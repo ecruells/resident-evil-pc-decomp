@@ -42,8 +42,8 @@ static BOOL LoadIniConfiguration(void)
     
     // Read display config from the found INI file
     g_bFullScreen = (GetPrivateProfileIntA("Display", "FullScreen", 0, foundPath) != 0);
-    g_dwScreenWidth = GetPrivateProfileIntA("Display", "Width", 1024, foundPath);
-    g_dwScreenHeight = GetPrivateProfileIntA("Display", "Height", 768, foundPath);
+    g_dwScreenWidth = GetPrivateProfileIntA("Display", "Width", 640, foundPath);
+    g_dwScreenHeight = GetPrivateProfileIntA("Display", "Height", 480, foundPath);
     g_dwBitDepth = GetPrivateProfileIntA("Display", "BitDepth", 32, foundPath);
     
     // Clamp to reasonable values

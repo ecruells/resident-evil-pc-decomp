@@ -421,7 +421,7 @@ void SignalVideoSkip(void)
 // ============================================================================
 // SetVideoResolution - Set video display resolution (0x00497f30)
 // ============================================================================
-void SetVideoResolution(int width, int height)
+static void SetVideoResolution(int width, int height)
 {
     if (g_pMarniDirect3D != NULL) {
         CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;

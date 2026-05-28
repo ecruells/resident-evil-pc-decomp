@@ -1,99 +1,93 @@
 // SoundStubs.cpp - Sound system stubs
-// These functions will be properly implemented with XAudio2 later
+// These functions will be properly implemented with DirectSound later
 #include "../Globals.h"
 
 // ============================================================================
-// ProbeWaveOutDevicesAndCacheVolume - Cache current system volume (0x004...)
+// sounds_reset (0x0047eb70)
+// Resets the sound system state.
 // ============================================================================
-void ProbeWaveOutDevicesAndCacheVolume(void)
-{
-    // Stub: cache current waveOut volume
-}
+void sounds_reset(void) { /* stub */ }
 
 // ============================================================================
-// StartSoundSystemAsync - Initialize sound asynchronously (0x004...)
+// load_sfx (0x0047ed30)
+// Loads a sound effect bank into a buffer.
 // ============================================================================
-void StartSoundSystemAsync(HWND hwnd)
-{
-    // Stub: start XAudio2 engine initialization
-}
+void load_sfx(int sound_id, void* buffer) { /* stub */ }
 
 // ============================================================================
-// RestoreWaveOutVolume - Restore original volume (0x004...)
+// play_sfx (0x0047fb10)
+// Triggers a sound effect.
 // ============================================================================
-void RestoreWaveOutVolume(void)
-{
-    // Stub
-}
+void play_sfx(int bank, int soundId) { /* stub */ }
 
 // ============================================================================
-// PauseSounds - Pause all audio (0x00480640)
+// title_select_sfx (0x0047eb80)
+// Sound effect played when player confirms a title menu selection.
 // ============================================================================
-void PauseSounds(void)
-{
-    // Stub: Pause XAudio2 source voices
-}
+void title_select_sfx(void) { /* stub */ }
 
 // ============================================================================
-// ResumePausedSounds - Resume paused audio (0x004806b0)
+// Sound_Dispatch (0x0047b...)
+// Dispatches sound commands.
 // ============================================================================
-void ResumePausedSounds(void)
-{
-    // Stub: Resume XAudio2 source voices
-}
+void Sound_Dispatch(int param) { /* stub */ }
 
 // ============================================================================
-// PauseGameSoundsAsync - Async pause
+// PauseSounds (0x0047...)
+// Pauses all active sounds.
 // ============================================================================
-void PauseGameSoundsAsync(void)
-{
-    PauseSounds();
-}
+void PauseSounds(void) { /* stub */ }
 
 // ============================================================================
-// ResumeGameSoundsAsync - Async resume
+// ResumePausedSounds (0x0047...)
+// Resumes all paused sounds.
 // ============================================================================
-void ResumeGameSoundsAsync(void)
-{
-    ResumePausedSounds();
-}
+void ResumePausedSounds(void) { /* stub */ }
 
 // ============================================================================
-// UpdateSoundFadeState - Update sound fade effect
+// UpdateSoundFadeState (0x0047...)
+// Updates sound fade state.
 // ============================================================================
-void UpdateSoundFadeState(void)
-{
-    // Stub
-}
+void UpdateSoundFadeState(void) { /* stub */ }
 
 // ============================================================================
-// UpdateSoundDecay - Update sound decay/ramp
+// UpdateSoundDecay (0x0047...)
+// Updates sound decay state.
 // ============================================================================
-void UpdateSoundDecay(void)
-{
-    // Stub
-}
+void UpdateSoundDecay(void) { /* stub */ }
 
 // ============================================================================
-// Sound_Dispatch - Dispatch sound command (0x00483510)
-void Sound_Dispatch(int param)
-{
-    // Stub
-}
+// UpdateMusicWaitState (0x0047...)
+// Updates music wait state.
+// ============================================================================
+void UpdateMusicWaitState(void) { /* stub */ }
 
 // ============================================================================
-// UpdateMusicWaitState - Update music wait/transition state
+// PauseGameSoundsAsync (0x0047...)
+// Async pause for game sounds during FMV playback.
 // ============================================================================
-void UpdateMusicWaitState(void)
-{
-    // Stub
-}
+void PauseGameSoundsAsync(void) { /* stub */ }
 
 // ============================================================================
-// getSndStat - Get sound bank status
+// ResumeGameSoundsAsync (0x0047...)
+// Async resume for game sounds after FMV playback.
 // ============================================================================
-int getSndStat(int bank)
-{
-    // Stub: return 0 = not playing, 1 = playing
-    return 0;
-}
+void ResumeGameSoundsAsync(void) { /* stub */ }
+
+// ============================================================================
+// ProbeWaveOutDevicesAndCacheVolume (0x0047...)
+// Probes wave out devices and caches volume settings.
+// ============================================================================
+void ProbeWaveOutDevicesAndCacheVolume(void) { /* stub */ }
+
+// ============================================================================
+// StartSoundSystemAsync (0x0047...)
+// Starts the sound system asynchronously with the given window handle.
+// ============================================================================
+void StartSoundSystemAsync(HWND hwnd) { /* stub */ }
+
+// ============================================================================
+// RestoreWaveOutVolume (0x0047...)
+// Restores wave out volume from cached settings.
+// ============================================================================
+void RestoreWaveOutVolume(void) { /* stub */ }

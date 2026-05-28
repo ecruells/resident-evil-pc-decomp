@@ -413,8 +413,13 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
 
 // Game functions
 void init_and_start_game(void);
+void load_global_assets(void);
+void logos_state(void);
+void title_state(void);
+void debug_state(void);
 void UpdateDemoTimer(void);
 void StMask(int param, int param2);
+void clear_textures(void);
 void setMenuScreenOffset(int w, int h, int x, int y, int mode);
 void CenterScreenOrigin(void);
 void SetSubpixelOffset(int x, int y);
@@ -468,6 +473,9 @@ extern float         g_debugClearR;
 extern float         g_debugClearG;
 extern float         g_debugClearB;
 extern int           g_debugTaskFrame;
+
+// Title screen display image SRV (shared with Rendering.cpp OT_InsertPrimitive)
+extern ID3D11ShaderResourceView*  g_displayImageSRV;
 
 // Title state globals
 extern unsigned char g_titleLoopFlag;                  // 0x00d22777
