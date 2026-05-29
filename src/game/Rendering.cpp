@@ -18,6 +18,7 @@ struct PendingSprite {
     DWORD color;
     ID3D11ShaderResourceView* srv;
     BOOL valid;
+    unsigned int depth;   // OT depth sort value (lower = closer = on top)
 };
 static PendingSprite g_pendingSprites[MAX_PENDING_SPRITES];
 static int g_pendingSpriteCount = 0;
@@ -59,32 +60,6 @@ void PrintText8x8(short x, short y, unsigned char color, char shadow)
 
     g_PrintTintA = 0x100;
     g_PrintClutTint = clutTint + 0x1E0;
-
-    if (shadow != 0) {
-        g_TexturePrintX = (x - g_ScreenOffsetX) + 1;
-        g_TexturePrintY = (y - g_ScreenOffsetY) + 1;
-        g_PrintTintR = 0;
-        g_PrintTintG = 0;
-        g_PrintTintB = 0;
-
-        for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
-            unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
-            if (ch == ' ') continue;
-
-            unsigned char idx = ch - 0x20U;
-            g_TextureVramX = (unsigned char)(idx * 8);
-            g_TextureVramY = (unsigned char)((idx & 0xE3) >> 2);
-
-            AddTintSprite((TextureDesc*)&g_texPrintState, 10);
-            g_TexturePrintX += 8;
-        }
-    }
-
-    g_TexturePrintX = x - g_ScreenOffsetX;
-    g_TexturePrintY = y - g_ScreenOffsetY;
-    g_PrintTintR = 128;
-    g_PrintTintG = 128;
-    g_PrintTintB = 128;
 
     for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
         unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
@@ -241,32 +216,6 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
 
     g_PrintClutTint = (color & 0xF) + 0x1E0;
 
-    if (flags != 0) {
-        g_TexturePrintX = (x - g_ScreenOffsetX) + 1;
-        g_TexturePrintY = (y - g_ScreenOffsetY) + 1;
-        g_PrintTintR = 0;
-        g_PrintTintG = 0;
-        g_PrintTintB = 0;
-
-        for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
-            unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
-            if (ch == ' ') continue;
-
-            if (ch == '(')      { g_TextureVramX = 56;  g_TextureVramY = 224; }
-            else if (ch == ')') { g_TextureVramX = 70;  g_TextureVramY = 224; }
-            else                { g_TextureVramX = (ch % 18) * 8; g_TextureVramY = (ch / 18) * 14; }
-
-            AddTintSprite((TextureDesc*)&g_texPrintState, 10);
-            g_TexturePrintX += 8;
-        }
-    }
-
-    g_TexturePrintX = x - g_ScreenOffsetX;
-    g_TexturePrintY = y - g_ScreenOffsetY;
-    g_PrintTintR = 0x80;
-    g_PrintTintG = 0x80;
-    g_PrintTintB = 0x80;
-
     for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
         unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
 
@@ -292,6 +241,9 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
 
 // ============================================================================
 // AddTintSprite (0x0046e0a0)
+// Adds a tinted font character sprite to the pending sprite queue.
+// Brightness controls color intensity. Pending sprites are rendered in
+// FrameRateGovernor before FlushSpriteCommands.
 // ============================================================================
 int AddTintSprite(TextureDesc* texture, unsigned short brightness)
 {
@@ -316,16 +268,30 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     float texH = (float)pD3D->m_FontTexHeight;
     float u0 = (float)g_TextureVramX / texW;
     float v0 = (float)g_TextureVramY / texH;
-
     float u1 = (float)(g_TextureVramX + g_texPrintState.vramWidth) / texW;
     float v1 = (float)(g_TextureVramY + g_texPrintState.vramHeight) / texH;
 
-    unsigned char a = (unsigned char)((unsigned int)brightness * 255 / 30);
-    if (brightness <= 2) a = 17;
-    unsigned char r = (unsigned char)((g_PrintTintR & 0xFF) * 2); if (r > 255) r = 255;
-    unsigned char g = (unsigned char)((g_PrintTintG & 0xFF) * 2); if (g > 255) g = 255;
-    unsigned char b = (unsigned char)((g_PrintTintB & 0xFF) * 2); if (b > 255) b = 255;
-    DWORD color = (a << 24) | (r << 16) | (g << 8) | b;
+    // Calculate RGB from tint values — cast to unsigned int first to avoid overflow
+    unsigned int r = ((unsigned int)(g_PrintTintR & 0xFF)) * 2; if (r > 255) r = 255;
+    unsigned int g = ((unsigned int)(g_PrintTintG & 0xFF)) * 2; if (g > 255) g = 255;
+    unsigned int b = ((unsigned int)(g_PrintTintB & 0xFF)) * 2; if (b > 255) b = 255;
+
+    DWORD color;
+    if (g_PrintTintR == 0 && g_PrintTintG == 0 && g_PrintTintB == 0) {
+        // Shadow pass: semi-transparent black (brightness controls alpha)
+        unsigned int a = ((unsigned int)brightness * 255) / 30;
+        if (a > 255) a = 255;
+        color = (a << 24) | (0 << 16) | (0 << 8) | 0;
+    } else {
+        // Text pass: opaque color, brightness dims RGB (original PS1 CLUT-based dimming)
+        unsigned int brightnessScale = ((unsigned int)brightness * 255) / 30;
+        if (brightnessScale > 255) brightnessScale = 255;
+        if (brightness <= 2) brightnessScale = 17;
+        r = (r * brightnessScale) / 255;
+        g = (g * brightnessScale) / 255;
+        b = (b * brightnessScale) / 255;
+        color = (255u << 24) | (r << 16) | (g << 8) | b;
+    }
 
     PendingSprite* spr = &g_pendingSprites[g_pendingSpriteCount];
     spr->x = screenX;
@@ -339,6 +305,7 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     spr->color = color;
     spr->srv = pD3D->m_pFontSRV;
     spr->valid = TRUE;
+    spr->depth = (unsigned int)brightness * 16 + 0x1C2;  // OT depth: higher=further behind
 
     g_pendingSpriteCount++;
     return 1;
@@ -346,6 +313,8 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
 
 // ============================================================================
 // draw_rect (0x00470350)
+// Fills a rectangle with the given color. Uses pending sprite queue.
+// The blend parameter controls depth/ordering, not transparency.
 // ============================================================================
 void draw_rect(RectDrawDesc* rect, int blend, int flags)
 {
@@ -368,26 +337,14 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     float screenW = gameW * scaleX;
     float screenH = gameH * scaleY;
 
+    // Use solid alpha — blend controls depth sort, not transparency
     unsigned char r = (unsigned char)(rect->r & 0xFF);
     unsigned char g = (unsigned char)(rect->g & 0xFF);
     unsigned char b = (unsigned char)(rect->b & 0xFF);
 
-    int alpha = 255 - blend;
-    if (alpha < 0) alpha = 0;
-    if (alpha > 255) alpha = 255;
-    unsigned char a = (unsigned char)alpha;
+    DWORD color = (255u << 24) | ((unsigned int)r << 16) | ((unsigned int)g << 8) | (unsigned int)b;
 
-    DWORD color = (a << 24) | (r << 16) | (g << 8) | b;
-
-    ID3D11ShaderResourceView* srv = NULL;
-    if (rect->textureId == 0) {
-        srv = pD3D->m_pWhiteSRV;
-    } else {
-        int shiftedSlot = (rect->textureId & 0xFF) + 0xF;
-        if (shiftedSlot >= 0 && shiftedSlot < 256) {
-            srv = g_TexturePageSRV[shiftedSlot];
-        }
-    }
+    ID3D11ShaderResourceView* srv = pD3D->m_pWhiteSRV;
 
     PendingSprite* spr = &g_pendingSprites[g_pendingSpriteCount];
     spr->x = screenX;
@@ -401,9 +358,13 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     spr->color = color;
     spr->srv = srv;
     spr->valid = TRUE;
+    // Depth: higher value = further back (drawn first).
+    // In original OT: flags==0 → blend+450, else → blend*16+500
+    spr->depth = (flags == 0) ? ((unsigned int)blend + 450) : ((unsigned int)blend * 16 + 500);
 
     g_pendingSpriteCount++;
 
+    (void)blend;
     (void)flags;
 }
 
@@ -462,6 +423,17 @@ void FrameRateGovernor(void)
             MarniClear();
 
             FUN_0040a8f0(NULL);
+
+            // Sort pending sprites by depth (descending: high depth first = behind, low depth last = on top)
+            for (int i = 0; i < g_pendingSpriteCount - 1; i++) {
+                for (int j = i + 1; j < g_pendingSpriteCount; j++) {
+                    if (g_pendingSprites[i].depth < g_pendingSprites[j].depth) {
+                        PendingSprite tmp = g_pendingSprites[i];
+                        g_pendingSprites[i] = g_pendingSprites[j];
+                        g_pendingSprites[j] = tmp;
+                    }
+                }
+            }
 
             for (int i = 0; i < g_pendingSpriteCount; i++) {
                 if (g_pendingSprites[i].valid) {
@@ -546,6 +518,7 @@ void OT_InsertPrimitive(void* prim, unsigned int depth)
     g_pendingSprites[0].color = 0xFFFFFFFF;
     g_pendingSprites[0].srv = g_displayImageSRV;
     g_pendingSprites[0].valid = TRUE;
+    g_pendingSprites[0].depth = 0xFFF;  // background (far, drawn first)
     g_pendingSpriteCount++;
 }
 
@@ -654,6 +627,12 @@ void ApplyScreenShake(void) {
 
 void FUN_004557b0(void) { g_menu_choice_id &= ~0x80; }
 
+void SetSubpixelOffset(int x, int y)
+{
+    g_SubpixelOffsetX = x;
+    g_SubpixelOffsetY = y;
+}
+
 void CenterScreenOrigin(void)
 {
     SetSubpixelOffset(160, 120);
@@ -665,6 +644,25 @@ void setMenuScreenOffset(int w, int h, int x, int y, int mode)
 {
     g_ScreenOffsetX = 0;
     g_ScreenOffsetY = 0;
+}
+
+// ============================================================================
+// clear_textures (0x00470a00)
+// Clears texture page entries across all active slots.
+// Original: calls TexturePage_DeleteSet for slots 0-11, then
+// delete_texture_set_secondary for slots 12-26.
+// ============================================================================
+void clear_textures(void)
+{
+    for (int i = 0; i < 4; i++) {
+        TexturePage_DeleteSet(i);
+    }
+    for (int i = 4; i < 12; i++) {
+        TexturePage_DeleteSet(i);
+    }
+    for (int i = 12; i < 27; i++) {
+        delete_texture_set_secondary(i);
+    }
 }
 
 // ============================================================================

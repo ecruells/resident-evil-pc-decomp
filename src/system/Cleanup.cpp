@@ -148,6 +148,7 @@ void CVideoSystem_Cleanup(void* ptr)
         if (pD3D->m_pFontSRV)          { pD3D->m_pFontSRV->Release(); pD3D->m_pFontSRV = NULL; }
         if (pD3D->m_pFontTexture)      { pD3D->m_pFontTexture->Release(); pD3D->m_pFontTexture = NULL; }
         if (pD3D->m_pSamplerLinear)    { pD3D->m_pSamplerLinear->Release(); pD3D->m_pSamplerLinear = NULL; }
+        if (pD3D->m_pSamplerPoint)     { pD3D->m_pSamplerPoint->Release(); pD3D->m_pSamplerPoint = NULL; }
         if (pD3D->m_pBlendAlpha)       { pD3D->m_pBlendAlpha->Release(); pD3D->m_pBlendAlpha = NULL; }
         if (pD3D->m_pSpriteCB)         { pD3D->m_pSpriteCB->Release(); pD3D->m_pSpriteCB = NULL; }
         if (pD3D->m_pQuadVB)           { pD3D->m_pQuadVB->Release(); pD3D->m_pQuadVB = NULL; }

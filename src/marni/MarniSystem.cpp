@@ -290,6 +290,11 @@ static bool CreateBlendAndSamplerStates(CMarniDirect3D* pD3D)
     hr = pD3D->m_pD3DDevice->CreateSamplerState(&sampDesc, &pD3D->m_pSamplerLinear);
     if (FAILED(hr)) return false;
 
+    // Point (nearest-neighbor) sampler for pixelated fonts
+    sampDesc.Filter = D3D11_FILTER_MIN_MAG_MIP_POINT;
+    hr = pD3D->m_pD3DDevice->CreateSamplerState(&sampDesc, &pD3D->m_pSamplerPoint);
+    if (FAILED(hr)) return false;
+
     // Depth-disabled state for 2D sprite rendering
     D3D11_DEPTH_STENCIL_DESC dsDesc = {};
     dsDesc.DepthEnable = FALSE;
@@ -389,7 +394,8 @@ static CMarniDirect3D* MarniDirect3D_Construct(CMarniDirect3D* pThis, HWND hWnd,
     pThis->m_pQuadVB           = NULL;
     pThis->m_pSpriteCB         = NULL;
     pThis->m_pBlendAlpha       = NULL;
-    pThis->m_pSamplerLinear    = NULL;
+    pThis->m_pSamplerLinear   = NULL;
+    pThis->m_pSamplerPoint    = NULL;
     pThis->m_pDepthDisabled    = NULL;
     pThis->m_pFontTexture      = NULL;
     pThis->m_pFontSRV          = NULL;
@@ -1324,7 +1330,27 @@ void MarniDrawSprite(float x, float y, float w, float h,
         pBindSRV = pD3D->m_pWhiteSRV;
     }
     pD3D->m_pD3DContext->PSSetShaderResources(0, 1, &pBindSRV);
-    pD3D->m_pD3DContext->PSSetSamplers(0, 1, &pD3D->m_pSamplerLinear);
+    // Use point sampler for fonts, linear for other textures
+    static int s_fontDrawCount = 0;
+    if (pBindSRV == pD3D->m_pFontSRV && pD3D->m_pSamplerPoint) {
+        if (s_fontDrawCount < 5) {
+            char dbg[128];
+            sprintf(dbg, "[FONT] point sampler applied, draw #%d, srv=%p, sampler=%p\n",
+                    s_fontDrawCount, pBindSRV, pD3D->m_pSamplerPoint);
+            OutputDebugStringA(dbg);
+            s_fontDrawCount++;
+        }
+        pD3D->m_pD3DContext->PSSetSamplers(0, 1, &pD3D->m_pSamplerPoint);
+    } else {
+        if (pBindSRV == pD3D->m_pFontSRV && s_fontDrawCount < 5) {
+            char dbg[128];
+            sprintf(dbg, "[FONT] WARNING: point sampler MISSING! srv=%p, sampler=%p\n",
+                    pBindSRV, pD3D->m_pSamplerPoint);
+            OutputDebugStringA(dbg);
+            s_fontDrawCount++;
+        }
+        pD3D->m_pD3DContext->PSSetSamplers(0, 1, &pD3D->m_pSamplerLinear);
+    }
 
     // Set blend state
     float blendFactor[4] = { 1.0f, 1.0f, 1.0f, 1.0f };

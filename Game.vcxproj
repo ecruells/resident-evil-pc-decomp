@@ -72,7 +72,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;xinput.lib;winmm.lib;dxguid.lib;imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;xinput.lib;winmm.lib;dxguid.lib;imm32.lib;xaudio2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -92,7 +92,7 @@
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <AdditionalDependencies>d3d11.lib;dxgi.lib;xinput.lib;winmm.lib;dxguid.lib;imm32.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>d3d11.lib;dxgi.lib;xinput.lib;winmm.lib;dxguid.lib;imm32.lib;xaudio2.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
@@ -102,6 +102,7 @@
     <ClCompile Include="src\marni\MarniSystem.cpp" />
     <ClCompile Include="src\marni\PSXTexture.cpp" />
     <ClCompile Include="src\marni\MarniBits.cpp" />
+    <ClCompile Include="src\marni\MarniSound.cpp" />
     <ClCompile Include="src\system\SystemChecks.cpp" />
     <ClCompile Include="src\system\Installation.cpp" />
     <ClCompile Include="src\system\DisplayConfig.cpp" />
@@ -118,7 +119,7 @@
     <ClCompile Include="src\game\Marni3DObject.cpp" />
     <ClCompile Include="src\game\InputStubs.cpp" />
     <ClCompile Include="src\game\MarniInput.cpp" />
-    <ClCompile Include="src\game\SoundStubs.cpp" />
+    <ClCompile Include="src\game\SoundSystem.cpp" />
     <ClCompile Include="src\game\TitleScreen.cpp" />
     <ClCompile Include="src\video\VideoPlayback.cpp" />
     <ClCompile Include="src\system\AssetPath.cpp" />
@@ -129,6 +130,7 @@
     <ClInclude Include="src\marni\MarniBits.h" />
     <ClInclude Include="src\marni\Marni3DObject.h" />
     <ClInclude Include="src\marni\MarniInput.h" />
+    <ClInclude Include="src\marni\MarniSound.h" />
     <ClInclude Include="src\game\SpriteRenderer.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />

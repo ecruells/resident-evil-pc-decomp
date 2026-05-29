@@ -5,7 +5,7 @@
 // ---------------------------------------------------------------------------
 // Texture/video stubs (called from logos_state / title_state in GameState.cpp)
 // ---------------------------------------------------------------------------
-void clear_textures(void)                                    { /* stub */ }
+
 void FUN_00470a30(void)                                      { /* stub */ }
 void Object_DeleteAll(int a)                                 { /* stub */ }
 void SetVideoResolution(int w, int h)                        { /* stub */ }
@@ -32,7 +32,7 @@ void FUN_004973a0(int param)                                 { /* stub */ }
 void UpdateDemoTimer(void)                                   { /* stub */ }
 void StMask(int param, int param2)                           { /* stub */ }
 
-void SetSubpixelOffset(int x, int y)                         { /* stub */ }
+
 void CreateTimestampedLogFile(void)                           { /* stub */ }
 void ShowVideoModeDebugText(void)                            { /* stub */ }
 

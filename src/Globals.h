@@ -153,6 +153,32 @@ extern int           g_demoTimer;                      // 0x004bcb5c (?)
 extern int           g_SndFadeType;                    // 0x00be15e0
 extern int           g_SndRampFramesLeft;              // 0x00be15e4
 extern int           g_BgmSoundBank;                   // BGM sound bank ID
+extern int           g_SfxBanks[64];                   // SFX bank handles + metadata
+extern int           g_RoomSfxBanks[64];               // Room SFX bank handles + metadata
+extern int           g_CharacterSfxBanks[64];          // Character SFX bank handles + metadata
+extern int           g_emSndBanks[64];                 // Enemy SFX bank handles + metadata
+extern int           g_SndBank[64];                    // Generic sound bank handles + metadata
+extern int           g_SfxVolume;                      // Master SFX volume
+extern char          g_BgmPaused;                      // BGM paused flag
+extern int           g_SndRampDirection;               // Sound ramp direction
+extern int           g_SndRampCurrentVolume;           // Current ramp volume
+extern int           g_SndRampBankIndex;               // Bank index for ramp
+extern int           g_SndDistSteps;                   // Sound distance steps
+extern void*         g_SoundManager;                   // Sound manager object pointer (legacy, for non-class code)
+extern class DirectSound* g_pDirectSound;               // DirectSound class instance
+extern DWORD         g_CachedWaveOutVolume;            // Cached wave out volume
+extern int           g_WaitForMusicTimer;              // Music wait timer
+extern unsigned char g_BGM_STATE;                      // BGM state byte
+extern HWND          g_MainWindowHandle;               // Main window handle for sound
+extern int           g_setVolResult;                   // getSndStat result
+extern int           g_CurBank;                        // Current bank for getSndStat
+extern unsigned char g_snd_slot_00ac99d5;              // Sound slot index
+extern int           g_SoundPanVol;                    // Sound pan/volume parameter
+extern int           g_SndPanSet_result;               // Pan set result flag
+extern char*         g_wavName;                        // WAV filename pointer for async load
+extern int           g_sndload_bank_index;             // Loaded bank index result
+extern short         g_CurSlot;                        // Current sound slot
+extern int           g_SndFadeStepTbl[64];              // Per-bank fade step counters
 
 // Game init
 extern int           init_game_flag;                   // 0x00bcb2e8
@@ -363,7 +389,7 @@ void UpdateSoundDecay(void);
 void Sound_Dispatch(int param);
 void UpdateMusicWaitState(void);
 void sounds_reset(void);
-void load_sfx(int sound_id, void* buffer);
+void LoadSoundBank(int sound_bank_id, void* buffer);
 void PauseGameSoundsAsync(void);
 void ResumeGameSoundsAsync(void);
 void DestroySoundManagerAsync(void);

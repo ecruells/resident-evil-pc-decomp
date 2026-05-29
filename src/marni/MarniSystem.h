@@ -77,6 +77,7 @@ public:
     ID3D11Buffer*           m_pSpriteCB;           // Sprite constant buffer (MVP matrix)
     ID3D11BlendState*       m_pBlendAlpha;         // Alpha blend state
     ID3D11SamplerState*     m_pSamplerLinear;      // Linear texture sampler
+    ID3D11SamplerState*     m_pSamplerPoint;       // Point sampler (pixelated, for fonts)
     ID3D11DepthStencilState* m_pDepthDisabled;     // Depth-disabled state for 2D sprites
 
     // Font texture (created during ProcessTextureImage for bank 0x1E)

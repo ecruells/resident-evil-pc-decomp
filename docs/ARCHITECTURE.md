@@ -125,6 +125,7 @@ The Marni System was created to:
 │   ID3D11Buffer*           m_pSpriteCB     (MVP constant)     │
 │   ID3D11BlendState*       m_pBlendAlpha   (alpha blend)     │
 │   ID3D11SamplerState*     m_pSamplerLinear                  │
+│   ID3D11SamplerState*     m_pSamplerPoint  (pixelated fonts)│
 │   ID3D11DepthStencilState*m_pDepthDisabled (2D rendering)   │
 │   ID3D11ShaderResourceView* m_pFontSRV    (font atlas)      │
 │   ID3D11ShaderResourceView* m_pWhiteSRV   (1×1 white fill)  │
@@ -252,7 +253,11 @@ The vertex shader transforms positions with an orthographic projection matrix (s
 
 ### Pending Sprite Queue
 
-**File:** `src/game/GameStubs.cpp`
+**File:** `src/game/Rendering.cpp`
+
+The `g_pendingSprites[]` queue is a simple forward-rendered array used by `AddTintSprite` (text), `draw_rect` (menu rectangles), and `OT_InsertPrimitive` (title screen background). Sprites are rendered in array order in `FrameRateGovernor`.
+
+> **Note on draw order:** The original game uses the PS1 **Ordering Table (OT)** with `depthSort` values to control draw order — lower depth = closer (drawn last, on top). The modern port renders in array insertion order instead. To ensure correct layering, the background rect must be enqueued **before** text.
 
 ```cpp
 #define MAX_PENDING_SPRITES 300
@@ -268,6 +273,12 @@ struct PendingSprite {
 static PendingSprite g_pendingSprites[MAX_PENDING_SPRITES];
 static int g_pendingSpriteCount = 0;
 ```
+
+### GDI/Sprite Command Buffer
+
+**File:** `src/game/SpriteRenderer.cpp`
+
+The original `g_SpriteCommandBuffer[600]` (double-buffered) handles textured quads via `FlushSpriteCommands()`. Each command has type=10 (textured quad) and includes position, UV, color, depth sorting, and texture page references. Commands are rendered through `MarniDrawSprite` after the `g_pendingSprites` queue.
 
 ### MarniClear / MarniPresent
 
@@ -300,16 +311,18 @@ Builds a `PendingSprite` and increments `g_pendingSpriteCount`.
 
 #### draw_rect (0x00470350)
 
-Draws a solid-color (or textured) rectangle.
+Draws a solid-color (or textured) rectangle. Used for menu backgrounds, fade overlays, and debug screens.
 
 **Parameters:** `(RectDrawDesc* rect, int blend, int flags)`
 
 - **Position**: `rect.x/y + g_ScreenOffsetX/Y`, scaled from 320×240 to screen
 - **Size**: `rect.w × rect.h`, scaled
-- **Color**: `rect.r/g/b` as RGB, alpha = `255 - blend` (0 = opaque)
+- **Color**: `rect.r/g/b` as RGB with **solid alpha (255)** — the `blend` parameter controls OT depth sort ordering, NOT transparency (matching original PS1 behavior)
 - **textureId == 0**: Uses `m_pWhiteSRV` (1×1 white texture) for solid fill
 - **textureId ≠ 0**: Looks up `g_TexturePageSRV[textureId + 0xF]`
-- **flags**: Depth sort mode (additive vs layered) — unused in modern port
+- **flags**: Depth sort mode — `0` = `blend + 450`, otherwise `blend * 16 + 500`
+
+> ⚠️ **Important:** `draw_rect` adds to `g_pendingSprites[]`. For correct layering, rects must be enqueued **before** any text that should appear on top. In the original game this was handled automatically by the Ordering Table depth sort.
 
 #### display_texture (0x0046e8d0)
 
@@ -617,16 +630,14 @@ The scheduler maintains 3 task slots (`g_TasksTable[3]`), each supporting one ac
 ```
 init_and_start_game()
   │
-  └─► Task_execute(0, debug_state)
+  └─► Task_execute(0, load_global_assets)
         │
-        ├─ Load font texture
-        ├─ Print test text for 120 frames
-        │   └─► Task_sleep(1) each frame
+        ├─ Initialize MarniSystem (D3D11 + XAudio2)
+        ├─ Load item images, font textures, status screen textures
+        ├─ Create shadow texture quad
         │
-        └─► Task_chain(load_global_assets)
-              │
-              ├─ Load item images, font textures, status screen textures
-              ├─ Create shadow texture quad
+        └─► Task_chain(debug_state)          ← SFX Player debug menu
+              │                                 Press ESC to continue
               │
               └─► Task_chain(logos_state)
                     │
@@ -634,7 +645,7 @@ init_and_start_game()
                     │
                     └─► Task_chain(title_state)
                           │
-                          ├─ Load title screen assets
+                          ├─ LoadSoundBank(BANK_EVIL, g_image_buffer)
                           ├─ Title menu loop (attract → main menu)
                           │
                           └─► Task_chain(game_start)
@@ -808,20 +819,138 @@ static BYTE g_titleLoadBuffer[320 * 240 * 2]; // 153.6KB for title screen
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │                  (XAudio2 backend)                    │    │
-│  │  Not yet fully implemented — stubs in place           │    │
+│  │           DirectSound class                          │    │
+│  │  src/marni/MarniSound.h, src/marni/MarniSound.cpp     │    │
 │  │                                                      │    │
-│  │  g_BgmSoundBank      - Background music             │    │
-│  │  g_SfxBanks[]        - Sound effects                │    │
-│  │  g_RoomSfxBanks[]    - Room-specific sounds         │    │
-│  │  g_CharacterSfxBanks[] - Character sounds           │    │
-│  │  g_emSndBanks[]      - Enemy sounds                 │    │
+│  │  Preserves original Ghidra method names:              │    │
+│  │  - DirectSound(HWND)     constructor                  │    │
+│  │  - CreateSound(wavName)  WAV loader + RIFF parser    │    │
+│  │  - DestroySound(bank)    free bank + WAV data        │    │
+│  │  - PlaySound(bank,slot)  XAudio2 source voice start  │    │
+│  │  - StopSound(bank)       XAudio2 voice stop + flush  │    │
+│  │  - SetVol(bank,vol)      XAudio2 voice volume        │    │
+│  │  - SetPan(bank,pan)      pan value (+0x924 — stub)   │    │
+│  │  - GetVol(bank)          get stored volume (+0x928)  │    │
+│  │  - GetStatus(bank)       query XAudio2 voice state   │    │
+│  │  - compact()             defrag device memory (stub) │    │
+│  │  - Release() / Reload()  pause/resume all audio      │    │
+│  │  - ErrorRoutine(code)    maps HRESULT → debug string │    │
 │  └─────────────────────────────────────────────────────┘    │
 │                                                              │
-│  Audio Format: PCM, 22050 Hz, 16-bit, Stereo               │
+│  XAudio2 Backend (modern replacement for DirectSound):       │
+│  - g_pXAudio2              IXAudio2 engine instance          │
+│  - g_pMasterVoice          mastering voice (2ch, 22050Hz)    │
+│  - g_BankVoices[81]        per-bank IXAudio2SourceVoice*     │
+│  - Initialized in InitializeSoundSystem()                    │
+│  - Shutdown via CleanupSoundManagerResources()               │
+│                                                              │
+│  Sound bank groups (game-level):                            │
+│  g_BgmSoundBank       - Background music (stub)             │
+│  g_SfxBanks[]         - Sound effects (16 entries × 2 ints) │
+│  g_RoomSfxBanks[]     - Room-specific sounds                │
+│  g_CharacterSfxBanks[] - Character sounds                   │
+│  g_emSndBanks[]       - Enemy sounds                        │
+│  g_SndBank[]          - General purpose banks               │
+│                                                              │
+│  g_SoundBanksTable[16] - SFX filename sub-tables:            │
+│    0,1=Knife   2=Gun     3=Shotgun  4,5=Magnum              │
+│    6=Flame     7=Grenade  8=Acid     9=Fire                  │
+│    10=Rocket   11=Bio    12=Evil    13=Select                │
+│    14=Ending   15=Win95                                      │
+│                                                              │
+│  SFXIds.h constants: SFX_<BANK>_<NAME> for each entry.       │
+│  Bank IDs: BANK_KNIFE(0) ... BANK_WIN95(15).                 │
+│                                                              │
+│  Volume mapping: -1=max, -9999=min, -10000=mute.             │
+│  → XAudio2: vol = 1.0 - (-marniVol / 10000.0)               │
+│                                                              │
+│  Async execution: ExecAsync(callback) queues operations      │
+│  via the TaskScheduler. ⚠️ Never call ExecAsync functions     │
+│  unconditionally in a task loop — causes scheduler re-entry. │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```
+
+### SFX Player Debug State
+
+**File:** `src/game/GameState.cpp`
+
+The `debug_state` task function provides an interactive sound test menu that launches at startup (chained from `load_global_assets` before `logos_state`). It uses `GetAsyncKeyState` for direct PC keyboard input.
+
+**Controls:**
+
+| Key | Action |
+|-----|--------|
+| `LEFT`/`RIGHT` | Select sound bank (0-15) |
+| `ENTER` | Load the selected bank via `LoadSoundBank()` |
+| `UP`/`DOWN` | Select SFX entry within the loaded bank |
+| `SPACE` | Play selected SFX (respects loop toggle) |
+| `S` | Stop selected SFX |
+| `L` | Toggle loop mode on/off |
+| `W`/`X` | Volume up/down |
+| `ESC` | Exit to `logos_state` |
+
+**Architecture notes:**
+- State variables (`curBank`, `curEntry`, `loadedBank`, `prevKeys`) are `static` to survive task stack context switches.
+- No `ExecAsync`-calling functions (`getSndStat`, `getSndVol`) are called unconditionally in the per-frame loop — this avoids the scheduler infinite re-entry bug.
+- Bank loading calls `LoadSoundBank()` which triggers `set_volume()` (async), but only on key-press edge, not every frame.
+- Two-column display shows 16 SFX entries (0-7 left, 8-15 right) with handle IDs and loaded status.
+- Background rect uses `draw_rect(bg, 100, 1)` matching the title screen pattern (depth=2100 behind text).
+┌─────────────────────────────────────────────────────────────┐
+│                    Sound Subsystem                           │
+├─────────────────────────────────────────────────────────────┤
+│                                                              │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │           DirectSound class                          │    │
+│  │  src/marni/MarniSound.h, src/marni/MarniSound.cpp     │    │
+│  │                                                      │    │
+│  │  Preserves original Ghidra method names:              │    │
+│  │  - DirectSound(HWND)     constructor                  │    │
+│  │  - DestroySound(bank)    free bank + WAV data        │    │
+│  │  - StopSound(bank)       stop playback               │    │
+│  │  - PlaySound(bank,slot)  start playback              │    │
+│  │  - SetVol(bank,vol)      set volume (+0x928)         │    │
+│  │  - SetPan(bank,pan)      set pan   (+0x924)         │    │
+│  │  - GetVol(bank)          get stored volume           │    │
+│  │  - CreateSound(wavName)  WAV loader + RIFF parser    │    │
+│  │  - ErrorRoutine(code)    maps HRESULT → debug string │    │
+│  │  - GetStatus(bank)       query buffer status          │    │
+│  │  - compact()             defrag device memory         │    │
+│  │  - Release() / Reload()  pause/resume all audio      │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  Bank structure (per bank, 0xA2C bytes each):               │
+│  +0x1C: WAV raw data pointer    +0x924: pan value           │
+│  +0x20: sample data size        +0x928: volume value        │
+│  +0x24: sample rate             +0x92C: slot number          │
+│  +0x28: channels                +0x930: playing status       │
+│  +0x2A: bits per sample         +0x93C: DS buffer ptr        │
+│  +0x920: playback rate          +0x940: filename              │
+│  +0xA44: active flag                                        │
+│                                                              │
+│  Sound bank groups (game-level):                            │
+│  g_BgmSoundBank      - Background music                    │
+│  g_SfxBanks[]        - Sound effects                       │
+│  g_RoomSfxBanks[]    - Room-specific sounds                │
+│  g_CharacterSfxBanks[] - Character sounds                  │
+│  g_emSndBanks[]      - Enemy sounds                        │
+│  g_SndBank[]         - General purpose banks               │
+│                                                              │
+│  g_SoundBanksTable[16][16] - SFX filename tables            │
+│                                                              │
+│  Async execution: ExecAsync(callback) queues operations     │
+│  via the TaskScheduler for non-blocking audio ops.          │
+│                                                              │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Font Sampler (Point vs Linear)
+
+The D3D11 pipeline uses two samplers:
+- **`m_pSamplerLinear`** (`D3D11_FILTER_MIN_MAG_MIP_LINEAR`): Used for all textured sprites, backgrounds, and UI elements. Provides smooth bilinear filtering.
+- **`m_pSamplerPoint`** (`D3D11_FILTER_MIN_MAG_MIP_POINT`): Used for font rendering only. Provides sharp pixelated text matching the original PS1 appearance.
+
+`MarniDrawSprite` automatically selects the point sampler when detecting the font SRV (`pBindSRV == pD3D->m_pFontSRV`).
 
 ### Video Playback Subsystem
 
@@ -860,18 +989,25 @@ src/
 │   ├── PSXTexture.h         # PS1 TIM/PIX texture parser
 │   ├── PSXTexture.cpp       # TIM parsing, CLUT management
 │   ├── Marni3DObject.h      # 3D object classes (stubbed)
-│   └── MarniInput.h         # Input state structures
+│   ├── MarniSound.h          # DirectSound class (PSYQ sound API)
+│   ├── MarniSound.cpp        # XAudio2 audio backend + SFX tables
+│   └── MarniInput.h          # Input state structures
 │
 ├── game/
 │   ├── GameLoop.cpp         # Main game loop (0x00428eb0)
-│   ├── GameStubs.cpp        # Game logic, tasks, text rendering, sprites
-│   ├── TaskScheduler.cpp    # Task coroutine scheduler
-│   ├── TextureLoader.cpp    # PSX texture → D3D11 loading pipeline
-│   ├── FileLoader.cpp       # Asset file loading with path resolution
-│   ├── SpriteRenderer.cpp   # Quad/OT rendering helpers
-│   ├── InputStubs.cpp       # Input stubs (keyboard/XInput)
-│   ├── SoundStubs.cpp       # Sound stubs
-│   └── Marni3DObject.cpp    # 3D object stubs
+│   ├── GameInit.cpp          # Game initialization (init_and_start_game)
+│   ├── GameState.cpp         # Game states: debug(SFX player), logos, title load
+│   ├── GameStubs.cpp         # Empty stub functions for unimplemented code
+│   ├── TitleScreen.cpp       # Title screen rendering & state machine
+│   ├── Rendering.cpp         # Frame present, text output, sprite drawing
+│   ├── TaskScheduler.cpp     # Task coroutine scheduler
+│   ├── TextureLoader.cpp     # PSX texture → D3D11 loading pipeline
+│   ├── SpriteRenderer.cpp    # Sprite command buffer & OT rendering
+│   ├── FileLoader.cpp        # Asset file loading with path resolution
+│   ├── SoundSystem.cpp       # Sound system: bank loading, play_sfx, fade/decay
+│   ├── InputStubs.cpp        # Input stubs (keyboard/XInput)
+│   ├── SFXIds.h              # Named constants for all SFX IDs per bank
+│   └── Marni3DObject.cpp     # 3D object stubs
 │
 ├── system/
 │   ├── AssetPath.h          # Path remapping (.\usa\ → .\assets\USA\)

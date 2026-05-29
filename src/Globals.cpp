@@ -167,6 +167,32 @@ int g_SndFadeType = 0;
 // 0x00be15e4
 int g_SndRampFramesLeft = 0;
 int g_BgmSoundBank = 0;
+int g_SfxBanks[64] = {};
+int g_RoomSfxBanks[64] = {};
+int g_CharacterSfxBanks[64] = {};
+int g_emSndBanks[64] = {};
+int g_SndBank[64] = {};
+int g_SfxVolume = -1;
+char g_BgmPaused = 0;
+int g_SndRampDirection = 0;
+int g_SndRampCurrentVolume = 0;
+int g_SndRampBankIndex = 0;
+int g_SndDistSteps = 0;
+void* g_SoundManager = NULL;
+DirectSound* g_pDirectSound = NULL;
+DWORD g_CachedWaveOutVolume = 0;
+int g_WaitForMusicTimer = 0;
+unsigned char g_BGM_STATE = 0xFF;
+HWND g_MainWindowHandle = NULL;
+int g_setVolResult = 0;
+int g_CurBank = 0;
+unsigned char g_snd_slot_00ac99d5 = 0;
+int g_SoundPanVol = 0;
+int g_SndPanSet_result = 0;
+char* g_wavName = NULL;
+int g_sndload_bank_index = 0;
+short g_CurSlot = 0;
+int g_SndFadeStepTbl[64] = {};
 
 // --- Game init ---
 // 0x00bcb2e8

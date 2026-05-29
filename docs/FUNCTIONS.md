@@ -9,12 +9,13 @@ This document provides detailed documentation for all implemented functions in t
 1. [WinMain.cpp Functions](#winmaincpp-functions)
 2. [MarniSystem.cpp Functions](#marnisystemcpp-functions)
 3. [GameLoop.cpp Functions](#gameloopcpp-functions)
-4. [Cleanup.cpp Functions](#cleanupcpp-functions)
-5. [SystemChecks.cpp Functions](#systemcheckscpp-functions)
-6. [Installation.cpp Functions](#installationcpp-functions)
-7. [DisplayConfig.cpp Functions](#displayconfigcpp-functions)
-8. [WindowProc.cpp Functions](#windowproccpp-functions)
-9. [VideoPlayback.cpp Functions](#videoplaybackcpp-functions)
+4. [Rendering.cpp Functions](#renderingcpp-functions)
+5. [Cleanup.cpp Functions](#cleanupcpp-functions)
+6. [SystemChecks.cpp Functions](#systemcheckscpp-functions)
+7. [Installation.cpp Functions](#installationcpp-functions)
+8. [DisplayConfig.cpp Functions](#displayconfigcpp-functions)
+9. [WindowProc.cpp Functions](#windowproccpp-functions)
+10. [VideoPlayback.cpp Functions](#videoplaybackcpp-functions)
 
 ---
 
@@ -240,7 +241,210 @@ int main_loop(void);
 
 ---
 
-## Cleanup.cpp Functions
+## Rendering.cpp Functions
+
+### PrintText8x14
+
+**Address:** `0x00455520`
+
+**Purpose:** Render text using 8×14 pixel mono-spaced font. Characters are laid out 18 per row in the font atlas (`fontus.tim`). Uses `PRINT_TEXT_BUFFER` as source string.
+
+**Signature:**
+```cpp
+void PrintText8x14(short x, short y, unsigned char color, char flags);
+```
+
+**Parameters:**
+- `x, y` — Screen position in 320×240 game coordinates (with `g_ScreenOffsetX/Y` applied)
+- `color` — Upper nibble = brightness (0→2, else raw; bit 7 = max brightness 30), lower nibble = CLUT tint index
+- `flags` — `0` = normal text, `!= 0` = draw shadow pass first (black, offset +1,+1)
+
+**Usage:**
+```cpp
+sprintf(PRINT_TEXT_BUFFER, "Hello World");
+PrintText8x14(16, 100, 128, 1);  // white text with shadow at (16,100)
+PrintText8x14(16, 116, 128, 0);  // white text without shadow
+```
+
+**Rendering:** Calls `AddTintSprite()` per character through the `g_pendingSprites[]` queue. Characters rendered in insertion order; to ensure text appears above background rects, the rect must be drawn **before** the text.
+
+**Dependencies:** `PRINT_TEXT_BUFFER`, `AddTintSprite()`, `g_ScreenOffsetX/Y`, `g_STAGE_ID`, `g_ROOM_ID`, `g_roomCamera_id`
+
+---
+
+### PrintText8x8
+
+**Address:** `0x00455420`
+
+**Purpose:** Render text using 8×8 pixel mono-spaced font. Characters offset from ASCII 0x20. Same pipeline as PrintText8x14.
+
+**Signature:**
+```cpp
+void PrintText8x8(short x, short y, unsigned char color, char shadow);
+```
+
+**Parameters:**
+- `x, y` — Screen position
+- `color` — Same encoding as PrintText8x14
+- `shadow` — `0` = no shadow, `!= 0` = draw shadow pass first
+
+**Dependencies:** Same as PrintText8x14
+
+---
+
+### PrintFormattedText
+
+**Address:** `0x00455190`
+
+**Purpose:** Control-code-based formatted text renderer for debug/menu output.
+
+**Signature:**
+```cpp
+void PrintFormattedText(short x, short y, unsigned char color, unsigned char* data);
+```
+
+**Parameters:**
+- `x, y` — Screen position
+- `color` — Same encoding as PrintText8x14
+- `data` — Byte stream with opcodes:
+
+| Opcode | Description |
+|--------|-------------|
+| `0x00` | Advance X by 8 (space) |
+| `0x01`/`0x07` | End of string |
+| `0xF8` | Next byte = char code, row = next/18 + 15 |
+| `0xF9` | Next byte = char code, row = next/18 |
+| `0xFA` | Next byte = char code, row = next/18 + 14 |
+| `0xFB` | Skip byte (no-op) |
+| `0xFF` | Advance X by 4 (half-width space) |
+| *default* | Direct char code, row = ch/18 + 2 |
+
+**Dependencies:** `g_TextureDepth`, `AddTintSprite()`
+
+---
+
+### AddTintSprite
+
+**Address:** `0x0046e0a0`
+
+**Purpose:** Build and enqueue a tinted font character sprite. Called by all text rendering functions.
+
+**Signature:**
+```cpp
+int AddTintSprite(TextureDesc* texDesc, unsigned short brightness);
+```
+
+**Parameters:**
+- `texDesc` — Texture descriptor (global `g_texPrintState`) containing position, UV, color tint
+- `brightness` — 0–30 range (maps to alpha 0–255). Values ≤2 map to alpha 17 (faint)
+
+**Operations:**
+1. Reads `g_TexturePrintX/Y`, `g_TextureVramX/Y`, `g_PrintTintR/G/B` from globals
+2. Computes screen-space position with scaling: `(gameX * scaleX, gameY * scaleY)`
+3. Computes UV coordinates from font atlas dimensions
+4. Builds `DWORD color`: alpha = `brightness * 255/30`, RGB = `tint * 2` (clamped to 255)
+5. Enqueues a `PendingSprite` in `g_pendingSprites[]` using `m_pFontSRV`
+
+**Dependencies:** `g_TexturePrintX/Y`, `g_TextureVramX/Y`, `g_PrintTintR/G/B`, `g_ScreenOffsetX/Y`, `CMarniDirect3D`
+
+---
+
+### draw_rect
+
+**Address:** `0x00470350`
+
+**Purpose:** Draw a solid-color (or textured) rectangle. Used for menu backgrounds, fade overlays, and debug screens.
+
+**Signature:**
+```cpp
+void draw_rect(RectDrawDesc* rect, int blend, int flags);
+```
+
+**Parameters:**
+- `rect` — Rectangle descriptor:
+  - `x, y` — Top-left position in 320×240 game coords
+  - `w, h` — Size in pixels
+  - `r, g, b` — Color components (0–255)
+  - `textureId` — `0` = solid fill, `≠ 0` = texture page slot + 0xF
+- `blend` — NOT alpha transparency! Controls OT depth sort value (higher = further back). In the modern port, this is unused but preserved for API compatibility.
+- `flags` — Depth sort mode selector
+
+**Usage:**
+```cpp
+RectDrawDesc darkRect = {0};
+darkRect.x = 0; darkRect.y = 0;
+darkRect.w = 320; darkRect.h = 240;
+darkRect.r = 0; darkRect.g = 0; darkRect.b = 0;
+draw_rect(&darkRect, 0, 0);  // solid black fullscreen background
+```
+
+**Important:** Rects are rendered in insertion order via `g_pendingSprites[]`. For correct layering:
+1. Draw background rects FIRST
+2. Draw text SECOND (so text appears on top)
+
+**Dependencies:** `g_ScreenOffsetX/Y`, `CMarniDirect3D`, `m_pWhiteSRV`
+
+---
+
+### display_texture
+
+**Address:** `0x0046e8d0`
+
+**Purpose:** Enqueue a textured sprite using the texture page table. Used for title screen button prompts and other texture atlas sprites.
+
+**Signature:**
+```cpp
+void display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount);
+```
+
+**Parameters:**
+- `texture` — Texture descriptor (flags, position, UV, color)
+- `depth` — Depth sort priority (multiplied by 16 + 500)
+- `slot` — Texture page slot index (shifted by +0xF)
+- `pageCount` — Unused in current port
+
+**Dependencies:** `g_SpriteCommandBuffer`, `BuildSpriteRenderFlags()`, `GetTextureVariant()`, `g_TexturePageSRV[]`
+
+---
+
+### OT_InsertPrimitive
+
+**Address:** `0x004402f0`
+
+**Purpose:** Insert the title screen background image into the pending sprite queue at index 0 (highest priority rendering). Called by `FUN_0040a8f0` at the start of `FrameRateGovernor`.
+
+**Signature:**
+```cpp
+void OT_InsertPrimitive(void* prim, unsigned int depth);
+```
+
+**Operations:**
+1. Validates prim type = 1 and depth = 0xFFF
+2. Shifts all existing `g_pendingSprites` right by one
+3. Inserts `g_displayImageSRV` as a fullscreen sprite at index 0
+4. Increments `g_pendingSpriteCount`
+
+**Dependencies:** `g_displayImageSRV`, `g_pendingSprites[]`, `g_main_state_flags & 0x40000000`
+
+---
+
+### FrameRateGovernor
+
+**Address:** `0x004973d0`
+
+**Purpose:** Core frame timing, rendering, and presentation function. Called once per frame from `main_loop()`.
+
+**Flow:**
+1. **Frame timing**: Tracks frame deltas in a 4-slot circular buffer, computes target frame time
+2. **Budget check**: If `g_frameTimeAccumulator < g_frameTargetTime`, skips rendering (drops frame)
+3. **Rendering**: `MarniClear()` → `FUN_0040a8f0()` (insert title BG) → render `g_pendingSprites[]` → `FlushSpriteCommands()` → `MarniPresent()`
+4. **Post-present**: Resets sprite queues, updates timers, handles screen/render access flags
+
+**Dependencies:** `MarniClear()`, `MarniPresent()`, `FlushSpriteCommands()`, `MarniDrawSprite()`, `FUN_0040a8f0()`, `SpriteQueue_Reset()`
+
+---
+
+
 
 ### CleanupSharedMemory
 
@@ -749,6 +953,7 @@ void UpdateVideoPlayback(void);
 | `0x0040c510` | `GetFreeDiskSpaceMB` | SystemChecks.cpp |
 | `0x0041d0b0` | `CleanupAsyncTasks` | Cleanup.cpp |
 | `0x00428eb0` | `main_loop` | GameLoop.cpp |
+| `0x004402f0` | `OT_InsertPrimitive` | Rendering.cpp |
 | `0x00441170` | `WindowProc` | WindowProc.cpp |
 | `0x00441350` | `WinMain` | WinMain.cpp |
 | `0x00442230` | `CleanupSharedMemory` | Cleanup.cpp |
@@ -757,11 +962,18 @@ void UpdateVideoPlayback(void);
 | `0x00442930` | `EnumDisplayModesCallback` | DisplayConfig.cpp |
 | `0x00448770` | `GetDisplayModeCount` | DisplayConfig.cpp |
 | `0x004487a0` | `GetDisplayModeRect` | DisplayConfig.cpp |
+| `0x00455190` | `PrintFormattedText` | Rendering.cpp |
+| `0x00455420` | `PrintText8x8` | Rendering.cpp |
+| `0x00455520` | `PrintText8x14` | Rendering.cpp |
+| `0x0046e0a0` | `AddTintSprite` | Rendering.cpp |
+| `0x0046e8d0` | `display_texture` | Rendering.cpp |
+| `0x00470350` | `draw_rect` | Rendering.cpp |
 | `0x00474e00` | `UpdateVideoPlayback` | VideoPlayback.cpp |
 | `0x0047b830` | `EnumerateDriveTypes` | SystemChecks.cpp |
 | `0x004801c0` | `DestroyAllSoundBanks` | Cleanup.cpp |
 | `0x00497060` | `IsGraphicsSystemReadyForOperation` | MarniSystem.cpp |
 | `0x004970c0` | `InitializeMarniSystem` | MarniSystem.cpp |
+| `0x004973d0` | `FrameRateGovernor` | Rendering.cpp |
 | `0x004976c0` | `EnumerateDisplayModes` | DisplayConfig.cpp |
 | `0x004977f0` | `EnumerateD3DRenderers` | MarniSystem.cpp |
 | `0x00497ea0` | `CleanupVideoConfigAndSaveAllSettings` | Cleanup.cpp |

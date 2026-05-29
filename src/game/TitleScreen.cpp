@@ -5,6 +5,7 @@
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
+#include "SFXIds.h"
 #include <cstdio>
 #include <cstdlib>
 
@@ -252,8 +253,8 @@ void update_title_options(void)
             UpdateTitleTextSprite(128, g_titleSelectionId);
 
             if ((justPressed & 0xEFF) || sidewinderPress) {
-                play_sfx(1, 0);
-                play_sfx(1, 1);
+                play_sfx(SFX_BANKS, SFX_TITLE_EVIL01);
+                play_sfx(SFX_BANKS, 1);  // null sfx
                 g_titleOptionsFading = 6;
                 g_fade_type_id = 1;
                 g_fading_counter = 0x7F00;
@@ -432,11 +433,11 @@ void title_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 0);
     CenterScreenOrigin();
     clear_textures();
-    set_title_render_param(192);
+    set_title_render_param(0x11000000);
     sounds_reset();
 
     g_loadDataDestPointer = g_image_buffer;
-    load_sfx(12, g_image_buffer);
+    LoadSoundBank(BANK_TITLE, g_image_buffer);
 
     g_fading_state = -1;
     g_titleLoopFlag = 0;
