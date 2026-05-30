@@ -415,7 +415,7 @@ The struct is exactly `0x22` (34) bytes — verified to match the original binar
 
 The font texture (`fontus.tim`) is loaded by `ProcessTextureImage()` (0x0046c5f0):
 
-1. `load_file(".\\usa\\data\\fontus.tim", buffer, 0x20)` — loads raw TIM bytes
+1. `LoadFile(".\\usa\\data\\fontus.tim", buffer, 0x20)` — loads raw TIM bytes
 2. `PSXTexture::Store(buffer, 1)` — parses TIM header + CLUT + pixel data
 3. Converts 4/8 bpp paletted pixels → RGBA8888 via CLUT
 4. Creates D3D11 texture & SRV: `MarniCreateTexture(w, h, 32, rgba, &fontTex, &fontSRV)`

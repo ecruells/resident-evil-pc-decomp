@@ -198,25 +198,14 @@ static BOOL MCI_OpenAndPlay(const char* filePath)
 
     g_mciWindowCreated = TRUE;
 
-    // Position the video window
-    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    if (pD3D != NULL) {
-        RECT clientRect;
-        GetClientRect(g_hWnd, &clientRect);
+    // Position the video window — fill the entire client area
+    // The MCI AVI video is always 320x240; MCI handles centering within the destination
+    RECT clientRect;
+    GetClientRect(g_hWnd, &clientRect);
 
-        int vidW = (int)pD3D->m_width;
-        int vidH = (int)pD3D->m_height;
-
-        int x = 0, y = 0;
-        if (vidW < clientRect.right)
-            x = (clientRect.right - vidW) / 2;
-        if (vidH < clientRect.bottom)
-            y = (clientRect.bottom - vidH) / 2;
-
-        sprintf_s(cmd, "put movie destination at %d %d %d %d",
-                  x, y, x + vidW - 1, y + vidH - 1);
-        mciSendStringA(cmd, NULL, 0, g_hWnd);
-    }
+    sprintf_s(cmd, "put movie destination at 0 0 %d %d",
+              clientRect.right - 1, clientRect.bottom - 1);
+    mciSendStringA(cmd, NULL, 0, g_hWnd);
 
     // Play the video with notification
     sprintf_s(cmd, "play movie notify");
@@ -421,7 +410,7 @@ void SignalVideoSkip(void)
 // ============================================================================
 // SetVideoResolution - Set video display resolution (0x00497f30)
 // ============================================================================
-static void SetVideoResolution(int width, int height)
+void SetVideoResolution(int width, int height)
 {
     if (g_pMarniDirect3D != NULL) {
         CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;

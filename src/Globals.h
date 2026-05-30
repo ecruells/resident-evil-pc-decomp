@@ -15,6 +15,39 @@ struct TextureDesc;
 #define MAX_DISPLAY_MODES 100
 #define MAX_DRIVES 26
 
+// PS1 digital controller button bit constants (used by g_RawPadPressed / g_PlayerPadPressed)
+#define PAD_SELECT      0x0001
+#define PAD_L3          0x0002
+#define PAD_R3          0x0004
+#define PAD_START       0x0008
+#define PAD_UP          0x0010
+#define PAD_RIGHT       0x0020
+#define PAD_DOWN        0x0040
+#define PAD_LEFT        0x0080
+#define PAD_L2          0x0100
+#define PAD_R2          0x0200
+#define PAD_L1          0x0400
+#define PAD_R1          0x0800
+#define PAD_TRIANGLE    0x1000
+#define PAD_CIRCLE      0x2000
+#define PAD_CROSS       0x4000
+#define PAD_SQUARE      0x8000
+
+// Composite masks for common groups
+#define PAD_ANY         0xFFFF      // any button
+#define PAD_DPAD        (PAD_UP|PAD_DOWN|PAD_LEFT|PAD_RIGHT)       // 0x00F0
+#define PAD_SHOULDER    (PAD_L1|PAD_L2|PAD_R1|PAD_R2)               // 0x0F00
+#define PAD_FACE        (PAD_TRIANGLE|PAD_CIRCLE|PAD_CROSS|PAD_SQUARE) // 0xF000
+#define PAD_MENU_CONFIRM PAD_CROSS   // confirm/select in menus
+#define PAD_MENU_BACK   PAD_SQUARE   // cancel/back in menus
+#define PAD_MENU_UP     PAD_TRIANGLE // navigate up in menus
+#define PAD_MENU_DOWN   PAD_CROSS    // navigate down in menus
+#define PAD_CONFIRM     (PAD_CROSS|PAD_START)  // start/confirm (Enter/Space maps to both)
+
+// Title screen: "any button except menu navigation/face buttons"
+// Excludes L2, TRIANGLE, CIRCLE, CROSS, SQUARE (menu nav + face buttons)
+#define PAD_TITLE_ANY   (PAD_SELECT|PAD_L3|PAD_R3|PAD_START|PAD_UP|PAD_RIGHT|PAD_DOWN|PAD_LEFT|PAD_R2|PAD_L1|PAD_R1)  // 0x0EFF
+
 struct DisplayModeInfo {
     DWORD dwWidth;         // 0x00 - Screen width
     DWORD dwHeight;        // 0x04 - Screen height
@@ -24,14 +57,14 @@ struct DisplayModeInfo {
 };
 
 struct RectDrawDesc {
-    int w;                 // 0x00 - Width
-    int textureId;         // 0x04 - Texture ID
-    int r;                 // 0x08 - Red
-    int g;                 // 0x0C - Green
-    int b;                 // 0x10 - Blue
-    int x;                 // 0x14 - X position
-    int h;                 // 0x18 - Height
-    int y;                 // 0x1C - Y position
+    unsigned int textureId;  // 0x00 - Texture ID
+    short x;                 // 0x04 - X position
+    short y;                 // 0x06 - Y position
+    short w;                 // 0x08 - Width
+    short h;                 // 0x0a - Height
+    unsigned char r;         // 0x0c - Red
+    unsigned char g;         // 0x0d - Green
+    unsigned char b;         // 0x1e - Blue
 };
 
 struct TaskControlBlock {
@@ -74,6 +107,8 @@ extern int           g_NumDisplayModes;                // 0x007d8f24
 extern D3DRendererInfo g_D3DRenderers[8];
 extern int           g_NumD3DRenderersAvailable;       // 0x007e0e08
 
+extern int           g_SelectedPlayerID;               // 0x008f879c
+
 // Drive types (0x008f87c4)
 extern UINT          g_DriveTypes[MAX_DRIVES];
 extern char          g_DriveLetterBuffer[256];
@@ -93,34 +128,35 @@ extern HANDLE        g_hFileMapping;                   // DAT_007dfd20 (= DAT_00
 extern BYTE*         g_pSharedMemory;                  // sharedMemoryPtr
 
 // Window rect for drawing
-extern RectDrawDesc  g_window_rect;                    // 0x004ba720
+extern RectDrawDesc  g_window_rect;                    // 0x00d227b0
 
 // Marni System objects
 extern void*         g_pMarniDirect3D;                 // 0x00ac4028
 extern MasterInputState* g_pMasterInputState;          // input state pointer
 
 // Main state flags
-extern DWORD         g_main_state_flags;               // 0x004ba744 (?)
-extern int           g_fading_state;                   // 0x004ba758
-extern int           g_fading_counter;                 // 0x004ba75c
-extern int           g_fade_type_id;                   // 0x004ba760
-extern int           g_playerHealth;                   // 0x004ba764 (?)
+extern DWORD         g_main_state_flags;               // 0x00be41c0 (?)
+
+extern int           g_playerHealth;                   // 0x00be636c (?)
 
 // Game state
-extern int           g_selectedPlayerID;               // SELECTED_PLAYER_ID
-extern int           g_SelectedPlayerID;               // 0x00d91bc8 (?)
+extern int           DAT_00d91bc8;                     // 0x00d91bc8 (?)
 extern int           g_currentFMVID;                   // FMV_ID
 extern int           g_CurrentFMVID;                   // 0x00d91bcc (?)
-extern int           g_stageId;                        // STAGE_ID
-extern int           g_STAGE_ID;                       // 0x00d91bd0 (?)
-extern int           g_roomId;                         // ROOM_ID
-extern int           g_roomCameraId;                   // g_roomCamera_id
-extern int           g_ROOM_ID;                        // 0x00d91bd4 (?)
-extern int           g_roomCamera_id;                  // 0x00d91bd8 (?)
+
+extern unsigned char g_stageId;                        // 0x00be9820
+extern unsigned char g_roomId;                         // 0x00be9821
+extern unsigned char g_roomCameraId;                   // 0x00be9822
 
 // Screen pos
 extern int           g_ScreenOffsetX;                  // 0x00ac3ff8
 extern int           g_ScreenOffsetY;                  // 0x00ac3ffc
+
+// fading
+extern short         g_fading_state;                   // 0x00be9834
+extern short         g_fading_counter;                 // 0x00bebcca
+extern unsigned char g_fade_type_id;                   // 0x00bf0a2f
+extern BYTE          g_bGameActive;                    // 0x00be41dc
 
 // Task system globals
 extern DWORD         g_StackPointer;                   // _g_StackPointer 0x007e0cc8
@@ -135,13 +171,16 @@ extern DWORD         g_SchedulerRunningFlag;           // 0x004ba0b8
 extern void*         g_AsyncRpcCallback;               // 0x00d91a90
 
 // Input state
-extern DWORD         g_RawPadPressed;                  // 0x00bcb2e0
-extern DWORD         g_InputFlags;                     // 0x00bcb2e4
-extern DWORD         g_PlayerPadPressed;               // 0x00bf0a08
-extern DWORD         button_pressed_id;                // 0x00bf0a0c
-extern DWORD         g_PlayerPadHeldPrev;              // 0x004bae30
-extern DWORD         g_PadRawP2;                       // SideWinder raw pad state
-extern BOOL          g_DisablePad;                     // 0x004bcb3c
+extern DWORD g_lastScanCodeOrMsgID; // 0x00bcb2e0 - last keyboard scan code or dialog message ID
+extern DWORD g_InputFlags; // 0x00bcb2e4
+extern DWORD g_RawPadPressed; // 0x00be05b4 - raw pad state (edge-detected WORD in original)
+extern DWORD g_PlayerPadPressed; // 0x00bf0a08 (edge-detected: pressed this frame only)
+extern DWORD g_PlayerPadHeld; // 0x00bf0a10 (currently held buttons)
+extern DWORD g_button_pressed_id; // 0x00bf0a0c
+extern DWORD g_PlayerPadHeldPrev; // 0x004bae30
+extern WORD g_RawPadState; // 0x00bf0a12 (raw pad state snapshot)
+extern DWORD g_PadRawP2; // SideWinder raw pad state
+extern BOOL g_DisablePad; // 0x004bcb3c
 
 // Menu / dialog flags
 extern int           g_menu_choice_id;                 // 0x00be0e28 (?)
@@ -150,8 +189,8 @@ extern BOOL          g_displayExitGameScreen_flag;     // 0x004bcb54
 extern int           g_demoTimer;                      // 0x004bcb5c (?)
 
 // Sound system
-extern int           g_SndFadeType;                    // 0x00be15e0
-extern int           g_SndRampFramesLeft;              // 0x00be15e4
+extern int           g_SndFadeType;                    // 0x00bf0a2d
+extern int           g_SndRampFramesLeft;              // 0x00ac9908
 extern int           g_BgmSoundBank;                   // BGM sound bank ID
 extern int           g_SfxBanks[64];                   // SFX bank handles + metadata
 extern int           g_RoomSfxBanks[64];               // Room SFX bank handles + metadata
@@ -207,9 +246,9 @@ extern BOOL          g_bMCIVideoEvent;                 // 0x004bcb48
 extern BOOL          g_bIsPaused;                      // DAT_004bcb2c
 extern BOOL          g_bWindowActive;                  // DAT_004bcb30
 extern BOOL          g_bQuitFlag;                      // DAT_004bcb40
-extern BOOL          g_bFrameRateUnlocked;             // DAT_004bcb48
+extern BOOL          g_bUseFrameSkip;             // DAT_004bcb48
 extern BOOL          g_bFrameSkipDetected;             // DAT_004d46dc
-extern int           g_ScreenAccessCheck;              // DAT_004d4684
+extern int           g_ScreenAccessCheck;              // 0x004d2290
 extern int           g_RenderAccessCheck;              // DAT_004d468c
 
 // ============================================================================
@@ -260,7 +299,7 @@ extern TexturePrintState g_texPrintState;
 #define g_PrintTintFlagB    g_texPrintState.tintFlagB
 
 // Other print globals (not part of the packed struct)
-extern char          PRINT_TEXT_BUFFER[256];           // 0x00be0e2c
+extern char          PRINT_TEXT_BUFFER[256];           // 0x00be0e20
 extern int           g_PrintClutTint;                  // CLUT tint index for text
 
 // Image buffer for asset loading
@@ -277,6 +316,7 @@ extern int           g_playingGameFlag;                // 0x004d4674
 extern int           g_loadSaveStateFlag;              // 0x004d4678
 extern int           g_demoIdleTimer1;                 // DAT_004c44d8
 extern void*         g_loadDataDestPointer;            // 0x00bebcdc
+extern unsigned char g_selectedFmvId;                  // 0x00bf07fb
 extern void*         g_fmvDataPointer;                 // 0x00bf07fc
 extern int           g_fmvPlayCount;                   // 0x004bae34
 
@@ -312,6 +352,7 @@ extern DWORD         g_TaskDataArray_ba780[16];       // DAT_004ba780 area
 
 // Image processing/status variables
 extern short         g_TextureBankID;                  // _DAT_00bebcc4
+#define g_TextureDepthByte (*((BYTE*)&g_TextureBankID + 1))  // 0x00bebcc5 - high byte = texture depth
 extern short         g_SpecialRoomLightR;              // DAT_00be9828
 extern short         g_SpecialRoomLightState;          // DAT_00be9836
 extern short         g_SpecialRoomLightDelta;          // DAT_00be9838
@@ -375,7 +416,7 @@ void Task_chain(void* func);
 
 // Async execution
 void ExecAsync(void* callback);
-void FUN_00442150(int status_flags);
+void SetFrameRateMode(int status_flags);
 
 // Input functions
 void InputUpdate(void);
@@ -386,7 +427,7 @@ void PauseSounds(void);
 void ResumePausedSounds(void);
 void UpdateSoundFadeState(void);
 void UpdateSoundDecay(void);
-void Sound_Dispatch(int param);
+void empty_0047b950(int param);
 void UpdateMusicWaitState(void);
 void sounds_reset(void);
 void LoadSoundBank(int sound_bank_id, void* buffer);
@@ -500,6 +541,12 @@ extern float         g_debugClearG;
 extern float         g_debugClearB;
 extern int           g_debugTaskFrame;
 
+// Sprite/clear color (set by setSomeColor)
+extern float         g_color_r;               // 0x004c336c
+extern float         g_color_g;               // 0x004c3370
+extern float         g_color_b;               // 0x004c3374
+extern float         g_spriteColorScale;       // 0x004af2ac
+
 // Title screen display image SRV (shared with Rendering.cpp OT_InsertPrimitive)
 extern ID3D11ShaderResourceView*  g_displayImageSRV;
 
@@ -535,7 +582,7 @@ extern DWORD         g_ObjectWorkBuffer[64];            // DAT_008ec9c8 - work b
 void set_display_resolution(int w, int h, int mode);
 void display_image(int slot, void* buffer, int width, int height);
 void title_setup_texture_pages(int slot, int mode);
-void title_reset_display_list(int slot);
+void empty_00470960(int slot);
 int  check_save_files_exist(void);
 int  create_texture_page(void* data, int mode);
 void destroy_texture_page(int handle);
@@ -549,11 +596,26 @@ int  read_sidewinder_pad(void);
 
 void init_title_screen(void);
 void title_select_sfx(void);
-void title_init_render_state(void* ptr, int a, int b, int c);
+void empty_0040abb0(void* ptr, int a, int b, int c);
 void set_title_render_param(int value);
 void cleanup_texture_slot(int slot);
-void reset_title_pad_state(int value);
+void empty_00497c10(int value);
 void update_title_options(void);
 void game_start(void);
 void characterSelectionScreen(void);
 void save_load_game_state(int, int, int, int, int);
+
+// Object cleanup globals (Object_DeleteAll / ObjectCleanupCallback)
+extern int           g_objectDeleteFlag;          // 0x004d2bfc
+extern int           g_objectCountArray[32];      // 0x008ffc40 - 0x008ffcbc
+extern int           g_objectDeleteCounter;       // 0x00aabd68
+extern int*          g_objectDeletePtr;           // 0x004d2bf8
+extern int           g_objectListCleanupFlag;     // 0x004d2fb4
+extern int           g_objectListCleanupCount;    // 0x004d2fb0
+extern DWORD         g_objectListPtrArray[512];   // 0x008fc430 area
+extern char          g_tmdObjectBuffer[250 * 0x1594]; // 0x00923b50 area (array of CMarniDirect3DTMD, 0x1594 stride)
+
+// Global render-state objects at fixed addresses in the original binary
+// Used by FUN_00484e70 (cleanup wrapper) and related functions
+extern char          g_renderStateTex[0x36c];    // 0x00aad6f0 — PSXTexture + aux data (clear via ClearState348)
+extern char          g_renderStateTMD[0x1594];    // 0x00aac158 — specific CMarniDirect3DTMD instance

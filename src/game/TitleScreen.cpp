@@ -12,7 +12,7 @@
 // Title image/buffer resources
 static BYTE g_displayImageBuffer[320 * 240 * 2];
 // Title text atlas sprite heights
-static float g_titleCurrentSprH = 60.0f;
+// static float g_titleCurrentSprH = 60.0f;
 
 extern void logos_state(void);
 
@@ -77,17 +77,17 @@ void title_setup_texture_pages(int slot, int mode)
 // ============================================================================
 void init_title_screen(void)
 {
-    g_StackPointer = 0;
+    g_bGameActive = 0;
     set_display_resolution(320, 240, 0);
 
-    g_roomCamera_id = 0;
+    g_roomCameraId = 0;
 
-    load_file(".\\usa\\data\\title.pix", g_displayImageBuffer, 0x20);
+    LoadFile(".\\usa\\data\\title.pix", g_displayImageBuffer, 0x20);
     display_image(0, g_displayImageBuffer, 320, 240);
 
     title_setup_texture_pages(0, 1);
 
-    title_reset_display_list(0);
+    //empty_00470960(0);
 
     const char* buttonTexPath;
     if (!g_bIsSideWinderConnected) {
@@ -95,16 +95,19 @@ void init_title_screen(void)
     } else {
         buttonTexPath = ".\\usa\\data\\t_start.tim";
     }
-    load_file(buttonTexPath, g_displayImageBuffer, 0x20);
+    LoadFile(buttonTexPath, g_displayImageBuffer, 0x20);
 
+    g_titleTextureDepthData[4] = 26;
     g_titleTextureDepthData[0] = 8;
-    g_titleTextureDepthData[1] = 8;
-    g_titleTextureDepthData[2] = 8;
-    g_titleTextureDepthData[4] = 0x1A;
-    g_titleTextureDepthData[5] = 0x1A;
-    g_titleTextureDepthData[6] = 0x1A;
+    g_TextureDepthByte = 26;
     g_TextureBankID = 8;
     LoadTexturePage(g_displayImageBuffer, 8, 0, 12, 4, 0, 0, 0);
+
+    g_titleTextureDepthData[1] = g_TextureBankID;
+    g_titleLoopFlag = 1;
+    g_titleTextureDepthData[5] = g_TextureDepthByte;
+    g_titleTextureDepthData[2] = g_titleTextureDepthData[1];
+    g_titleTextureDepthData[6] = g_titleTextureDepthData[5];
 
     {
         char dbg[256];
@@ -112,15 +115,14 @@ void init_title_screen(void)
         OutputDebugStringA(dbg);
     }
 
-    g_titleLoopFlag = 1;
 
     if (check_save_files_exist()) {
         g_titleSelectionId = 2;
-        g_main_state_flags &= ~0x40000000;
+        g_main_state_flags &= ~0xC0000000;
         return;
     }
     g_titleSelectionId = 1;
-    g_main_state_flags &= ~0x40000000;
+    g_main_state_flags &= ~0xC0000000;
 }
 
 // ============================================================================
@@ -145,8 +147,8 @@ void title_exit_loop(void)
 // ============================================================================
 void fade_update(void)
 {
-    if ((short)g_fading_state <= 0 && g_fading_counter != 0) {
-        if ((short)g_fading_counter <= 0) {
+    if (g_fading_state <= 0 && g_fading_counter != 0) {
+        if (g_fading_counter <= 0) {
             g_fading_state = 0x7FFF;
         } else {
             g_fading_state = 0;
@@ -198,7 +200,7 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
     td->texV = (unsigned char)entry->vramY;
     td->height = entry->sprHeight;
     td->screenY = entry->screenY + 38;
-    g_titleCurrentSprH = (float)entry->sprHeight;
+    // g_titleCurrentSprH = (float)entry->sprHeight;
 
     td->colorMulR = brightness;
     td->unk10 = 0;
@@ -217,17 +219,13 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
 // ============================================================================
 void update_title_options(void)
 {
-    DWORD sidewinderPress = 0;
-    DWORD sidewinderState = 0;
-    if (g_bIsSideWinderConnected) {
-        sidewinderState = read_sidewinder_pad();
-        sidewinderPress = sidewinderState & 0x10000 & ~g_PlayerPadHeldPrev;
-    }
-    g_PlayerPadHeldPrev = sidewinderState;
-
-    static DWORD prevPad = 0;
-    DWORD justPressed = g_PlayerPadPressed & ~prevPad;
-    prevPad = g_PlayerPadPressed;
+	DWORD sidewinderPress = 0;
+	DWORD sidewinderState = 0;
+	if (g_bIsSideWinderConnected) {
+		sidewinderState = read_sidewinder_pad();
+		sidewinderPress = sidewinderState & 0x10000 & ~g_PlayerPadHeldPrev;
+	}
+	g_PlayerPadHeldPrev = sidewinderState;
 
     if (g_titleMode != 0) {
         if (g_titleMode != 1) return;
@@ -236,10 +234,10 @@ void update_title_options(void)
         case 0:
             g_titleOptionsFading = 1;
             g_fade_type_id = 2;
-            g_fading_counter = (short)0xFC00;
+            g_fading_counter = 0xFC00;
             g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
             fade_update();
-            break;
+            return;
 
         case 1:
             if (g_fading_state < 0) {
@@ -247,83 +245,87 @@ void update_title_options(void)
                 g_titleDemoTime = 0x708;
             }
             UpdateTitleTextSprite(128, g_titleSelectionId);
-            break;
+            return;
 
-        case 2:
-            UpdateTitleTextSprite(128, g_titleSelectionId);
+	case 2:
+		UpdateTitleTextSprite(128, g_titleSelectionId);
 
-            if ((justPressed & 0xEFF) || sidewinderPress) {
-                play_sfx(SFX_BANKS, SFX_TITLE_EVIL01);
-                play_sfx(SFX_BANKS, 1);  // null sfx
-                g_titleOptionsFading = 6;
-                g_fade_type_id = 1;
-                g_fading_counter = 0x7F00;
-                fade_update();
-                g_StackPointer = 2;
-                break;
-            }
+		if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+			play_sfx(SFX_BANKS, SFX_TITLE_EVIL01);
+			play_sfx(SFX_BANKS, 1); // null sfx
+			g_titleOptionsFading = 6;
+			g_fade_type_id = 1;
+			g_fading_counter = 0x7F00;
+			fade_update();
+			g_bGameActive = 2;
+			return;
+		}
 
-            if (justPressed & 0x5100) {
-                if (!(justPressed & 0x1100)) {
-                    if (g_titleSelectionId == 2) g_titleSelectionId = 0;
-                    g_titleSelectionId++;
-                } else {
-                    g_titleSelectionId--;
-                    if (g_titleSelectionId == 0) {
-                        g_titleSelectionId = 2;
-                        g_titleDemoTime = 0x708;
-                        goto demo_reset;
-                    }
-                }
-                g_titleDemoTime = 0x708;
-            }
-        demo_reset:
+		if (g_PlayerPadPressed & (PAD_L2 | PAD_TRIANGLE | PAD_CROSS)) {
+			if (!(g_PlayerPadPressed & (PAD_L2 | PAD_TRIANGLE))) {
+				if (g_titleSelectionId == 2) g_titleSelectionId = 0;
+				g_titleSelectionId++;
+			} else {
+				g_titleSelectionId--;
+				if (g_titleSelectionId == 0) {
+					g_titleSelectionId = 2;
+					g_titleDemoTime = 0x708;
+					goto demo_reset;
+				}
+			}
+			g_titleDemoTime = 0x708;
+		}
+
+	demo_reset:
             g_titleDemoTime--;
             if (g_titleDemoTime != 0) break;
+
             g_titleOptionsFading = 3;
             g_fade_type_id = 2;
             g_fading_counter = 0x400;
             fade_update();
-            break;
+            return;
 
         case 3:
             if (g_fading_state < 0) {
                 g_titleSelectionId = 0;
                 title_exit_loop();
-                break;
+                return;
             }
-            UpdateTitleTextSprite(0x80, g_titleSelectionId);
-            if ((g_PlayerPadPressed & 0xEFF) == 0) break;
+            UpdateTitleTextSprite(128, g_titleSelectionId);
+            if ((g_PlayerPadPressed & PAD_TITLE_ANY) == 0) {
+                return;
+            }
             g_titleOptionsFading = 0;
-            g_fading_counter = (short)0xF000;
-            break;
+            g_fading_counter = 0xF000;
+            return;
 
         case 4:
             if (g_fading_state < 0) {
                 title_exit_loop();
                 g_main_state_flags &= 0xC0000000;
-                break;
+                return;
             }
-            UpdateTitleTextSprite(0x80, g_titleSelectionId);
+            UpdateTitleTextSprite(128, g_titleSelectionId);
 
         case 6:
             if (g_fading_state < 0) {
                 g_titleOptionsFading = 7;
                 g_fade_type_id = 1;
-                g_fading_counter = (short)0xC000;
+                g_fading_counter = 0xC000;
                 fade_update();
-                UpdateTitleTextSprite(0x80, g_titleSelectionId);
-                break;
+                UpdateTitleTextSprite(128, g_titleSelectionId);
+                return;
             }
 
         case 8:
             if (g_fading_state < 0) {
                 g_titleOptionsFading = 9;
                 g_fade_type_id = 1;
-                g_fading_counter = (short)0xF800;
+                g_fading_counter = 0xF800;
                 fade_update();
-                UpdateTitleTextSprite(0x80, g_titleSelectionId);
-                break;
+                UpdateTitleTextSprite(128, g_titleSelectionId);
+                return;
             }
             break;
 
@@ -331,11 +333,11 @@ void update_title_options(void)
             if (g_fading_state < 0) {
                 g_titleOptionsFading = 8;
                 g_fade_type_id = 1;
-                g_fading_counter = (short)0x8000;
+                g_fading_counter = 0x8000;
                 fade_update();
                 UpdateTitleTextSprite(0x80, g_titleSelectionId);
+                return;
             }
-            break;
 
         case 9:
             if (g_fading_state < 0) {
@@ -344,75 +346,77 @@ void update_title_options(void)
                 g_fading_counter = 0x270;
                 fade_update();
                 UpdateTitleTextSprite(0x80, g_titleSelectionId);
+                return;
             }
+
+        default:
             break;
         }
 
-        if (g_titleOptionsFading == 4 || g_titleOptionsFading >= 6) {
-            UpdateTitleTextSprite(0x80, g_titleSelectionId);
-        }
+        UpdateTitleTextSprite(0x80, g_titleSelectionId);
         return;
     }
 
     switch (g_titleOptionsFading) {
-    case 0:
-        g_titleOptionsFading = 1;
-        g_titleDemoTime = 0x80;
-    case 1:
-        g_titleDemoTime -= 4;
-        UpdateTitleTextSprite(-0x80 - (char)g_titleDemoTime, 0);
-        if (g_titleDemoTime == 0) {
-            g_titleOptionsFading = 2;
-            g_titleDemoTime = 0x708;
-        }
-        if ((justPressed & 0xEFF) || sidewinderPress) {
-            g_titleOptionsFading = 2;
-            g_titleDemoTime = 0x708;
-        }
-        break;
+        case 0:
+            g_titleOptionsFading = 1;
+            g_titleDemoTime = 0x80;
+            goto option_selected;
+        case 1:
+    option_selected:
+            g_titleDemoTime -= 4;
+            UpdateTitleTextSprite(-0x80 - (char)g_titleDemoTime, 0);
+            if (g_titleDemoTime == 0) {
+                g_titleOptionsFading = 2;
+                g_titleDemoTime = 0x708;
+            }
+            if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+                g_titleOptionsFading = 2;
+                g_titleDemoTime = 0x708;
+            }
+            break;
 
-    case 2:
-        g_titleDemoTime--;
-        UpdateTitleTextSprite(0x80, 0);
-        if (g_titleDemoTime == 0) {
-            g_titleOptionsFading = 3;
-            g_fade_type_id = 2;
-            g_fading_counter = 0x400;
-            fade_update();
-        }
-        if ((justPressed & 0xEFF) || sidewinderPress) {
-            g_titleMode = 1;
-            g_titleOptionsFading = 2;
-            g_titleDemoTime = 0x708;
-        }
-        break;
+        case 2:
+            g_titleDemoTime--;
+            UpdateTitleTextSprite(0x80, 0);
+            if (g_titleDemoTime == 0) {
+                g_titleOptionsFading = 3;
+                g_fade_type_id = 2;
+                g_fading_counter = 0x400;
+                fade_update();
+            }
+            if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+                g_titleMode = 1;
+                g_titleOptionsFading = 2;
+            }
+            break;
 
-    case 3:
-        if (0x7B80 < g_fading_state) {
-            g_fading_state = 0x7FFF;
-            g_fading_counter = 0;
-            g_titleSelectionId = 0;
-            g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
-            title_exit_loop();
-        }
-        if ((justPressed & 0xEFF) || sidewinderPress) {
-            g_titleOptionsFading = 2;
-            g_fading_state = -1;
-            g_titleDemoTime = 0x708;
-        }
-        UpdateTitleTextSprite(0x80, 0);
-        break;
+        case 3:
+            if (g_fading_state > 0x7B80) {
+                g_fading_state = 0x7FFF;
+                g_fading_counter = 0;
+                g_titleSelectionId = 0;
+                g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+                title_exit_loop();
+            }
+            if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+                g_titleOptionsFading = 2;
+                g_fading_state = -1;
+                g_titleDemoTime = 0x708;
+            }
+            UpdateTitleTextSprite(0x80, 0);
+            break;
 
-    case 4:
-        UpdateTitleTextSprite(0x80, 0);
-        if (0x7B80 < g_fading_state) {
-            g_titleMode = 1;
-            g_titleOptionsFading = 0;
-            g_fading_state = 0x7FFF;
-            g_fading_counter = 0;
-            g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
-        }
-        break;
+        case 4:
+            UpdateTitleTextSprite(0x80, 0);
+            if (g_fading_state > 0x7B80) {
+                g_titleMode = 1;
+                g_titleOptionsFading = 0;
+                g_fading_state = 0x7FFF;
+                g_fading_counter = 0;
+                g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+            }
+            break;
     }
 }
 
@@ -425,10 +429,12 @@ void title_state(void)
 {
     int i;
 
-    g_main_state_flags &= ~0x10000;
-    g_PlayerPadHeldPrev = 0;
-    g_playingGameFlag = 0;
-    g_menu_choice_id = 0;
+	g_main_state_flags &= 0xFFFEFFFF;
+	g_PlayerPadHeldPrev = 0;
+	g_PlayerPadHeld = 0;
+	g_PlayerPadPressed = 0;
+	g_playingGameFlag = 0;
+	g_menu_choice_id = 0;
 
     setMenuScreenOffset(320, 240, 0, 0, 0);
     CenterScreenOrigin();
@@ -441,19 +447,29 @@ void title_state(void)
 
     g_fading_state = -1;
     g_titleLoopFlag = 0;
-    g_SpecialRoomLightState = (short)0xFFFF;
+    g_SpecialRoomLightState = 0xFFFF;
     g_titleMode = 0;
     g_titleOptionsFading = 0;
 
     init_title_screen();
-    reset_title_pad_state(0);
-    title_init_render_state((void*)0, 0, 0, 0);
+
+    // empty_00497c10(0);
+    // empty_0040abb0((void*)0, 0, 0, 0);
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
-    Sound_Dispatch(0);
+    empty_0047b950(0);
 
     setMenuScreenOffset(320, 240, 0, 0, 1);
     Task_sleep(1);
+
+    if (g_fmvPlayCount < 1) {
+        // g_selectedFmvId = 0;
+        g_currentFMVID = 0;
+        g_fmvDataPointer = g_loadDataDestPointer;
+        g_fmvPlayCount = 0x10;
+        g_main_state_flags = g_main_state_flags | 0x40000;
+        Task_sleep(1);
+    }
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
     Task_sleep(1);
@@ -463,6 +479,7 @@ void title_state(void)
         Task_sleep(1);
     } while (g_titleLoopFlag != 0);
 
+    // legacy gpu wait
     if (g_GPU_VENDOR_ID == 1) {
         for (i = 180; i != 0; i--) {
             Task_sleep(1);
@@ -470,6 +487,10 @@ void title_state(void)
     }
 
     cleanup_texture_slot(12);
+
+    char dbg[128];
+    sprintf(dbg, "[TITLE] Title selected option id: %d\n", g_titleSelectionId);
+    OutputDebugStringA(dbg);
 
     switch (g_titleSelectionId) {
     case 0:

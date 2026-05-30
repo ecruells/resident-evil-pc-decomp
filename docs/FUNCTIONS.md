@@ -268,7 +268,7 @@ PrintText8x14(16, 116, 128, 0);  // white text without shadow
 
 **Rendering:** Calls `AddTintSprite()` per character through the `g_pendingSprites[]` queue. Characters rendered in insertion order; to ensure text appears above background rects, the rect must be drawn **before** the text.
 
-**Dependencies:** `PRINT_TEXT_BUFFER`, `AddTintSprite()`, `g_ScreenOffsetX/Y`, `g_STAGE_ID`, `g_ROOM_ID`, `g_roomCamera_id`
+**Dependencies:** `PRINT_TEXT_BUFFER`, `AddTintSprite()`, `g_ScreenOffsetX/Y`, `g_stageId`, `g_roomId`, `g_roomCameraId`
 
 ---
 

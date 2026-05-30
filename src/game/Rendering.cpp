@@ -229,7 +229,7 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
         else                { g_TextureVramX = (ch % 18) * 8; g_TextureVramY = (ch / 18) * 14; }
 
         unsigned char finalBrightness = brightness;
-        if ((g_STAGE_ID == 3) && (g_ROOM_ID == 17) && (g_roomCamera_id == 4)) {
+        if ((g_stageId == 3) && (g_roomId == 17) && (g_roomCameraId == 4)) {
             finalBrightness = 0;
         }
 
@@ -382,7 +382,7 @@ void FrameRateGovernor(void)
         frameDelta = (int)(currentTime - g_LastFrameTime_ms);
 
         if (frameDelta < 300) {
-            if (g_bFrameRateUnlocked) {
+            if (g_bUseFrameSkip) {
                 g_frameTimeIndex += 2;
                 g_frameTimeBuffer[g_frameTimeIndex & 3] = frameDelta;
                 g_frameTimeBuffer[(g_frameTimeIndex - 1) & 3] = frameDelta;
@@ -401,7 +401,7 @@ void FrameRateGovernor(void)
             frameTimeSum += g_frameTimeBuffer[i];
         }
 
-        if (!g_bFrameRateUnlocked) {
+        if (!g_bUseFrameSkip) {
             g_frameTargetTime = (int)((frameTimeSum * 100 + (frameTimeSum * 100 >> 31 & 0x3FU)) >> 6);
         } else {
             g_frameTargetTime = (frameTimeSum * 100) / 132;
@@ -611,21 +611,26 @@ void display_image(int slot, void* buffer, int width, int height)
 }
 
 // ============================================================================
-// Screen effect functions
+// SetFrameRateMode - Set frame rate unlocked mode based on game active state
+// Original: FUN_00442150 at 0x00442150
 // ============================================================================
-void FUN_00442150(int status_flags) {
-    if (status_flags != 0) { g_bFrameRateUnlocked = TRUE; }
-    else { g_bFrameRateUnlocked = FALSE; }
+void SetFrameRateMode(int bActive) {
+    if (bActive != 0) { g_bUseFrameSkip = TRUE; }
+    else { g_bUseFrameSkip = FALSE; }
 }
 
-void ResetScreenPanning(void) { g_ScreenOffsetX = 0; g_ScreenOffsetY = 0; }
+void ResetScreenPanning(void) {
+    CenterScreenOrigin();
+    // Dummy_00429a30()
+    g_main_state_flags = g_main_state_flags & 0xfff7ffff;
+}
 
 void ApplyScreenShake(void) {
     g_ScreenOffsetX = (rand() % 5) - 2;
     g_ScreenOffsetY = (rand() % 5) - 2;
 }
 
-void FUN_004557b0(void) { g_menu_choice_id &= ~0x80; }
+void FUN_004557b0(void) { /* stub */ }
 
 void SetSubpixelOffset(int x, int y)
 {

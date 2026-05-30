@@ -666,6 +666,10 @@ int CMarniDirect3DTMD::Transform(void* d3dContext, void* renderData, void* outDa
 int CMarniDirect3DTMD::Destroy(void* d3dContext)
 {
     // 0x00415880
+    if (d3dContext == NULL) {
+        return 0;
+    }
+
     void** d3dVtable = *(void***)d3dContext;
 
     DWORD objCount = m_objectCount;

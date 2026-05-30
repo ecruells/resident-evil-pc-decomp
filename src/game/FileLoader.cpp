@@ -1,5 +1,5 @@
 // FileLoader.cpp - Asset file loading implementation
-// Original function: load_file at 0x00411e10 (Ghidra)
+// Original function: LoadFile at 0x00411e10 (Ghidra)
 // Handles fopen/fread with retry logic and path resolution
 #include "../Globals.h"
 #include "../system/AssetPath.h"
@@ -7,7 +7,7 @@
 #include <stdio.h>
 
 // ============================================================================
-// load_file - Load a game asset file into memory (0x00411e10)
+// LoadFile - Load a game asset file into memory (0x00411e10)
 //
 // The original function has retry logic:
 //   1. If flag bit 5 is set: prepend install directory to path (skipped in dev)
@@ -16,7 +16,7 @@
 //   4. On success: fseek to end, ftell for size, fseek back, fread into buffer
 //   5. On failure after retries: show error message, return -1
 // ============================================================================
-size_t load_file(const char* path, void* buffer, unsigned char flags)
+size_t LoadFile(const char* path, void* buffer, unsigned char flags)
 {
     char resolvedPath[MAX_PATH];
     const char* filePath;

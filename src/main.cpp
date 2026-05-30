@@ -638,7 +638,7 @@ int RunMessageLoop(void)
                     int targetDelta = 0;
                     BOOL bSkipFrame = FALSE;
                     
-                    if (g_bFrameRateUnlocked) {
+                    if (g_bUseFrameSkip) {
                         // Unlocked framerate: when frame skip is also active, skip limiting
                         // (original: if DAT_004bcb48==1 && DAT_004d46dc!=0 → goto LAB_00441f75)
                         // do nothing - proceed to game loop

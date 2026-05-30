@@ -47,6 +47,10 @@ D3DRendererInfo g_D3DRenderers[8] = {};
 // 0x007e0e08
 int g_NumD3DRenderersAvailable = 0;
 
+
+// 0x008f879c
+int g_SelectedPlayerID = 0;
+
 // --- Drive types ---
 // 0x008f87c4
 UINT g_DriveTypes[MAX_DRIVES] = {};
@@ -61,8 +65,10 @@ char g_szCreateDir[260] = {};
 // --- Registry loaded data ---
 BYTE g_keyBindingData[32] = {};
 BYTE g_joystickBindingData[128] = {};
-// 0x004d1f50
-BOOL g_bIsSideWinderConnected = FALSE;
+
+BOOL g_bIsPaused = FALSE;                   // 0_004d46ac
+BOOL g_bIsSideWinderConnected = FALSE;      // 0x004d46b0
+
 BYTE g_InstallFlagData = 0;
 
 // --- Shared memory ---
@@ -71,49 +77,51 @@ HANDLE g_hFileMapping = NULL;
 BYTE* g_pSharedMemory = NULL;
 
 // --- Window rect for drawing ---
-// 0x004ba720
+// 0xd227b0
 RectDrawDesc g_window_rect = {320, 0, 0, 0, 0, 0, 240, 0};
 
 // --- Marni System objects ---
-// 0x00ac4028
+// 0x00d227b0
 void* g_pMarniDirect3D = NULL;
 // Input state pointer
 MasterInputState* g_pMasterInputState = NULL;
 
 // --- Main state flags ---
-// 0x004ba744
+// 0x00be41c0
 DWORD g_main_state_flags = 0;
-// 0x004ba758
-int g_fading_state = 0;
-// 0x004ba75c
-int g_fading_counter = 0;
-// 0x004ba760
-int g_fade_type_id = 0;
+
+// 0x00be9834
+short g_fading_state = 0;
+// 0x00bebcca
+short g_fading_counter = 0;
+// 0x00bf0a2f
+unsigned char g_fade_type_id = 0;
+
+
 // Player health
 int g_playerHealth = 0;
 
 // --- Game state ---
-int g_selectedPlayerID = 0;
 // 0x00d91bc8
-int g_SelectedPlayerID = 0;
+int DAT_00d91bc8 = 0;
 int g_currentFMVID = 0;
 // 0x00d91bcc
 int g_CurrentFMVID = 0;
-int g_stageId = 0;
-// 0x00d91bd0
-int g_STAGE_ID = 0;
-int g_roomId = 0;
-int g_roomCameraId = 0;
-// 0x00d91bd4
-int g_ROOM_ID = 0;
-// 0x00d91bd8
-int g_roomCamera_id = 0;
+
+
+unsigned char g_stageId = 0;
+unsigned char g_roomId = 0;
+unsigned char g_roomCameraId = 0;
+
 
 // --- Screen pos ---
 // 0x00ac3ff8
 int g_ScreenOffsetX = 0;
 // 0x00ac3ffc
 int g_ScreenOffsetY = 0;
+
+// 0x00be41dc
+BYTE g_bGameActive = 0;
 
 // --- Task system globals ---
 // _g_StackPointer 0x007e0cc8
@@ -138,16 +146,22 @@ DWORD g_SchedulerRunningFlag = 0;
 void* g_AsyncRpcCallback = NULL;
 
 // --- Input state ---
-// 0x00bcb2e0
-DWORD g_RawPadPressed = 0;
+// 0x00bcb2e0 - last keyboard scan code or dialog message ID
+DWORD g_lastScanCodeOrMsgID = 0;
 // 0x00bcb2e4
 DWORD g_InputFlags = 0;
-// 0x00bf0a08
+// 0x00be05b4 - WORD-sized edge-detected "just pressed" pad state (low word of g_PlayerPadPressed)
+DWORD g_RawPadPressed = 0;
+// 0x00bf0a08 (edge-detected: pressed this frame only)
 DWORD g_PlayerPadPressed = 0;
+// 0x00bf0a10 (currently held buttons)
+DWORD g_PlayerPadHeld = 0;
 // 0x00bf0a0c
-DWORD button_pressed_id = 0;
+DWORD g_button_pressed_id = 0;
 // 0x004bae30
 DWORD g_PlayerPadHeldPrev = 0;
+// 0x00bf0a12 (raw pad state snapshot)
+WORD g_RawPadState = 0;
 // SideWinder raw pad state
 DWORD g_PadRawP2 = 0;
 // 0x004bcb3c
@@ -162,9 +176,9 @@ BOOL g_displayReturnToTitleScreen_Flag = FALSE;
 BOOL g_displayExitGameScreen_flag = FALSE;
 
 // --- Sound system ---
-// 0x00be15e0
+// 0x00bf0a2d
 int g_SndFadeType = 0;
-// 0x00be15e4
+// 0x00ac9908
 int g_SndRampFramesLeft = 0;
 int g_BgmSoundBank = 0;
 int g_SfxBanks[64] = {};
@@ -227,14 +241,14 @@ int g_mciVideoDeviceID = 0;
 BOOL g_bMCIVideoEvent = FALSE;
 
 // --- Misc flags ---
-BOOL g_bIsPaused = FALSE;       // DAT_004bcb2c
+
 BOOL g_bWindowActive = TRUE;    // DAT_004bcb30 (start active so game loop runs)
 BOOL g_bQuitFlag = FALSE;       // DAT_004bcb40
-BOOL g_bFrameRateUnlocked = FALSE; // DAT_004bcb48
+BOOL g_bUseFrameSkip = FALSE; // DAT_004bcb48
 BOOL g_bFrameSkipDetected = TRUE;  // DAT_004d46dc (allow frame timing check)
 
 // --- Print text buffer ---
-// 0x00be0e2c
+// 0x00be0e20
 char PRINT_TEXT_BUFFER[256] = {};
 
 // Print text globals (0x00be1170 area)
@@ -260,6 +274,12 @@ float g_debugClearR = 0.05f;
 float g_debugClearG = 0.05f;
 float g_debugClearB = 0.08f;
 int   g_debugTaskFrame = 0;
+
+// Sprite/clear color (set by setSomeColor)
+float g_color_r = 0.0f;              // 0x004c336c
+float g_color_g = 0.0f;              // 0x004c3370
+float g_color_b = 0.0f;              // 0x004c3374
+float g_spriteColorScale = 1.0f;     // 0x004af2ac (read-only multiplier constant)
 
 // Title state globals
 unsigned char g_titleLoopFlag = 0;        // 0x00d22777
@@ -301,6 +321,7 @@ int   g_playingGameFlag = 0;            // 0x004d4674
 int   g_loadSaveStateFlag = 0;          // 0x004d4678
 int   g_demoIdleTimer1 = 0;             // DAT_004c44d8
 void* g_loadDataDestPointer = NULL;     // 0x00bebcdc
+unsigned char g_selectedFmvId = 0;          // 0x00bf07fb
 void* g_fmvDataPointer = NULL;          // 0x00bf07fc
 int   g_fmvPlayCount = 0;               // 0x004bae34
 
@@ -364,7 +385,19 @@ DWORD g_KeyBindingConfig[32] = {};
 BYTE  g_MasterInputState[256] = {};
 
 // --- Other state vars ---
-int g_ScreenAccessCheck = 1;    // DAT_004d4684 (start enabled so rendering happens)
+int g_ScreenAccessCheck = 1;    // 0x004d2290 (start enabled so rendering happens)
 int g_RenderAccessCheck = 1;    // DAT_004d468c (start enabled so rendering happens)
 int g_demoTimer = 0;            // DEMO timer pattern field
 BOOL g_bFullScreenFlag_68 = FALSE;  // used for cursor hiding logic
+
+// Object cleanup globals (Object_DeleteAll / ObjectCleanupCallback / ObjectList_Cleanup)
+int    g_objectDeleteFlag = 0;                // 0x004d2bfc
+int    g_objectCountArray[32] = {};           // 0x008ffc40
+int    g_objectDeleteCounter = 0;             // 0x00aabd68
+int*   g_objectDeletePtr = NULL;              // 0x004d2bf8
+int    g_objectListCleanupFlag = 0;           // 0x004d2fb4
+int    g_objectListCleanupCount = 0;          // 0x004d2fb0
+DWORD  g_objectListPtrArray[512] = {};        // 0x008fc430 area
+char   g_tmdObjectBuffer[250 * 0x1594] = {};  // 0x00923b50 area (array of CMarniDirect3DTMD, 0x1594 stride)
+char   g_renderStateTex[0x36c] = {};           // 0x00aad6f0 — PSXTexture + aux data
+char   g_renderStateTMD[0x1594] = {};          // 0x00aac158 — specific CMarniDirect3DTMD instance
