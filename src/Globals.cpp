@@ -119,6 +119,10 @@ unsigned char g_roomCameraId = 0;
 int g_ScreenOffsetX = 0;
 // 0x00ac3ffc
 int g_ScreenOffsetY = 0;
+// 0x00bca0d8
+signed char g_ScreenShakeOffsetX = 0;
+// 0x00bca0d9
+signed char g_ScreenShakeOffsetY = 0;
 
 // 0x00be41dc
 BYTE g_bGameActive = 0;
@@ -232,7 +236,10 @@ int g_frameTimeBuffer[4] = {};     // 0x00ac4000
 int g_frameTimeAccumulator = 0;   // 0x004d45f4
 int g_frameTargetTime = 100;      // 0x004d45ec (start at 100 for first-frame present)
 int g_ScreenAccessReady = 1;      // 0x004d4658 (start ready so first frame presents)
+int g_ScreenAccessCountdown = 0;  // 0x004d4684 - StMask countdown (frames until re-enable)
 int g_RenderAccessReady = 1;      // 0x004d4688
+int g_MarniScreenReady = 0;       // FUN_00497340 - screen present enable (marni field_0x2ec)
+DWORD g_MarniScreenColor = 0;     // FUN_00497360 - packed RGB debug color override
 
 // --- MCIVideo ---
 // 0x004bcb44

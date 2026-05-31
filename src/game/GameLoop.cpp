@@ -90,11 +90,11 @@ int main_loop(void)
                 sprintf(PRINT_TEXT_BUFFER, "Press F9 to abort game and return to");
                 PrintText8x14(16, 100, 128, 1);
 
-                sprintf(PRINT_TEXT_BUFFER, "title screen.");
+                sprintf(PRINT_TEXT_BUFFER, "title screen");
                 // unk_00be0e2c = 0x9d;
                 PrintText8x14(16, 116, 128, 1);
                 
-                sprintf(PRINT_TEXT_BUFFER, "Or any other key to continue game.");
+                sprintf(PRINT_TEXT_BUFFER, "Or any other key to continue game");
                 // unk_00be0e41 = 0x9d;
                 PrintText8x14(16, 150, 128, 1);
                 

@@ -166,13 +166,10 @@ static void FUN_00427250(void)                               { /* stub */ }
 
 // ---------------------------------------------------------------------------
 // General game engine stubs (referenced from GameLoop.cpp and WindowProc.cpp)
+// FUN_00401020, FUN_0045ab60, FUN_00497360, FUN_00497340, StMask
+// are implemented in Rendering.cpp
 // ---------------------------------------------------------------------------
-void FUN_00401020(int param)                                 { /* stub */ }
-void FUN_0045ab60(void)                                      { /* stub */ }
-void FUN_00497360(int r, int g, int b)                       { /* stub */ }
-void FUN_00497340(int param)                                 { /* stub */ }
 void FUN_004973a0(int param)                                 { /* stub */ }
-void StMask(int param, int param2)                           { /* stub */ }
 
 void UpdateDemoTimer(void) {
 

@@ -151,6 +151,8 @@ extern unsigned char g_roomCameraId;                   // 0x00be9822
 // Screen pos
 extern int           g_ScreenOffsetX;                  // 0x00ac3ff8
 extern int           g_ScreenOffsetY;                  // 0x00ac3ffc
+extern signed char   g_ScreenShakeOffsetX;             // 0x00bca0d8
+extern signed char   g_ScreenShakeOffsetY;             // 0x00bca0d9
 
 // fading
 extern short         g_fading_state;                   // 0x00be9834
@@ -236,7 +238,10 @@ extern int           g_frameTimeBuffer[4];            // 0x00ac4000 - last 4 fra
 extern int           g_frameTimeAccumulator;          // 0x004d45f4 - running time budget accumulator
 extern int           g_frameTargetTime;               // 0x004d45ec - computed target frame interval
 extern int           g_ScreenAccessReady;             // 0x004d4658 - screen ready for present
+extern int           g_ScreenAccessCountdown;         // 0x004d4684 - StMask countdown (frames until re-enable)
 extern int           g_RenderAccessReady;             // 0x004d4688 - render state ready
+extern int           g_MarniScreenReady;              // 0x00497340 - screen present enable (marni field_0x2ec)
+extern DWORD         g_MarniScreenColor;              // 0x00497360 - packed RGB debug color override
 
 // MCIVideo 
 extern int           g_mciVideoDeviceID;               // 0x004bcb44
@@ -451,6 +456,7 @@ void CreateLights(int count);
 
 // Screen effects
 void ResetScreenPanning(void);
+void SetScreenOffset(int x, int y);   // 0x00483600
 void ApplyScreenShake(void);
 void FUN_004557b0(void);
 void FUN_00401020(int param);
@@ -458,6 +464,7 @@ void FUN_0045ab60(void);
 void FUN_00497360(int r, int g, int b);
 void FUN_00497340(int param);
 void FUN_004973a0(int param);
+void FUN_00470a90(void);              // 0x00470a90 - build title background sprites
 void FrameRateGovernor(void);  // 0x004973d0 - frame timing + present governor
 void FUN_0040a8f0(void* param);
 void ResetSpriteQueue(void);     // 0x0046d990 - reset sprite queue after present

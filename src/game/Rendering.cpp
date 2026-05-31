@@ -680,9 +680,59 @@ void ResetScreenPanning(void) {
     g_main_state_flags = g_main_state_flags & 0xfff7ffff;
 }
 
-void ApplyScreenShake(void) {
-    g_ScreenOffsetX = (rand() % 5) - 2;
-    g_ScreenOffsetY = (rand() % 5) - 2;
+// ============================================================================
+// SetScreenOffset (0x00483600)
+// Sets subpixel rendering offset. In the original, this also set
+// g_ScreenOffsetX/Y, but in the modern port g_ScreenOffsetX/Y is managed
+// separately by CenterScreenOrigin/setMenuScreenOffset because
+// FlushSpriteCommands already applies a +160/+120 centering offset.
+// ============================================================================
+void SetScreenOffset(int x, int y)
+{
+    g_SubpixelOffsetX = x;
+    g_SubpixelOffsetY = y;
+}
+
+// ============================================================================
+// ApplyScreenShake (0x0045aac0)
+// Generates random ±1 screen shake offsets and applies them centered at (160,120).
+// ============================================================================
+void ApplyScreenShake(void)
+{
+    int val;
+
+    // Random X offset: (rand() & 1) with random sign
+    val = rand();
+    signed char signX = (signed char)(val >> 31);
+    g_ScreenShakeOffsetX = (signed char)((((unsigned char)val ^ signX) - signX) & 1 ^ signX) - signX;
+
+    // Random Y offset: (rand() & 1) with random sign
+    val = rand();
+    signed char signY = (signed char)(val >> 31);
+    g_ScreenShakeOffsetY = (signed char)((((unsigned char)val ^ signY) - signY) & 1 ^ signY) - signY;
+
+    // Random direction (0-3) to optionally negate X and/or Y
+    val = rand();
+    unsigned int uSign = (unsigned int)((int)val >> 31);
+    int dir = (int)(((val ^ uSign) - uSign) & 3 ^ uSign) - uSign;
+    if (dir != 1) {
+        if (dir == 2) {
+            g_ScreenShakeOffsetX = -g_ScreenShakeOffsetX;
+        } else if (dir == 3) {
+            g_ScreenShakeOffsetX = -g_ScreenShakeOffsetX;
+            g_ScreenShakeOffsetY = -g_ScreenShakeOffsetY;
+        }
+    } else {
+        g_ScreenShakeOffsetY = -g_ScreenShakeOffsetY;
+    }
+
+    // Apply shake directly to screen offset (g_ScreenOffsetX/Y)
+    // In the original: SetScreenOffset(shakeX + 0xa0, shakeY + 0x78) which set both
+    // g_ScreenOffsetX and g_SubpixelOffsetX. In the modern port, SetScreenOffset only
+    // sets g_SubpixelOffsetX, so we set g_ScreenOffsetX/Y directly for the camera shake.
+    g_ScreenOffsetX = g_ScreenShakeOffsetX;
+    g_ScreenOffsetY = g_ScreenShakeOffsetY;
+    SetScreenOffset(g_ScreenShakeOffsetX + 0xa0, g_ScreenShakeOffsetY + 0x78);
 }
 
 void FUN_004557b0(void) { /* stub */ }
@@ -736,4 +786,91 @@ int FUN_0046c230(void* data)
 int FUN_0046c280(int id)
 {
     return 0;
+}
+
+// ============================================================================
+// FUN_00497340 (0x00497340)
+// Sets the MarniDirect3D screen-ready flag and clears the debug color override.
+// Original: writes to CMarniDirect3D field_0x2ec and field_0x2f0
+// ============================================================================
+void FUN_00497340(int param)
+{
+    g_MarniScreenReady = param;
+    g_MarniScreenColor = 0;
+}
+
+// ============================================================================
+// FUN_00497360 (0x00497360)
+// Enables screen-ready and sets a packed RGB debug color override.
+// Original: writes to CMarniDirect3D field_0x2ec=1 and field_0x2f0=(r<<16|g<<8|b)
+// ============================================================================
+void FUN_00497360(int r, int g, int b)
+{
+    g_MarniScreenReady = 1;
+    g_MarniScreenColor = ((unsigned int)r << 16) | ((unsigned int)g << 8) | (unsigned int)b;
+}
+
+// ============================================================================
+// FUN_00401020 (0x00401020)
+// Resets screen offset to center, disables screen-ready, resets subpixel
+// params, and rebuilds title background sprites.
+// ============================================================================
+void FUN_00401020(int param)
+{
+    SetScreenOffset(160, 120);
+    FUN_00497340(0);
+    Display_SetParams(0, 0);
+    FUN_00470a90();
+}
+
+// ============================================================================
+// FUN_0045ab60 (0x0045ab60)
+// Applies screen shake offsets to display params (if screen shake active),
+// enables screen-ready, and rebuilds title background sprites.
+// ============================================================================
+void FUN_0045ab60(void)
+{
+    int subY, subX;
+
+    if ((((unsigned char)g_InputFlags & 0x02) == 0) ||
+        (((g_main_state_flags >> 8) & 0xFF) != 0)) {
+        subY = 2;
+        subX = 2;
+    } else {
+        subY = (int)g_ScreenShakeOffsetY + 2;
+        subX = (int)g_ScreenShakeOffsetX + 2;
+    }
+
+    Display_SetParams(subX, subY);
+    FUN_00497340(1);
+    FUN_00470a90();
+}
+
+// ============================================================================
+// StMask (0x00497670)
+// Controls frame presentation gating.
+//   param_1 != 0 → immediately enable screen present (g_ScreenAccessReady = 1)
+//   param_1 == 0 → disable screen present and set countdown timer
+// ============================================================================
+void StMask(int param_1, int param_2)
+{
+    if (param_1 != 0) {
+        g_ScreenAccessReady = 1;
+        return;
+    }
+    g_ScreenAccessReady = 0;
+    g_ScreenAccessCountdown = (char)param_2;
+}
+
+// ============================================================================
+// FUN_00470a90 (0x00470a90)
+// Builds title background sprite commands for the display image.
+// In the original, this splits the background into two halves (left/right)
+// and inserts them into the ordering table at depths 0xFFE and 0xFFF
+// via vtable calls on the CMarniDirect3D object.
+// Modern impl: background rendering is already handled by OT_InsertPrimitive
+// in FrameRateGovernor via FUN_0040a8f0, so this is a no-op in the modern pipeline.
+// ============================================================================
+void FUN_00470a90(void)
+{
 }
