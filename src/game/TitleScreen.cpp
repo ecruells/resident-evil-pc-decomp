@@ -462,14 +462,19 @@ void title_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 1);
     Task_sleep(1);
 
-    // if (g_fmvPlayCount < 1) {
-    //     // g_selectedFmvId = 0;
-    //     g_currentFMVID = 0;
-    //     g_fmvDataPointer = g_loadDataDestPointer;
-    //     g_fmvPlayCount = 0x10;
-    //     g_main_state_flags = g_main_state_flags | 0x40000;
-    //     Task_sleep(1);
-    // }
+    if (g_fmvPlayCount < 1) {
+        // g_selectedFmvId = 0;
+        g_currentFMVID = 0;
+        g_fmvDataPointer = g_loadDataDestPointer;
+        g_fmvPlayCount = 0x10;
+        g_main_state_flags = g_main_state_flags | 0x40000;
+        Task_sleep(1);
+
+        // Restore menu screen offset after FMV — UpdateVideoPlayback calls
+        // CenterScreenOrigin() which sets g_ScreenOffsetX=160, g_ScreenOffsetY=120,
+        // pushing the title text sprite off-screen. Reset to menu offset (0,0).
+        setMenuScreenOffset(320, 240, 0, 0, 1);
+    }
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
     Task_sleep(1);
