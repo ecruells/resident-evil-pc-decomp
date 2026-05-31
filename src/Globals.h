@@ -351,8 +351,8 @@ extern DWORD         g_TaskDataArray_ba750[16];       // DAT_004ba750 area
 extern DWORD         g_TaskDataArray_ba780[16];       // DAT_004ba780 area
 
 // Image processing/status variables
-extern short         g_TextureBankID;                  // _DAT_00bebcc4
-#define g_TextureDepthByte (*((BYTE*)&g_TextureBankID + 1))  // 0x00bebcc5 - high byte = texture depth
+extern unsigned char g_TextureBankID;                  // 0x00bebcc4
+extern unsigned char g_TextureDepthByte;               // 0x00bebcc5
 extern short         g_SpecialRoomLightR;              // DAT_00be9828
 extern short         g_SpecialRoomLightState;          // DAT_00be9836
 extern short         g_SpecialRoomLightDelta;          // DAT_00be9838

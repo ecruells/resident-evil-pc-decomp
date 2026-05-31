@@ -356,7 +356,8 @@ DWORD g_TaskDataArray_ba750[16] = {};
 DWORD g_TaskDataArray_ba780[16] = {};
 
 // Texture/room state
-short g_TextureBankID = 0;             // _DAT_00bebcc4
+unsigned char g_TextureBankID = 0;       // 0x00bebcc4
+unsigned char g_TextureDepthByte = 0;    // 0x00bebcc5
 short g_SpecialRoomLightR = 0;
 short g_SpecialRoomLightState = 0;
 short g_SpecialRoomLightDelta = 0;
