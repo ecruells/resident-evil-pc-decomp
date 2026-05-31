@@ -439,7 +439,7 @@ void title_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 0);
     CenterScreenOrigin();
     clear_textures();
-    set_title_render_param(0x11000000);
+    set_title_render_param(0xc0);
     sounds_reset();
 
     g_loadDataDestPointer = g_image_buffer;
@@ -462,14 +462,14 @@ void title_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 1);
     Task_sleep(1);
 
-    if (g_fmvPlayCount < 1) {
-        // g_selectedFmvId = 0;
-        g_currentFMVID = 0;
-        g_fmvDataPointer = g_loadDataDestPointer;
-        g_fmvPlayCount = 0x10;
-        g_main_state_flags = g_main_state_flags | 0x40000;
-        Task_sleep(1);
-    }
+    // if (g_fmvPlayCount < 1) {
+    //     // g_selectedFmvId = 0;
+    //     g_currentFMVID = 0;
+    //     g_fmvDataPointer = g_loadDataDestPointer;
+    //     g_fmvPlayCount = 0x10;
+    //     g_main_state_flags = g_main_state_flags | 0x40000;
+    //     Task_sleep(1);
+    // }
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
     Task_sleep(1);

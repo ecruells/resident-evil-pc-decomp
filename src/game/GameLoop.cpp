@@ -175,6 +175,10 @@ int main_loop(void)
                         
                         g_FadingRect.g = g_FadingRect.r;
                         g_FadingRect.b = g_FadingRect.r;
+                        g_FadingRect.x = -g_ScreenOffsetX;
+                        g_FadingRect.y = -g_ScreenOffsetY;
+                        g_FadingRect.w = 320;
+                        g_FadingRect.h = 240;
                         draw_rect(&g_FadingRect, drawBlend, 0);
                     }
                 } else {
@@ -205,6 +209,10 @@ int main_loop(void)
                     
                     g_FadingRect.r = g_FadingRect.b;
                     g_FadingRect.g = g_FadingRect.b;
+                    g_FadingRect.x = -g_ScreenOffsetX;
+                    g_FadingRect.y = -g_ScreenOffsetY;
+                    g_FadingRect.w = 320;
+                    g_FadingRect.h = 240;
                     draw_rect(&g_FadingRect, 0, 0);
                     
                     // Update tasks and fade state
@@ -266,6 +274,14 @@ int main_loop(void)
                 int fadeBlend = 0;
                 if ((g_main_state_flags & 0x4008000) == 0) {
                     if (g_spriteAnimIntensity != 0) {
+                        g_ColorRect.x = -g_ScreenOffsetX;
+                        g_ColorRect.y = -g_ScreenOffsetY;
+                        g_ColorRect.w = 320;
+                        g_ColorRect.h = 240;
+                        g_ColorRect2.x = -g_ScreenOffsetX;
+                        g_ColorRect2.y = -g_ScreenOffsetY;
+                        g_ColorRect2.w = 320;
+                        g_ColorRect2.h = 240;
                         // Special room/camera logic for Stage 4, Room 0x13, Camera 5
                         if ((g_stageId == 4) && (g_stageId == 0x13) && (g_stageId == 5)) {
                             draw_rect(&g_ColorRect, 0, 0);
@@ -287,6 +303,10 @@ int main_loop(void)
                         g_FadingRect.r = g_SpecialR1 & specComp;
                         g_FadingRect.g = g_SpecialG1 & specComp;
                         g_FadingRect.b = g_SpecialB1 & specComp;
+                        g_FadingRect.x = -g_ScreenOffsetX;
+                        g_FadingRect.y = -g_ScreenOffsetY;
+                        g_FadingRect.w = 320;
+                        g_FadingRect.h = 240;
                         
                         // Stage 2, Room 5, Camera 3 special handling
                         if (((g_stageId == 2) && (g_roomId == 5)) && (g_roomCameraId == 3)) {

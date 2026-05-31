@@ -353,7 +353,7 @@ int AddTintSprite(TextureDesc* texDesc, unsigned short brightness);
 
 **Address:** `0x00470350`
 
-**Purpose:** Draw a solid-color (or textured) rectangle. Used for menu backgrounds, fade overlays, and debug screens.
+**Purpose:** Draw a solid-color (or textured) rectangle. Used for menu backgrounds, fade overlays, and debug screens. Implements `GetTextureVariant` blend modes from the original game to control alpha transparency.
 
 **Signature:**
 ```cpp
@@ -365,24 +365,26 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags);
   - `x, y` — Top-left position in 320×240 game coords
   - `w, h` — Size in pixels
   - `r, g, b` — Color components (0–255)
-  - `textureId` — `0` = solid fill, `≠ 0` = texture page slot + 0xF
-- `blend` — NOT alpha transparency! Controls OT depth sort value (higher = further back). In the modern port, this is unused but preserved for API compatibility.
+  - `textureId` — Selects blend variant via `GetTextureVariant()`:
+    - `0` → Variant 0: Opaque fill (`g_window_rect`, pause screens)
+    - `0x50000000` → Variant 2: White flash overlay (`fade_type_id=1`), alpha = max(r,g,b)
+    - `0x60000000` → Variant 3: Black fade overlay (`fade_type_id=2`), alpha = max(r,g,b), color forced to black
+    - `0x40000000` → Variant 1: Semi-transparent tinted overlay (special room lighting)
+- `blend` — Controls OT depth sort value (higher = further back). `flags==0` → `blend+450`, else `blend*16+500`.
 - `flags` — Depth sort mode selector
 
-**Usage:**
-```cpp
-RectDrawDesc darkRect = {0};
-darkRect.x = 0; darkRect.y = 0;
-darkRect.w = 320; darkRect.h = 240;
-darkRect.r = 0; darkRect.g = 0; darkRect.b = 0;
-draw_rect(&darkRect, 0, 0);  // solid black fullscreen background
-```
+**Blend Variants (matching original `GetTextureVariant` at `0x0046d950`):**
 
-**Important:** Rects are rendered in insertion order via `g_pendingSprites[]`. For correct layering:
-1. Draw background rects FIRST
-2. Draw text SECOND (so text appears on top)
+| Variant | textureId | Behavior | Original Case |
+|---------|-----------|----------|---------------|
+| 0 | `0` or no high bits | Fully opaque (alpha=255) | case 0 |
+| 1 | `0x40000000` | Semi-transparent tinted (alpha = max component) | case 1 |
+| 2 | `0x50000000` | White flash (r=g=b=255, alpha = brightness) | case 2 |
+| 3 | `0x60000000` | Black fade (r=g=b=0, alpha = brightness) | case 3 |
 
-**Dependencies:** `g_ScreenOffsetX/Y`, `CMarniDirect3D`, `m_pWhiteSRV`
+**Important:** When alpha = 0 (brightness = 0), the draw is skipped entirely, allowing the background image to show through. Rects with `draw_rect` use `g_pendingSprites[]` with depth-sorted rendering in `FrameRateGovernor`.
+
+**Dependencies:** `g_ScreenOffsetX/Y`, `CMarniDirect3D`, `m_pWhiteSRV`, `GetTextureVariant()`
 
 ---
 
@@ -437,8 +439,20 @@ void OT_InsertPrimitive(void* prim, unsigned int depth);
 **Flow:**
 1. **Frame timing**: Tracks frame deltas in a 4-slot circular buffer, computes target frame time
 2. **Budget check**: If `g_frameTimeAccumulator < g_frameTargetTime`, skips rendering (drops frame)
-3. **Rendering**: `MarniClear()` → `FUN_0040a8f0()` (insert title BG) → render `g_pendingSprites[]` → `FlushSpriteCommands()` → `MarniPresent()`
+3. **Rendering**: `MarniClear()` → `FUN_0040a8f0()` (insert title BG) → render in depth-split order → `MarniPresent()`
 4. **Post-present**: Resets sprite queues, updates timers, handles screen/render access flags
+
+**Rendering Order (depth-split):**
+
+The original game puts all sprites (background, game objects, text, fade overlays) in one `g_SpriteCommandBuffer` sorted by depth. The decomp uses two queues — `g_pendingSprites[]` (from `draw_rect`, `OT_InsertPrimitive`) and `g_SpriteCommandBuffer` (from `display_texture`). To match the original depth ordering, rendering is split into three phases:
+
+| Phase | Depth Range | Contents | Rendered By |
+|-------|-------------|----------|-------------|
+| 1 — Background | ≥ 500 | Title BG image (0xFFF), pause overlays (2100) | `MarniDrawSprite` on `g_pendingSprites` |
+| 2 — Game objects | varies | Title text, game sprites, textures | `FlushSpriteCommands` on `g_SpriteCommandBuffer` |
+| 3 — Screen effects | < 500 | Fade overlays (450), color tinting (490), room lighting (470–499) | `MarniDrawSprite` on `g_pendingSprites` |
+
+This ensures fade overlays correctly cover title text and game objects, matching the original game where the fade rect at depth 450 sorted on top of the title text at depth 532.
 
 **Dependencies:** `MarniClear()`, `MarniPresent()`, `FlushSpriteCommands()`, `MarniDrawSprite()`, `FUN_0040a8f0()`, `SpriteQueue_Reset()`
 

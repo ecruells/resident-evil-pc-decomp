@@ -312,9 +312,26 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
 }
 
 // ============================================================================
+// GetTextureVariant (0x0046d950)
+// Returns blend variant index from texture flags.
+// ============================================================================
+static int GetTextureVariant(unsigned int textureFlags)
+{
+    if ((textureFlags & 0x40000000) != 0) {
+        return ((textureFlags & 0x30000000) >> 0x1c) + 1;
+    }
+    return 0;
+}
+
+// ============================================================================
 // draw_rect (0x00470350)
 // Fills a rectangle with the given color. Uses pending sprite queue.
-// The blend parameter controls depth/ordering, not transparency.
+// The blend parameter controls depth/ordering.
+// The textureId field selects blend variant via GetTextureVariant:
+//   0: Opaque fill (g_window_rect, etc.)
+//   1: Semi-transparent tinted overlay (special room lighting)
+//   2: Semi-transparent white flash (fade_type_id=1)
+//   3: Semi-transparent black fade (fade_type_id=2)
 // ============================================================================
 void draw_rect(RectDrawDesc* rect, int blend, int flags)
 {
@@ -337,12 +354,37 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     float screenW = gameW * scaleX;
     float screenH = gameH * scaleY;
 
-    // Use solid alpha — blend controls depth sort, not transparency
     unsigned char r = (unsigned char)(rect->r & 0xFF);
     unsigned char g = (unsigned char)(rect->g & 0xFF);
     unsigned char b = (unsigned char)(rect->b & 0xFF);
 
-    DWORD color = (255u << 24) | ((unsigned int)r << 16) | ((unsigned int)g << 8) | (unsigned int)b;
+    int variant = GetTextureVariant(rect->textureId);
+    unsigned char a;
+
+    switch (variant) {
+    case 2:
+        // fade_type_id=1: White flash — white overlay, alpha = brightness
+        a = r; if (g > a) a = g; if (b > a) a = b;
+        r = 255; g = 255; b = 255;
+        break;
+    case 3:
+        // fade_type_id=2: Fade to black — black overlay, alpha = brightness
+        a = r; if (g > a) a = g; if (b > a) a = b;
+        r = 0; g = 0; b = 0;
+        break;
+    case 1:
+        // Special room lighting — tinted overlay, alpha = max component
+        a = r; if (g > a) a = g; if (b > a) a = b;
+        break;
+    default:
+        // Variant 0 or unknown: fully opaque (g_window_rect, etc.)
+        a = 255;
+        break;
+    }
+
+    if (a == 0) return;
+
+    DWORD color = ((unsigned int)a << 24) | ((unsigned int)r << 16) | ((unsigned int)g << 8) | (unsigned int)b;
 
     ID3D11ShaderResourceView* srv = pD3D->m_pWhiteSRV;
 
@@ -363,9 +405,6 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     spr->depth = (flags == 0) ? ((unsigned int)blend + 450) : ((unsigned int)blend * 16 + 500);
 
     g_pendingSpriteCount++;
-
-    (void)blend;
-    (void)flags;
 }
 
 // ============================================================================
@@ -435,8 +474,10 @@ void FrameRateGovernor(void)
                 }
             }
 
+            // Render high-depth pending sprites first (background, room lighting)
+            // Threshold: depth >= 500 are scene elements, depth < 500 are screen overlays (fade, color rects)
             for (int i = 0; i < g_pendingSpriteCount; i++) {
-                if (g_pendingSprites[i].valid) {
+                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth >= 500) {
                     MarniDrawSprite(
                         g_pendingSprites[i].x, g_pendingSprites[i].y,
                         g_pendingSprites[i].w, g_pendingSprites[i].h,
@@ -447,7 +488,21 @@ void FrameRateGovernor(void)
                 }
             }
 
+            // Render command buffer sprites (game objects, title text, etc.)
             FlushSpriteCommands();
+
+            // Render low-depth pending sprites last (fade overlays, color tinting)
+            for (int i = 0; i < g_pendingSpriteCount; i++) {
+                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth < 500) {
+                    MarniDrawSprite(
+                        g_pendingSprites[i].x, g_pendingSprites[i].y,
+                        g_pendingSprites[i].w, g_pendingSprites[i].h,
+                        g_pendingSprites[i].u0, g_pendingSprites[i].v0,
+                        g_pendingSprites[i].u1, g_pendingSprites[i].v1,
+                        g_pendingSprites[i].color,
+                        g_pendingSprites[i].srv);
+                }
+            }
 
             if (!g_DisablePad) {
                 MarniPresent();

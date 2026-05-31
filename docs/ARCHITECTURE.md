@@ -1,4 +1,4 @@
-# Resident Evil 1 PC - Architecture Documentation
+﻿# Resident Evil 1 PC - Architecture Documentation
 
 This document describes the overall architecture of Resident Evil 1 PC, including the Marni System, rendering pipeline, game loop structure, and key subsystems.
 
@@ -224,21 +224,21 @@ The vertex shader transforms positions with an orthographic projection matrix (s
 │     │                                                        │
 │  4. Screen effects (shake, fade rects via draw_rect)         │
 │                         │                                      │
-│  5. game_frame_present()                                      │
+│  5. FrameRateGovernor()                                      │
 │     │                                                        │
 │     ├─ 5a. MarniClear()                                      │
 │     │      Clear render target to dark blue-gray             │
 │     │                                                        │
-│     ├─ 5b. Draw g_titleImageSRV (if set AND not in           │
-│     │      debug overlay mode)                               │
+│     ├─ 5b. OT_InsertPrimitive() — insert title BG           │
+│     │      into g_pendingSprites[0]                               │
 │     │                                                        │
-│     ├─ 5c. Render ALL pending sprites                        │
-│     │      for i = 0..g_pendingSpriteCount:                  │
-│     │        MarniDrawSprite(sprites[i])                     │
-│     │      g_pendingSpriteCount = 0                          │
+│     ├─ 5c. Sort g_pendingSprites by depth                        │
+│     │      5d. Phase 1: pending sprites depth >= 500                  │
+│     │        (background, pause overlays)                     │
+│     │      5e. Phase 2: FlushSpriteCommands()                          │
 │     │                                                        │
-│     └─ 5d. MarniPresent()                                    │
-│            Swap chain present                                 │
+│     └─ 5f. Phase 3: pending sprites depth < 500                                    │
+│            (fade overlays, color tinting, room lighting)                                 │
 │                                                                │
 └───────────────────────────────────────────────────────────────┘
 ```
@@ -251,13 +251,18 @@ The vertex shader transforms positions with an orthographic projection matrix (s
 
 3. **Scaling**: Game coordinates (320×240 base resolution) are scaled to screen resolution inside each sprite-builder function (`AddTintSprite`, `draw_rect`, `display_texture`) before queueing.
 
+4. **Depth-split rendering**: `FrameRateGovernor` renders in three phases to match the original game's depth-sorted ordering:
+   - **Phase 1** (depth ≥ 500): Background and scene elements from `g_pendingSprites` (e.g., title BG at 0xFFF, pause overlays at 2100)
+   - **Phase 2**: Game objects and text from `g_SpriteCommandBuffer` via `FlushSpriteCommands` (e.g., title text at 532)
+   - **Phase 3** (depth < 500): Screen effects from `g_pendingSprites` (e.g., fade overlays at 450, color tinting at 490, room lighting at 470–499)
+
+   This ensures fade overlays correctly cover text and game objects, matching the original game where all sprites shared one depth-sorted command buffer.
+
 ### Pending Sprite Queue
 
 **File:** `src/game/Rendering.cpp`
 
-The `g_pendingSprites[]` queue is a simple forward-rendered array used by `AddTintSprite` (text), `draw_rect` (menu rectangles), and `OT_InsertPrimitive` (title screen background). Sprites are rendered in array order in `FrameRateGovernor`.
-
-> **Note on draw order:** The original game uses the PS1 **Ordering Table (OT)** with `depthSort` values to control draw order — lower depth = closer (drawn last, on top). The modern port renders in array insertion order instead. To ensure correct layering, the background rect must be enqueued **before** text.
+The `g_pendingSprites[]` queue is a depth-sorted array used by `AddTintSprite` (text), `draw_rect` (menu rectangles, fade overlays), and `OT_InsertPrimitive` (title screen background). Sprites are sorted by `depth` in `FrameRateGovernor` and rendered in split passes (see rule 4 above).
 
 ```cpp
 #define MAX_PENDING_SPRITES 300
@@ -268,10 +273,11 @@ struct PendingSprite {
     DWORD color;                  // RGBA color (A in high byte)
     ID3D11ShaderResourceView* srv;// Texture to sample
     BOOL valid;                   // Set to TRUE when queued
+    unsigned int depth;           // OT depth sort value (lower = closer = on top)
 };
 
 static PendingSprite g_pendingSprites[MAX_PENDING_SPRITES];
-static int g_pendingSpriteCount = 0;
+static int 5e. Phase 2: FlushSpriteCommands();
 ```
 
 ### GDI/Sprite Command Buffer
@@ -311,18 +317,20 @@ Builds a `PendingSprite` and increments `g_pendingSpriteCount`.
 
 #### draw_rect (0x00470350)
 
-Draws a solid-color (or textured) rectangle. Used for menu backgrounds, fade overlays, and debug screens.
+Draws a solid-color rectangle. Used for menu backgrounds, fade overlays, color tinting, and debug screens. Implements the original game's `GetTextureVariant` blend modes via the `textureId` field.
 
 **Parameters:** `(RectDrawDesc* rect, int blend, int flags)`
 
 - **Position**: `rect.x/y + g_ScreenOffsetX/Y`, scaled from 320×240 to screen
 - **Size**: `rect.w × rect.h`, scaled
-- **Color**: `rect.r/g/b` as RGB with **solid alpha (255)** — the `blend` parameter controls OT depth sort ordering, NOT transparency (matching original PS1 behavior)
-- **textureId == 0**: Uses `m_pWhiteSRV` (1×1 white texture) for solid fill
-- **textureId ≠ 0**: Looks up `g_TexturePageSRV[textureId + 0xF]`
-- **flags**: Depth sort mode — `0` = `blend + 450`, otherwise `blend * 16 + 500`
-
-> ⚠️ **Important:** `draw_rect` adds to `g_pendingSprites[]`. For correct layering, rects must be enqueued **before** any text that should appear on top. In the original game this was handled automatically by the Ordering Table depth sort.
+- **Color/Alpha**: Determined by `GetTextureVariant(rect->textureId)`:
+  - **Variant 0** (textureId = 0): Fully opaque fill (alpha=255) — used by `g_window_rect`, pause screens
+  - **Variant 1** (textureId = `0x40000000`): Semi-transparent tinted overlay — used by special room lighting
+  - **Variant 2** (textureId = `0x50000000`): White flash — r=g=b=255, alpha = max(r,g,b) from brightness — used by `fade_type_id=1`
+  - **Variant 3** (textureId = `0x60000000`): Black fade — r=g=b=0, alpha = max(r,g,b) from brightness — used by `fade_type_id=2`
+  - When alpha = 0, the draw is skipped (background shows through)
+- **blend**: Controls OT depth sort — `flags==0` → `blend + 450`, else `blend * 16 + 500`
+- **Depth < 500**: Rendered in Phase 3 (after game objects/text), so fade overlays cover everything beneath them
 
 #### display_texture (0x0046e8d0)
 
