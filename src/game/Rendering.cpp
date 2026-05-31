@@ -655,7 +655,7 @@ void display_image(int slot, void* buffer, int width, int height)
         unsigned char r = ((px >> 0)  & 0x1F) * 255 / 31;
         unsigned char g = ((px >> 5)  & 0x1F) * 255 / 31;
         unsigned char b = ((px >> 10) & 0x1F) * 255 / 31;
-        unsigned char a = (px & 0x8000) ? 0x80 : 0xFF;
+        unsigned char a = (((px >> 0) & 0x1F) == 0 && ((px >> 5) & 0x1F) == 0 && ((px >> 10) & 0x1F) == 0) ? 0x00 : 0xFF;
         rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
     }
 

@@ -358,11 +358,8 @@ void debug_state(void)
 }
 
 // ============================================================================
-// characterSelectionScreen (0x00492340)
+// characterSelectionScreen is now implemented in CharacterSelectionScreen.cpp
 // ============================================================================
-void characterSelectionScreen(void) {
-    OutputDebugStringA("[CharSelection] Character selection screen\n");
-}
 
 // ============================================================================
 // game_start (0x00480710)

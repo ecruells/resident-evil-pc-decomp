@@ -351,11 +351,17 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             WORD* src = (WORD*)psxTex.m_pPixelData;
             for (int i = 0; i < w * h; i++) {
                 WORD px = src[i];
-                DWORD a = (px & 0x8000) ? 0x80 : 0xFF;
-                DWORD r = ((px >> 0)  & 0x1F) * 255 / 31;
-                DWORD g = ((px >> 5)  & 0x1F) * 255 / 31;
-                DWORD b = ((px >> 10) & 0x1F) * 255 / 31;
-                rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
+                // PS1 ARGB1555: bit 15 = STP, bits 0-14 = RGB555
+                // Black pixels (R=G=B=0) are always transparent on PS1
+                // regardless of STP (semi-transparent black = transparent)
+                DWORD r = ((px >> 0)  & 0x1F);
+                DWORD g = ((px >> 5)  & 0x1F);
+                DWORD b = ((px >> 10) & 0x1F);
+                DWORD a = (r == 0 && g == 0 && b == 0) ? 0x00 : 0xFF;
+                DWORD r8 = r * 255 / 31;
+                DWORD g8 = g * 255 / 31;
+                DWORD b8 = b * 255 / 31;
+                rgba[i] = (a << 24) | (b8 << 16) | (g8 << 8) | r8;
             }
             if (slotIndex >= 0 && slotIndex < 256) {
                 ID3D11Texture2D* tex = NULL;

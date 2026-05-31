@@ -198,4 +198,6 @@ void empty_00497c10(int value)                         { /* stub */ }
 void save_load_game_state(int a, int b, int c, int d, int e) { /* stub */ }
 
 
-void empty_00470960(void) { }
+void empty_00470960(int slot) { }
+
+

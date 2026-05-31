@@ -121,6 +121,8 @@
     <ClCompile Include="src\game\MarniInput.cpp" />
     <ClCompile Include="src\game\SoundSystem.cpp" />
     <ClCompile Include="src\game\TitleScreen.cpp" />
+    <ClCompile Include="src\game\CharacterSelectionScreen.cpp" />
+    <ClCompile Include="src\game\GteMatrix.cpp" />
     <ClCompile Include="src\video\VideoPlayback.cpp" />
     <ClCompile Include="src\system\AssetPath.cpp" />
   </ItemGroup>

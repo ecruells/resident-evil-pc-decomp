@@ -77,7 +77,15 @@ void FlushSpriteCommands(void) {
         if (cr > 255) cr = 255; if (cr < 0) cr = 0;
         if (cg > 255) cg = 255; if (cg < 0) cg = 0;
         if (cb > 255) cb = 255; if (cb < 0) cb = 0;
-        DWORD color = (255 << 24) | (cr << 16) | (cg << 8) | cb;
+
+        // unk1c carries alpha when in (0,1) range, or render flags otherwise
+        float alpha = 1.0f;
+        if (cmd->unk1c > 0.0f && cmd->unk1c < 1.0f) {
+            alpha = cmd->unk1c;
+        }
+        int ca = (int)(alpha * 255.0f);
+        if (ca > 255) ca = 255; if (ca < 0) ca = 0;
+        DWORD color = (ca << 24) | (cr << 16) | (cg << 8) | cb;
 
         int texSlot = cmd->extraFlags;
         ID3D11ShaderResourceView* srv = NULL;

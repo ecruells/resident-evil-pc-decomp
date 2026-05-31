@@ -11,6 +11,19 @@
 
 struct TextureDesc;
 
+// PS1 GTE matrix type (0x00ac93b0 layout, 32 bytes)
+struct MATRIX {
+    short m[3][3];  // 0x00: Rotation matrix (9 × short = 18 bytes)
+    short _pad;     // 0x12: Padding for int alignment
+    int t[3];       // 0x14: Translation vector (3 × int = 12 bytes)
+};
+
+// PS1 GTE vector type
+struct SVECTOR {
+    short x, y, z;
+    short pad;
+};
+
 #define REGKEY_PATH "Software\\CAPCOM\\RESIDENT EVIL"
 #define MAX_DISPLAY_MODES 100
 #define MAX_DRIVES 26
@@ -626,3 +639,32 @@ extern char          g_tmdObjectBuffer[250 * 0x1594]; // 0x00923b50 area (array 
 // Used by FUN_00484e70 (cleanup wrapper) and related functions
 extern char          g_renderStateTex[0x36c];    // 0x00aad6f0 — PSXTexture + aux data (clear via ClearState348)
 extern char          g_renderStateTMD[0x1594];    // 0x00aac158 — specific CMarniDirect3DTMD instance
+
+// PS1 GTE fixed-point pipe matrix globals
+extern int g_fixedPointPipe_matrix_m00;  // 0x004c3790
+extern int g_fixedPointPipe_matrix_m01;  // 0x004c3794
+extern int g_fixedPointPipe_matrix_m02;  // 0x004c3798
+extern int g_fixedPointPipe_matrix_m10;  // 0x004c379c
+extern int g_fixedPointPipe_matrix_m11;  // 0x004c37a0
+extern int g_fixedPointPipe_matrix_m12;  // 0x004c37a4
+extern int g_fixedPointPipe_matrix_m20;  // 0x004c37a8
+extern int g_fixedPointPipe_matrix_m21;  // 0x004c37ac
+extern int g_fixedPointPipe_matrix_m22;  // 0x004c37b0
+extern int matrix_t0;                    // 0x004c37b8
+extern int matrix_t1;                    // 0x004c37bc
+extern int matrix_t2;                    // 0x004c37c0
+
+// PS1 GTE trig lookups (12-bit fixed-point angle → sin/cos * 4096)
+int GteSin(int angle);   // 0x00440a10
+int GteCos(int angle);   // 0x004409f0
+
+// PS1 GTE matrix functions
+MATRIX* RotMatrix(SVECTOR* r, MATRIX* m);      // 0x004406a0
+void MatrixSetTranslation(MATRIX* m, int* translation); // 0x0040ab80
+void SetGlobalScaledRotationMatrix(MATRIX* m);  // 0x0040a9e0
+void GetMatrixTranslation(MATRIX* m);           // 0x0040a9c0
+
+// PS1 sprite primitive helpers
+void GteSpriteHeaderInit(SVECTOR* header);      // 0x0040abc0
+int  GteClutBuild(int param_1, short param_2);  // 0x0040ac00
+int  GteTpageBuild(unsigned short param_1, unsigned short param_2, int param_3, int param_4); // 0x0040ac30
