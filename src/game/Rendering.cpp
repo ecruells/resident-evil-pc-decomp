@@ -1,4 +1,4 @@
-// Rendering.cpp - Frame rendering, present, text output, sprite drawing
+// Rendering.cpp - Frame rendering, present, sprite drawing
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
@@ -26,220 +26,6 @@ static int g_pendingSpriteCount = 0;
 ID3D11ShaderResourceView* g_displayImageSRV = NULL;
 
 // ============================================================================
-// PrintText8x8 (0x00455420)
-// ============================================================================
-void PrintText8x8(short x, short y, unsigned char color, char shadow)
-{
-    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    if (pD3D == NULL) return;
-    if (pD3D->m_pFontSRV == NULL || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return;
-
-    unsigned char brightness = color >> 4;
-    if (brightness == 0) brightness = 2;
-
-    g_TextureBuffer = ((shadow != 0) ? 0x40000000U : 0U) + 0x40;
-
-    g_TextureVramX = 8;
-    g_TextureVramY = 8;
-    g_texPrintState.vramWidth = 8;
-    g_texPrintState.vramHeight = 8;
-    g_TextureDepth = 30;
-
-    g_TexturePrintX = x - g_ScreenOffsetX;
-    g_TexturePrintY = y - g_ScreenOffsetY;
-
-    g_PrintTintR = 128;
-    g_PrintTintG = 128;
-    g_PrintTintB = 128;
-    g_PrintTintMode = 0;
-    g_PrintTintFlagB = 0;
-    g_PrintTintFlagA = 0;
-
-    unsigned char clutTint = color & 0xF;
-    if (shadow != 0) clutTint += 8;
-
-    g_PrintTintA = 0x100;
-    g_PrintClutTint = clutTint + 0x1E0;
-
-    for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
-        unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
-
-        if (ch == ' ') {
-            g_TexturePrintX += 8;
-            continue;
-        }
-
-        unsigned char idx = ch - 0x20U;
-        g_TextureVramX = (unsigned char)(idx * 8);
-        g_TextureVramY = (unsigned char)((idx & 0xE3) >> 2);
-
-        AddTintSprite((TextureDesc*)&g_texPrintState, brightness);
-
-        g_TexturePrintX += 8;
-    }
-}
-
-// ============================================================================
-// PrintFormattedText (0x00455190)
-// ============================================================================
-void PrintFormattedText(short x, short y, unsigned char color, unsigned char* data)
-{
-    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    if (pD3D == NULL) return;
-    if (pD3D->m_pFontSRV == NULL || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return;
-    if (data == NULL) return;
-
-    unsigned char brightness = color >> 4;
-    if (brightness == 0) brightness = 2;
-
-    g_TextureVramY = 14;
-    g_TextureBuffer = 0x40;
-    g_TexturePrintX = x - g_ScreenOffsetX;
-    g_PrintTintA = 0x100;
-    g_TexturePrintY = y - g_ScreenOffsetY;
-    g_PrintClutTint = (color & 0xF) + 0x1E0;
-    g_TextureVramX = 8;
-    g_PrintTintR = 128;
-    g_PrintTintG = 128;
-    g_PrintTintB = 128;
-    g_PrintTintMode = 0;
-    g_PrintTintFlagB = 0;
-    g_PrintTintFlagA = 0;
-
-    g_texPrintState.vramWidth = 8;
-    g_texPrintState.vramHeight = 14;
-
-    unsigned char row = 0;
-    unsigned char texDepth = 0x1E;
-    unsigned char ch = *data;
-    while (ch != 1 && ch != 7) {
-        ch = *data;
-
-        if (ch == 0) {
-            g_TexturePrintX += 8;
-        } else {
-            switch (ch) {
-            case 1:
-            case 7:
-                return;
-
-            case 0xF8:
-                data++;
-                row = *data / 0x12 + 0xF;
-                texDepth = 0x1E;
-                ch = *data;
-                goto render;
-
-            case 0xF9:
-                data++;
-                row = *data / 0x12;
-                texDepth = 0x1F;
-                ch = *data;
-                goto render;
-
-            case 0xFA:
-                data++;
-                row = *data / 0x12 + 14;
-                texDepth = 0x1F;
-                ch = *data;
-                goto render;
-
-            case 0xFB:
-                break;
-
-            case 0xFF:
-                g_TexturePrintX += 4;
-                break;
-
-            default:
-                row = ch / 0x12 + 2;
-                texDepth = 0x1E;
-                goto render;
-            }
-        }
-
-        data++;
-        ch = *data;
-        continue;
-
-render:
-        g_TextureDepth = texDepth;
-        g_TextureVramY = row * 14;
-        g_TextureVramX = (ch % 0x12) * 8;
-        AddTintSprite((TextureDesc*)&g_texPrintState, brightness);
-
-        g_TexturePrintX += 8;
-        data++;
-        ch = *data;
-    }
-}
-
-// ============================================================================
-// PrintText8x14 (0x00455520)
-// ============================================================================
-void PrintText8x14(short x, short y, unsigned char color, char flags)
-{
-    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    if (pD3D == NULL) return;
-
-    if (pD3D->m_pFontSRV == NULL || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) {
-        OutputDebugStringA("[TEXT] Font not loaded yet, skipping\n");
-        return;
-    }
-
-    unsigned char brightness;
-    if ((color & 0x80) == 0) {
-        brightness = color >> 4;
-        if (brightness == 0) brightness = 2;
-    } else {
-        brightness = 30;
-    }
-
-    g_TextureBuffer = ((flags != 0) ? 0x40000000U : 0U) + 0x40;
-
-    g_TextureVramX = 8;
-    g_TextureVramY = 14;
-    g_texPrintState.vramWidth = 8;
-    g_texPrintState.vramHeight = 14;
-    g_TextureDepth = 0x1E;
-
-    g_TexturePrintX = x - g_ScreenOffsetX;
-    g_TexturePrintY = y - g_ScreenOffsetY;
-
-    g_PrintTintR = 0x80;
-    g_PrintTintG = 0x80;
-    g_PrintTintB = 0x80;
-    g_PrintTintA = 0x100;
-    g_PrintTintMode = 0;
-    g_PrintTintFlagA = 0;
-    g_PrintTintFlagB = 0;
-
-    g_PrintClutTint = (color & 0xF) + 0x1E0;
-
-    for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
-        unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
-
-        if (ch == ' ') {
-            g_TexturePrintX += 8;
-            continue;
-        }
-
-        if (ch == '(')      { g_TextureVramX = 56;  g_TextureVramY = 224; }
-        else if (ch == ')') { g_TextureVramX = 70;  g_TextureVramY = 224; }
-        else                { g_TextureVramX = (ch % 18) * 8; g_TextureVramY = (ch / 18) * 14; }
-
-        unsigned char finalBrightness = brightness;
-        if ((g_stageId == 3) && (g_roomId == 17) && (g_roomCameraId == 4)) {
-            finalBrightness = 0;
-        }
-
-        AddTintSprite((TextureDesc*)&g_texPrintState, finalBrightness);
-
-        g_TexturePrintX += 8;
-    }
-}
-
-// ============================================================================
 // AddTintSprite (0x0046e0a0)
 // Adds a tinted font character sprite to the pending sprite queue.
 // Brightness controls color intensity. Pending sprites are rendered in
@@ -253,31 +39,31 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     if (pD3D == NULL || pD3D->m_pFontSRV == NULL) return 0;
     if (pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return 0;
 
-    float gameX = (float)(g_TexturePrintX + g_ScreenOffsetX);
-    float gameY = (float)(g_TexturePrintY + g_ScreenOffsetY);
+    float gameX = (float)(texture->screenX + g_ScreenOffsetX);
+    float gameY = (float)(texture->screenY + g_ScreenOffsetY);
 
     float scaleX = (float)pD3D->m_width / 320.0f;
     float scaleY = (float)pD3D->m_height / 240.0f;
 
     float screenX = gameX * scaleX;
     float screenY = gameY * scaleY;
-    float charW = (float)g_texPrintState.vramWidth * scaleX;
-    float charH = (float)g_texPrintState.vramHeight * scaleY;
+    float charW = (float)texture->width * scaleX;
+    float charH = (float)texture->height * scaleY;
 
     float texW = (float)pD3D->m_FontTexWidth;
     float texH = (float)pD3D->m_FontTexHeight;
-    float u0 = (float)g_TextureVramX / texW;
-    float v0 = (float)g_TextureVramY / texH;
-    float u1 = (float)(g_TextureVramX + g_texPrintState.vramWidth) / texW;
-    float v1 = (float)(g_TextureVramY + g_texPrintState.vramHeight) / texH;
+    float u0 = (float)texture->texU / texW;
+    float v0 = (float)texture->texV / texH;
+    float u1 = (float)(texture->texU + texture->width) / texW;
+    float v1 = (float)(texture->texV + texture->height) / texH;
 
     // Calculate RGB from tint values — cast to unsigned int first to avoid overflow
-    unsigned int r = ((unsigned int)(g_PrintTintR & 0xFF)) * 2; if (r > 255) r = 255;
-    unsigned int g = ((unsigned int)(g_PrintTintG & 0xFF)) * 2; if (g > 255) g = 255;
-    unsigned int b = ((unsigned int)(g_PrintTintB & 0xFF)) * 2; if (b > 255) b = 255;
+    unsigned int r = ((unsigned int)(texture->colorMulR & 0xFF)) * 2; if (r > 255) r = 255;
+    unsigned int g = ((unsigned int)(texture->colorMulG & 0xFF)) * 2; if (g > 255) g = 255;
+    unsigned int b = ((unsigned int)(texture->colorMulB & 0xFF)) * 2; if (b > 255) b = 255;
 
     DWORD color;
-    if (g_PrintTintR == 0 && g_PrintTintG == 0 && g_PrintTintB == 0) {
+    if (texture->colorMulR == 0 && texture->colorMulG == 0 && texture->colorMulB == 0) {
         // Shadow pass: semi-transparent black (brightness controls alpha)
         unsigned int a = ((unsigned int)brightness * 255) / 30;
         if (a > 255) a = 255;
@@ -286,7 +72,7 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
         // Text pass: opaque color, brightness dims RGB (original PS1 CLUT-based dimming)
         unsigned int brightnessScale = ((unsigned int)brightness * 255) / 30;
         if (brightnessScale > 255) brightnessScale = 255;
-        if (brightness <= 2) brightnessScale = 17;
+        if (brightness == 2) brightnessScale = 255;
         r = (r * brightnessScale) / 255;
         g = (g * brightnessScale) / 255;
         b = (b * brightnessScale) / 255;

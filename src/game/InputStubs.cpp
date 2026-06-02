@@ -17,8 +17,8 @@ void InputUpdate(void)
 	if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) g_RawPadPressed |= 0x8000; // SQUARE = exit
 	if (GetAsyncKeyState(VK_RETURN) & 0x8000) g_RawPadPressed |= 0x4008; // CROSS + START
 	if (GetAsyncKeyState(VK_SPACE) & 0x8000)  g_RawPadPressed |= 0x4008; // CROSS + START
-	if (GetAsyncKeyState(VK_UP) & 0x8000)     g_RawPadPressed |= 0x1000; // TRIANGLE (menu up)
-	if (GetAsyncKeyState(VK_DOWN) & 0x8000)   g_RawPadPressed |= 0x4000; // CROSS (menu down)
+	if (GetAsyncKeyState(VK_UP) & 0x8000)     g_RawPadPressed |= 0x0010; // PAD_UP
+	if (GetAsyncKeyState(VK_DOWN) & 0x8000)   g_RawPadPressed |= 0x0040; // PAD_DOWN
 	if (GetAsyncKeyState(VK_LEFT) & 0x8000)   g_RawPadPressed |= 0x0080; // LEFT
 	if (GetAsyncKeyState(VK_RIGHT) & 0x8000)  g_RawPadPressed |= 0x0020; // RIGHT
 

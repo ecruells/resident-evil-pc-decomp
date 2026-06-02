@@ -406,7 +406,7 @@ Iterates a byte stream with opcodes:
 | `0xFF` | Advance X by 4 (half-width space) |
 | *default* | TEXTURE_DEPTH=0x1E, col = ch%18, row = ch/18 + 2 |
 
-Used extensively by `save_load_game_state` for menu rendering.
+Used extensively by `LoadSaveGameState` for menu rendering.
 
 The struct is exactly `0x22` (34) bytes — verified to match the original binary. Individual fields are exposed as macros for backward compatibility:
 

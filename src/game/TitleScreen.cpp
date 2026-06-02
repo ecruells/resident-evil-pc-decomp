@@ -9,11 +9,6 @@
 #include <cstdio>
 #include <cstdlib>
 
-// Title image/buffer resources
-static BYTE g_displayImageBuffer[320 * 240 * 2];
-// Title text atlas sprite heights
-// static float g_titleCurrentSprH = 60.0f;
-
 extern void logos_state(void);
 
 // ============================================================================
@@ -82,8 +77,8 @@ void init_title_screen(void)
 
     g_roomCameraId = 0;
 
-    LoadFile(".\\usa\\data\\title.pix", g_displayImageBuffer, 0x20);
-    display_image(0, g_displayImageBuffer, 320, 240);
+    LoadFile(".\\usa\\data\\title.pix", g_BackgroundImageBuffer+20, 0x20);
+    display_image(0, g_BackgroundImageBuffer+20, 320, 240);
 
     title_setup_texture_pages(0, 1);
 
@@ -95,13 +90,13 @@ void init_title_screen(void)
     } else {
         buttonTexPath = ".\\usa\\data\\t_start.tim";
     }
-    LoadFile(buttonTexPath, g_displayImageBuffer, 0x20);
+    LoadFile(buttonTexPath, g_BackgroundImageBuffer+20, 0x20);
 
     g_titleTextureDepthData[4] = 26;
     g_titleTextureDepthData[0] = 8;
     g_TextureDepthByte = 26;
     g_TextureBankID = 8;
-    LoadTexturePage(g_displayImageBuffer, 8, 0, 12, 4, 0, 0, 0);
+    LoadTexturePage(g_BackgroundImageBuffer+20, 8, 0, 12, 4, 0, 0, 0);
 
     g_titleTextureDepthData[1] = g_TextureBankID;
     g_titleLoopFlag = 1;
@@ -184,7 +179,7 @@ static const TitleTextPosData g_titleTextPosTable[3] = {
 // ============================================================================
 void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
 {
-    TextureDesc* td = (TextureDesc*)&g_texPrintState;
+    TextureDesc* td = &g_TextureDesc;
 
     td->flags = 0x10000000;
     if (brightness != 0x80) {
@@ -261,8 +256,8 @@ void update_title_options(void)
 			return;
 		}
 
-		if (g_PlayerPadPressed & (PAD_L2 | PAD_TRIANGLE | PAD_CROSS)) {
-			if (!(g_PlayerPadPressed & (PAD_L2 | PAD_TRIANGLE))) {
+		if (g_PlayerPadPressed & (PAD_L2 | PAD_UP | PAD_DOWN)) {
+			if (!(g_PlayerPadPressed & (PAD_L2 | PAD_UP))) {
 				if (g_titleSelectionId == 2) g_titleSelectionId = 0;
 				g_titleSelectionId++;
 			} else {
@@ -462,19 +457,19 @@ void title_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 1);
     Task_sleep(1);
 
-    if (g_fmvPlayCount < 1) {
-        // g_selectedFmvId = 0;
-        g_currentFMVID = 0;
-        g_fmvDataPointer = g_loadDataDestPointer;
-        g_fmvPlayCount = 0x10;
-        g_main_state_flags = g_main_state_flags | 0x40000;
-        Task_sleep(1);
+    // if (g_fmvPlayCount < 1) {
+    //     // g_selectedFmvId = 0;
+    //     g_currentFMVID = 0;
+    //     g_fmvDataPointer = g_loadDataDestPointer;
+    //     g_fmvPlayCount = 0x10;
+    //     g_main_state_flags = g_main_state_flags | 0x40000;
+    //     Task_sleep(1);
 
-        // Restore menu screen offset after FMV — UpdateVideoPlayback calls
-        // CenterScreenOrigin() which sets g_ScreenOffsetX=160, g_ScreenOffsetY=120,
-        // pushing the title text sprite off-screen. Reset to menu offset (0,0).
-        setMenuScreenOffset(320, 240, 0, 0, 1);
-    }
+    //     // Restore menu screen offset after FMV — UpdateVideoPlayback calls
+    //     // CenterScreenOrigin() which sets g_ScreenOffsetX=160, g_ScreenOffsetY=120,
+    //     // pushing the title text sprite off-screen. Reset to menu offset (0,0).
+    //     setMenuScreenOffset(320, 240, 0, 0, 1);
+    // }
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
     Task_sleep(1);
@@ -512,7 +507,7 @@ void title_state(void)
     case 2:
     case 3:
         g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
-        save_load_game_state(1, 0x80180000, 0, 1, 0);
+        LoadSaveGameState(1, 0x80180000, 0, 1, 0);
         g_loadSaveStateFlag = 0;
         Game_timer = g_gameTimerSnapshot;
         g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;

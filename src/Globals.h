@@ -53,13 +53,13 @@ struct SVECTOR {
 #define PAD_FACE        (PAD_TRIANGLE|PAD_CIRCLE|PAD_CROSS|PAD_SQUARE) // 0xF000
 #define PAD_MENU_CONFIRM PAD_CROSS   // confirm/select in menus
 #define PAD_MENU_BACK   PAD_SQUARE   // cancel/back in menus
-#define PAD_MENU_UP     PAD_TRIANGLE // navigate up in menus
-#define PAD_MENU_DOWN   PAD_CROSS    // navigate down in menus
+#define PAD_MENU_UP     PAD_UP     // navigate up in menus
+#define PAD_MENU_DOWN   PAD_DOWN   // navigate down in menus
 #define PAD_CONFIRM     (PAD_CROSS|PAD_START)  // start/confirm (Enter/Space maps to both)
 
 // Title screen: "any button except menu navigation/face buttons"
-// Excludes L2, TRIANGLE, CIRCLE, CROSS, SQUARE (menu nav + face buttons)
-#define PAD_TITLE_ANY   (PAD_SELECT|PAD_L3|PAD_R3|PAD_START|PAD_UP|PAD_RIGHT|PAD_DOWN|PAD_LEFT|PAD_R2|PAD_L1|PAD_R1)  // 0x0EFF
+// Excludes L2, UP, DOWN, TRIANGLE, CIRCLE, CROSS, SQUARE (menu nav + face buttons)
+#define PAD_TITLE_ANY   (PAD_SELECT|PAD_L3|PAD_R3|PAD_START|PAD_RIGHT|PAD_LEFT|PAD_R2|PAD_L1|PAD_R1)  // 0x0EAF
 
 struct DisplayModeInfo {
     DWORD dwWidth;         // 0x00 - Screen width
@@ -79,6 +79,30 @@ struct RectDrawDesc {
     unsigned char g;         // 0x0d - Green
     unsigned char b;         // 0x1e - Blue
 };
+
+#pragma pack(push, 1)
+struct TextureDesc {
+    unsigned int flags;         // 0x00
+    short screenX;              // 0x04
+    short screenY;              // 0x06
+    unsigned short width;       // 0x08
+    unsigned short height;      // 0x0a
+    short depth;                // 0x0c
+    unsigned char texU;         // 0x0e
+    unsigned char texV;         // 0x0f
+    short unk10;                // 0x10 legacy PS1 alpha/tint field
+    short printClutTint;        // 0x12
+    unsigned char colorMulR;    // 0x14
+    unsigned char colorMulG;    // 0x15
+    unsigned char colorMulB;    // 0x16
+    unsigned char unk17;        // 0x17
+    short pivotX;               // 0x18
+    short pivotY;               // 0x1a
+    short scaleX;               // 0x1c (fix16.12, 0x1000 = 1.0)
+    short scaleY;               // 0x1e (fix16.12, 0x1000 = 1.0)
+};
+#pragma pack(pop)
+static_assert(sizeof(TextureDesc) == 0x20, "TextureDesc size mismatch");
 
 struct TaskControlBlock {
     short state;           // 0x00 - State/flags
@@ -269,52 +293,10 @@ extern BOOL          g_bFrameSkipDetected;             // DAT_004d46dc
 extern int           g_ScreenAccessCheck;              // 0x004d2290
 extern int           g_RenderAccessCheck;              // DAT_004d468c
 
-// ============================================================================
-// TexturePrintState - packed struct matching original Ghidra memory layout
-// Used by AddTintSprite / AddSprite for offset-based field access (0x00be116c area)
-// ============================================================================
-#pragma pack(push, 1)
-struct TexturePrintState {
-    DWORD  flags;          // +0x00  _texture_buffer (flags for BuildSpriteRenderFlags)
-    short  printPosX;      // +0x04  TEXTURE_PRINT_POS_X
-    short  printPosY;      // +0x06  TEXTURE_PRINT_POS_Y
-    short  vramWidth;      // +0x08  VRAM area width (8 for font)
-    short  vramHeight;     // +0x0A  VRAM area height (14 for font)
-    short  textureDepth;   // +0x0C  TEXTURE_DEPTH (0x1E = font bank)
-    byte   vramAreaX;      // +0x0E  VRAM_AREA_X
-    byte   vramAreaY;      // +0x0F  VRAM_AREA_Y
-    short  printTintA;     // +0x10  _DAT_00be1170 / PrintTintA (0x100)
-    short  textureDepth2;  // +0x12  TEXTURE_DEPTH dup (variant lookup)
-    byte   tintR;          // +0x14  DAT_00be1174 / PrintTintR
-    byte   tintG;          // +0x15  DAT_00be1175 / PrintTintG
-    byte   tintB;          // +0x16  DAT_00be1176 / PrintTintB
-    byte   pad_17;         // +0x17
-    short  tintMode;       // +0x18  _DAT_00be1178 (x0 anchor)
-    short  tintFlagA;      // +0x1A  _DAT_00be117a (y0 anchor, subtracted from sprite y)
-    short  pad_1C;         // +0x1C
-    short  pad_1E;         // +0x1E
-    short  tintFlagB;      // +0x20  _DAT_00be1180
-};
-#pragma pack(pop)
-static_assert(sizeof(TexturePrintState) == 0x22, "TexturePrintState size mismatch");
+extern RectDrawDesc  g_rect;                           // 0x00be1150
+extern TextureDesc   g_TextureDesc;                    // 0x00be1160
 
-// Global texture print state instance (address 0x00be116c area)
-extern TexturePrintState g_texPrintState;
-
-// Macros to maintain backward compatibility with existing code
-#define g_TextureBuffer     g_texPrintState.flags
-#define g_TexturePrintX     g_texPrintState.printPosX
-#define g_TexturePrintY     g_texPrintState.printPosY
-#define g_TextureVramX      g_texPrintState.vramAreaX
-#define g_TextureVramY      g_texPrintState.vramAreaY
-#define g_TextureDepth      g_texPrintState.textureDepth
-#define g_PrintTintR        g_texPrintState.tintR
-#define g_PrintTintG        g_texPrintState.tintG
-#define g_PrintTintB        g_texPrintState.tintB
-#define g_PrintTintA        g_texPrintState.printTintA
-#define g_PrintTintMode     g_texPrintState.tintMode
-#define g_PrintTintFlagA    g_texPrintState.tintFlagA
-#define g_PrintTintFlagB    g_texPrintState.tintFlagB
+extern int           unk_00be1180;                      // 0x00be1180
 
 // Other print globals (not part of the packed struct)
 extern char          PRINT_TEXT_BUFFER[256];           // 0x00be0e20
@@ -418,7 +400,7 @@ extern int           g_loopCounter;                    // local counter in main_
 // Print text
 void PrintText8x8(short x, short y, unsigned char color, char shadow);     // 0x00455420
 void PrintText8x14(short x, short y, unsigned char color, char flags);     // 0x00455520
-void PrintFormattedText(short x, short y, unsigned char color, unsigned char* data); // 0x00455190
+void PrintFormattedText(short x, short y, unsigned char color, const unsigned char* data); // 0x00455190
 void draw_rect(RectDrawDesc* rect, int blend, int flags);
 
 // Task scheduler functions
@@ -623,7 +605,43 @@ void empty_00497c10(int value);
 void update_title_options(void);
 void game_start(void);
 void characterSelectionScreen(void);
-void save_load_game_state(int, int, int, int, int);
+void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int cutsceneReset);
+void cut_set(void);
+void InitInputKeyBindings(void);
+unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
+void use_room_action_item(void);
+void rearrange_item_slots(void);
+int  FileWrite(const char* name, void* buf, int len);
+int  ReadSaveFile(const char* path, void* buffer);
+void EnsureDirectoryExists(const char* path);
+int  GetSaveLocationIndex(int stageId, int roomId);
+void DrawSaveCursor(short x, short y, int mode);
+
+// Save/Load game state globals
+extern unsigned char g_characterId;              // 0x00be9823 - current character (0=Chris, 1=Jill)
+extern int           g_healthStatus;             // 0x00be6370 - player health status
+extern int           g_playerAngle;              // 0x00be6368 - current player facing angle
+extern short         g_playerBkpPosX;            // 0x00be6380 - backup player X for save
+extern short         g_playerBkpPosZ;            // 0x00be6382 - backup player Z for save
+extern int           g_playerBkpHealthStat;       // 0x00be6384 - backup health for save
+extern short         g_playerBkpAngle;           // 0x00be6388 - backup angle for save
+extern int           g_playerPosX;               // 0x00be6350 - current player X position
+extern int           g_playerPosZ;               // 0x00be6358 - current player Z position
+extern unsigned char g_selectedItemId;            // 0x00be0e30 - selected item for use
+extern int           g_savesCounter;             // 0x004d467c - total saves made (0-99)
+extern unsigned char g_usedItemId;               // 0x00be0e31 - item being used
+extern unsigned char g_equippedItemId;           // 0x00be0e32 - equipped weapon/item
+extern unsigned char* g_firstItemSlotPointer;    // 0x00be63a0 - pointer to item inventory slots
+extern int           g_totalHeldItems;           // 0x00be63a4 - total items held
+extern DWORD         g_heItemsX2Less1;           // 0x00be63a8 - held items bitmask
+extern unsigned char g_itemSlotIndices[8];        // 0x00be63b0 - item slot index table
+extern char          g_saveFileName[260];         // 0x004d42d8 - save file name buffer
+extern char          g_saveDirPrefix[260];        // 0x004d4429 - save directory prefix ("SAVE\")
+extern char          g_saveSlotTextBuf[80];       // save slot display text buffer
+extern BYTE          g_saveFileBuffer[0x1000];    // save file read/write buffer
+extern BYTE          g_BackgroundImageBuffer[320 * 240 * 2 + 20];     // 0x00cf2298 - TIM background buffer
+extern char          g_characterNameTable[4][16]; // character names for save display
+extern char          g_locationNameTable[7][40];  // location names for save display
 
 // Object cleanup globals (Object_DeleteAll / ObjectCleanupCallback)
 extern int           g_objectDeleteFlag;          // 0x004d2bfc

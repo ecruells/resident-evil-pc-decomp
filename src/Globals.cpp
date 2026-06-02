@@ -258,9 +258,11 @@ BOOL g_bFrameSkipDetected = TRUE;  // DAT_004d46dc (allow frame timing check)
 // 0x00be0e20
 char PRINT_TEXT_BUFFER[256] = {};
 
-// Print text globals (0x00be1170 area)
-TexturePrintState g_texPrintState = {};
-int   g_PrintClutTint = 0;
+// --- Texture descriptor for text rendering ---
+// 0x00be1160
+TextureDesc g_TextureDesc = {};
+// 0x00be1180
+int unk_00be1180 = 0;
 
 // --- Counters ---
 int g_numFramesRendered = 0;    // DAT_004d4694
@@ -409,3 +411,27 @@ DWORD  g_objectListPtrArray[512] = {};        // 0x008fc430 area
 char   g_tmdObjectBuffer[250 * 0x1594] = {};  // 0x00923b50 area (array of CMarniDirect3DTMD, 0x1594 stride)
 char   g_renderStateTex[0x36c] = {};           // 0x00aad6f0 — PSXTexture + aux data
 char   g_renderStateTMD[0x1594] = {};          // 0x00aac158 — specific CMarniDirect3DTMD instance
+
+// --- Save/Load game state globals ---
+unsigned char g_characterId = 0;               // 0x00be9823
+int           g_healthStatus = 0;              // 0x00be6370
+int           g_playerAngle = 0;               // 0x00be6368
+short         g_playerBkpPosX = 0;             // 0x00be6380
+short         g_playerBkpPosZ = 0;             // 0x00be6382
+int           g_playerBkpHealthStat = 0;       // 0x00be6384
+short         g_playerBkpAngle = 0;            // 0x00be6388
+int           g_playerPosX = 0;                // 0x00be6350
+int           g_playerPosZ = 0;                // 0x00be6358
+unsigned char g_selectedItemId = 0;             // 0x00be0e30
+int           g_savesCounter = 0;              // 0x004d467c
+unsigned char g_usedItemId = 0;                // 0x00be0e31
+unsigned char g_equippedItemId = 0;            // 0x00be0e32
+unsigned char* g_firstItemSlotPointer = NULL;  // 0x00be63a0
+int           g_totalHeldItems = 0;            // 0x00be63a4
+
+DWORD         g_heItemsX2Less1 = 0;            // 0x00be63a8
+unsigned char g_itemSlotIndices[8] = {};        // 0x00be63b0
+char          g_saveFileName[260] = {};         // 0x004d42d8
+
+
+BYTE g_BackgroundImageBuffer[(320 * 240 * 2) + 20] = {};           // 0x00cf2298 - save screen TIM background buffer (320x240 16-bit + TIM header)

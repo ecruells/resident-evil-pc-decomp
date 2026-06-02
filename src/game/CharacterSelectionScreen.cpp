@@ -634,7 +634,7 @@ void characterSelectionScreen(void)
         g_selTexDesc.unk10 = 0;
         g_selTexDesc.pivotX = 0;
         g_selTexDesc.pivotY = 0;
-        g_PrintTintFlagB = 0;
+        g_selTexDesc.printClutTint = 0;
         g_selTexDesc.flags = 0x01000040;
         g_selTexDesc.colorMulR = 0x80;
         g_selTexDesc.colorMulG = 0x80;

@@ -2,33 +2,12 @@
 #include <windows.h>
 #include <d3d11.h>
 
+struct TextureDesc;
+
 #define MAX_SPRITE_COMMANDS 300
 #define MAX_OT_ENTRIES 32
 
-// TextureDesc (0x0046e8d0) - Texture descriptor matching original Ghidra layout (0x20 bytes)
-#pragma pack(push, 1)
-struct TextureDesc {
-    unsigned int flags;         // 0x00
-    short screenX;              // 0x04
-    short screenY;              // 0x06
-    unsigned short width;       // 0x08
-    unsigned short height;      // 0x0a
-    short depth;                // 0x0c
-    unsigned char texU;         // 0x0e
-    unsigned char texV;         // 0x0f
-    short unk10;                // 0x10 legacy PS1 alpha/tint field
-    short printClutTint;        // 0x12
-    unsigned char colorMulR;    // 0x14
-    unsigned char colorMulG;    // 0x15
-    unsigned char colorMulB;    // 0x16
-    unsigned char unk17;        // 0x17
-    short pivotX;               // 0x18
-    short pivotY;               // 0x1a
-    short scaleX;               // 0x1c (fix16.12, 0x1000 = 1.0)
-    short scaleY;               // 0x1e (fix16.12, 0x1000 = 1.0)
-};
-#pragma pack(pop)
-static_assert(sizeof(TextureDesc) == 0x20, "TextureDesc size mismatch");
+
 
 // TextureDraw (0x008ec900) - Sprite command buffer entry (0x34 bytes)
 struct TextureDraw {

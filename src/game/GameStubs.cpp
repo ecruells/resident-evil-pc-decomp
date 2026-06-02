@@ -191,13 +191,6 @@ void ShowVideoModeDebugText(void)                            { /* stub */ }
 void empty_0040abb0(void* ptr, int a, int b, int c) { /* stub */ }
 void cleanup_texture_slot(int slot)                           { /* stub */ }
 void empty_00497c10(int value)                         { /* stub */ }
-
-// ---------------------------------------------------------------------------
-// Save/load stubs
-// ---------------------------------------------------------------------------
-void save_load_game_state(int a, int b, int c, int d, int e) { /* stub */ }
-
-
 void empty_00470960(int slot) { }
 
 

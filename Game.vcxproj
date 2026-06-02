@@ -114,6 +114,7 @@
     <ClCompile Include="src\game\TaskScheduler.cpp" />
     <ClCompile Include="src\game\GameStubs.cpp" />
     <ClCompile Include="src\game\Rendering.cpp" />
+    <ClCompile Include="src\game\PrintText.cpp" />
     <ClCompile Include="src\game\TextureLoader.cpp" />
     <ClCompile Include="src\game\SpriteRenderer.cpp" />
     <ClCompile Include="src\game\Marni3DObject.cpp" />
@@ -122,6 +123,7 @@
     <ClCompile Include="src\game\SoundSystem.cpp" />
     <ClCompile Include="src\game\TitleScreen.cpp" />
     <ClCompile Include="src\game\CharacterSelectionScreen.cpp" />
+    <ClCompile Include="src\game\SaveLoadScreen.cpp" />
     <ClCompile Include="src\game\GteMatrix.cpp" />
     <ClCompile Include="src\video\VideoPlayback.cpp" />
     <ClCompile Include="src\system\AssetPath.cpp" />
