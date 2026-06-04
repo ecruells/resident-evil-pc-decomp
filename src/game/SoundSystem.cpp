@@ -299,16 +299,16 @@ void UpdateMusicWaitState(void)
 // ============================================================================
 void PauseGameSoundsAsync(void)
 {
-    ExecAsync((void*)PauseGameSoundsCallback);
+    PauseSounds();
 }
 
 // ============================================================================
 // ResumeGameSoundsAsync (0x0047...)
-// Queues async callback to resume all game sounds (after FMV).
+// Resumes all game sounds (after FMV).
 // ============================================================================
 void ResumeGameSoundsAsync(void)
 {
-    ExecAsync((void*)ResumeGameSoundsCallback);
+    ResumePausedSounds();
 }
 
 // ============================================================================
@@ -408,12 +408,8 @@ void RestoreWaveOutVolume(void)
 // ============================================================================
 int getSndStat(int bank)
 {
-    g_setVolResult = 0;
-    g_CurBank = bank;
-    if (g_pDirectSound != NULL && bank != 0) {
-        ExecAsync((void*)getCurSndStat);
-    }
-    return g_setVolResult;
+    if (g_pDirectSound == NULL || bank == 0) return 0;
+    return g_pDirectSound->GetStatus(bank);
 }
 
 // ============================================================================
