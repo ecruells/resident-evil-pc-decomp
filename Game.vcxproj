@@ -109,7 +109,7 @@
     <ClCompile Include="src\system\Cleanup.cpp" />
     <ClCompile Include="src\game\FileLoader.cpp" />
     <ClCompile Include="src\game\GameInit.cpp" />
-    <ClCompile Include="src\game\GameLoop.cpp" />
+    <ClCompile Include="src\game\MainLoop.cpp" />
     <ClCompile Include="src\game\GameState.cpp" />
     <ClCompile Include="src\game\TaskScheduler.cpp" />
     <ClCompile Include="src\game\GameStubs.cpp" />

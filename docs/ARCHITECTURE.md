@@ -1002,7 +1002,7 @@ src/
 │   └── MarniInput.h          # Input state structures
 │
 ├── game/
-│   ├── GameLoop.cpp         # Main game loop (0x00428eb0)
+│   ├── MainLoop.cpp         # Main game loop (0x00428eb0)
 │   ├── GameInit.cpp          # Game initialization (init_and_start_game)
 │   ├── GameState.cpp         # Game states: debug(SFX player), logos, title load
 │   ├── GameStubs.cpp         # Empty stub functions for unimplemented code

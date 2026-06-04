@@ -8,7 +8,7 @@ This document provides detailed documentation for all implemented functions in t
 
 1. [WinMain.cpp Functions](#winmaincpp-functions)
 2. [MarniSystem.cpp Functions](#marnisystemcpp-functions)
-3. [GameLoop.cpp Functions](#gameloopcpp-functions)
+3. [MainLoop.cpp Functions](#mainLoopcpp-functions)
 4. [Rendering.cpp Functions](#renderingcpp-functions)
 5. [Cleanup.cpp Functions](#cleanupcpp-functions)
 6. [SystemChecks.cpp Functions](#systemcheckscpp-functions)
@@ -186,7 +186,7 @@ void EnumerateD3DRenderers(void);
 
 ---
 
-## GameLoop.cpp Functions
+## MainLoop.cpp Functions
 
 ### main_loop
 
@@ -966,7 +966,7 @@ void UpdateVideoPlayback(void);
 | `0x0040aea0` | `LoadInstallationConfiguration` | Installation.cpp |
 | `0x0040c510` | `GetFreeDiskSpaceMB` | SystemChecks.cpp |
 | `0x0041d0b0` | `CleanupAsyncTasks` | Cleanup.cpp |
-| `0x00428eb0` | `main_loop` | GameLoop.cpp |
+| `0x00428eb0` | `main_loop` | MainLoop.cpp |
 | `0x004402f0` | `OT_InsertPrimitive` | Rendering.cpp |
 | `0x00441170` | `WindowProc` | WindowProc.cpp |
 | `0x00441350` | `WinMain` | WinMain.cpp |

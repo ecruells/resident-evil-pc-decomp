@@ -165,7 +165,7 @@ static void FUN_00426f70(int a, void* b)                     { /* stub */ }
 static void FUN_00427250(void)                               { /* stub */ }
 
 // ---------------------------------------------------------------------------
-// General game engine stubs (referenced from GameLoop.cpp and WindowProc.cpp)
+// General game engine stubs (referenced from MainLoop.cpp and WindowProc.cpp)
 // FUN_00401020, FUN_0045ab60, FUN_00497360, FUN_00497340, StMask
 // are implemented in Rendering.cpp
 // ---------------------------------------------------------------------------
