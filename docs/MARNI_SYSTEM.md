@@ -884,7 +884,6 @@ Screen
 | `src/game/TextureLoader.cpp` | Texture page creation, async workers, page management |
 | `src/game/SpriteRenderer.h` | SpriteCommand struct, OT entry, sprite functions |
 | `src/game/SpriteRenderer.cpp` | PSYQ GPU sprite emulation (19 functions) |
-| `src/game/GameStubs.cpp` | `game_frame_present()`, rendering stubs |
 | `src/Globals.h` | Global variable declarations for all Marni subsystems |
 
 ---

@@ -215,21 +215,6 @@ void DrawSaveCursor(short x, short y, int mode)
 }
 
 // ============================================================================
-// cut_set (0x004628c0)
-// Handles room cutscene/camera transition when entering a new room context.
-// Loads background image and sets up room rendering state.
-// ============================================================================
-void cut_set(void)
-{
-    OutputDebugStringA("[CUT] cut_set start\n");
-    // DAT_00bebcc6 is the saved texture bank ID for room transition
-    // In the original, cut_set checks if a room background needs reloading
-    // and restores the room camera/rendering state.
-    // This is a simplified implementation — full room loading is not yet implemented.
-    OutputDebugStringA("[CUT] cut_set end\n");
-}
-
-// ============================================================================
 // InitInputKeyBindings (0x00497c20)
 // Copies key binding configuration from config area to active binding vectors.
 // ============================================================================
@@ -284,8 +269,8 @@ void use_room_action_item(void)
     // If item is a weapon (ID < 0x0B): unequip and remove
     if (g_selectedItemId < 0x0B) {
         g_firstItemSlotPointer[index * 2] = 0;
-        if ((unsigned int)g_equippedItemId - (unsigned int)index == 1) {
-            g_equippedItemId = 0;
+        if ((unsigned int)g_EquippedItemId - (unsigned int)index == 1) {
+            g_EquippedItemId = 0;
         }
         rearrange_item_slots();
         return;
@@ -316,11 +301,11 @@ void rearrange_item_slots(void)
 {
     if (g_firstItemSlotPointer == NULL) return;
 
-    unsigned char equippedSlotIdx = g_equippedItemId - 1;
+    unsigned char equippedSlotIdx = g_EquippedItemId - 1;
     unsigned char readIdx = 0;
     unsigned char writeIdx = 0;
     // Chris (0) has 6 slots, Jill (1) has 8 slots
-    int maxSlots = (4 - (((g_characterId & 3) != 1) ? 1 : 0)) * 2;
+    int maxSlots = (4 - (((g_playerEntity.id & 3) != 1) ? 1 : 0)) * 2;
     int remaining = maxSlots;
 
     do {
@@ -346,7 +331,7 @@ void rearrange_item_slots(void)
         remaining--;
     } while (remaining != 0);
 
-    g_equippedItemId = equippedSlotIdx + 1;
+    g_EquippedItemId = equippedSlotIdx + 1;
     g_totalHeldItems = writeIdx;
 
     // Zero remaining empty slots

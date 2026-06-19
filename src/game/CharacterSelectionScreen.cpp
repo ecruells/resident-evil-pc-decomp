@@ -852,7 +852,7 @@ sub_5:
         case 6:
 case_6:
             // Set selected player and transition to game
-            g_SelectedPlayerID = g_selSelected;
+            g_FmvCharacterId = g_selSelected;
             if (g_selSelected != 0) {
                 g_main_state_flags |= 0x800000;
             }

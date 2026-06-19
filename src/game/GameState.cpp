@@ -7,11 +7,12 @@
 #include "FileLoader.h"
 #include <cstdio>
 
-// Forward declarations for stub functions (defined in GameStubs.cpp)
 extern void FUN_00470a30(void);
 extern void Object_DeleteAll(int a);
 extern void SetVideoResolution(int w, int h);
 extern void setSomeColor(int r, int g, int b);
+extern void vram_clr(int x, int y, int w, int h);
+extern void empty_00412380(void);
 
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -110,7 +111,7 @@ void logos_state(void)
 
     // if (g_bIsSoftwareRendering == FALSE) {
         g_currentFMVID = 28;
-        g_SelectedPlayerID = 0;
+        g_FmvCharacterId = 0;
         g_main_state_flags |= 0x40000;
     // } else {
     //     QueueVideoPlayback(29, 0);
@@ -120,7 +121,7 @@ void logos_state(void)
 
     // if (g_bIsSoftwareRendering == FALSE) {
         g_currentFMVID = 23;
-        g_SelectedPlayerID = 0;
+        g_FmvCharacterId = 0;
         g_main_state_flags |= 0x40000;
     // } else {
     //     QueueVideoPlayback(29, 0);
@@ -357,13 +358,564 @@ void debug_state(void)
     Task_chain((void*)logos_state);
 }
 
+
+// ---------------------------------------------------------------------------
+// Flg_on (0x00473f60)
+// Sets a bit flag in a flag array.
+// baseAddr: base address of the flag array
+// bitIndex: bit position to set
+// ---------------------------------------------------------------------------
+void Flg_on(int baseAddr, unsigned int bitIndex)
+{
+    unsigned int* flagWord = (unsigned int*)(((bitIndex & 0xffffffe7) >> 3) + baseAddr);
+    *flagWord = *flagWord | (0x80000000U >> ((unsigned char)bitIndex & 0x1f));
+}
+
+// ---------------------------------------------------------------------------
+// memclr (0x00475720)
+// Zeros memory from start up to (but not including) end. Operates on DWORDs.
+// ---------------------------------------------------------------------------
+void memclr(void* start, void* end)
+{
+    unsigned int* p = (unsigned int*)start;
+    unsigned int* e = (unsigned int*)end;
+    while (p < e) {
+        *p = 0;
+        p++;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ResetGetAsyncKeyStateFlags (0x00497e60)
+// Clears async key state tracking flags.
+// ---------------------------------------------------------------------------
+void ResetGetAsyncKeyStateFlags(void)
+{
+    // In the original, this resets per-frame key state tracking.
+    // With GetAsyncKeyState-based input, this is effectively a no-op.
+}
+
+// ---------------------------------------------------------------------------
+// ScheduleInputFlush (0x00497e80)
+// Schedules an async call to ResetGetAsyncKeyStateFlags.
+// ---------------------------------------------------------------------------
+void ScheduleInputFlush(void)
+{
+    ExecAsync((void*)ResetGetAsyncKeyStateFlags);
+}
+
+// ---------------------------------------------------------------------------
+// SetInitialItems (0x004513f0)
+// Sets up the initial inventory based on selected character.
+// ---------------------------------------------------------------------------
+void SetInitialItems(void)
+{
+    unsigned char slot_index;
+    unsigned char total_items_slots;
+    unsigned char* item_slot;
+    unsigned char item_qty;
+
+    unsigned char initial_items[] = {
+        // chris items
+        ITEM_KNIFE,             0,
+        ITEM_FIRST_AID_SPRAY,   1,
+        ITEM_NONE,              0,
+        ITEM_NONE,              0,
+        // jill items
+        ITEM_KNIFE,             0,
+        ITEM_BERETTA,          15,
+        ITEM_FIRST_AID_SPRAY,   1,
+        ITEM_NONE,              0
+    };
+
+    // Set player flags (secondary flags array at 0x00be989c)
+    g_PlayerFlags2[0] = 0xbfffffff;    // first DWORD has cleared bit 30
+    g_PlayerFlags2[1] = 0xffffffff;
+    g_PlayerFlags2[2] = 0xffffffff;
+    g_PlayerFlags2[3] = 0xffffffff;
+    g_PlayerFlags2[4] = 0xffffffff;
+    g_PlayerFlags2[5] = 0xfff7ffff;    // 5th DWORD has cleared bit 19
+    g_PlayerFlags2[6] = 0xffffffff;
+    g_PlayerFlags2[7] = 0xffffffff;
+
+    // Set display values
+    DAT_00be982c = 7;
+    DAT_00be982d = 0xf0;
+    DAT_00be982e = 0xf0;
+
+    if ((g_playerEntity.id & 3) == 0) {
+        // Chris: 6 slots, Rebecca gets Baretta + 15
+        item_slot = initial_items;           // Chris items at offset 0
+        total_items_slots = 6;
+        g_RebeccaItemSlots[0].Id = ITEM_BERETTA;
+        g_RebeccaItemSlots[0].qty = 15;
+    } else {
+        // Jill: 8 slots
+        item_slot = initial_items + 8;       // Jill items at offset 8
+        total_items_slots = 8;
+    }
+
+    // Copy items into inventory slots
+    item_qty = *item_slot;
+    slot_index = 0;
+    while (item_qty != 0) {
+        g_ItemsSlots[slot_index].Id = *item_slot;
+        item_qty = item_slot[1];
+        (&g_ItemSlotsIndexes)[slot_index] = slot_index;
+        g_ItemsSlots[slot_index].qty = item_qty;
+        item_qty = item_slot[2];
+        item_slot = item_slot + 2;
+        slot_index = slot_index + 1;
+    }
+    g_ItemSlotsBitmask = (1 << (slot_index & 0x1f)) - 1;
+    g_TotalHeldItems = slot_index;
+
+    // Clear remaining slots
+    for (; slot_index < total_items_slots; slot_index++) {
+        g_ItemsSlots[slot_index].Id = 0;
+        g_ItemsSlots[slot_index].qty = 0;
+    }
+}
+
+// ---------------------------------------------------------------------------
+// CountHeldItems (0x00451600)
+// Counts non-empty item slots in the current character's inventory.
+// Max slots: 8 for Jill (characterId & 3 == 1), 6 for Chris/Rebecca.
+// ---------------------------------------------------------------------------
+void CountHeldItems(void) // 0x00451600
+{
+    g_TotalHeldItems = 0;
+    unsigned char itemSlot = *g_firstItemSlotPointer;
+    while (itemSlot != 0 &&
+           g_TotalHeldItems < (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2)) {
+        g_TotalHeldItems = g_TotalHeldItems + 1;
+        itemSlot = g_firstItemSlotPointer[(unsigned int)g_TotalHeldItems * 2];
+    }
+}
+
+// ---------------------------------------------------------------------------
+// LoadHeldItemsImages (0x00451640)
+// Loads inventory item images into the image buffer for HUD display.
+// Counts held items, sets up slot bitmask and indices, then loads each
+// item's image sprite via LoadItemImage using the item image lookup table.
+// ---------------------------------------------------------------------------
+void LoadHeldItemsImages(void* buf) // 0x00451640
+{
+    unsigned char totalItems;
+    unsigned int index;
+
+    CountHeldItems();
+    g_ItemSlotsBitmask = (1 << (g_TotalHeldItems & 0x1f)) - 1;
+    totalItems = g_TotalHeldItems;
+
+    while (totalItems != 0) {
+        totalItems = totalItems - 1;
+        index = (unsigned int)totalItems;
+        (&g_ItemSlotsIndexes)[index] = totalItems;
+        unsigned char itemId = g_firstItemSlotPointer[index * 2];
+        unsigned char imageType = g_ItemImageLookupTable[itemId * 4];
+        LoadItemImage(imageType - 1, (int)index, buf);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// InitPlayerData (0x00481880)
+// Initializes starting position, angle, and calls SetInitialItems.
+// Starting position: (17000, 5000), angle: 3072 (about 270 degrees)
+// ---------------------------------------------------------------------------
+void InitPlayerData(void)
+{
+    SetInitialItems();
+    g_playerEntity.position.x = 17000;
+    g_InputFlags = g_InputFlags | 0x20000000;
+    g_playerEntity.position.z = 5000;
+    g_playerEntity.directionAngle = 3072;
+}
+
+// ---------------------------------------------------------------------------
+// InitPlayerEntity (0x004950b0)
+// Zeroes out all entity state fields: flags, animation, position, etc.
+// Called at the start of SetupCharacterData.
+// ---------------------------------------------------------------------------
+void InitPlayerEntity(void)
+{
+    g_playerEntity.unk_bc = 0;
+    g_playerEntity.attackAnim = 0;
+    g_playerEntity.unk_be = 0;
+    g_playerEntity.unk_bf = 0;
+    g_playerEntity.unk_c0 = 0;
+    g_playerEntity.flags = 1;
+    g_playerEntity.unk_c2 = 0;
+    g_playerEntity.unk_03 = 1;
+    g_playerEntity.speed.y = 0;
+    g_playerEntity.animationId = 0;
+    g_playerEntity.animFrameId = 0;
+    g_playerEntity.anim_86 = 0;
+    g_playerEntity.anim_87 = 0;
+    g_playerEntity.speed.z = 0;
+    g_playerEntity.unk_c1 = 0;
+    g_playerEntity.speed.pad = 0;
+    g_playerEntity.isBeingAttackedFlag = 0;
+    g_playerEntity.position.pad = 0;
+    g_playerEntity.unk_10 = 0;
+    g_playerEntity.unk_11 = 99;
+    g_playerEntity.unk_12 = 0xBE;
+    g_playerEntity.unk_13 = 0;
+    g_playerEntity.speed.x = 0;
+    g_playerEntity.transform.m[0][0] = 0x1000;
+    g_playerEntity.transform.m[0][1] = 0;
+    g_playerEntity.transform.m[0][2] = 0;
+    g_playerEntity.transform.m[1][0] = 0;
+    g_playerEntity.transform.m[1][1] = 0x1000;
+    g_playerEntity.transform.m[1][2] = 0;
+    g_playerEntity.unk_d8 = 0;
+    g_playerEntity.transform.m[2][0] = 0;
+    g_playerEntity.transform.m[2][1] = 0;
+    g_playerEntity.transform.m[2][2] = 0x1000;
+    g_playerEntity.unk_ca = 0;
+}
+
+// ===========================================================================
+// InitializeGame (0x004807a0)
+// Main game initialization. Loads bio_card.dat, sets up player entity, health,
+// inventory, character data, room SFX, character SFX, and initializes the
+// starting room.
+// ===========================================================================
+void InitializeGame(void)
+{
+    int has_alternate_outfit;
+
+    g_AttractModeIdleTimer = 1;
+    ScheduleInputFlush();
+    vram_clr(0, 0, 320, 480);
+
+    g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x40000000;
+
+    Task_sleep(1);
+    g_bGameActive = 2;
+
+    g_main_state_flags = g_main_state_flags & 0xd4e900f0;
+    g_main_state_flags = g_main_state_flags | 0x4000000;
+
+    empty_00412380();
+
+    memclr(&g_defaultItemSlot, g_BioCardData);
+
+    g_loadDataDestPointer = g_image_buffer;
+    g_SpecialRoomLightDelta = 0;
+    g_fading_counter = 0;
+
+    Task_execute(1, (void*)display_game_loading_message);
+
+    LoadFile(".\\usa\\data\\bio_card.dat", g_loadDataDestPointer, 32);
+
+    if ((g_main_state_flags & 0x10000000) == 0) {
+        g_gameSessionInitFlag = 0;
+        Game_timer = 0;
+
+        g_playerEntity.id = g_SelectedCharactedId;
+        g_playerEntity.healthStatusFlags = 0x10;
+
+        memcpy(&g_BioCardData[0], g_loadDataDestPointer, 1052);
+
+        g_SpecialRoomLightState = (short)0xFFFF;
+        g_CharacterModelId = g_playerEntity.id;
+
+        if ((g_InputFlags & 0x10000000) == 0) {
+            InitPlayerData();
+            /*
+            * chris: 140hp
+            * jill: 96hp
+            */
+            g_playerEntity.health = (short)((g_playerEntity.id & 1) * -44 + 140);
+            g_PlayerHealthCopy = g_playerEntity.health;
+        } else {
+            LoadAttractModePlayerData();
+        }
+    } else {
+        memcpy(&g_BioCardData[0], g_loadDataDestPointer, 0x200);
+        empty_0047eb90((int)((~g_controllerConfig) >> 7));
+
+        g_playerEntity.position.x = g_PlayerPosXCopy;
+        g_playerEntity.position.z = g_PlayerPosZCopy;
+        g_playerEntity.healthStatusFlags = g_PlayerHealthStatusCopy;
+        g_playerEntity.directionAngle = g_PlayerDirAngleCopy;
+        g_playerEntity.health = g_PlayerHealthCopy;
+        g_playerEntity.id = g_SelectedCharactedId;
+        g_CharacterModelId = g_SelectedCharactedId;
+
+        /*  check alternative outfit flag */
+        has_alternate_outfit = Flg_ck((int)g_PlayerFlags, 0x2a);
+        if (has_alternate_outfit != 0) {
+            g_CharacterModelId = g_CharacterModelId + 8;
+        }
+
+        if (g_SavesCounter == 0) {
+            Game_timer = 0;
+        }
+        g_SavesCounter = g_SavesCounter + 1;
+    }
+
+    g_deadMoveValue = (DWORD)&g_identityMatrixData;
+    g_RoomCameraDataCopy = (DWORD)&g_RoomCameraData;
+    g_lightMatrixPtr = (DWORD)&g_lightMatrix;
+
+    g_firstItemSlotPointer = (unsigned char*)g_ItemsSlots;
+    g_usedItemId = 0;
+    DAT_00be9833 = 0;
+    DAT_00be41e1 = 0;
+    g_defaultItemSlot = 0;
+    DAT_00be9614 = 0;
+
+    LoadHeldItemsImages(g_image_buffer);
+
+    g_playerEntity.pSca_hit_data = (DWORD)g_entityDataBlock;
+
+    g_playerEntity.maxHealth = (unsigned char)((g_playerEntity.id & 1) * -44 + 140);
+
+    g_playerEntity.Sca_info = (unsigned int)g_scaDataTable;
+
+    g_scaPoolPtr = (DWORD)g_entityDataBlock + 6;
+    g_scaPoolBase = (DWORD)g_entityDataBlock + 6;
+
+    Task_sleep(1);
+
+    SetupCharacterData();
+
+    g_loadDataDestPointer = g_shootDirEspBuffer;
+    load_shoot_direction_data();
+
+    g_SndFadeType = 0;
+    g_loadDataDestPointer = g_image_buffer;
+    g_BGM_STATE = 0xFF;
+
+    load_room_sfx(0);
+    load_character_sfx(g_playerEntity.id & 1);
+
+    LoadSoundBank(g_playerEntity.equippedWeaponId, g_image_buffer);
+
+    g_main_state_flags = g_main_state_flags & 0xfbffffff;
+
+    init_room();
+
+    g_AttractModeIdleTimer = 1;
+    update_room_bgm();
+
+    if ((g_playerEntity.id & 3) == CHAR_JILL) {
+        has_alternate_outfit = Flg_ck((int)g_PlayerFlags, 0x7b);
+        if (has_alternate_outfit == 0) {
+            Flg_on((int)g_PlayerFlags2, 0x34);
+            Flg_on((int)g_PlayerFlags3, 0x0b);
+        }
+    }
+
+    g_AttractModeIdleTimer = 0;
+    printf("end of game init\n");
+}
+
 // ============================================================================
-// characterSelectionScreen is now implemented in CharacterSelectionScreen.cpp
+// game_loop (0x00480b30) — STUB
+// Main gameplay loop: entities, cameras, rooms, menus, combat.
+// Returns: 1 = died/quit to title, 0 = game completed → ending.
 // ============================================================================
+int game_loop(void)
+{
+    // 0x00480b30
+    OutputDebugStringA("[GAME] game_loop — stub (returning 1 = died)\n");
+
+    g_main_state_flags |= 0x2000000;
+    g_message_flags = 0xfd3f;
+
+    // Stub: wait a few frames then return "died" to go back to title
+    for (int i = 0; i < 60; i++) {
+        Task_sleep(1);
+    }
+
+    return 1;  // 1 = died, chains to title_state
+}
+
+// ============================================================================
+// ending_state (0x00410820) — STUB
+// Ending sequence: plays ending FMVs, credits, result screen.
+// Sets up next-cycle save data and chains to title_state.
+// ============================================================================
+void ending_state(void)
+{
+    // 0x00410820
+    OutputDebugStringA("[GAME] ending_state — stub\n");
+
+    g_main_state_flags |= 0x80000;
+    Task_sleep(1);
+
+    sounds_reset();
+    LoadSoundBank(0xe, g_image_buffer);
+
+    // Stub: brief delay then return to title
+    for (int i = 0; i < 90; i++) {
+        Task_sleep(1);
+    }
+
+    g_dwClearCount++;
+    Task_chain((void*)title_state);
+}
 
 // ============================================================================
 // game_start (0x00480710)
+// Entry point for gameplay. Initializes game, runs the main game loop,
+// then chains to the appropriate next state based on how the game ended.
+//
+// State transitions:
+//   end_game_status == 1 → title_state (player died or quit)
+//   end_game_status == 0 → ending_state (game completed)
+//   otherwise            → logos_state  (fallback)
 // ============================================================================
-void game_start(void) {
-    OutputDebugStringA("[GAME] Game start\n");
+void game_start(void)
+{
+    int end_game_status;
+    // 0x00480710: MOV dword ptr [g_playingGameFlag], 1
+    g_playingGameFlag = 1;
+
+    // 0x0048071a: AND word ptr [g_message_flags], 0xFDFF — clear bit 9
+    g_message_flags = g_message_flags & 0xfdff;
+
+    // 0x00480723: CALL InitializeGame
+    InitializeGame();
+
+    // 0x00480728: CALL game_loop — returns end_game_status in EAX
+    end_game_status = game_loop();
+
+    // 0x0048072d: MOV dword ptr [g_main_state_flags], 0
+    g_main_state_flags = 0;
+
+    // 0x0048073c: CMP end_game_status, 1
+    if (end_game_status == 1) {
+        // 0x00480745: AND dword ptr [g_InputFlags], 0x20080000
+        g_InputFlags = g_InputFlags & 0x20080000;
+        // 0x0048074f: Task_chain(title_state)
+        Task_chain((void*)title_state);
+    }
+
+    // 0x0048075c: AND dword ptr [g_InputFlags], 0x20080000
+    g_InputFlags = g_InputFlags & 0x20080000;
+
+    // 0x00480766: CMP end_game_status, 0
+    if (end_game_status == 0) {
+        // 0x0048076f: MOV EAX, [Game_timer]
+        // 0x00480779: MOV [g_gameTimerSnapshot], EAX
+        g_gameTimerSnapshot = Game_timer;
+        // 0x00480774: Task_chain(ending_state)
+        Task_chain((void*)ending_state);
+    }
+
+    // 0x00480786: Task_chain(logos_state)
+    Task_chain((void*)logos_state);
 }
+
+// ============================================================================
+// Stub implementations for functions not yet decompiled
+// ============================================================================
+
+// (0x0045fbb0) - Load item image into display buffer
+void LoadItemImage(int imageType, int index, void* buf) { }
+
+// (0x00481060) - Load attract mode (demo) player save data
+void LoadAttractModePlayerData(void) { }
+
+// (0x0047eb90) - Restore game state from bio card on load
+void empty_0047eb90(int param) { }
+
+// (0x0045fa80) - Load shoot direction effect sprite data
+void load_shoot_direction_data(void) { }
+
+// (0x0045a6d0) - Play title screen selection SFX
+void title_select_sfx(void) { }
+
+// (0x00462e90) - Check if player moved to different camera zone
+void check_camera_switch(int param) { }
+
+// (0x00462740) - Load RDT file for current room
+void LoadRoomRdt(void) { }
+
+// (0x00462990) - Display room camera background image
+void display_room_camera_bg(void) { }
+
+// (0x00487590) - SCD: Create a script event entry
+void ScdEventEntry_Create(unsigned int slot, int scriptIndex) { }
+
+// (0x0046a250) - SCD: Room action dispatch
+void cmd_room_action(void) { }
+
+// (0x0047f870) - Play 3D sound with voice effect
+void play_sound_and_voice_effect(int type, int id) { }
+
+// (0x00455260) - Set background clear color
+void setBackColor(unsigned char r, unsigned char g, unsigned char b) { }
+
+// (0x00473b10) - Texture bank setup variant
+void FUN_00473b10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6) { }
+
+// (0x00473d10) - Texture bank setup variant 2
+void FUN_00473d10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6) { }
+
+// (0x00473d60) - Entity animation trigger
+void FUN_00473d60(char p1, unsigned char p2, unsigned char p3) { }
+
+// (0x00473e40) - Texture page operation
+void FUN_00473e40(int param) { }
+
+// (0x00473ea0) - SCA matrix setup
+void FUN_00473ea0(int param1, void* param2, ScaMatrixData* param3) { }
+
+// (0x00473f10) - Flag set operation
+void FUN_00473f10(int* baseAddr, unsigned int bitIndex) { }
+
+// (0x0047cf80) - Sprite/billboard effect creation
+void FUN_0047cf80(int param1, unsigned int param2, unsigned int param3, unsigned int param4, MATRIX* param5) { }
+
+// (0x004804a0) - Sound fade control
+void FUN_004804a0(short param1, unsigned int param2, short param3, unsigned int param4) { }
+
+// (0x004805d0) - Sound parameter control
+void FUN_004805d0(short param1, unsigned int param2, unsigned int param3, unsigned int param4) { }
+
+// (0x00484d90) - Entity animation setup
+void FUN_00484d90(int param1, unsigned char param2, unsigned char param3) { }
+
+// (0x00484e40) - Entity animation setup variant
+void FUN_00484e40(int param1, unsigned char param2, unsigned char param3) { }
+
+// (0x004870d0) - Entity/sound operation
+void FUN_004870d0(int param) { }
+
+// (0x0048a190) - Entity effect setup
+void FUN_0048a190(void* param1, int param2, int param3, int param4) { }
+
+// (0x0048bfe0) - Joint animation processing
+void FUN_0048bfe0(void) { }
+
+// (0x0048c020) - Entity weapon setup
+void FUN_0048c020(int param) { }
+
+// (0x0048f330) - Get entity animation state
+int FUN_0048f330(unsigned char param) { return 0; }
+
+// (0x0047ee20) - Get item slot index
+int get_item_slot(unsigned char itemId) { return -1; }
+
+// (0x0047cf80) - Create billboard effect sprite
+unsigned char Effect_CreateBillboard(unsigned char type, unsigned char param, unsigned short flags, MATRIX* spriteInfo, int* pos, char mode) { return 0; }
+
+// (0x0047b410) - Build sound fade table
+void BuildSndFadeTbl(char fadeType, int maxVol) { }
+
+// (0x00455150) - Display message with pause
+void set_message_display(unsigned short msg_id, unsigned short pause_game) { }
+
+// (0x0040c560) - Camera/viewport operation
+void FUN_0040c560(int param) { }
+
+// Global stubs
+unsigned long g_gameTimerSnapshot = 0;            // 0x00be9844
+unsigned char g_equippedItemId = 0;               // 0x00be9849
+extern const unsigned char DAT_004bec80[] = { 0 };  // 0x004bec80
+void* room_check_actions[] = { nullptr };          // 0x004c1420

@@ -15,12 +15,10 @@ static int g_fading_007d9048;       // 0x007d9048
 static int g_fading_007d904c;       // 0x007d904c
 static int g_MaxHealthDisplayFlag;  // 0x00d227c0
 static int g_screenStateVar;        // 0x004ba73c range
-static int g_specialRoomLightR;     // 0x00be9828
-static int g_specialRoomLightState; // 0x00be9836
-static int g_specialRoomLightDelta; // 0x00be9838
-static int g_SpecialR1;             // 0x00be961d
-static int g_SpecialG1;             // 0x00be961e
-static int g_SpecialB1;             // 0x00be961f
+static int g_specialRoomLightR;     // 0x00be9828 (alias: g_SpecialRoomLightR BioCard macro)
+static int g_specialRoomLightState; // 0x00be9836 (alias: g_SpecialRoomLightState BioCard macro)
+static int g_specialRoomLightDelta; // 0x00be9838 (alias: g_SpecialRoomLightDelta BioCard macro)
+// g_SpecialR1, g_SpecialG1, g_SpecialB1 moved to Globals.cpp (used by cmd_0x1c)
 static RectDrawDesc g_FadingRect;   // 0x004ba720
 static RectDrawDesc g_ColorRect;    // 0x004ba730
 static RectDrawDesc g_ColorRect2;   // 0x004ba740
@@ -453,7 +451,7 @@ int main_loop(void)
             g_bMCINotifyEnabled = TRUE;
             g_window_rect.textureId = 0;
             g_window_rect.r = 0;
-            g_SelectedPlayerID = g_selectedFmvId;
+            g_FmvCharacterId = g_selectedFmvId;
             g_window_rect.g = 0;
             g_window_rect.b = 0;
             g_window_rect.x = -g_ScreenOffsetX;

@@ -98,6 +98,7 @@
   <ItemGroup>
     <ClCompile Include="src\main.cpp" />
     <ClCompile Include="src\Globals.cpp" />
+    <ClCompile Include="src\game\SoundTables.cpp" />
     <ClCompile Include="src\WindowProc.cpp" />
     <ClCompile Include="src\marni\MarniSystem.cpp" />
     <ClCompile Include="src\marni\PSXTexture.cpp" />
@@ -112,7 +113,16 @@
     <ClCompile Include="src\game\MainLoop.cpp" />
     <ClCompile Include="src\game\GameState.cpp" />
     <ClCompile Include="src\game\TaskScheduler.cpp" />
-    <ClCompile Include="src\game\GameStubs.cpp" />
+    <ClCompile Include="src\game\PlayerAnimations.cpp" />
+    <ClCompile Include="src\game\ObjectManager.cpp" />
+    <ClCompile Include="src\game\TmdAnimation.cpp" />
+    <ClCompile Include="src\game\EntityModelLoader.cpp" />
+    <ClCompile Include="src\game\RoomInit.cpp" />
+    <ClCompile Include="src\game\RoomStubs.cpp" />
+    <ClCompile Include="src\game\Room.cpp" />
+    <ClCompile Include="src\game\RoomEvents.cpp" />
+    <ClCompile Include="src\game\CmdFunctions.cpp" />
+    <ClCompile Include="src\game\EngineStubs.cpp" />
     <ClCompile Include="src\game\Rendering.cpp" />
     <ClCompile Include="src\game\PrintText.cpp" />
     <ClCompile Include="src\game\TextureLoader.cpp" />

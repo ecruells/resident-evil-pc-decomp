@@ -1,14 +1,14 @@
-// GameStubs.cpp - Stub functions and implementations from Ghidra decompilation
-// All functions decompiled from Ghidra with original addresses
+// ObjectManager.cpp - Object lifecycle management (decompiled from Ghidra)
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
+#include "SpriteRenderer.h"
 
 // ============================================================================
 // ObjectList_Cleanup (0x00487040)
 // Cleans up the object list: releases object handles and calls destructors
 // ============================================================================
-static void ObjectList_Cleanup(void)
+void ObjectList_Cleanup(void)
 {
     if (g_objectListCleanupFlag == 1) {
         DWORD* basePtr = g_objectListPtrArray;
@@ -42,7 +42,7 @@ static void ObjectList_Cleanup(void)
 // VideoDriver_ClearState348 (0x004211b0)
 // Clears texture state at this+0x348: releases handles then zeros the array
 // ============================================================================
-static int __stdcall VideoDriver_ClearState348(void* obj, void* context)
+int __stdcall VideoDriver_ClearState348(void* obj, void* context)
 {
     // VideoDriver_ReleaseResources (0x00421150)
     // Release 8 texture handles stored at obj+0x34c
@@ -69,7 +69,7 @@ static int __stdcall VideoDriver_ClearState348(void* obj, void* context)
 // ObjectCleanupCallback (0x00483e00)
 // Async callback for Object_DeleteAll: iterates object arrays and cleans up
 // ============================================================================
-static void ObjectCleanupCallback(void)
+void ObjectCleanupCallback(void)
 {
     g_objectDeleteFlag = 0;
 
@@ -108,7 +108,7 @@ static void ObjectCleanupCallback(void)
 // FUN_00484e70 (0x00484e70)
 // Called by CleanupWrapper: clears specific render-state objects
 // ============================================================================
-static void FUN_00484e70(void)
+void FUN_00484e70(void)
 {
     // Clear a specific PSXTexture+aux object at g_renderStateTex
     VideoDriver_ClearState348(g_renderStateTex, g_pMarniDirect3D);
@@ -122,7 +122,7 @@ static void FUN_00484e70(void)
 // CleanupWrapper (0x00484ea0)
 // Wrapper that schedules FUN_00484e70 asynchronously
 // ============================================================================
-static void CleanupWrapper(void)
+void CleanupWrapper(void)
 {
     ExecAsync((void*)FUN_00484e70);
 }
@@ -148,49 +148,8 @@ void setSomeColor(int r, int g, int b)
     g_color_b = (float)b * 0.0078125;
 }
 
-// ---------------------------------------------------------------------------
-// Texture/video stubs (called from logos_state / title_state in GameState.cpp)
-// ---------------------------------------------------------------------------
-
-void FUN_00470a30(void) { }
-static void QueueVideoPlayback(int id, int b)                { /* stub */ }
-static void VideoDriver_ClearArrayD0(void)                   { /* stub */ }
-static void LoadPSXImage(void* buf, int mode)                { /* stub */ }
-static int  FUN_0046c160(void* data, int mode)               { return 0; }
-static void FUN_00427270(void)                               { /* stub */ }
-static void FUN_00427100(int a, int b, int c)                { /* stub */ }
-static int  FUN_004271e0(int a, int b)                       { return 0; }
-static void FUN_00426df0(int id, void* data)                 { /* stub */ }
-static void FUN_00426f70(int a, void* b)                     { /* stub */ }
-static void FUN_00427250(void)                               { /* stub */ }
-
-// ---------------------------------------------------------------------------
-// General game engine stubs (referenced from MainLoop.cpp and WindowProc.cpp)
-// FUN_00401020, FUN_0045ab60, FUN_00497360, FUN_00497340, StMask
-// are implemented in Rendering.cpp
-// ---------------------------------------------------------------------------
-void FUN_004973a0(int param)                                 { /* stub */ }
-
-void UpdateDemoTimer(void) {
-
-}
 // ============================================================================
-// empty function (0x0047b950 area)
+// object_delete_00442170 (0x00442170)
+// No-op placeholder. Called from room_set with category=1 but does nothing.
 // ============================================================================
-void empty_0047b950(int param)
-{
-}
-
-
-void CreateTimestampedLogFile(void)                           { /* stub */ }
-void ShowVideoModeDebugText(void)                            { /* stub */ }
-
-// ---------------------------------------------------------------------------
-// Title/input stubs
-// ---------------------------------------------------------------------------
-void empty_0040abb0(void* ptr, int a, int b, int c) { /* stub */ }
-void cleanup_texture_slot(int slot)                           { /* stub */ }
-void empty_00497c10(int value)                         { /* stub */ }
-void empty_00470960(int slot) { }
-
-
+void object_delete_00442170(int category) { }

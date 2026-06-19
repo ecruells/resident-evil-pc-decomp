@@ -404,3 +404,26 @@ void Display_SetParams(int param1, int param2) {
     g_SubpixelOffsetX = param1;
     g_SubpixelOffsetY = param2;
 }
+
+// ============================================================================
+// texture_queue_reset (0x004739e0)
+// Resets the texture queue state and all 5 queue entries.
+// Each entry is 10 bytes. Clears counters DAT_00ae9f04, DAT_00ae9f06,
+// DAT_00ae9f00, DAT_00ae9efc.
+// ============================================================================
+void texture_queue_reset(void) {
+    DAT_00ae9f04 = 0;
+    DAT_00ae9f06 = 0;
+    DAT_00ae9f00 = 0;
+    DAT_00ae9efc = 0;
+    unsigned char* p = g_textureQueueData;
+    for (int i = 0; i < 5; i++) {
+        p[3] = 0;
+        p[4] = 0;
+        p[5] = 0;
+        *(unsigned short*)(p + 6) = 0;
+        *(unsigned short*)(p + 8) = 0x100;
+        p[1] = 0;
+        p += 10;
+    }
+}

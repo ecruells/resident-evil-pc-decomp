@@ -1005,7 +1005,6 @@ src/
 │   ├── MainLoop.cpp         # Main game loop (0x00428eb0)
 │   ├── GameInit.cpp          # Game initialization (init_and_start_game)
 │   ├── GameState.cpp         # Game states: debug(SFX player), logos, title load
-│   ├── GameStubs.cpp         # Empty stub functions for unimplemented code
 │   ├── TitleScreen.cpp       # Title screen rendering & state machine
 │   ├── Rendering.cpp         # Frame present, text output, sprite drawing
 │   ├── TaskScheduler.cpp     # Task coroutine scheduler

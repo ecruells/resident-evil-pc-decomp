@@ -1,0 +1,861 @@
+// TmdAnimation.cpp - TMD animation pipeline (decompiled from Ghidra)
+#include "../Globals.h"
+#include "../marni/MarniSystem.h"
+#include "../marni/PSXTexture.h"
+#include "FileLoader.h"
+#include <cstdio>
+
+// ============================================================================
+// TMD texture header struct (output of FUN_00482d40 / ParseTmdTextureHeader)
+// Packed struct matching the original byte layout (28 bytes = 0x1C)
+// ============================================================================
+#pragma pack(push, 1)
+struct TmdTextureHeader {
+    int   count;       // offset 0x00: (*data & 0xF) sign-extended
+    short field_04;    // offset 0x04: first short from aligned sub-section
+    short field_06;    // offset 0x06: second short
+    short field_08;    // offset 0x08: third short (used for page count calc)
+    short field_0A;    // offset 0x0A: fourth short
+    int   dataPtr;     // offset 0x0C: pointer into sub-section data
+    short field_10;    // offset 0x10: first short from data+8 (CLUT descriptor low)
+    short field_12;    // offset 0x12: second short from data+8
+    short field_14;    // offset 0x14: third short from data+8
+    short field_16;    // offset 0x16: fourth short from data+8 (depth increment)
+    int   ptr_10;      // offset 0x18: data + 0x10 pointer
+};
+#pragma pack(pop)
+
+// ============================================================================
+// FUN_00482dc0 (0x00482dc0) - Resolve relative pointers in animation data
+// Given a pointer to an animation data block header, resolves all internal
+// relative pointers (offsets) into absolute addresses.
+// ============================================================================
+void ResolveAnimPointers(unsigned char* data)
+{
+    int iVar1;
+    unsigned char* pbVar2;
+
+    if ((*data & 1) != 0) return;
+
+    data[0] = 1;
+    data[1] = 0;
+    data[2] = 0;
+    data[3] = 0;
+    iVar1 = *(int*)(data + 4);
+    unsigned char* basePtr = data + 8;
+    pbVar2 = basePtr;
+    if (iVar1 > 0) {
+        do {
+            *(unsigned char**)pbVar2 = basePtr + *(int*)pbVar2;
+            *(unsigned char**)(pbVar2 + 8) = basePtr + *(int*)(pbVar2 + 8);
+            *(unsigned char**)(pbVar2 + 0x10) = basePtr + *(int*)(pbVar2 + 0x10);
+            iVar1--;
+            pbVar2 += 0x1c;
+        } while (iVar1 != 0);
+    }
+}
+
+// ============================================================================
+// FUN_00482ef0 (0x00482ef0) - Set animation slot data
+// Links an animation data slot to a specific index within the animation header.
+// ============================================================================
+void SetAnimSlot(AnimSlot* slots, int slotPtr, int index)
+{
+    *(int*)(slotPtr + 8) = (int)&slots[index];
+    g_animSlotIndex = index;
+}
+
+// ============================================================================
+// FUN_00483da0 (0x00483da0) - Find minimum CLUT depth in animation
+// Scans animation data entries to find the lowest CLUT depth value.
+// Returns 0 if no valid depth found.
+// ============================================================================
+unsigned int FindMinClutDepth(AnimSlot* slot)
+{
+    unsigned int minDepth = 0xFFFFFFFF;
+    unsigned int depth;
+
+    for (int i = 0; i < 2; i++) {
+        unsigned int* puVar5 = (unsigned int*)slot->data2;
+        int iVar2 = slot->entryCount;
+        if (iVar2 > 0) {
+            do {
+                if ((*puVar5 & 0x4000000) != 0) {
+                    depth = (puVar5[2] >> 16) & 0x1f;
+                    if (depth < minDepth) {
+                        minDepth = depth;
+                    }
+                }
+                iVar2--;
+                puVar5 = puVar5 + ((*puVar5 >> 8) & 0xff) + 1;
+            } while (iVar2 != 0);
+        }
+        slot++;
+    }
+    if (minDepth == 0xFFFFFFFF) {
+        minDepth = 0;
+    }
+    return minDepth;
+}
+
+// ============================================================================
+// FUN_00483fc0 (0x00483fc0) - Setup texture bank for rendering
+// Prepares a PSXTexture bank entry for D3D rendering.
+// param_1: pointer to receive the resolved texture bank pointer
+// param_2: texture bank ID (index into g_objectCountArray)
+// ============================================================================
+void SetupTextureBank(DWORD** param_1, int param_2)
+{
+    int count = g_objectCountArray[param_2];
+    if (count == 0) return;
+
+    if (count > 1) {
+        *param_1 = (DWORD*)&g_psxTextureArray[(param_2 * 8 + 1) * 0x36C];
+        return;
+    }
+
+    g_objectCountArray[param_2] = count + 1;
+    int slotIndex = count + param_2 * 8;
+    BYTE* dstTex = &g_psxTextureArray[slotIndex * 0x36C];
+    BYTE* srcTex = &g_psxTextureArray[(slotIndex - 1) * 0x36C];
+
+    VideoDriver_ClearState348(dstTex, g_pMarniDirect3D);
+
+    PSXTexture* dst = (PSXTexture*)dstTex;
+    PSXTexture* src = (PSXTexture*)srcTex;
+    *dst = *src;
+
+    DWORD* dstFlag = (DWORD*)(dstTex + 0x348);
+    DWORD* srcFlag = (DWORD*)(srcTex + 0x348);
+    *dstFlag = *srcFlag;
+
+    DWORD* dstHandles = (DWORD*)(dstTex + 0x34C);
+    DWORD* srcHandles = (DWORD*)(srcTex + 0x34C);
+    for (int i = 0; i < 8; i++) {
+        dstHandles[i] = srcHandles[i];
+    }
+
+    *param_1 = (DWORD*)dstTex;
+
+    DWORD* clearHandles = dstHandles;
+    for (int i = 0; i < 8; i++) {
+        clearHandles[i] = 0;
+    }
+    *dstFlag = 0;
+
+    ResolveAnimPointers(dstTex);
+
+    int matCount = *(int*)(dstTex + 0x340);
+    if (matCount != 0) {
+        void** vtable = *(void***)g_pMarniDirect3D;
+        typedef DWORD (*CreateTextureFn)(void*, void*, int, int);
+        CreateTextureFn createTex = (CreateTextureFn)vtable[6];
+
+        DWORD* handlePtr = dstHandles;
+        BYTE* matPtr = dstTex;
+        for (unsigned int i = 0; i < (unsigned int)matCount; i++) {
+            DWORD handle = createTex(g_pMarniDirect3D, matPtr, 0x21, 0);
+            *handlePtr = handle;
+            handlePtr++;
+            matPtr += 0x68;
+        }
+    }
+    *dstFlag = 1;
+}
+
+// ============================================================================
+// FUN_00483cf0 (0x00483cf0) - Check if TMD has transparent polygons
+// Returns 1 if any polygon has the transparency bit (0x2000000) set.
+// ============================================================================
+unsigned int CheckTmdTransparency(int param_1)
+{
+    unsigned int count = 0;
+    unsigned int* objData = *(unsigned int**)(param_1 + 0x10);
+    unsigned int objCount = *(unsigned int*)(param_1 + 0x14);
+
+    for (unsigned int i = 0; i < objCount; i++) {
+        if ((*objData & 0x2000000) != 0) {
+            return 1;
+        }
+        count++;
+        objData = objData + ((*objData >> 8) & 0xFF) + 1;
+    }
+    return 0;
+}
+
+// ============================================================================
+// FUN_00483d30 (0x00483d30) - Get TMD blend mode
+// Returns blend mode from DAT_004d2be0 override or from polygon flags.
+// ============================================================================
+int GetTmdBlendMode(int param_1)
+{
+    unsigned int* objData = *(unsigned int**)(param_1 + 0x10);
+    unsigned int objCount = *(unsigned int*)(param_1 + 0x14);
+
+    for (unsigned int i = 0; i < objCount; i++) {
+        if ((*objData & 0x2000000) != 0) {
+            if (DAT_004d2be0 >= 0 && DAT_004d2be0 < 256) {
+                return DAT_004d2be0;
+            }
+            return *(int*)((BYTE*)&DAT_004d2be0 + (((objData[2] & 0x600000) >> 0x13) * 4));
+            // NOTE: DAT_004d2c00 is the blend mode lookup table at 0x004d2c00
+        }
+        objData = objData + ((*objData >> 8) & 0xFF) + 1;
+    }
+    return 0;
+}
+
+// ============================================================================
+// FUN_00483eb0 (0x00483eb0) - Fix CLUT vertex data for PSXTexture
+// Scans 8-bit textures and adjusts CLUT vertex coordinates.
+// ============================================================================
+unsigned int FixClutVertexData(BYTE* texPtr)
+{
+    unsigned int hasChanges = 0;
+    unsigned int matCount = *(unsigned int*)(texPtr + 0x340);
+
+    for (unsigned int i = 0; i < matCount; i++) {
+        BYTE* matEntry = texPtr + i * 0x68;
+        if (*(char*)(matEntry + 0x2A) == 8) {
+            int* vtable = *(int**)matEntry;
+            short localBuf[256];
+            int result = ((int(*)(short*, short*))vtable[4])(localBuf, localBuf);
+            if (result != 0) {
+                short* ptr = localBuf;
+                for (int j = 0; j < 256; j++) {
+                    if (*ptr == (short)0x8000) {
+                        *ptr = (short)0x8001;
+                    }
+                    if (*ptr == 0) {
+                        hasChanges = 1;
+                    }
+                    ptr++;
+                }
+            }
+            ((void(*)())vtable[5])();
+        }
+    }
+    return hasChanges;
+}
+
+// ============================================================================
+// FUN_00483f40 (0x00483f40) - Check if PSXTexture needs re-creation
+// Returns 1 if any 8-bit texture has a zero CLUT entry.
+// ============================================================================
+unsigned int CheckTextureRecreation(BYTE* texPtr)
+{
+    unsigned int matCount = *(unsigned int*)(texPtr + 0x340);
+
+    for (unsigned int i = 0; i < matCount; i++) {
+        BYTE* matEntry = texPtr + i * 0x68;
+        if (*(char*)(matEntry + 0x2A) == 8) {
+            int* vtable = *(int**)matEntry;
+            short localBuf[256];
+            int result = ((int(*)(short*, short*))vtable[4])(localBuf, localBuf);
+            if (result != 0) {
+                short* ptr = localBuf;
+                for (int j = 0; j < 256; j++) {
+                    if (*ptr == 0) {
+                        return 1;
+                    }
+                    ptr++;
+                }
+            }
+            ((void(*)())vtable[5])();
+        }
+    }
+    return 0;
+}
+
+// ============================================================================
+// FUN_00483910 (0x00483910) - Create TMD object (internal)
+// Sets up a TMD object with texture, vertex, and rendering data.
+// param_1: texture depth/bank ID
+// param_2: TMD data pointer (from animation header)
+// param_3: animation object pointer
+// Returns: pointer to g_tmdObjectBuffer entry, or NULL on failure
+// ============================================================================
+BYTE* CreateTmdObjectInternal(int depth, int tmdDataPtr, int animObjPtr)
+{
+    // Check if this object is already cached
+    int slotIndex = *(int*)(animObjPtr + 8);
+    if (g_objectDeletePtr && g_objectDeletePtr[slotIndex] == animObjPtr) {
+        return (BYTE*)&g_tmdObjectBuffer[slotIndex * 0x1594];
+    }
+
+    // Find a free slot
+    int freeSlot = 0;
+    if (g_objectDeletePtr) {
+        for (freeSlot = 0; freeSlot < 250; freeSlot++) {
+            if (g_objectDeletePtr[freeSlot] == animObjPtr) goto slotFound;
+        }
+        if (g_objectDeleteFlag >= 250) {
+            return NULL;
+        }
+        freeSlot = g_objectDeleteFlag;
+    }
+
+slotFound:
+    // Resolve texture bank redirect
+    int bankID = depth;
+    if (g_textureBankRedirect[bankID] != 0) {
+        bankID = g_textureBankRedirect[bankID];
+    }
+
+    // Save the original header fields
+    DWORD* hdrPtr = (DWORD*)(tmdDataPtr - 0xC);
+    DWORD saved0 = hdrPtr[0];
+    DWORD saved1 = hdrPtr[1];
+    DWORD saved2 = hdrPtr[2];
+
+    // Temporarily modify header for PSXObject::Store
+    hdrPtr[0] = 0x41;
+    hdrPtr[1] = 1;
+    hdrPtr[2] = 1;
+
+    BYTE* texBank = &g_psxTextureArray[bankID * 0x1b60];
+    DWORD texRef = *(DWORD*)(texBank + 0x2C); // texture reference
+
+    // Call PSXObject::Store to parse TMD data
+    int tmdObjBase = (int)&g_tmdObjectBuffer[freeSlot * 0x1594];
+    // FUN_004450e0 processes the TMD and sets up vertex/index buffers
+    // For now, call the CMarniDirect3DTMD::Create path
+
+    // Restore header
+    hdrPtr[0] = saved0;
+    hdrPtr[1] = saved1;
+    hdrPtr[2] = saved2;
+
+    // Set up material pointers
+    CMarniDirect3DTMD* tmdObj = (CMarniDirect3DTMD*)tmdObjBase;
+
+    // Search through texture bank for matching materials
+    int matCount = *(int*)(texBank + 0x340);
+    bool hasTransparency = false;
+
+    if (matCount > 0) {
+        int* matPtr = (int*)(texBank + 0x54);
+        for (int i = 0; i < matCount; i++) {
+            // Check for transparency and blend mode
+            int transparency = CheckTmdTransparency(tmdDataPtr);
+            if (transparency != 0 && DAT_004d2bdc == 0) {
+                int blendMode = GetTmdBlendMode(tmdDataPtr);
+                if (blendMode != 0) {
+                    *(DWORD*)(animObjPtr + 0x14) = 0x3F000000; // 0.5f
+                    if (DAT_004d2be0 >= 0 && DAT_004d2be0 < 256 && DAT_004d2be0 == 0x30) {
+                        *(DWORD*)(animObjPtr + 0x14) = 0x3E4CCCCD; // 0.2f
+                    }
+                } else {
+                    *(DWORD*)(animObjPtr + 0x14) = 0;
+                }
+                hasTransparency = true;
+            }
+
+            if (*(int*)(texBank + 0x348) == 0) {
+                if (g_tmdTextureAllocated[bankID] == 0) {
+                    unsigned int needsRecreate = CheckTextureRecreation(texBank);
+                    if (needsRecreate != 0 && DAT_004d2bdc == 0) {
+                        FixClutVertexData(texBank);
+
+                        // Create D3D texture handles
+                        void** vtable = *(void***)g_pMarniDirect3D;
+                        typedef DWORD (*CreateTextureFn)(void*, BYTE*, int, int);
+                        CreateTextureFn createTex = (CreateTextureFn)vtable[6];
+
+                        int texCount = *(int*)(texBank + 0x340);
+                        DWORD* handlePtr = (DWORD*)(texBank + 0x34C);
+                        BYTE* matBase = texBank;
+                        for (int j = 0; j < texCount; j++) {
+                            DWORD handle = createTex(g_pMarniDirect3D, matBase, 0x21, 0);
+                            *handlePtr = handle;
+                            handlePtr++;
+                            matBase += 0x68;
+                        }
+                        *(int*)(texBank + 0x348) = 1;
+                    }
+                } else {
+                    // Use existing texture setup
+                    void** vtable = *(void***)g_pMarniDirect3D;
+                    typedef int (*SetTextureFn)(void*);
+                    SetTextureFn setTex = (SetTextureFn)vtable[9];
+                    setTex(g_pMarniDirect3D);
+                }
+            }
+
+            // Create the D3D TMD object
+            int result = tmdObj->Create(g_pMarniDirect3D, texBank, (void*)1);
+            if (result == 0) {
+                return NULL;
+            }
+
+            if (hasTransparency) {
+                // Mark transparent polygons
+                BYTE* objBase = (BYTE*)&g_tmdObjectBuffer[freeSlot * 0x1594 + 0x4D0];
+                for (int k = 0; k < 32; k++) {
+                    DWORD* flags = (DWORD*)(objBase + k * 0x84 + 0x80);
+                    *flags = *flags | 2;
+                }
+            }
+
+            matPtr += 0x1A; // 0x68 / 4 = 0x1A
+        }
+    }
+
+    // Store in the object delete list
+    if (g_objectDeletePtr) {
+        g_objectDeletePtr[freeSlot] = animObjPtr;
+    }
+    if (freeSlot == g_objectDeleteFlag) {
+        g_objectDeleteFlag++;
+    }
+    *(int*)(animObjPtr + 8) = freeSlot;
+
+    return (BYTE*)tmdObjBase;
+}
+
+// ============================================================================
+// LAB_00483c90 - Async callback for CreateTmdObject
+// Loads stored globals and calls CreateTmdObjectInternal, stores result.
+// ============================================================================
+void AsyncCreateTmdCallback(void)
+{
+    BYTE* result = CreateTmdObjectInternal(
+        (int)g_asyncTmdDepth,
+        (int)g_asyncTmdDataPtr,
+        (int)g_asyncTmdObjectPtr
+    );
+    g_asyncTmdResult = (DWORD)result;
+}
+
+// ============================================================================
+// FUN_00483cc0 (0x00483cc0) - Async TMD object setup
+// Schedules async TMD object creation. Returns an object handle.
+// ============================================================================
+unsigned int AsyncCreateTmdObject(unsigned int param1, unsigned int param2, unsigned int param3)
+{
+    g_asyncTmdDepth = param1;
+    g_asyncTmdDataPtr = param2;
+    g_asyncTmdObjectPtr = param3;
+    ExecAsync((void*)AsyncCreateTmdCallback);
+    return g_asyncTmdResult;
+}
+
+// ============================================================================
+// FUN_00486990 (0x00486990) - Complex TMD object setup
+// Processes TMD model objects for Direct3D rendering with vertex/UV/normal data.
+// Called when DAT_004d2bd8 (special model flag) is set.
+// param_1: pointer to animation object data (the param2 from CreateAnimObject)
+// ============================================================================
+void ComplexTmdObjectSetup(int* param_1)
+{
+    if (g_objectListCleanupFlag != 0) return;
+    g_objectListCleanupFlag = 1;
+
+    // Clear tracking arrays (0x100 DWORDs each)
+    memset(g_complexTmdObjectArray, 0, sizeof(g_complexTmdObjectArray));
+    for (int i = 0; i < 256; i++) g_complexTmdObjectIds[i] = -1;
+
+    // Get TMD data from the animation object
+    int* tmdData = (int*)*param_1;
+    int vertexBase = *tmdData;                                // [ESI+0x00] vertex data base
+    unsigned int* objTable = (unsigned int*)tmdData[4];       // [ESI+0x10] object table
+    int objCount = tmdData[5];                                // [ESI+0x14] object count
+
+    // Resolve texture bank
+    unsigned int bankID = (objTable[2] & 0x1F0000) >> 16;
+    if (g_textureBankRedirect[bankID] != 0) {
+        bankID = g_textureBankRedirect[bankID];
+    }
+    BYTE* texBank = &g_psxTextureArray[bankID * 0x1b60];
+
+    // Setup texture bank
+    DWORD* texBankPtr = (DWORD*)texBank;
+    SetupTextureBank(&texBankPtr, bankID);
+    texBank = (BYTE*)texBankPtr;
+
+    if (objCount <= 0) {
+        g_objectListCleanupCount = 0;
+        param_1[4] = 1;
+        return;
+    }
+
+    // Output array pointers
+    BYTE* faceData = g_faceNormalBuffer;                           // face normal output
+    DWORD* ptrArray = g_objectListPtrArray;                        // function table pointers
+    // D3D object data starts at offset 0x54 from the cleanup data area
+    // In original: DAT_008ffd14 = g_objectCountArray[32] + 0x54
+    // We use g_objectCountArray extended area via cast
+    DWORD* objDataBase = (DWORD*)&g_objectCountArray[32];
+    DWORD* d3dHandle = objDataBase + 0x15;                         // first entry's D3D handle
+
+    int outCount = 0;
+
+    for (int objIdx = 0; objIdx < objCount; objIdx++) {
+        unsigned int flags = *objTable;
+
+        if ((flags & 0xFDFFFFFF) == 0x34000609) {
+            // Textured triangle primitive - process for D3D rendering
+
+            // Release existing D3D handle
+            void** d3dVtable = *(void***)g_pMarniDirect3D;
+            typedef void (*DeleteHandleFn)(void*, DWORD);
+            DeleteHandleFn deleteHandle = (DeleteHandleFn)d3dVtable[9];
+            deleteHandle(g_pMarniDirect3D, *d3dHandle);
+            *d3dHandle = 0;
+
+            // Set up rendering state from function table
+            void** funcPtrs = (void**)*ptrArray;
+
+            // Call Release/reset [vtable[0]]
+            typedef void (*VoidFn)(void);
+            ((VoidFn)funcPtrs[0])();
+
+            // Call CreateWork(3 vertices, 2 primitives, type 3=triangles) [vtable[1]]
+            typedef int (*CreateWorkFn)(void*, int, int, int);
+            ((CreateWorkFn)funcPtrs[1])(funcPtrs, 3, 2, 3);
+
+            // Call Lock(NULL, NULL) [vtable[6]]
+            typedef int (*LockFn)(void*, void*, void*);
+            ((LockFn)funcPtrs[6])(funcPtrs, NULL, NULL);
+
+            // Find matching texture/material entry
+            unsigned int texID = ptrArray[1] >> 16;
+            int matCount = *(int*)(texBank + 0x340) - 1;
+            int matIdx = 0;
+            int matOffset = 0;
+
+            if (matCount > 0) {
+                int* matPtr = (int*)(texBank + 0x54);
+                while (matIdx < matCount) {
+                    if (*matPtr == (int)((texID & 0x3F) << 4) || matPtr[1] == (int)(texID >> 6))
+                        break;
+                    matPtr += 0x1A;  // stride 0x68 / 4
+                    matIdx++;
+                    matOffset += 0x68;
+                }
+            }
+
+            // Get vertex callback [vtable[3]]
+            typedef int (*SetVertexFn)(void*, int, float*);
+            SetVertexFn setVertex = (SetVertexFn)funcPtrs[3];
+
+            // Process 3 vertices
+            short vertexPositions[3][3];  // 3 vertices × 3 coordinates (x, y, z)
+            int vertexCount = 0;
+            unsigned int* vertData = objTable + 1;  // vertex data starts after object header
+
+            // The UV data and vertex indices are interleaved in the object data
+            // Each vertex has: UV word (at vertData[n]) + vertex index (at vertData[n+3])
+            DWORD* uvData = (DWORD*)(objTable + 1);
+            DWORD* idxData = (DWORD*)(objTable + 4);
+
+            for (int v = 0; v < 3; v++) {
+                // Get vertex position from TMD vertex data
+                unsigned int vertIdx = idxData[v] >> 16;
+                short* pos = (short*)(vertexBase + vertIdx * 8);
+
+                float x = (float)(int)pos[0];
+                float y = -(float)(int)pos[1];
+                float z = (float)(int)pos[2];
+
+                // Build vertex data with position + defaults
+                float vertBuf[12];
+                vertBuf[0] = x;
+                vertBuf[1] = y;
+                vertBuf[2] = z;
+                for (int s = 3; s < 9; s++) vertBuf[s] = 1.0f;
+                vertBuf[9] = 1.0f;
+                vertBuf[10] = 1.0f;
+                vertBuf[11] = 1.0f;
+
+                // UV coordinates from the lower bytes of the UV data word
+                unsigned int uVal = uvData[v] & 0xFF;
+                unsigned int vVal = (uvData[v] >> 8) & 0xFF;
+                unsigned int texWidth = *(unsigned int*)(texBank + matOffset + 0x2C);
+                unsigned int texHeight = *(unsigned int*)(texBank + matOffset + 0x30);
+                if (texWidth > 0) vertBuf[9] = (float)uVal / (float)texWidth;
+                if (texHeight > 0) vertBuf[10] = (float)vVal / (float)texHeight;
+
+                // Set vertex
+                setVertex(funcPtrs, vertexCount, vertBuf);
+
+                // Store position for normal calculation
+                vertexPositions[v][0] = pos[0];
+                vertexPositions[v][1] = pos[1];
+                vertexPositions[v][2] = pos[2];
+
+                vertexCount++;
+            }
+
+            // Calculate face normal as average of 3 vertex positions
+            short* normalOut = (short*)faceData;
+            normalOut[0] = (short)((int)vertexPositions[0][0] + (int)vertexPositions[1][0] + (int)vertexPositions[2][0]) / 3;
+            normalOut[1] = (short)((int)vertexPositions[0][1] + (int)vertexPositions[1][1] + (int)vertexPositions[2][1]) / 3;
+            normalOut[2] = (short)((int)vertexPositions[0][2] + (int)vertexPositions[1][2] + (int)vertexPositions[2][2]) / 3;
+
+            // Call SetList for both primitives [vtable[5]]
+            typedef int (*SetListFn)(void*, int, void*);
+            SetListFn setList = (SetListFn)funcPtrs[5];
+            setList(funcPtrs, 0, objTable);
+            setList(funcPtrs, 1, objTable);
+
+            // Call Unlock [vtable[7]]
+            ((VoidFn)funcPtrs[7])();
+
+            // Set object properties
+            d3dHandle[-0x15] = 4;   // object type = 4
+            d3dHandle[0x0B] = 2;    // flags = 2
+
+            // Create D3D object handle via g_pMarniDirect3D vtable[7]
+            typedef DWORD (*CreateHandleFn)(void*, DWORD, DWORD);
+            CreateHandleFn createHandle = (CreateHandleFn)d3dVtable[7];
+            DWORD handle = createHandle(g_pMarniDirect3D, 0, 0);
+            *d3dHandle = handle;
+            d3dHandle[1] = *(DWORD*)(texBank + matIdx * 4 + 0x34C);
+
+            // Set scale to 1.0
+            d3dHandle[-3] = 0x3F800000;  // scaleX = 1.0f
+            d3dHandle[-2] = 0x3F800000;  // scaleY = 1.0f
+            d3dHandle[-1] = 0x3F800000;  // scaleZ = 1.0f
+            d3dHandle[2] = 0x3F800000;
+            d3dHandle[3] = 0x3F800000;
+            d3dHandle[4] = 0x3F800000;
+
+            // Copy scale to secondary location
+            d3dHandle[6] = d3dHandle[2];
+            d3dHandle[7] = d3dHandle[3];
+            d3dHandle[8] = d3dHandle[4];
+            d3dHandle[9] = d3dHandle[5];
+
+            // Copy 0x21 DWORDs (0x84 bytes) of object data to secondary buffer
+            // In original binary: from EBP-0x54 to EBP+0x83ac (256 entries ahead)
+            DWORD* src = d3dHandle - 0x15;
+            DWORD* dst = d3dHandle + 0x20EB;  // 0x83ac / 4 = 0x20EB
+            for (int c = 0; c < 0x21; c++) {
+                dst[c] = src[c];
+            }
+
+            // Advance output pointers
+            faceData += 8;
+            ptrArray += 0x0E;     // 0x38 / 4 = 0x0E
+            d3dHandle += 0x21;    // 0x84 / 4 = 0x21
+            outCount++;
+        }
+
+        // Check bounds on pointer array
+        if (ptrArray >= (DWORD*)((BYTE*)g_objectListPtrArray + 0x3800)) break;
+
+        // Advance to next TMD object (variable-size entries)
+        unsigned int advance = ((flags & 0xFF00) >> 6) + 4;
+        objTable = (unsigned int*)((BYTE*)objTable + advance);
+    }
+
+    g_objectListCleanupCount = outCount;
+    param_1[4] = 1;
+}
+
+// ============================================================================
+// FUN_00482f20 (0x00482f20) - Create animation object entry
+// Sets up an animation object with data from the animation header.
+// The result is written to param2 and returned as param2 + 0x2d.
+// ============================================================================
+unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2)
+{
+    *(unsigned int**)(slotPtr + 0xc) = param2;
+    AnimSlot* slot = *(AnimSlot**)(slotPtr + 8);
+    *param2 = (unsigned int)slot;
+    unsigned int uVar1 = FindMinClutDepth(slot);
+    param2[1] = uVar1;
+    param2[2] = 0xFFFFFFFF;
+    param2[3] = 0xFFFFFFFF;
+    param2[4] = 0;
+    param2[6] = 0;
+    param2[5] = 0;
+
+    if (DAT_004d2bd8 != 0) {
+        ComplexTmdObjectSetup((int*)param2);
+        DAT_004d2bd8 = 0;
+        return param2 + 0x2d;
+    }
+
+    param2[8] = 0;
+    unsigned int uVar2 = AsyncCreateTmdObject(param2[1], *param2, (unsigned int)param2);
+    param2[8] = uVar2;
+    return param2 + 0x2d;
+}
+
+// ============================================================================
+// FUN_00473da0 (0x00473da0) - Process TMD texture entries
+// Iterates through TMD texture entries and applies texture bank/depth settings.
+// param1: mode (0=no change, 1=set depth, 2=set bank+depth)
+// param2: pointer to TMD data
+// param3: texture bank ID
+// param4: texture depth byte
+// ============================================================================
+unsigned int ProcessTmdTextures(char param1, unsigned int* param2, int param3, int param4)
+{
+    unsigned int uVar1 = *param2;
+
+    if (param2[1] == 0) {
+        ResolveAnimPointers((unsigned char*)(param2 + 1));
+    }
+
+    int iVar3 = param2[2];
+    unsigned int* cursor = param2 + 3;
+
+    while (iVar3 != 0) {
+        unsigned int* puVar2 = (unsigned int*)cursor[4];
+        for (int iVar4 = cursor[5]; iVar4 != 0; iVar4--) {
+            if ((*puVar2 & 0x4000000) != 0) {
+                if (param1 == 0) {
+                    puVar2[2] = puVar2[2] + param3 * 0x10000;
+                } else {
+                    if (param1 == 1) {
+                        puVar2[1] = puVar2[1] + param4 * 0x400000;
+                    } else if (param1 == 2) {
+                        puVar2[2] = puVar2[2] + param3 * 0x10000;
+                        puVar2[1] = puVar2[1] + param4 * 0x400000;
+                    }
+                }
+            }
+            puVar2 = puVar2 + ((*puVar2 >> 8) & 0xff) + 1;
+        }
+        cursor += 7;
+        iVar3--;
+    }
+    return uVar1;
+}
+
+// ============================================================================
+// FUN_00483900 (0x00483900) - Clear TMD processing flag
+// ============================================================================
+void ClearTmdProcessingFlag(void)
+{
+    DAT_004d2bf4 = 0;
+}
+
+// ============================================================================
+// FUN_00411e00 (0x00411e00) - Set sprite buffer flag
+// Sets g_SpriteBufferFlag = 1, indicating sprite data needs processing.
+// ============================================================================
+void SetSpriteBufferFlag(void)
+{
+    g_SpriteBufferFlag = 1;
+}
+
+// ============================================================================
+// FUN_00473ad0 (0x00473ad0) - Queue texture for processing
+// Adds a texture reference to the processing queue.
+// Returns the queue index on success, 0xFF if queue is full.
+// ============================================================================
+unsigned char QueueTextureForProcessing(char param1, unsigned char param2)
+{
+    if (DAT_00ae9f04 > 3) {
+        return 0xFF;
+    }
+    unsigned int idx = DAT_00ae9f04;
+    ((unsigned short*)g_textureQueueData)[idx * 5] = param2;
+    ((unsigned short*)g_textureQueueData)[idx * 5 + 1] = param1 - 10;
+    DAT_00ae9f04++;
+    return (unsigned char)idx;
+}
+
+// ============================================================================
+// FUN_00482d40 (0x00482d40) - Parse TMD texture header
+// Parses EMD/TMD texture data header into a structured form.
+// param_1: pointer to texture data section at offset 4 of the TMD buffer
+// header:  output struct (28 bytes)
+// ============================================================================
+void ParseTmdTextureHeader(void* data, TmdTextureHeader* header)
+{
+    DWORD* d = (DWORD*)data;
+
+    header->count = (int)(short)(*(short*)data & 0xF);
+
+    short* src = (short*)((BYTE*)data + 8);
+    header->field_10 = *src++;
+    header->field_12 = *src++;
+    header->field_14 = *src++;
+    header->field_16 = *src++;
+
+    header->ptr_10 = (int)((BYTE*)data + 0x10);
+
+    DWORD offset = d[1] & 0xFFFFFFFC;
+    src = (short*)((BYTE*)data + offset + 8);
+    header->field_04 = *src++;
+    header->field_06 = *src++;
+    header->field_08 = *src++;
+    header->field_0A = *src++;
+
+    header->dataPtr = (int)((BYTE*)data + offset + 0x10);
+}
+
+// ============================================================================
+// FUN_00483770 (0x00483770) - TMD processing callback
+// Processes TMD texture data asynchronously. Called via ExecAsync.
+// Handles texture page allocation, CLUT setup, and PSXTexture loading.
+// ============================================================================
+void TmdProcessingCallback(void)
+{
+    BYTE* tmdData = (BYTE*)g_tmdAsyncData;
+    TmdTextureHeader header;
+
+    ParseTmdTextureHeader(tmdData + 4, &header);
+
+    void* psvTex;
+    if (g_TextureBankID == 0x16) {
+        g_objectCountArray[22] = 1;
+        psvTex = &g_psxTextureArray[0x16 * 0x1b60];
+    } else {
+        int count = g_objectCountArray[g_TextureBankID];
+        if (count >= 8) {
+            return;
+        }
+        g_objectCountArray[g_TextureBankID] = count + 1;
+        psvTex = &g_psxTextureArray[(count + g_TextureBankID * 8) * 0x36C];
+    }
+
+    DWORD* puVar7 = (DWORD*)(tmdData + 0xC);
+    DWORD savedVar7 = *puVar7;
+
+    DWORD subOffset = *(DWORD*)(tmdData + 8) & 0xFFFFFFFC;
+    DWORD* puVar1 = (DWORD*)(tmdData + subOffset + 0xC);
+    DWORD savedVar1 = *puVar1;
+
+    *puVar7 = ((unsigned int)(g_TextureDepthByte + 0x1E0) << 16) | (header.field_10 & 0xFFFF);
+    *puVar1 = ((unsigned int)(g_TextureBankID & 0x10) << 20) | ((unsigned int)(g_TextureBankID & 0xF) << 6);
+
+    VideoDriver_ClearState348(psvTex, g_pMarniDirect3D);
+    ((PSXTexture*)psvTex)->Store((int*)tmdData, 1);
+
+    *puVar7 = savedVar7;
+    *puVar1 = savedVar1;
+
+    int pageCount = (int)(((header.field_08 & 0xFFFF) + 0x3F) >> 6);
+
+    if (pageCount != 0) {
+        DWORD* allocPtr = &g_tmdTextureAllocated[g_TextureBankID];
+        for (int i = pageCount; i != 0; i--) {
+            *allocPtr++ = DAT_004d2bf4;
+        }
+
+        DWORD* redirectPtr = &g_textureBankRedirect[g_TextureBankID];
+        for (int i = pageCount; i != 0; i--) {
+            *redirectPtr++ = g_TextureBankID;
+        }
+    }
+
+    g_TextureBankID = g_TextureBankID + (unsigned char)pageCount;
+    g_TextureDepthByte = g_TextureDepthByte + (unsigned char)(header.field_16 & 0xFF);
+    DAT_004d2bf4 = 1;
+}
+
+// ============================================================================
+// FUN_004838e0 (0x004838e0) - Async TMD processing
+// Schedules TMD texture processing asynchronously.
+// ============================================================================
+void ProcessTmdAsync(unsigned int param1)
+{
+    g_tmdAsyncData = param1;
+    ExecAsync((void*)TmdProcessingCallback);
+}

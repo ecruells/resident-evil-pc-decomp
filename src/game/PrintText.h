@@ -90,9 +90,24 @@ struct Encoded {
 
     constexpr Encoded(const char (&str)[N]) : bytes{}
     {
-        for (int i = 0; i < N - 1; i++)
-            bytes[i] = encodeChar((unsigned char)str[i]);
-        bytes[N - 1] = 0x01;
+        int out = 0;
+        for (int i = 0; i < N - 1; i++) {
+            unsigned char c = (unsigned char)str[i];
+            if (c == 0x5C && i + 1 < N - 1) {
+                switch ((unsigned char)str[i + 1]) {
+                    case 'n': bytes[out++] = 0x02; i++; continue;
+                    case 'p': bytes[out++] = 0x03; i++; continue;
+                    case 's': bytes[out++] = 0x04; i++; continue;
+                    case 'i': bytes[out++] = 0x05; i++; continue;
+                    case 'c': bytes[out++] = 0x08; i++; continue;
+                    case 'q': bytes[out++] = 0x0A; i++; continue;
+                    case 0x5C: bytes[out++] = encodeChar(0x5C); i++; continue;
+                    default: break;
+                }
+            }
+            bytes[out++] = encodeChar(c);
+        }
+        bytes[out] = 0x01;
     }
 
     operator const unsigned char*() const { return bytes; }
