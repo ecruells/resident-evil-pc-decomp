@@ -55,14 +55,12 @@ struct PlayerEntity {
     unsigned char  unk_13;              // 0x13
     unsigned int   modelLoadBuffer;     // 0x14
     unsigned int   unk_18;              // 0x18
-    ScaMatrixData* scaMatrixData;       // 0x1C
 
-    // ---- Transform MATRIX (0x20 - 0x3F) ----
-    MATRIX         transform;           // 0x20 (32 bytes)
-
-    // ---- Post-transform gap (0x40 - 0x6B) ----
-    int            t_pad;               // 0x40
-    unsigned char  pad_44[0x28];        // 0x44-0x6B
+    // ---- SCA matrix data (0x1C - 0x6B, 0x50 bytes) ----
+    // Embedded ScaMatrixData struct. localMatrix at entity+0x20 is the transform matrix.
+    // worldMatrix at entity+0x40. Total: field_00(4) + localMatrix(32) + worldMatrix(32)
+    // + field_44(4) + owner(4) + field_4c(4) = 0x50 bytes.
+    ScaMatrixData  scaMatrixData;       // 0x1C
 
     // ---- Position + movement (0x6C - 0x83) ----
     SVECTOR        position;            // 0x6C (8 bytes)
@@ -162,14 +160,12 @@ struct Entity {
     unsigned char  unk_13;              // 0x13
     unsigned int   modelLoadBuffer;     // 0x14
     unsigned int   unk_18;              // 0x18
-    ScaMatrixData* scaMatrixData;       // 0x1C
 
-    // ---- Transform MATRIX (0x20 - 0x3F) ----
-    MATRIX         transform;           // 0x20 (32 bytes)
-
-    // ---- Post-transform gap (0x40 - 0x6B) ----
-    int            t_pad;               // 0x40
-    unsigned char  pad_44[0x28];        // 0x44-0x6B
+    // ---- SCA matrix data (0x1C - 0x6B, 0x50 bytes) ----
+    // Embedded ScaMatrixData struct. localMatrix at entity+0x20 is the transform matrix.
+    // worldMatrix at entity+0x40. Total: field_00(4) + localMatrix(32) + worldMatrix(32)
+    // + field_44(4) + owner(4) + field_4c(4) = 0x50 bytes.
+    ScaMatrixData  scaMatrixData;       // 0x1C
 
     // ---- Position + movement (0x6C - 0x83) ----
     SVECTOR        position;            // 0x6C (8 bytes)

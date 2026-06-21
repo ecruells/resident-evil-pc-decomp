@@ -190,9 +190,9 @@ static void scd_event_state2_movement(void)
         return;
 
     case 0x02: // Apply speed to position
-        ent->transform.t[0] += (int)ent->speed.x;
-        ent->transform.t[1] += (int)ent->speed.y;
-        ent->transform.t[2] += (int)ent->speed.z;
+        ent->scaMatrixData.localMatrix.t[0] += (int)ent->speed.x;
+        ent->scaMatrixData.localMatrix.t[1] += (int)ent->speed.y;
+        ent->scaMatrixData.localMatrix.t[2] += (int)ent->speed.z;
         g_pScdEventCurrent->scriptPtr++;
         return;
 
@@ -204,9 +204,9 @@ static void scd_event_state2_movement(void)
         return;
 
     case 0x04: // Apply speed AND rotation steps
-        ent->transform.t[0] += (int)ent->speed.x;
-        ent->transform.t[1] += (int)ent->speed.y;
-        ent->transform.t[2] += (int)ent->speed.z;
+        ent->scaMatrixData.localMatrix.t[0] += (int)ent->speed.x;
+        ent->scaMatrixData.localMatrix.t[1] += (int)ent->speed.y;
+        ent->scaMatrixData.localMatrix.t[2] += (int)ent->speed.z;
         ent->position.pad += ent->move_step_x;
         *(short*)&ent->angle = *(short*)&ent->angle + ent->move_step_z;
         *((short*)&ent->angle + 1) = *((short*)&ent->angle + 1) + *(short*)&ent->state;
@@ -232,16 +232,16 @@ static void scd_event_state2_movement(void)
         return;
 
     case 0x07: // Set absolute position (3 shorts)
-        ent->transform.t[0] = (int)(short)opcodes[1];
-        ent->transform.t[1] = (int)*(short*)(g_pScdEventCurrent->scriptPtr + 4);
-        ent->transform.t[2] = (int)*(short*)(g_pScdEventCurrent->scriptPtr + 6);
+        ent->scaMatrixData.localMatrix.t[0] = (int)(short)opcodes[1];
+        ent->scaMatrixData.localMatrix.t[1] = (int)*(short*)(g_pScdEventCurrent->scriptPtr + 4);
+        ent->scaMatrixData.localMatrix.t[2] = (int)*(short*)(g_pScdEventCurrent->scriptPtr + 6);
         g_pScdEventCurrent->scriptPtr += 8;
         return;
 
     case 0x08: // Set single transform component
         {
             int component = g_pScdEventCurrent->scriptPtr[1];
-            *(int*)((char*)ent->transform.t + component) = (int)(short)opcodes[1];
+            *(int*)((char*)ent->scaMatrixData.localMatrix.t + component) = (int)(short)opcodes[1];
         }
         g_pScdEventCurrent->scriptPtr += 3;
         return;
@@ -256,9 +256,9 @@ static void scd_event_state2_movement(void)
         {
             int* target;
             switch (*opcodes >> 8) {
-            case 0: target = &ent->transform.t[0]; break;
-            case 1: target = &ent->transform.t[1]; break;
-            case 2: target = &ent->transform.t[2]; break;
+            case 0: target = &ent->scaMatrixData.localMatrix.t[0]; break;
+            case 1: target = &ent->scaMatrixData.localMatrix.t[1]; break;
+            case 2: target = &ent->scaMatrixData.localMatrix.t[2]; break;
             case 3:
                 ent->health = opcodes[1];
                 goto advance4;

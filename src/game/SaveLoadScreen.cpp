@@ -448,7 +448,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
 
             // SideWinder pad check
             DWORD sidewinderBtn = 0;
-            if (g_bIsSideWinderConnected) {
+            if (g_isSideWinderConnected) {
                 sidewinderBtn = read_sidewinder_pad() & 0x10000;
             }
 

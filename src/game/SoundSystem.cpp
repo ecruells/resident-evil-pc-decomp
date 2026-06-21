@@ -139,7 +139,7 @@ void play_sfx(int bank, int soundId)
         break;
 
     case 1:
-        if ((g_InputFlags & 0x200000) != 0) {
+        if ((g_main_state_flags2 & 0x200000) != 0) {
             if (soundId > 15) return;
         } else {
             if (soundId > 31) return;
@@ -755,7 +755,7 @@ void update_room_bgm(void)
             bgm_fade_out_all();
             g_BGM_STATE = 0xFF;
         }
-        g_InputFlags &= 0xFF7FFFFF;
+        g_main_state_flags2 &= 0xFF7FFFFF;
         return;
     }
 
@@ -769,7 +769,7 @@ void update_room_bgm(void)
 
         if ((unsigned char)g_BGM_STATE != 0xFF && bgmData[newIdx] != bgmData[oldIdx] && (g_BGM_STATE & 0x38) != 0) {
             bgm_fade_out_all();
-            g_InputFlags &= 0xFF7FFFFF;
+            g_main_state_flags2 &= 0xFF7FFFFF;
             bgm_load_and_start(g_targetBgmState);
         }
     }
@@ -777,7 +777,7 @@ void update_room_bgm(void)
     unsigned char bgmType = g_targetBgmState >> 6;
     if (bgmType == 0) {
         if (g_prevBgmState == 0xFF) {
-            g_InputFlags &= 0xFF7FFFFF;
+            g_main_state_flags2 &= 0xFF7FFFFF;
             bgm_load_and_start(g_targetBgmState);
         } else {
             // compare category bytes
@@ -786,7 +786,7 @@ void update_room_bgm(void)
                 unsigned int newIdx = (g_targetBgmState & 7) + (g_stageId * 0x20 + g_roomId) * 4;
                 unsigned int oldIdx = (g_prevBgmState & 7) + (g_stageId * 0x20 + g_AttractMode_RoomCameraId) * 4;
                 if (data[newIdx] == data[oldIdx]) {
-                    g_InputFlags &= 0xFF7FFFFF;
+                    g_main_state_flags2 &= 0xFF7FFFFF;
                     // bit-level sound slot toggling
                     if ((g_targetBgmState ^ g_prevBgmState) & 8) {
                         if (!(g_targetBgmState & 8)) {
@@ -813,17 +813,17 @@ void update_room_bgm(void)
                 }
             }
             bgm_fade_out_all();
-            g_InputFlags &= 0xFF7FFFFF;
+            g_main_state_flags2 &= 0xFF7FFFFF;
             bgm_load_and_start(g_targetBgmState);
         }
     } else if (bgmType == 1) {
         bgm_fade_out_all();
-        g_InputFlags &= 0xFF7FFFFF;
+        g_main_state_flags2 &= 0xFF7FFFFF;
         bgm_load_and_start(g_targetBgmState);
     } else if (bgmType == 2) {
         g_targetBgmState &= 0x7F;
         bgm_fade_out_all();
-        g_InputFlags &= 0xFF7FFFFF;
+        g_main_state_flags2 &= 0xFF7FFFFF;
         bgm_load_and_start(g_targetBgmState);
         if ((g_targetBgmState & 0xC0) == 0) {
             bgm_start_secondary_slots();
@@ -837,7 +837,7 @@ void update_room_bgm(void)
 
 done:
     g_BGM_STATE = g_targetBgmState;
-    g_InputFlags &= 0xFF7FFFFF;
+    g_main_state_flags2 &= 0xFF7FFFFF;
 }
 
 // ============================================================================
@@ -1004,7 +1004,7 @@ void Play3DSnd(int bank, int soundId, int vol, int pos) // 0x0047f9c0
         break;
 
     case 1:
-        if ((g_InputFlags & 0x200000) == 0) {
+        if ((g_main_state_flags2 & 0x200000) == 0) {
             if (soundId > 0x2F) return;
         } else {
             if (soundId > 0x0F) return;
@@ -1080,11 +1080,11 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
         (g_playerEntity.unk_8e != (unsigned short)0xF8F8)) {
         // Normal path: look up zone-based sound offset
         unsigned short zoneData = LookupFootstepZone(
-            (short)ENTITY->transform.t[0], (short)ENTITY->transform.t[2]);
+            (short)ENTITY->scaMatrixData.localMatrix.t[0], (short)ENTITY->scaMatrixData.localMatrix.t[2]);
         char zoneOffset = (char)(zoneData & 0xFF);
 
-        // Add input modifier: if g_InputFlags bit 0 is set, add 0xFD (suppresses/wraps sound)
-        unsigned int inputMod = (((g_InputFlags & 1) == 0) - 1U) & 0xFD;
+        // Add input modifier: if g_main_state_flags2 bit 0 is set, add 0xFD (suppresses/wraps sound)
+        unsigned int inputMod = (((g_main_state_flags2 & 1) == 0) - 1U) & 0xFD;
         soundType = (unsigned char)((int)soundType + (int)zoneOffset + (int)inputMod);
     } else {
         // Special state: fixed offset 0x23
@@ -1093,7 +1093,7 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
 
     if (soundType >= 0x30) return;
 
-    Calc3DSndPan((VECTOR*)ENTITY->transform.t);
+    Calc3DSndPan((VECTOR*)ENTITY->scaMatrixData.localMatrix.t);
 
     int handle = g_emSndBanks[(unsigned int)soundType * 2];
     if (handle != 0) {
@@ -1116,7 +1116,7 @@ void Snd_em(unsigned char em_snd_id) // 0x0047fca0
     em_snd_id = em_snd_id + ((ENTITY->unk_10 & 0x70) >> 4) * 10;
     if (em_snd_id >= 48) return;
 
-    Calc3DSndPan((VECTOR*)ENTITY->transform.t);
+    Calc3DSndPan((VECTOR*)ENTITY->scaMatrixData.localMatrix.t);
 
     int handle = g_emSndBanks[em_snd_id * 2];
     if (handle != 0) {

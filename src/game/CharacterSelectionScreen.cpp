@@ -22,8 +22,8 @@ extern void game_start(void);
 static void DisplayIntroAndStartGame(void)
 {
     sounds_reset();
-    g_currentFMVID = 1;
-    g_main_state_flags |= 0x000C0000;
+    g_CurrentFMVID = 1;
+    g_main_state_flags |= (0x00000000 | 0x00080000);
     title_select_sfx();
     Task_sleep(1);
     Task_chain((void*)game_start);
@@ -625,7 +625,7 @@ void characterSelectionScreen(void)
         if (g_resetGameFlag != 0) {
             g_resetGameFlag = 0;
             StMask(0, 3);
-            g_InputFlags = g_InputFlags & 0x20080000;
+            g_main_state_flags2 = g_main_state_flags2 & 0x20080000;
             g_main_state_flags = (g_main_state_flags & 0x2FFFFFFF) | 0x40000000;
             Task_chain((void*)title_state);
         }
@@ -664,7 +664,7 @@ void characterSelectionScreen(void)
 
             // SideWinder check
             DWORD sidewinderPress = 0;
-            if (g_bIsSideWinderConnected) {
+            if (g_isSideWinderConnected) {
                 sidewinderPress = read_sidewinder_pad();
                 sidewinderPress &= 0x10000;
             }

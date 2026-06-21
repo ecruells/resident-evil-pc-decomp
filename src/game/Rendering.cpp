@@ -6,6 +6,8 @@
 #include "SpriteRenderer.h"
 #include <cstdlib>
 
+extern unsigned int set_message_display(unsigned short msg_id, unsigned short pause_game);
+
 // ============================================================================
 // Pending sprite queue (filled by AddTintSprite / draw_rect / OT_InsertPrimitive,
 // rendered by FrameRateGovernor)
@@ -308,9 +310,16 @@ void FrameRateGovernor(void)
         }
     }
 
-    if (g_ScreenAccessCheck != 0) {
-        g_ScreenAccessCheck--;
-        if (g_ScreenAccessCheck == 0) g_ScreenAccessReady = 1;
+    // StMask countdown (0x004d4684). StMask(0,N) stores N here and clears
+    // g_ScreenAccessReady; once it reaches zero, presentation is re-enabled.
+    // The original FrameRateGovernor (0x004973d0) decrements THIS variable,
+    // not g_ScreenAccessCheck (0x004d2290, which is a separate flag read by
+    // main_loop and written by the menu-transition code). Using the wrong
+    // variable left g_ScreenAccessReady stuck at 0 after any StMask(0,N),
+    // freezing presentation on a stale backbuffer.
+    if (g_ScreenAccessCountdown != 0) {
+        g_ScreenAccessCountdown--;
+        if (g_ScreenAccessCountdown == 0) g_ScreenAccessReady = 1;
     }
     if (g_RenderAccessCheck != 0) {
         g_RenderAccessCheck--;
@@ -468,13 +477,15 @@ void ResetScreenPanning(void) {
 
 // ============================================================================
 // SetScreenOffset (0x00483600)
-// Sets subpixel rendering offset. In the original, this also set
-// g_ScreenOffsetX/Y, but in the modern port g_ScreenOffsetX/Y is managed
-// separately by CenterScreenOrigin/setMenuScreenOffset because
-// FlushSpriteCommands already applies a +160/+120 centering offset.
+// Sets both screen offset and subpixel rendering offset.
+// The original PS1 code stored absolute screen coordinates (including g_ScreenOffsetX/Y)
+// in the sprite command buffer. FlushSpriteCommands converts these PS1-space coordinates
+// to screen-space coordinates using scaleX/scaleY.
 // ============================================================================
 void SetScreenOffset(int x, int y)
 {
+    g_ScreenOffsetX = x;
+    g_ScreenOffsetY = y;
     g_SubpixelOffsetX = x;
     g_SubpixelOffsetY = y;
 }
@@ -512,16 +523,511 @@ void ApplyScreenShake(void)
         g_ScreenShakeOffsetY = -g_ScreenShakeOffsetY;
     }
 
-    // Apply shake directly to screen offset (g_ScreenOffsetX/Y)
-    // In the original: SetScreenOffset(shakeX + 0xa0, shakeY + 0x78) which set both
-    // g_ScreenOffsetX and g_SubpixelOffsetX. In the modern port, SetScreenOffset only
-    // sets g_SubpixelOffsetX, so we set g_ScreenOffsetX/Y directly for the camera shake.
+    // Apply shake to screen offset and subpixel offset.
+    // In the original: SetScreenOffset(shakeX + 0xa0, shakeY + 0x78) set both
+    // g_ScreenOffsetX/Y and g_SubpixelOffsetX/Y to the full centering+shake value.
     g_ScreenOffsetX = g_ScreenShakeOffsetX;
     g_ScreenOffsetY = g_ScreenShakeOffsetY;
-    SetScreenOffset(g_ScreenShakeOffsetX + 0xa0, g_ScreenShakeOffsetY + 0x78);
+    SetScreenOffset(g_ScreenShakeOffsetX + 160, g_ScreenShakeOffsetY + 120);
 }
 
-void FUN_004557b0(void) { /* stub */ }
+// 0x0045ab60
+void ApplyShakeAndRebuildSprites() {
+    if ( (g_main_state_flags2 & 2) == 0 || ((g_main_state_flags >> 8) & 0xFF) != 0 )
+    Display_SetParams(2, 2);
+    else
+    Display_SetParams(g_ScreenShakeOffsetX + 2, g_ScreenShakeOffsetY + 2);
+    SetScreenReady(1);
+    FUN_00470a90();
+}
+
+// ============================================================================
+// FUN_00455140 (0x00455140) - Item name lookup
+// Returns a pointer to the item name string. If the item is not yet examined,
+// returns the generic "???" name instead.
+// TODO: Wire up to the real item name tables (0x004bf0a0, 0x004bf260, 0x004bd823)
+// ============================================================================
+static unsigned char* message_item_name_lookup(unsigned char itemId)
+{
+    // Stub: return a placeholder string for now
+    static unsigned char unknownName[] = "???";
+    (void)itemId;
+    return unknownName;
+}
+
+// ============================================================================
+// FUN_00456020 (0x00456020) - Message character rendering
+// Renders the message text characters from g_MessagePtr up to g_MessageCurrentPtr.
+// Handles newlines, color changes, item name substitution, and character glyphs.
+// ============================================================================
+static void message_render_chars(void)
+{
+    unsigned char bVar1;
+    unsigned char* pbVar2;
+    unsigned char* pbVar3;
+    unsigned short fade;
+    unsigned char* savedPtr;
+
+    g_TextureDesc.screenX = 0x30 - g_ScreenOffsetX;
+    g_TextureDesc.screenY = g_MessageScreenY;
+    g_TextureDesc.flags = 0x40;
+    g_TextureDesc.width = 8;
+    g_TextureDesc.printClutTint = g_MessageClutBase + 0x1e0;
+    g_TextureDesc.height = 0xe;
+    g_TextureDesc.unk10 = 0x100;
+
+    pbVar2 = g_MessagePtr;
+    if (g_MessagePtr == g_MessageCurrentPtr) {
+        g_DepthSortOverride = 0;
+        return;
+    }
+
+    do {
+        bVar1 = *pbVar2;
+        if (bVar1 == 0) goto msg_next_char;
+
+        switch (bVar1) {
+        case 2: // newline
+            pbVar3 = pbVar2 + 1;
+            g_TextureDesc.screenY += 0x10;
+            g_TextureDesc.screenX = 0x30 - g_ScreenOffsetX;
+            break;
+
+        case 3: // unknown tag (skip 1 byte)
+        case 4: // unknown tag (skip 1 byte)
+            pbVar2 = pbVar2 + 1;
+            // fall through
+        case 1: // end-of-page delay marker
+            pbVar3 = pbVar2 + 1;
+            break;
+
+        case 5: // set CLUT color
+            g_TextureDesc.unk10 = 0x100;
+            g_TextureDesc.printClutTint = pbVar2[1] + 0x1e0;
+            pbVar3 = pbVar2 + 2;
+            break;
+
+        case 6: // item name lookup
+            bVar1 = pbVar2[1];
+            if (pbVar2[1] == 0) {
+                bVar1 = g_selectedItemId;
+            }
+            pbVar3 = message_item_name_lookup(bVar1);
+            savedPtr = pbVar2;
+            break;
+
+        case 7: // return from item name
+            pbVar3 = savedPtr + 2;
+            break;
+
+        case 0xf8: // single-width character
+            pbVar3 = pbVar2 + 1;
+            pbVar2 = pbVar2 + 1;
+            bVar1 = *pbVar3 / 0x12 + 0xf;
+            goto msg_render_char;
+
+        case 0xf9: // medium-width character
+            bVar1 = pbVar2[1] / 0x12;
+            goto msg_render_char_wide;
+
+        case 0xfa: // full-width character
+            bVar1 = pbVar2[1] / 0x12 + 0xe;
+msg_render_char_wide:
+            g_TextureDesc.depth = 0x1f;
+            pbVar2 = pbVar2 + 1;
+            goto msg_draw_char;
+
+        default: // normal character
+            bVar1 = bVar1 / 0x12 + 2;
+msg_render_char:
+            g_TextureDesc.depth = 0x1e;
+msg_draw_char:
+            // Calculate texture coordinates from character index
+            g_TextureDesc.texV = bVar1 * 0xe;
+            g_TextureDesc.texU = *pbVar2 % 0x12 << 3;
+
+            g_DepthSortOverride = 0;
+
+            // Fade type selection for specific room/camera
+            if ((g_stageId == 3) && (g_roomId == 0x11) &&
+                (g_roomCameraId == 0x04 || g_roomCameraId == 0x00)) {
+                fade = 0;
+            } else {
+                fade = 2;
+            }
+
+            AddTintSprite(&g_TextureDesc, fade);
+
+msg_next_char:
+            g_TextureDesc.screenX += 8;
+            pbVar3 = pbVar2 + 1;
+            break;
+        }
+        pbVar2 = pbVar3;
+    } while (pbVar3 != g_MessageCurrentPtr);
+
+    g_DepthSortOverride = 0;
+}
+
+// ============================================================================
+// FUN_00455fb0 (0x00455fb0) - Message dismissal handler
+// Handles message-triggered actions: yes/no selection, item usage,
+// lab slides, and other conditional actions.
+// ============================================================================
+static void message_dismiss_handler(void)
+{
+    // Advance past current position
+    g_MessageCurrentPtr++;
+
+    unsigned char* pbVar2 = g_MessageCurrentPtr;
+    unsigned int choiceOffset = (unsigned int)(g_menu_choice_id & 1) * (unsigned int)*g_MessageCurrentPtr;
+    g_MessageCurrentPtr = g_MessageCurrentPtr + choiceOffset + 1;
+
+    unsigned char cmdByte = *g_MessageCurrentPtr;
+    g_MessageCurrentPtr = pbVar2 + choiceOffset + 2;
+
+    if (cmdByte == 9) {
+        // Display follow-up message
+        set_message_display(*g_MessageCurrentPtr, g_PauseGameInMsgFlag);
+        return;
+    }
+
+    if (cmdByte != 10) {
+        return;
+    }
+
+    // cmdByte == 10: conditional actions based on sub-command
+    switch (*g_MessageCurrentPtr) {
+    case 0: // Room event / flag action
+        // TODO: Original checks g_room_event_index and calls FUN_00451700
+        return;
+
+    case 1: // Use selected item
+        g_usedItemId = g_selectedItemId;
+        return;
+
+    case 2: // Discard selected item from inventory
+        {
+            unsigned char slotIdx = 0;
+            unsigned char itemId = *(unsigned char*)g_ItemSlotsPointer;
+            while (itemId != g_selectedItemId) {
+                slotIdx++;
+                itemId = ((unsigned char*)g_ItemSlotsPointer)[(unsigned int)slotIdx * 2];
+            }
+            ((unsigned char*)g_ItemSlotsPointer)[(unsigned int)slotIdx * 2] = 0;
+            rearrange_item_slots();
+        }
+        return;
+
+    case 3: // No action
+        return;
+
+    case 4: // Lab slides / cutscene start
+    case 6: // Lab slides end
+        // Deferred to full implementation
+        return;
+    }
+}
+
+// ============================================================================
+// FUN_004557b0 (0x004557b0) - Message display state machine
+// Called each frame from main_loop to advance the message display.
+// Manages character-by-character text reveal, timing, yes/no prompts,
+// and message dismissal.
+// ============================================================================
+void FUN_004557b0(void)
+{
+    unsigned char bVar1;
+    int lineCount;
+    unsigned char* pbVar3;
+    short screenX;
+    unsigned short fade;
+
+    g_TextureDesc.colorMulR = 0x80;
+    g_TextureDesc.colorMulG = 0x80;
+    g_TextureDesc.colorMulB = 0x80;
+    g_TextureDesc.pivotX = 0;
+    unk_00be1180 = 0;
+    g_TextureDesc.pivotY = 0;
+    g_SpriteAsyncFlag = 0;
+
+    switch (g_MessageStateCounter) {
+
+    // === State 0: Initialize message display ===
+    case 0:
+        g_MessageStateCounter = 1;
+        // Set char delay: 1 frame normally, shifted by g_bGameActive
+        g_MessageCharDelay = (unsigned char)(1 << (g_bGameActive == 0));
+        g_MessageCurrentPtr = g_MessagePtr;
+        g_MessageClutBase = 0;
+        g_MessageClutCopy = 0;
+        g_MessageLineCounter = 0;
+        g_MessageCharTimer = g_MessageCharDelay;
+        // Fall through to state 1
+
+    // === State 1: Character-by-character text reveal ===
+    case 1:
+        bVar1 = g_MessageCharTimer;
+        g_MessageCharTimer = g_MessageCharTimer - 1;
+
+        if (g_MessageSpeedUpFlag == 0) {
+            // Normal speed: wait for timer
+            if (g_MessageCharTimer != 0) break;
+        } else {
+            // Speed-up mode: reduce timer faster
+            if (g_MessageCharTimer != 0) {
+                if ((g_PlayerDpadHeld & 0x4000) != 0) {
+                    g_MessageCharTimer = bVar1 - 2; // double speed
+                }
+                goto state1_check_timer;
+            }
+        }
+
+    state1_check_timer:
+        if (g_MessageCharTimer != 0) break;
+
+        // Timer expired: process next character
+        bVar1 = *g_MessageCurrentPtr;
+        lineCount = g_MessageLineCounter;
+        pbVar3 = g_MessageCurrentPtr;
+
+    state1_process_char:
+        g_MessageCurrentPtr = pbVar3;
+        g_MessageLineCounter = lineCount;
+
+        // Check for end of text or special character
+        if (bVar1 == 0) goto msg_skip_char;
+        bVar1 = *pbVar3;
+        if (bVar1 > 0x0b && bVar1 < 0xf8) goto msg_skip_char;
+
+        switch (bVar1) {
+        case 1: // Page end marker with delay
+            g_MessageCurrentPtr = pbVar3 + 1;
+            if (*g_MessageCurrentPtr == 0) {
+                // End of message: wait for input
+                g_MessageStateCounter = 5;
+                message_render_chars();
+                return;
+            }
+            // Auto-advance after delay
+            g_MessageStateCounter = 6;
+            g_MessageCharTimer = *g_MessageCurrentPtr << (g_bGameActive == 0);
+            message_render_chars();
+            return;
+
+        case 2: // Next page / skip
+            goto state1_case2;
+
+        case 3: // Newline (page break)
+            g_SpriteAsyncFlag = 1;
+            g_MessageLineCounter = lineCount + 1;
+            if (lineCount < 5) {
+                g_MessageCharTimer = g_MessageCharTimer + 1;
+                message_render_chars();
+                return;
+            }
+            // More than 5 lines: clear and continue
+            g_MessageCurrentPtr = pbVar3 + 1;
+            g_MessageLineCounter = 0;
+            if (*g_MessageCurrentPtr == 0) {
+                g_MessageStateCounter = 2;
+                g_MessageCurrentPtr = pbVar3 + 2;
+                message_render_chars();
+                return;
+            }
+            g_MessageStateCounter = 3;
+            g_MessageCharTimer = *g_MessageCurrentPtr << (g_bGameActive == 0);
+            g_MessageCurrentPtr = pbVar3 + 2;
+            message_render_chars();
+            return;
+
+        case 4: // Skip embedded tags
+            g_MessageCurrentPtr = pbVar3 + 1;
+            if (*g_MessageCurrentPtr == 0) {
+                // Skip to end marker (tag 4)
+                g_MessageCurrentPtr = pbVar3 + 2;
+                bVar1 = *g_MessageCurrentPtr;
+                while (bVar1 != 4) {
+                    switch (*g_MessageCurrentPtr) {
+                    case 5:
+                    case 6:
+                    case 0xf8:
+                    case 0xf9:
+                    case 0xfa:
+                        g_MessageCurrentPtr++;
+                    }
+                    g_MessageCurrentPtr++;
+                    bVar1 = *g_MessageCurrentPtr;
+                }
+                g_MessageCurrentPtr++;
+            }
+            g_MessageCharDelay = *g_MessageCurrentPtr << (g_bGameActive == 0);
+            goto state1_case2;
+
+        case 5: // Set CLUT color
+            g_MessageCurrentPtr = pbVar3 + 1;
+            g_MessageClutCopy = *g_MessageCurrentPtr;
+state1_case2:
+            g_MessageCurrentPtr++;
+            break;
+
+        case 6: // Item name lookup
+            g_MessageCurrentPtr = pbVar3 + 1;
+            bVar1 = *g_MessageCurrentPtr;
+            if (*g_MessageCurrentPtr == 0) {
+                bVar1 = g_selectedItemId;
+            }
+            g_MessageSavedPtr = pbVar3;
+            g_MessageCurrentPtr = message_item_name_lookup(bVar1);
+            break;
+
+        case 7: // Return from item name
+            g_MessageCurrentPtr = g_MessageSavedPtr + 2;
+            break;
+
+        case 8: // Yes/No prompt
+            g_MessageStateCounter = 4;
+            message_render_chars();
+            return;
+
+        case 0xf8:
+        case 0xf9:
+        case 0xfa: // Character codes — skip to render
+            g_MessageCurrentPtr = pbVar3 + 1;
+msg_skip_char:
+            g_MessageCurrentPtr++;
+            g_MessageCharTimer = g_MessageCharDelay;
+            goto state1_default;
+        }
+
+        // Process next character in sequence
+        bVar1 = *g_MessageCurrentPtr;
+        lineCount = g_MessageLineCounter;
+        pbVar3 = g_MessageCurrentPtr;
+        goto state1_process_char;
+
+    // === State 2: Waiting with blinking cursor ===
+    case 2:
+        if ((g_button_pressed_id & (PAD_CROSS | PAD_SQUARE)) != 0) {
+            // Button pressed: restart text reveal
+            g_MessageStateCounter = 1;
+            g_MessagePtr = g_MessageCurrentPtr;
+            g_MessageClutBase = g_MessageClutCopy;
+            g_MessageCharTimer = (unsigned char)(1 << (g_bGameActive == 0));
+            message_render_chars();
+            return;
+        }
+        g_MessageCharTimer = g_MessageCharTimer - 1;
+        // Blink cursor every ~24 frames (0x18 = 24)
+        if ((((unsigned int)g_MessageCharTimer & (0x18 << (g_bGameActive == 0)))) != 0) {
+            // Draw cursor indicator
+            g_TextureDesc.flags = 0x40;
+            g_TextureDesc.width = 8;
+            g_TextureDesc.height = 0xe;
+            g_TextureDesc.depth = 0x1e;
+            g_TextureDesc.texU = 0x58;
+            g_TextureDesc.texV = 0x1c;
+            g_TextureDesc.unk10 = 0x100;
+            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.screenX = 0x99 - g_ScreenOffsetX;
+            g_TextureDesc.screenY = g_MessageScreenY + 0x1e;
+            AddTintSprite(&g_TextureDesc, 2);
+            message_render_chars();
+            return;
+        }
+        break;
+
+    // === State 3: Post-newline delay ===
+    case 3:
+        g_MessageCharTimer = g_MessageCharTimer - 1;
+        if (g_MessageCharTimer == 0) {
+            g_MessageStateCounter = 1;
+            g_MessagePtr = g_MessageCurrentPtr;
+            g_MessageClutBase = g_MessageClutCopy;
+            g_MessageCharTimer = g_MessageCharDelay << (g_bGameActive == 0);
+            message_render_chars();
+            return;
+        }
+        break;
+
+    // === State 4: Yes/No prompt ===
+    case 4:
+        // Check if confirm button pressed
+        if ((g_button_pressed_id & PAD_CROSS) == 0) {
+            // No confirm: handle navigation
+            if ((g_PlayerPadHeld & (PAD_UP | PAD_DOWN)) != 0) {
+                g_menu_choice_id = g_menu_choice_id ^ 1;
+                g_MessageCharTimer = 0;
+            }
+            g_MessageCharTimer = g_MessageCharTimer - 1;
+            // Blink cursor
+            if ((((unsigned int)g_MessageCharTimer & (0x18 << (g_bGameActive == 0)))) != 0) {
+                g_TextureDesc.flags = 0x40;
+                if ((g_menu_choice_id & 1) == 0) {
+                    screenX = 0xd0;
+                } else {
+                    screenX = 0xf8;
+                }
+                g_TextureDesc.width = 8;
+                g_TextureDesc.height = 0xe;
+                g_TextureDesc.texU = 0x10;
+                g_TextureDesc.texV = 0x1c;
+                g_TextureDesc.depth = 0x1e;
+                g_TextureDesc.unk10 = 0x100;
+                g_TextureDesc.printClutTint = 0x1e0;
+                g_TextureDesc.screenX = screenX - g_ScreenOffsetX;
+                g_TextureDesc.screenY = g_MessageScreenY + 0x10;
+
+                if ((g_stageId == 3) && (g_roomId == 0x11) && (g_roomCameraId == 0x04)) {
+                    fade = 0;
+                } else {
+                    fade = 2;
+                }
+                AddTintSprite(&g_TextureDesc, fade);
+            }
+            sprintf(PRINT_TEXT_BUFFER, "Yes No");
+            PrintText8x14(0xd8, g_ScreenOffsetY + g_MessageScreenY + 0x10, 0, 0);
+            message_render_chars();
+            return;
+        }
+
+        // Confirm pressed: dismiss message
+        g_menu_choice_id = g_menu_choice_id & 0x7f;
+        g_message_flags = g_messageFlagsBackup;
+        message_dismiss_handler();
+        return;
+
+    // === State 5: Waiting for player input to dismiss ===
+    case 5:
+        if ((g_button_pressed_id & (PAD_CROSS | PAD_SQUARE)) != 0) {
+            g_menu_choice_id = g_menu_choice_id & 0x7f;
+            if ((g_message_flags & 1) == 0) {
+                // Clear movement buttons, keep only face buttons
+                g_PlayerPadHeld &= (PAD_TRIANGLE | PAD_CIRCLE | PAD_CROSS | PAD_SQUARE);
+            }
+            g_message_flags = g_messageFlagsBackup;
+            return;
+        }
+        break;
+
+    // === State 6: Auto-dismiss after timeout ===
+    case 6:
+        g_MessageCharTimer = g_MessageCharTimer - 1;
+        if (g_MessageCharTimer == 0) {
+            g_menu_choice_id = g_menu_choice_id & 0x7f;
+            if ((g_message_flags & 1) == 0) {
+                // Clear movement buttons, keep only face buttons
+                g_PlayerPadHeld &= (PAD_TRIANGLE | PAD_CIRCLE | PAD_CROSS | PAD_SQUARE);
+            }
+            g_message_flags = g_messageFlagsBackup;
+            return;
+        }
+        break;
+    }
+
+state1_default:
+    message_render_chars();
+}
 
 void SetSubpixelOffset(int x, int y)
 {
@@ -575,22 +1081,22 @@ int FUN_0046c280(int id)
 }
 
 // ============================================================================
-// FUN_00497340 (0x00497340)
+// SetScreenReady (0x00497340)
 // Sets the MarniDirect3D screen-ready flag and clears the debug color override.
 // Original: writes to CMarniDirect3D field_0x2ec and field_0x2f0
 // ============================================================================
-void FUN_00497340(int param)
+void SetScreenReady(int param)
 {
     g_MarniScreenReady = param;
     g_MarniScreenColor = 0;
 }
 
 // ============================================================================
-// FUN_00497360 (0x00497360)
+// SetScreenReadyWithDebugColor (0x00497360)
 // Enables screen-ready and sets a packed RGB debug color override.
 // Original: writes to CMarniDirect3D field_0x2ec=1 and field_0x2f0=(r<<16|g<<8|b)
 // ============================================================================
-void FUN_00497360(int r, int g, int b)
+void SetScreenReadyWithDebugColor(int r, int g, int b)
 {
     g_MarniScreenReady = 1;
     g_MarniScreenColor = ((unsigned int)r << 16) | ((unsigned int)g << 8) | (unsigned int)b;
@@ -601,34 +1107,11 @@ void FUN_00497360(int r, int g, int b)
 // Resets screen offset to center, disables screen-ready, resets subpixel
 // params, and rebuilds title background sprites.
 // ============================================================================
-void FUN_00401020(int param)
+void ResetScreenAndRebuildSprites(int param)
 {
     SetScreenOffset(160, 120);
-    FUN_00497340(0);
+    SetScreenReady(0);
     Display_SetParams(0, 0);
-    FUN_00470a90();
-}
-
-// ============================================================================
-// FUN_0045ab60 (0x0045ab60)
-// Applies screen shake offsets to display params (if screen shake active),
-// enables screen-ready, and rebuilds title background sprites.
-// ============================================================================
-void FUN_0045ab60(void)
-{
-    int subY, subX;
-
-    if ((((unsigned char)g_InputFlags & 0x02) == 0) ||
-        (((g_main_state_flags >> 8) & 0xFF) != 0)) {
-        subY = 2;
-        subX = 2;
-    } else {
-        subY = (int)g_ScreenShakeOffsetY + 2;
-        subX = (int)g_ScreenShakeOffsetX + 2;
-    }
-
-    Display_SetParams(subX, subY);
-    FUN_00497340(1);
     FUN_00470a90();
 }
 

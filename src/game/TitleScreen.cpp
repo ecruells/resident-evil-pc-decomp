@@ -85,7 +85,7 @@ void init_title_screen(void)
     //empty_00470960(0);
 
     const char* buttonTexPath;
-    if (!g_bIsSideWinderConnected) {
+    if (!g_isSideWinderConnected) {
         buttonTexPath = ".\\usa\\data\\t_press.tim";
     } else {
         buttonTexPath = ".\\usa\\data\\t_start.tim";
@@ -216,7 +216,7 @@ void update_title_options(void)
 {
 	DWORD sidewinderPress = 0;
 	DWORD sidewinderState = 0;
-	if (g_bIsSideWinderConnected) {
+	if (g_isSideWinderConnected) {
 		sidewinderState = read_sidewinder_pad();
 		sidewinderPress = sidewinderState & 0x10000 & ~g_PlayerPadHeldPrev;
 	}
@@ -464,11 +464,6 @@ void title_state(void)
     //     g_fmvPlayCount = 0x10;
     //     g_main_state_flags = g_main_state_flags | 0x40000;
     //     Task_sleep(1);
-
-    //     // Restore menu screen offset after FMV — UpdateVideoPlayback calls
-    //     // CenterScreenOrigin() which sets g_ScreenOffsetX=160, g_ScreenOffsetY=120,
-    //     // pushing the title text sprite off-screen. Reset to menu offset (0,0).
-    //     setMenuScreenOffset(320, 240, 0, 0, 1);
     // }
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
@@ -495,7 +490,7 @@ void title_state(void)
     switch (g_titleSelectionId) {
     case 0:
         title_select_sfx();
-        g_InputFlags |= 0x10000000;
+        g_main_state_flags2 |= 0x10000000;
         Task_chain((void*)game_start);
         Task_chain((void*)logos_state);
         return;

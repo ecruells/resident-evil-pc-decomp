@@ -141,7 +141,11 @@ static MCIERROR MCISend(const char* cmd, BOOL showError)
 }
 
 // ============================================================================
-// MCI_CloseAll - Close the MCI AVI device entirely
+// MCI_CloseAll - Close the MCI AVI device entirely.
+// NOTE: The MCI AVI video renders directly into g_hWnd (see MCI_OpenAndPlay:
+// "window movie handle <g_hWnd>"), so we must NOT send "window movie state
+// hide" here — that would hide the entire game window. The stale backbuffer
+// flash is handled by presenting a fresh black D3D11 frame in state 3.
 // ============================================================================
 static void MCI_CloseAll(void)
 {

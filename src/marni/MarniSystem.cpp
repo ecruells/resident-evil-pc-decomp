@@ -952,7 +952,7 @@ void InitializeMarniSystem(void)
 
     // Check SideWinder pad (legacy check, not relevant for XInput)
     int swResult = IsSideWinderPadConnected();
-    g_bIsSideWinderConnected = (swResult == 0);
+    g_isSideWinderConnected = (swResult == 0);
 
     // Create default lights
     CreateLights(3);

@@ -812,7 +812,7 @@ static BYTE g_titleLoadBuffer[320 * 240 * 2]; // 153.6KB for title screen
 │                                  ▼                          │
 │                        ┌─────────────────┐                  │
 │                        │ g_RawPadPressed │                  │
-│                        │ g_InputFlags    │                  │
+│                        │ g_main_state_flags2    │                  │
 │                        │ button_pressed  │                  │
 │                        └─────────────────┘                  │
 │                                                              │

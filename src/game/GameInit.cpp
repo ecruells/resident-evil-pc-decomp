@@ -15,21 +15,18 @@ static BYTE g_AssetLoadBuffer[256 * 1024];  // 256KB for texture loads
 static BYTE g_ItemsImageBuffer[128 * 1024]; // 128KB for item images
 
 // ---------------------------------------------------------------------------
-// InitTaskDataEntry (0x0040abe0)
-// Initializes a task data entry structure. Writes byte at offset +7 = 0x28
-// and ORs the first dword with 0x05000000.
+// setPolyF4 (0x0040abe0)
 // ---------------------------------------------------------------------------
-static void InitTaskDataEntry(DWORD* entry)
+static void setPolyF4(POLY_F4* entry)
 {
-    if (entry == NULL) return;
-    *((BYTE*)entry + 7) = 0x28;
-    *entry = (*entry & 0x000000FF) | 0x05000000;
+    entry->code = 0x28;
+    entry->tag = entry->tag & 0xffffff | 0x5000000;
 }
 
 // ---------------------------------------------------------------------------
-// ClearGameStateFlags (0x00429a...)
+// ClearGameStateFlags (0x004756c0)
 // Clears 7 dwords starting at g_main_state_flags, then clears g_menu_choice_id
-// ---------------------------------------------------------------------------
+// ============================================================================
 static void ClearGameStateFlags(void)
 {
     DWORD* p = &g_main_state_flags;
@@ -112,12 +109,12 @@ void init_and_start_game(void)
 
     InitPlayerInputData();
 
-    DWORD* pEntry = g_TaskDataArray_ba750;
-    for (int i = 0; i < 4; i++) {
-        InitTaskDataEntry(pEntry);
-        InitTaskDataEntry(pEntry + (0x30 / sizeof(DWORD)));
-        pEntry += (0x18 / sizeof(DWORD));
-    }
+    POLY_F4* poly = Poly_F4_ARRAY_004ba750;
+    do {
+        setPolyF4(poly);
+        setPolyF4(poly + 2);
+        poly++;
+    } while (poly < Poly_F4_ARRAY_004ba750 + 2);
 
     Task_execute(0, (void*)load_global_assets);
 }

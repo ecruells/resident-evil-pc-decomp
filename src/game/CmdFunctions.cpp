@@ -6,7 +6,7 @@
 #include <cstring>
 
 // Forward declarations for functions defined in other files
-extern void set_message_display(unsigned short msg_id, unsigned short pause_game);
+extern unsigned int set_message_display(unsigned short msg_id, unsigned short pause_game);
 extern void cut_set(void);
 extern void Play3DSnd(int bank, int id, int vol, int pos);
 extern void play_sfx(int bank, int soundId);
@@ -739,7 +739,7 @@ int cmd_em_set(void)
 
     unsigned char enemySlot = g_ScdOpcodes[0x12] & 0xf;
     ENTITY = &g_EnemiesList[enemySlot];
-    g_EnemiesList[enemySlot].transform.t[1] = (int)scd_read_s16(0xe);
+    g_EnemiesList[enemySlot].scaMatrixData.localMatrix.t[1] = (int)scd_read_s16(0xe);
     g_EnemiesList[enemySlot].pad_15d[4] = g_ScdOpcodes[0x12] & 0xf;
     g_EnemiesList[enemySlot].pad_15d[4] |= (char)g_ScdOpcodes[0x15] << 4;
 
@@ -756,11 +756,11 @@ int cmd_em_set(void)
         ENTITY->status_flags = 1;
         ENTITY->behavior_flags = g_ScdOpcodes[2];
         *(unsigned short*)&ENTITY->angle = scd_read_u16(8);
-        ENTITY->transform.t[0] = (unsigned int)scd_read_u16(0xc);
-        ENTITY->transform.t[2] = (unsigned int)scd_read_u16(0x10);
-        ENTITY->position.x = (short)ENTITY->transform.t[0];
-        ENTITY->position.y = (short)ENTITY->transform.t[1];
-        ENTITY->position.z = (short)ENTITY->transform.t[2];
+        ENTITY->scaMatrixData.localMatrix.t[0] = (unsigned int)scd_read_u16(0xc);
+        ENTITY->scaMatrixData.localMatrix.t[2] = (unsigned int)scd_read_u16(0x10);
+        ENTITY->position.x = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+        ENTITY->position.y = (short)ENTITY->scaMatrixData.localMatrix.t[1];
+        ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
         ENTITY->animationId = g_ScdOpcodes[0x13];
         ENTITY->animation_frame_id = g_ScdOpcodes[0x14];
         ENTITY->timing_control = 1;
@@ -1051,13 +1051,13 @@ int cmd_player_pos_set(void)
     g_playerEntity.directionAngle = scd_read_s16(4);
     g_playerEntity.speed.x = scd_read_s16(6);
     g_playerEntity.position.x = scd_read_s16(8);
-    g_playerEntity.transform.t[0] = (int)scd_read_s16(8);
+    g_playerEntity.scaMatrixData.localMatrix.t[0] = (int)scd_read_s16(8);
     g_playerEntity.position.y = scd_read_s16(10);
-    g_playerEntity.transform.t[1] = (int)scd_read_s16(10);
+    g_playerEntity.scaMatrixData.localMatrix.t[1] = (int)scd_read_s16(10);
     short posZ = scd_read_s16(0xc);
     g_ScdOpcodes += 0xe;
     g_playerEntity.position.z = posZ;
-    g_playerEntity.transform.t[2] = (int)posZ;
+    g_playerEntity.scaMatrixData.localMatrix.t[2] = (int)posZ;
     return 1;
 }
 
@@ -1075,13 +1075,13 @@ int cmd_enemy_pos_set(void)
     *((short*)&g_EnemiesList[enemyIdx].angle + 1) = scd_read_s16(1);
     short posX = scd_read_s16(3);
     g_EnemiesList[enemyIdx].position.x = posX;
-    g_EnemiesList[enemyIdx].transform.t[0] = (int)posX;
+    g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t[0] = (int)posX;
     short posY = scd_read_s16(5);
     g_EnemiesList[enemyIdx].position.y = posY;
-    g_EnemiesList[enemyIdx].transform.t[1] = (int)posY;
+    g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t[1] = (int)posY;
     short posZ = scd_read_s16(7);
     g_EnemiesList[enemyIdx].position.z = posZ;
-    g_EnemiesList[enemyIdx].transform.t[2] = (int)posZ;
+    g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t[2] = (int)posZ;
     return 1;
 }
 
@@ -1316,7 +1316,7 @@ int cmd_effect_spawn(void)
     if (parentType == 0) {
         spriteInfo = &g_identityMatrixData;
     } else if (parentType == 1) {
-        spriteInfo = &g_playerEntity.transform;
+        spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
     } else if ((parentParam & 0x8000) == 0) {
         spriteInfo = (MATRIX*)(g_effectPool[parentType * 3 + 0x3d].animDataBase + 0x10);
     } else {
@@ -1723,7 +1723,7 @@ int cmd_0x3c(void)
 
     int* targetPos;
     if ((targetSpec & 0xff) == 0) {
-        targetPos = g_EnemiesList[targetSpec >> 8].transform.t;
+        targetPos = g_EnemiesList[targetSpec >> 8].scaMatrixData.localMatrix.t;
     } else if ((targetSpec & 0xff) == 1) {
         targetPos = (int*)(*(int*)((int)&g_itemboxes_covers_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
     } else if ((targetSpec & 0xff) == 2) {
@@ -1732,8 +1732,8 @@ int cmd_0x3c(void)
         return 0;
     }
 
-    int dx = g_playerEntity.transform.t[0] - targetPos[0];
-    int dz = g_playerEntity.transform.t[2] - targetPos[2];
+    int dx = g_playerEntity.scaMatrixData.localMatrix.t[0] - targetPos[0];
+    int dz = g_playerEntity.scaMatrixData.localMatrix.t[2] - targetPos[2];
     unsigned int dist = SquareRoot0(dz * dz + dx * dx);
     return dist <= (unsigned int)maxDist;
 }
@@ -1756,7 +1756,7 @@ int cmd_bullet_0x3d(void)
     if ((parentParam >> 8) == 0) {
         spriteInfo = &g_identityMatrixData;
     } else if ((parentParam >> 8) == 1) {
-        spriteInfo = &g_playerEntity.transform;
+        spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
     } else if ((parentParam & 0x8000) == 0) {
         spriteInfo = (MATRIX*)(g_effectPool[((unsigned int)(typeParam >> 8) >> 8) * 3 + 0x3d].animDataBase + 0x10);
     } else {

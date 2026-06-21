@@ -2,6 +2,25 @@
 #include "Globals.h"
 #include "game/PrintText.h"
 
+// ============================================================================
+// Task scheduler state section
+// ----------------------------------------------------------------------------
+// The scheduler state globals MUST live outside the memory range that
+// InitializeGame()'s memclr(&g_defaultItemSlot, g_BioCardData) wipes. In the
+// original binary these globals (0x00d91a68..0x00d91a90, plus g_TasksTable at
+// 0x00d1fde4 and g_StackPointer at 0x007e0cc8) are placed by the linker far
+// away from the wiped game-state block (0x00be41e0..0x00be9620), so memclr
+// never touches them. Our decompilation's linker happened to place them inside
+// the wiped range, which zeroed g_SchedulerESP mid-task and crashed TaskYield.
+//
+// To preserve the original layout intent without disturbing the bio card /
+// game-state globals (whose relative order and sizes are load-bearing), we
+// isolate the scheduler state into its own .sched section. The relative order
+// within this block matches the original's 0x00d91a68 cluster ordering.
+// ============================================================================
+#pragma section(".sched", read, write)
+__declspec(allocate(".sched"))
+
 // --- Window system ---
 // 0x00bcb2c0
 HWND g_hWnd = NULL;
@@ -67,8 +86,8 @@ char g_szCreateDir[260] = {};
 BYTE g_keyBindingData[32] = {};
 BYTE g_joystickBindingData[128] = {};
 
-BOOL g_bIsPaused = FALSE;                   // 0_004d46ac
-BOOL g_bIsSideWinderConnected = FALSE;      // 0x004d46b0
+BOOL g_isPaused = FALSE;                   // 0_004d46ac
+BOOL g_isSideWinderConnected = FALSE;      // 0x004d46b0
 
 BYTE g_InstallFlagData = 0;
 
@@ -91,28 +110,28 @@ MasterInputState* g_pMasterInputState = NULL;
 // 0x00be41c0
 DWORD g_main_state_flags = 0;
 
+// 0x00be41c4
+DWORD g_main_state_flags2 = 0;
+
 // 0x00bebcca
 short g_fading_counter = 0;
 // 0x00bf0a2f
 unsigned char g_fade_type_id = 0;
 
 
-// Player health
-int g_playerHealth = 0;
-
 // --- Game state ---
 // 0x00d91bc8
 int DAT_00d91bc8 = 0;
-int g_currentFMVID = 0;
-// 0x00d91bcc
+
+// 0x008f8790
 int g_CurrentFMVID = 0;
 
 
 // --- Screen pos ---
-// 0x00ac3ff8
-int g_ScreenOffsetX = 0;
-// 0x00ac3ffc
-int g_ScreenOffsetY = 0;
+// 0x004bcac8
+short g_ScreenOffsetX = 0;
+// 0x04bcaca
+short g_ScreenOffsetY = 0;
 // 0x00bca0d8
 signed char g_ScreenShakeOffsetX = 0;
 // 0x00bca0d9
@@ -122,32 +141,34 @@ signed char g_ScreenShakeOffsetY = 0;
 BYTE g_bGameActive = 0;
 
 // --- Task system globals ---
+// NOTE: These live in the dedicated .sched section (see top of file) so that
+// InitializeGame's memclr(&g_defaultItemSlot, g_BioCardData) cannot wipe them.
+// Relative order mirrors the original binary's 0x00d91a68 cluster.
 // _g_StackPointer 0x007e0cc8
-DWORD g_StackPointer = 0;
+__declspec(allocate(".sched")) DWORD g_StackPointer = 0;
 // 0x00d1fde4
-TaskControlBlock g_TasksTable[3] = {};
+__declspec(allocate(".sched")) TaskControlBlock g_TasksTable[3] = {};
 // 0x00bf09ec
-void* g_CurrentTask = NULL;
-// 0x00d91a70
-DWORD g_TasksESP[3] = {};
-// 0x00d91a80
-DWORD g_TasksEIP[3] = {};
-// 0x00d91a7c
-DWORD g_CurrentTaskID = 0;
+__declspec(allocate(".sched")) void* g_CurrentTask = NULL;
 // 0x00d91a68
-void* g_CurrentTaskPtr = NULL;
+__declspec(allocate(".sched")) void* g_CurrentTaskPtr = NULL;
+// 0x00d91a70
+__declspec(allocate(".sched")) DWORD g_TasksESP[3] = {};
+// 0x00d91a7c
+__declspec(allocate(".sched")) DWORD g_CurrentTaskID = 0;
+// 0x00d91a80
+__declspec(allocate(".sched")) DWORD g_TasksEIP[3] = {};
 // 0x00d91a8c
-DWORD g_SchedulerESP = 0;
-// 0x004ba0b8
-DWORD g_SchedulerRunningFlag = 0;
+__declspec(allocate(".sched")) DWORD g_SchedulerESP = 0;
 // 0x00d91a90
-void* g_AsyncRpcCallback = NULL;
+__declspec(allocate(".sched")) void* g_AsyncRpcCallback = NULL;
+// 0x004ba0b8
+__declspec(allocate(".sched")) DWORD g_SchedulerRunningFlag = 0;
 
 // --- Input state ---
 // 0x00bcb2e0 - last keyboard scan code or dialog message ID
 DWORD g_lastScanCodeOrMsgID = 0;
-// 0x00bcb2e4
-DWORD g_InputFlags = 0;
+
 // 0x00be05b4 - WORD-sized edge-detected "just pressed" pad state (low word of g_PlayerPadPressed)
 DWORD g_RawPadPressed = 0;
 // 0x00bf0a08 (edge-detected: pressed this frame only)
@@ -168,13 +189,13 @@ BOOL g_DisablePad = FALSE;
 // --- Menu / dialog flags ---
 // 0x00be0e28
 int g_menu_choice_id = 0;
-// 0x004bcb50
-BOOL g_displayReturnToTitleScreen_Flag = FALSE;
-// 0x004bcb54
+// 0x004D4668
 BOOL g_displayExitGameScreen_flag = FALSE;
+// 0x004d466c
+BOOL g_displayReturnToTitleScreen_Flag = FALSE;
 
 // --- Sound system ---
-// 0x00bf0a2d
+// 0x00BF0A2D
 int g_SndFadeType = 0;
 // 0x00ac9908
 int g_SndRampFramesLeft = 0;
@@ -233,7 +254,11 @@ int g_roomSfxVolume = -1;              // 0x00ac9b70
 int g_charSfxVolume = -1;              // 0x00ac98fc
 
 // --- Game init ---
-// 0x00bcb2e8
+
+// 0x004ba750
+POLY_F4 Poly_F4_ARRAY_004ba750[4] = {};
+
+// 0x004ba7b0
 int init_game_flag = 0;
 
 // --- Timing ---
@@ -243,8 +268,10 @@ DWORD g_dwSystemTimer1 = 0;
 DWORD g_dwGameTimer1 = 0;
 // 0x004d46c4
 DWORD g_GameInitTime = 0;
-// 0x004d46d0
+// 0x00d22730
 DWORD Game_timer = 0;
+// 0x004d46d4
+DWORD DAT_004d46d4 = 0;
 // 0x004d45fc
 DWORD g_LastFrameTime_ms = 0;
 
@@ -378,10 +405,6 @@ int   g_PlayerInputConfig_56 = 0;
 int   g_PlayerInputConfig_58 = 0;
 int   g_PlayerInputConfig_5a = 0;
 
-// Task data arrays
-DWORD g_TaskDataArray_ba750[16] = {};
-DWORD g_TaskDataArray_ba780[16] = {};
-
 // Player animation function pointer table (0x00bebbd8, 52 entries)
 // Populated by set_player_animations_functions (0x00409a00)
 // Indexed by g_playerEntityPointer.animFrameId * 4
@@ -472,6 +495,8 @@ BYTE  g_MasterInputState[256] = {};
 int g_ScreenAccessCheck = 1;    // 0x004d2290 (start enabled so rendering happens)
 int g_RenderAccessCheck = 1;    // DAT_004d468c (start enabled so rendering happens)
 int g_demoTimer = 0;            // DEMO timer pattern field
+short g_DemoTimerCur = 0;      // 0x00d21cee - demo idle timer current value
+short g_DemoTimerMax = 0;      // 0x00d21cf0 - demo idle timer threshold
 BOOL g_bFullScreenFlag_68 = FALSE;  // used for cursor hiding logic
 
 // Object cleanup globals (Object_DeleteAll / ObjectCleanupCallback / ObjectList_Cleanup)
@@ -528,10 +553,17 @@ unsigned short g_message_flags = 0;
 unsigned short g_messageFlagsBackup = 0;            // 0x00bebcc2
 unsigned short g_PauseGameInMsgFlag = 0;            // 0x00bf0a18
 unsigned char* g_MessagePtr = NULL;                 // 0x00bf0a1c
-unsigned char g_MessageStateCounter = 0;            // 0x00bf0a16
-short         g_MessageScreenY = 0;                 // 0x00bf0a1a
-unsigned char g_MessageSpeedUpFlag = 0;             // 0x00bf0a17
-RDT*          g_RdtPointer = NULL;                  // 0x00bebcd0
+unsigned char  g_MessageStateCounter = 0;            // 0x00bf0a16
+short          g_MessageScreenY = 0;                 // 0x00bf0a1a
+unsigned char  g_MessageSpeedUpFlag = 0;             // 0x00bf0a17
+RDT*           g_RdtPointer = NULL;                  // 0x00bebcd0
+unsigned char* g_MessageCurrentPtr = NULL;           // 0x00bf0a20
+unsigned char* g_MessageSavedPtr = NULL;             // 0x00bf0a24
+unsigned char  g_MessageCharDelay = 0;               // 0x00bf0a29
+unsigned char  g_MessageCharTimer = 0;               // 0x00bf0a2a
+unsigned char  g_MessageClutBase = 0;                // 0x00bf0a2b
+unsigned char  g_MessageClutCopy = 0;                // 0x00bf0a2c
+int            g_MessageLineCounter = 0;             // 0x008e1c64
 // 0x008f8894
 int end_game_status = 0;
 
@@ -967,7 +999,7 @@ BYTE           g_displayImageBuffer[0x30000] = {};
 // 0x004d46b4 - Background loading mode flag
 // 0 = per-camera: load PAK, unpack, display each camera individually
 // non-zero = cache: load all camera PAKs into cache buffer with offset table
-int            g_bgCacheMode = 0;
+int            g_bgCacheMode = 1;             // 0x004d46b4 — original value is 1 (cache mode)
 
 // 0x004c2060 - Hex character lookup table for path construction
 char           g_hexCharTable[17] = "0123456789abcdef";
@@ -1095,6 +1127,7 @@ unsigned char* g_ScdOpcodes = NULL;                     // 0x00bf0800
 unsigned int*  g_CmdOpcodesPointer = NULL;              // 0x00bf0804
 unsigned char  g_ScriptContinueFlag = 0;                // 0x00bf07fa
 unsigned char* g_EvtScripts = NULL;                     // 0x00d213b4
+unsigned char* g_RoomScdOpcodes = NULL;                  // 0x00d213b8
 
 // SCD flag bank 9
 unsigned int   DAT_00d213a0[2] = {};                    // 0x00d213a0

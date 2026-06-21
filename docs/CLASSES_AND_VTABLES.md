@@ -429,7 +429,7 @@ Used for drawing operations:
 | Address | Type | Name | Description |
 |---------|------|------|-------------|
 | `g_RawPadPressed` | DWORD | Raw pad input state |
-| `g_InputFlags` | DWORD | Input state flags |
+| `g_main_state_flags2` | DWORD | Input state flags |
 | `button_pressed_id` | unsigned short | Button identifier |
 
 ### Input Functions

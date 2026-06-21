@@ -49,7 +49,7 @@ extern char          g_szCreateDir[260];
 // Registry loaded data
 extern BYTE          g_keyBindingData[32];
 extern BYTE          g_joystickBindingData[128];
-extern BOOL          g_bIsSideWinderConnected;         // 0x004d1f50
+extern BOOL          g_isSideWinderConnected;         // 0x004d1f50
 extern BYTE          g_InstallFlagData;
 
 // Shared memory
@@ -64,30 +64,73 @@ extern void*         g_pMarniDirect3D;                 // 0x00ac4028
 extern MasterInputState* g_pMasterInputState;
 int __stdcall VideoDriver_ClearState348(void* obj, void* context);
 
+// ============================================================================
+// g_main_state_flags - Global game state bit flags (0x00be41c0)
+//
+// This 32-bit flag word controls global game state, rendering behavior, and
+// scene transitions. Bits are tested/set across the entire codebase.
+//
+// Bit   Mask          Description
+// ----  ------------  ----------------------------------------------------------
+//   0   0x00000001    Entity joint animation flag (tested in room_set, PlayerAnimations)
+//   7   0x00000080    Special entity sound state (tested in SoundSystem)
+//   8   0x00000100    Message display Y-position (byte 1, test in set_message_display)
+//   9   0x00000200    Room events wait condition (byte 1 bit 1, RoomEvents)
+//  10   0x00000400    "Got item" active (set by cmd_got_item)
+//  11   0x00000800    "Got item" toggle flag (toggled by cmd_got_item)
+//  13   0x00002000    Key item depleted / drop message (SaveLoadScreen)
+//  16   0x00010000    Screen intensity animation direction (main_loop)
+//  17   0x00020000    SFX playback active / music wait done (sfx_set, SoundSystem)
+//  18   0x00040000    FMV playback active (logos_state, cmd_fmv_set, main_loop)
+//  19   0x00080000    Screen panning reset / ending state (ResetScreenPanning, ending_state)
+//  20   0x00100000    Camera changes disabled during cutscene (cut_set, cmd_cut_toogle)
+//  23   0x00800000    Room RDT variant: 0=Chris, 1=Jill/Rebecca (LoadRoomRdt, char select)
+//  25   0x02000000    Game loop active flag (game_loop)
+//  26   0x04000000    Game initialized / loading complete (InitializeGame, room_set)
+//  27   0x08000000    (tested alongside bit 26 in main_loop 0x4008000 combo)
+//  28   0x10000000    New game (0) vs continue/load game (1) (InitializeGame)
+//  29   0x20000000    Screen fade transition in progress (main_loop, title, char select)
+//  30   0x40000000    Debug overlay mode / exit-to-title transition (rendering, main_loop)
+//  31   0x80000000    Save/load screen active / title screen overlay (title, save/load)
+//
+// The lower 2 bits (0-1) are also used as a 2-bit SCD script parameter
+// (cmd_entities_0x0f writes g_ScdOpcodes[1] into bits 0-1).
+//
+// The lower nibble is cleared by room_set: g_main_state_flags &= 0xfffffff0.
+//
+// Byte 3 bit 0x10 is tested in display_game_loading_message for input check.
+// Byte 7 bit 0x10 is tested in the same function.
+// ============================================================================
 // Main state flags
 extern DWORD         g_main_state_flags;               // 0x00be41c0
+extern DWORD         g_main_state_flags2;              // 0x00be41c4
 extern WORD          g_message_flags;                  // 0x00bebcc0
 
 // Message display system
 extern unsigned short g_messageFlagsBackup;            // 0x00bebcc2
 extern unsigned short g_PauseGameInMsgFlag;            // 0x00bf0a18
 extern unsigned char* g_MessagePtr;                    // 0x00bf0a1c
-extern unsigned char g_MessageStateCounter;            // 0x00bf0a16
-extern short         g_MessageScreenY;                 // 0x00bf0a1a
-extern unsigned char g_MessageSpeedUpFlag;             // 0x00bf0a17
-extern RDT*          g_RdtPointer;                     // 0x00bebcd0
+extern unsigned char  g_MessageStateCounter;            // 0x00bf0a16
+extern short          g_MessageScreenY;                 // 0x00bf0a1a
+extern unsigned char  g_MessageSpeedUpFlag;             // 0x00bf0a17
+extern RDT*           g_RdtPointer;                     // 0x00bebcd0
 extern unsigned char* global_messages[64];             // 0x004bfc58
-
-extern int           g_playerHealth;                   // 0x00be636c
+extern unsigned char* g_MessageCurrentPtr;             // 0x00bf0a20 - current position in message text
+extern unsigned char* g_MessageSavedPtr;               // 0x00bf0a24 - saved ptr for item name returns
+extern unsigned char  g_MessageCharDelay;              // 0x00bf0a29 - base delay between characters
+extern unsigned char  g_MessageCharTimer;              // 0x00bf0a2a - current timer countdown
+extern unsigned char  g_MessageClutBase;               // 0x00bf0a2b - CLUT color base
+extern unsigned char  g_MessageClutCopy;               // 0x00bf0a2c - copy of CLUT base
+extern int            g_MessageLineCounter;            // 0x008e1c64 - line counter for newlines
 
 // Game state
 extern int           DAT_00d91bc8;                     // 0x00d91bc8
-extern int           g_currentFMVID;
-extern int           g_CurrentFMVID;                   // 0x00d91bcc
+
+extern int           g_CurrentFMVID;                   // 0x008f8790
 
 // Screen pos
-extern int           g_ScreenOffsetX;                  // 0x00ac3ff8
-extern int           g_ScreenOffsetY;                  // 0x00ac3ffc
+extern short         g_ScreenOffsetX;                  // 0x004BCAC8
+extern short         g_ScreenOffsetY;                  // 0x004BCACA
 extern signed char   g_ScreenShakeOffsetX;             // 0x00bca0d8
 extern signed char   g_ScreenShakeOffsetY;             // 0x00bca0d9
 
@@ -95,6 +138,13 @@ extern signed char   g_ScreenShakeOffsetY;             // 0x00bca0d9
 extern short         g_fading_counter;                 // 0x00bebcca
 extern unsigned char g_fade_type_id;                   // 0x00bf0a2f
 extern BYTE          g_bGameActive;                    // 0x00be41dc
+
+// Sprite animation/screen tint state (0x00be41d0-0x00be41d4)
+extern int           g_spriteAnimActive;               // 0x00be41d0
+extern int           g_spriteAnimR;                    // 0x00be41d1
+extern int           g_spriteAnimG;                    // 0x00be41d2
+extern int           g_spriteAnimB;                    // 0x00be41d3
+extern short         g_spriteAnimIntensity;            // 0x00be41d4
 
 // Task system globals
 extern DWORD         g_StackPointer;                   // 0x007e0cc8
@@ -110,7 +160,6 @@ extern void*         g_AsyncRpcCallback;               // 0x00d91a90
 
 // Input state
 extern DWORD g_lastScanCodeOrMsgID;                    // 0x00bcb2e0
-extern DWORD g_InputFlags;                              // 0x00bcb2e4
 
 // Entity / Player globals
 extern PlayerEntity  g_playerEntity;                   // 0x00be62e4 - main player entity (0x180 bytes)
@@ -149,13 +198,15 @@ extern BioCardLayout g_BioCard;                        // 0x00be9620
 
 // Menu / dialog flags
 extern int           g_menu_choice_id;                 // 0x00be0e28
-extern BOOL          g_displayReturnToTitleScreen_Flag;// 0x004bcb50
-extern BOOL          g_displayExitGameScreen_flag;     // 0x004bcb54
+extern BOOL          g_displayReturnToTitleScreen_Flag;// 0x004d466c
+extern BOOL          g_displayExitGameScreen_flag;     // 0x004D4668
 extern int           g_demoTimer;                      // 0x004bcb5c
+extern short         g_DemoTimerCur;                   // 0x00d21cee
+extern short         g_DemoTimerMax;                   // 0x00d21cf0
 
 // Sound system
-extern int           g_SndFadeType;                    // 0x00bf0a2d
-extern int           g_SndRampFramesLeft;              // 0x00ac9908
+extern int           g_SndFadeType;                    // 0x00BF0A2D
+extern int           g_SndRampFramesLeft;              // 0x00AC9908 
 extern int           g_BgmSoundBank;
 extern int           g_SfxBanks[64];
 extern int           g_RoomSfxBanks[64];
@@ -200,15 +251,19 @@ extern int           g_sndload_bank_index;
 extern short         g_CurSlot;
 extern int           g_SndFadeStepTbl[64];
 
+
+extern POLY_F4      Poly_F4_ARRAY_004ba750[4];          // 0x004ba750
+
 // Game init
-extern int           init_game_flag;                   // 0x00bcb2e8
+extern int           init_game_flag;                   // 0x004ba7b0
 
 // Timing
 extern DWORD         g_dwSystemTimer1;                 // 0x007e0df4
 extern DWORD         g_dwGameTimer1;                   // 0x007e0df8
 extern DWORD         g_GameInitTime;                   // 0x004d46c4
-extern DWORD         g_gameTimerSnapshot;              // 0x004d46cc
-extern DWORD         Game_timer;                       // 0x004d46d0
+extern DWORD         g_gameTimerSnapshot;              // 0x00be9844
+extern DWORD         Game_timer;                       // 0x00d22730
+extern DWORD         DAT_004d46d4;                     // 0x004d46d4
 extern DWORD         g_LastFrameTime_ms;               // 0x004d45fc
 
 // Frame rate governor
@@ -227,7 +282,7 @@ extern int           g_mciVideoDeviceID;               // 0x004bcb44
 extern BOOL          g_bMCIVideoEvent;                 // 0x004bcb48
 
 // Misc flags
-extern BOOL          g_bIsPaused;
+extern BOOL          g_isPaused;
 extern BOOL          g_bWindowActive;                  // 0x004bcb30
 extern BOOL          g_bQuitFlag;                      // 0x004bcb40
 extern BOOL          g_bUseFrameSkip;
@@ -532,6 +587,7 @@ void ResumePausedSounds(void);
 void UpdateSoundFadeState(void);
 void UpdateSoundDecay(void);
 void empty_0047b950(int param);
+int  empty_483510(void);
 void UpdateMusicWaitState(void);
 void sounds_reset(void);
 void LoadSoundBank(int sound_bank_id, void* buffer);
@@ -558,10 +614,10 @@ void ResetScreenPanning(void);
 void SetScreenOffset(int x, int y);
 void ApplyScreenShake(void);
 void FUN_004557b0(void);
-void FUN_00401020(int param);
-void FUN_0045ab60(void);
-void FUN_00497360(int r, int g, int b);
-void FUN_00497340(int param);
+void ResetScreenAndRebuildSprites(int param);
+void ApplyShakeAndRebuildSprites(void);
+void SetScreenReadyWithDebugColor(int r, int g, int b);
+void SetScreenReady(int param);
 void FUN_004973a0(int param);
 void FUN_00470a90(void);
 void FrameRateGovernor(void);
@@ -954,6 +1010,7 @@ extern unsigned char* g_ScdOpcodes;                     // 0x00bf0800 - current 
 extern unsigned int*  g_CmdOpcodesPointer;              // 0x00bf0804 - SCD call stack pointer
 extern unsigned char  g_ScriptContinueFlag;             // 0x00bf07fa - SCD call depth counter
 extern unsigned char* g_EvtScripts;                     // 0x00d213b4 - event script table pointer
+extern unsigned char* g_RoomScdOpcodes;                  // 0x00d213b8 - room SCD opcodes pointer
 extern void*          script_command_funcs_table[256];   // 0x004c1110 - SCD command dispatch table
 
 // SCD flag bank 9 (misc flags)

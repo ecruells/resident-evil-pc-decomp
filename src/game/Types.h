@@ -19,17 +19,33 @@ struct MATRIX {
     int t[3];       // 0x14: Translation vector (3 x int = 12 bytes)
 };
 
-// PS1 GTE vector type
+// PSQY short vector type
 struct SVECTOR {
     short x, y, z;
     short pad;
 };
 
-// 32-bit integer vector (for positions)
+// PSYQ - Character vector
+struct CVECTOR {
+    short r, g, b;  // Color palette
+    short cd;       // GPU code
+};
+
+// 32-bit integer vector
 struct VECTOR {
     int x, y, z;
     int pad;
 };
+
+struct POLY_F4 {
+    unsigned int tag; // Next primitive pointer + size (OT tag)
+    unsigned char r0, g0, b0; // RGB color values
+    unsigned char code; // Primitive ID (reserved)
+    short x0, y0; // Vertex coordinates
+    short x1, y1; // Vertex coordinates
+    short x2, y2; // Vertex coordinates
+    short x3, y3; // Vertex coordinates
+}; 
 
 // Forward declarations for circular references
 struct JointStruct;
@@ -378,6 +394,7 @@ struct RectDrawDesc {
     unsigned char g;
     unsigned char b;
 };
+static_assert(sizeof(RectDrawDesc) == 16, "RectDrawDesc size mismatch");
 
 #pragma pack(push, 1)
 struct TextureDesc {

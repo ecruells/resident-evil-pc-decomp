@@ -445,7 +445,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     unsigned char bVar5 = g_TextureBankID;
     unsigned char bVar6 = g_TextureDepthByte;
 
-    if ((((unsigned char*)&g_InputFlags)[3] & 4) != 0 && entity_id < 2) {
+    if ((g_main_state_flags2 & 0x4000000) != 0 && entity_id < 2) {
         entity_id = (unsigned char)DAT_004d6444 + 0x33;
     }
 
@@ -457,7 +457,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     unsigned int fileSize = LoadFile(FILE_PATH, g_loadDataDestPointer, 32);
     int data_pointer = (int)g_loadDataDestPointer;
 
-    if ((((unsigned char*)&g_InputFlags)[3] & 4) != 0 && (unsigned int)DAT_004d6444 - entity_id == -0x33) {
+    if ((g_main_state_flags2 & 0x4000000) != 0 && (unsigned int)DAT_004d6444 - entity_id == -51) {
         entity_id = g_playerEntity.id & 1;
     }
 
@@ -620,7 +620,7 @@ void SetupCharacterData(void)
     g_TextureBankID = 0x16;
     Object_DeleteAll(0);
     LoadEntityModel();
-    InitScaMatrix(0, g_playerEntity.scaMatrixData);
+    InitScaMatrix(0, &g_playerEntity.scaMatrixData);
     SetWeaponBodyParts(0xe);
     g_playerEntity.equippedWeaponId = 0;
     if (g_equippedItemId != 0) {
@@ -632,7 +632,7 @@ void SetupCharacterData(void)
     g_playerEntity.jointsStructs[1].rotDeltaX = 0;
     g_playerEntity.jointsStructs[1].rotDeltaY = 0;
     g_playerEntity.jointsStructs[1].rotDeltaZ = 0x10;
-    g_playerEntity.scaMatrixData = (ScaMatrixData*)g_scaDataTable[(g_playerEntity.id & 1) * 2];
+    g_playerEntity.Sca_info = g_scaDataTable[(g_playerEntity.id & 1) * 2];
     ClearAnimTiming();
 }
 

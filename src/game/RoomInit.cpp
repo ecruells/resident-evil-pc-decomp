@@ -59,11 +59,11 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
 {
     short screenY;
 
-    if ((g_MessageDisplayActive & 0x80) != 0) {
+    if ((g_menu_choice_id & 0x80) != 0) {
         return 1;
     }
 
-    g_MessageDisplayActive = 0x80;
+    g_menu_choice_id = 0x80;
 
     g_messageFlagsBackup = g_message_flags;
     g_PauseGameInMsgFlag = pause_game;
@@ -84,6 +84,15 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
     }
 
     g_MessageStateCounter = 0;
+
+    // Consume any stale button press from the transition that triggered this
+    // message (e.g., the ENTER/CROSS press that confirmed character selection
+    // and skipped the FMV). The main_loop checks g_PlayerPadPressed against
+    // g_lastScanCodeOrMsgID (which we just set to msg_id above) — if a stale
+    // press survives, the check at main_loop line 52 would clear
+    // g_menu_choice_id and kill the message before it renders.
+    g_button_pressed_id = 0;
+    g_PlayerPadPressed = 0;
 
     if ((*(((BYTE*)&g_main_state_flags) + 1) == 0)) {
         screenY = 181;
@@ -110,11 +119,11 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
 // ============================================================================
 void display_game_loading_message(void)
 {
-    if ((*(((BYTE*)&g_main_state_flags) + 7) & 0x10) != 0) {
+    if ( (g_main_state_flags2 & 0x10000000) != 0 ) {
         set_message_display(0x5d, 0);
         Task_exit();
     }
-    if ((*(((BYTE*)&g_main_state_flags) + 3) & 0x10) != 0) {
+    if ( (g_main_state_flags & 0x10000000) != 0 ) {
         set_message_display(0x5c, 0);
         Task_exit();
     }
@@ -131,23 +140,19 @@ void init_room(void)
 {
     g_AttractMode_RoomCameraId = 0x1f;
     g_BGM_STATE = 0xFF;
-    g_loadDataDestPointer = &g_image_buffer;
+    g_loadDataDestPointer = g_image_buffer;
     g_StageDataPtr = (void*)g_StageVoiceOffsetTable[g_stageId];
     // Set pointer to current stage's 32-room BGM state block (used by update_room_bgm)
     g_RoomBgmStatePtr = &g_RoomBgmStateData[g_stageId * 32];
 
     set_player_animations_functions();
 
-    // 0x004099e1: g_RdtLoadDataBackup = g_loadDataDestPointer
     g_RdtLoadDataBackup = g_loadDataDestPointer;
 
-    // 0x004099d4: if ((g_InputFlags byte 3 & 0x10) != 0)
-    if ((((unsigned char*)&g_InputFlags)[3] & 0x10) != 0) {
+    if ( (g_main_state_flags2 & 0x10000000) != 0 ){
         // 0x004099f6: Force silence for this room's BGM (0xFF = no BGM)
         g_RoomBgmStatePtr[g_roomId] = 0xFF;
     }
-
-    // 0x004099fa: room_set()
     room_set();
 }
 
@@ -230,8 +235,8 @@ void room_set(void)
     printf("object delete end\n");
 
     // 0x0047780d: Clear lower nibble of main state flags and input flags
-    g_main_state_flags &= 0xfffffff0;
-    g_InputFlags &= 0xfffffff0;
+    g_main_state_flags &= 0xFFFFFFF0;
+    g_main_state_flags2 &= 0xFFFFFFF0;
 
     // 0x0047782e: Restore g_loadDataDestPointer from backup
     g_loadDataDestPointer = g_RdtLoadDataBackup;
@@ -301,7 +306,7 @@ void room_set(void)
                 }
             }
         } else {
-            g_InputFlags |= 0x4000000;
+            g_main_state_flags2 |= 0x4000000;
             g_CharacterModelId &= 7;
         }
 

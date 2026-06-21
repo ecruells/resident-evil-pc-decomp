@@ -620,7 +620,7 @@ int RunMessageLoop(void)
         
         // 0x00441e50: Frame timing and game loop execution
         if (!g_bQuitFlag && g_bWindowActive) {
-            if ((g_hWnd != NULL && g_bWindowActive) || g_bIsPaused) {
+            if ((g_hWnd != NULL && g_bWindowActive) || g_isPaused) {
                 DWORD currentTime = timeGetTime();
                 
                 // 0x00441e70: Frame rate counter every second
@@ -670,7 +670,7 @@ int RunMessageLoop(void)
                 }
             }
             
-            g_bIsPaused = FALSE;
+            g_isPaused = FALSE;
         }
     }
     

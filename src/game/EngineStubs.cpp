@@ -51,9 +51,16 @@ void FUN_00427250(void)                               { /* stub */ }
 // FUN_004973a0 (0x004973a0) - stub
 void FUN_004973a0(int param)                                 { /* stub */ }
 
-// UpdateDemoTimer - stub
+// UpdateDemoTimer (0x00429ce0) - increments demo idle timer and resets when threshold reached
 void UpdateDemoTimer(void) {
-
+  if ((g_main_state_flags2 & 0x10000000) != 0 &&
+      (g_message_flags & 0x200) != 0 &&
+      g_DemoTimerCur != 0) {
+    g_DemoTimerCur++;
+    if ((int)(g_DemoTimerMax - 1) <= (int)(unsigned short)g_DemoTimerCur) {
+      g_DemoTimerCur = 0;
+    }
+  }
 }
 
 // empty_0047b950 (0x0047b950) - stub
@@ -84,3 +91,6 @@ void vram_clr(int x, int y, int w, int h) {}
 
 // empty_00412380 (0x00412380) - unknown init function
 void empty_00412380(void) { }
+
+// empty_483510 (0x00483510) - stub, returns 0
+int  empty_483510(void) { return 0; }

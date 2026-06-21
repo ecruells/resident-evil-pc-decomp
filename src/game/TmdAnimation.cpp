@@ -75,7 +75,7 @@ unsigned int FindMinClutDepth(AnimSlot* slot)
     unsigned int minDepth = 0xFFFFFFFF;
     unsigned int depth;
 
-    for (int i = 0; i < 2; i++) {
+    for (int i = 0; i < 1; i++) {
         unsigned int* puVar5 = (unsigned int*)slot->data2;
         int iVar2 = slot->entryCount;
         if (iVar2 > 0) {

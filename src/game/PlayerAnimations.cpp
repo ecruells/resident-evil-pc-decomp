@@ -16,9 +16,9 @@ void player_anim_attack_recoil(void) {
         g_playerEntity.unk_bf = 0;
         g_playerEntity.unk_8c = 0;
         g_playerEntity.anim_87 = 1;
-        g_playerEntity.transform.t[0] = (int)*(unsigned short*)((char*)ENTITY + 0xC6);
-        g_playerEntity.transform.t[2] = (int)*(unsigned short*)((char*)ENTITY + 0xC8);
-        Play3DSnd(3, 0, 0, (int)&g_playerEntity.transform.t);
+        g_playerEntity.scaMatrixData.localMatrix.t[0] = (int)*(unsigned short*)((char*)ENTITY + 0xC6);
+        g_playerEntity.scaMatrixData.localMatrix.t[2] = (int)*(unsigned short*)((char*)ENTITY + 0xC8);
+        Play3DSnd(3, 0, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
         g_playerEntity.flags |= 2;
     case 1:
         entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
@@ -69,7 +69,7 @@ void player_anim_simple_recovery(void) {
         g_playerEntity.unk_bf = 0;
         g_playerEntity.unk_8c = 0;
         g_playerEntity.attackAnim = 2;
-        Play3DSnd(3, 2, 0, (int)&g_playerEntity.transform.t);
+        Play3DSnd(3, 2, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
         return;
     }
     if (g_playerEntity.unk_be == 0xf) {
@@ -281,8 +281,8 @@ void player_anim_dispatch_4ba360(void) {
         Effect_CreateBillboard(0, 3, 0, &pJVar5[0].world, &g_playerPosScratch, 0);
         Effect_CreateBillboard(0, 3, 0, &pJVar5[2].world, &g_playerPosScratch, 0);
         Effect_CreateBillboard(0, 3, 0, &pJVar5[1].world, &g_playerPosScratch, 0);
-        Play3DSnd(3, 3, 0, (int)&g_playerEntity.transform.t);
-        Play3DSnd(4, 0, 0, (int)&g_playerEntity.transform.t);
+        Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        Play3DSnd(4, 0, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
         g_playerEntity.flags |= 4;
         g_playerEntity.attackDirection = 0xf;
         // fall through
@@ -366,17 +366,17 @@ void player_anim_dispatch_4ba360(void) {
 
     // Joint 0 bounce check (when in-air flag set and position.y < 700)
     if (((((unsigned char*)&pJVar5[0].velX)[1] & 0x80) != 0) &&
-        (g_playerEntity.transform.t[1] < 700)) {
+        (g_playerEntity.scaMatrixData.localMatrix.t[1] < 700)) {
         g_playerEntity.health = -1;
-        g_playerEntity.transform.t[1] = g_playerEntity.transform.t[1] + pJVar5[0].velY;
+        g_playerEntity.scaMatrixData.localMatrix.t[1] = g_playerEntity.scaMatrixData.localMatrix.t[1] + pJVar5[0].velY;
         sVar8 = pJVar5[0].velY;
         sVar7 = sVar8 + 2;
         pJVar5[0].velY = sVar7;
         if (0x20 < sVar7) {
             pJVar5[0].velY = sVar8 + 12;
         }
-        if ((700 < g_playerEntity.transform.t[1]) && ((pJVar5[0].velX & 7) != 0)) {
-            g_playerEntity.transform.t[1] = 0x28a;
+        if ((700 < g_playerEntity.scaMatrixData.localMatrix.t[1]) && ((pJVar5[0].velX & 7) != 0)) {
+            g_playerEntity.scaMatrixData.localMatrix.t[1] = 0x28a;
             sVar8 = -pJVar5[0].velY;
             pJVar5[0].velY = sVar8;
             pJVar5[0].velY = (short)((int)((int)sVar8 + ((int)sVar8 >> 31 & 7U)) >> 3);
@@ -483,7 +483,7 @@ void player_anim_dispatch_4c10b0(void) {
         // fall through
     case 3:
         if ((1 < g_playerEntity.isBeingAttackedFlag) && (3 < g_playerEntity.unk_be)) {
-            Play3DSnd(3, 2, 0, (int)&g_playerEntity.transform.t);
+            Play3DSnd(3, 2, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
             PlayEntitySnd(2);
             g_playerEntity.isBeingAttackedFlag = 1;
         }
@@ -549,7 +549,7 @@ void player_anim_dispatch_4c10b0(void) {
         }
         break;
     case 8:
-        Play3DSnd(3, 3, 0, (int)&g_playerEntity.transform.t);
+        Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
         g_playerEntity.anim_87 = 9;
         g_playerEntity.attackDirection = 0x5a;
         BillboardSetColor(&g_playerEntity.pushVelocity, 1, 2, DAT_00ffff50);
@@ -575,7 +575,7 @@ void player_anim_poison_death(void) {
         g_playerEntity.unk_bf = 0;
         g_playerEntity.unk_8c = 3;
         g_playerEntity.isBeingAttackedFlag = 1;
-        Play3DSnd(3, 0, 0, (int)&g_playerEntity.transform.t);
+        Play3DSnd(3, 0, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
     }
     Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
 }
@@ -615,7 +615,7 @@ void player_anim_enemy_interact(void) {
         g_playerEntity.unk_8c = 0;
     } else if (g_playerEntity.anim_87 == 1) {
         if (g_playerEntity.unk_be == 8) {
-            Play3DSnd(3, 3, 0, (int)&g_playerEntity.transform.t);
+            Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
             // TODO: Billboard effects on joints at frame 8/9 and >95
         }
         entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
@@ -712,8 +712,8 @@ void entity_apply_anim_vertex(Entity* entity, unsigned int emdScratch1, unsigned
     ApplyMatrixSV(&g_matrixScratch, &g_svecScratch, &g_svecScratch);
 
     // 0x00489fff - Set entity transform translation from base offset + rotated vertex
-    entity->transform.t[0] = (unsigned int)entity->unk_c6 + (int)g_svecScratch.x;
-    entity->transform.t[2] = (unsigned int)entity->unk_c8 + (int)g_svecScratch.z;
+    entity->scaMatrixData.localMatrix.t[0] = (unsigned int)entity->unk_c6 + (int)g_svecScratch.x;
+    entity->scaMatrixData.localMatrix.t[2] = (unsigned int)entity->unk_c8 + (int)g_svecScratch.z;
 }
 
 // ============================================================================
@@ -1084,10 +1084,10 @@ void EntityUpdateWeaponJoint(int weaponIdx)
     JointStruct* joints = ENTITY->jointsStructs;
 
     // Build rotation from entity's facing angle
-    RotMatrix((SVECTOR*)&ENTITY->position.pad, &ENTITY->transform);
+    RotMatrix((SVECTOR*)&ENTITY->position.pad, &ENTITY->scaMatrixData.localMatrix);
 
     // Compose: scratch = entity_transform * joint[0].transform
-    ApplyLVAndMul0Matrix(&ENTITY->transform, &joints[0].transform, &g_matrixScratch);
+    ApplyLVAndMul0Matrix(&ENTITY->scaMatrixData.localMatrix, &joints[0].transform, &g_matrixScratch);
 
     // Compose: scratch = scratch * joint[2].transform
     ApplyLVAndMulMatrix(&g_matrixScratch, &joints[2].transform);
@@ -1104,8 +1104,8 @@ void EntityUpdateWeaponJoint(int weaponIdx)
     g_matrixScratch.t[2] -= joints[idx * 3 + 5].world.t[2];
 
     // Adjust entity translation
-    ENTITY->transform.t[0] -= g_matrixScratch.t[0];
-    ENTITY->transform.t[2] -= g_matrixScratch.t[2];
+    ENTITY->scaMatrixData.localMatrix.t[0] -= g_matrixScratch.t[0];
+    ENTITY->scaMatrixData.localMatrix.t[2] -= g_matrixScratch.t[2];
 }
 
 // ============================================================================
@@ -1140,9 +1140,9 @@ void Add_speedXZ(int angleOffset)
     ApplyMatrixSV(&g_matrixScratch, &g_svecScratch, &ENTITY->speed);
 
     // Apply speed to entity transform translation
-    ENTITY->transform.t[0] += (int)ENTITY->speed.x;
-    ENTITY->transform.t[1] += (int)ENTITY->speed.y;
-    ENTITY->transform.t[2] += (int)ENTITY->speed.z;
+    ENTITY->scaMatrixData.localMatrix.t[0] += (int)ENTITY->speed.x;
+    ENTITY->scaMatrixData.localMatrix.t[1] += (int)ENTITY->speed.y;
+    ENTITY->scaMatrixData.localMatrix.t[2] += (int)ENTITY->speed.z;
 }
 
 // ============================================================================

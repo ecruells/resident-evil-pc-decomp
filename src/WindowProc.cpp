@@ -24,7 +24,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     switch (msg) {
         // --- WM_ACTIVATE ---
         case WM_ACTIVATE:
-            g_bIsPaused = FALSE;
+            g_isPaused = FALSE;
             if (LOWORD(wParam) == WA_INACTIVE) {
                 // 0x004411f4: Window deactivated
                 if (!g_bIsSoftwareRendering && g_mciVideoDeviceID == 1) {
@@ -33,7 +33,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 PauseSounds();
             } else {
                 // Window activated
-                g_bIsPaused = TRUE;
+                g_isPaused = TRUE;
                 ResumePausedSounds();
             }
             break;

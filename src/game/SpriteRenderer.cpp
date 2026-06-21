@@ -53,7 +53,8 @@ void SpriteQueue_Reset(void) {
 
 // ============================================================================
 // FlushSpriteCommands
-// Converts TextureDraw entries to D3D11 draw calls
+// Converts TextureDraw entries (in PS1 absolute screen coordinates, 0-319 x 0-239)
+// to D3D11 draw calls at the current display resolution.
 // ============================================================================
 void FlushSpriteCommands(void) {
     if (g_SpriteQueueCount == 0) return;
@@ -66,8 +67,8 @@ void FlushSpriteCommands(void) {
         TextureDraw* cmd = &g_SpriteCommandBuffer[i];
         if (cmd->type != 10) continue;
 
-        float x = ((float)cmd->x0 + 160.0f) * scaleX;
-        float y = ((float)cmd->y0 + 120.0f) * scaleY;
+        float x = (float)cmd->x0 * scaleX;
+        float y = (float)cmd->y0 * scaleY;
         float w = (float)(cmd->x1 - cmd->x0 + 1) * scaleX;
         float h = (float)(cmd->y1 - cmd->y0 + 1) * scaleY;
 

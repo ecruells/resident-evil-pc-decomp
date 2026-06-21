@@ -11,8 +11,11 @@ extern void FUN_00470a30(void);
 extern void Object_DeleteAll(int a);
 extern void SetVideoResolution(int w, int h);
 extern void setSomeColor(int r, int g, int b);
-extern void vram_clr(int x, int y, int w, int h);
 extern void empty_00412380(void);
+extern void SetSpriteBufferFlag(void);
+extern void setBackColor(unsigned char r, unsigned char g, unsigned char b);
+extern void empty_40ae40(int);
+extern void vram_clr(int x, int y, int w, int h);
 
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -110,9 +113,9 @@ void logos_state(void)
     setSomeColor(128, 128, 128);
 
     // if (g_bIsSoftwareRendering == FALSE) {
-        g_currentFMVID = 28;
-        g_FmvCharacterId = 0;
-        g_main_state_flags |= 0x40000;
+        // g_currentFMVID = 28;
+        // g_FmvCharacterId = 0;
+        // g_main_state_flags |= 0x40000;
     // } else {
     //     QueueVideoPlayback(29, 0);
     // }
@@ -120,9 +123,9 @@ void logos_state(void)
     Task_sleep(3);
 
     // if (g_bIsSoftwareRendering == FALSE) {
-        g_currentFMVID = 23;
-        g_FmvCharacterId = 0;
-        g_main_state_flags |= 0x40000;
+        // g_currentFMVID = 23;
+        // g_FmvCharacterId = 0;
+        // g_main_state_flags |= 0x40000;
     // } else {
     //     QueueVideoPlayback(29, 0);
     // }
@@ -527,7 +530,7 @@ void InitPlayerData(void)
 {
     SetInitialItems();
     g_playerEntity.position.x = 17000;
-    g_InputFlags = g_InputFlags | 0x20000000;
+    g_main_state_flags2 = g_main_state_flags2 | 0x20000000;
     g_playerEntity.position.z = 5000;
     g_playerEntity.directionAngle = 3072;
 }
@@ -562,16 +565,16 @@ void InitPlayerEntity(void)
     g_playerEntity.unk_12 = 0xBE;
     g_playerEntity.unk_13 = 0;
     g_playerEntity.speed.x = 0;
-    g_playerEntity.transform.m[0][0] = 0x1000;
-    g_playerEntity.transform.m[0][1] = 0;
-    g_playerEntity.transform.m[0][2] = 0;
-    g_playerEntity.transform.m[1][0] = 0;
-    g_playerEntity.transform.m[1][1] = 0x1000;
-    g_playerEntity.transform.m[1][2] = 0;
+    g_playerEntity.scaMatrixData.localMatrix.m[0][0] = 0x1000;
+    g_playerEntity.scaMatrixData.localMatrix.m[0][1] = 0;
+    g_playerEntity.scaMatrixData.localMatrix.m[0][2] = 0;
+    g_playerEntity.scaMatrixData.localMatrix.m[1][0] = 0;
+    g_playerEntity.scaMatrixData.localMatrix.m[1][1] = 0x1000;
+    g_playerEntity.scaMatrixData.localMatrix.m[1][2] = 0;
     g_playerEntity.unk_d8 = 0;
-    g_playerEntity.transform.m[2][0] = 0;
-    g_playerEntity.transform.m[2][1] = 0;
-    g_playerEntity.transform.m[2][2] = 0x1000;
+    g_playerEntity.scaMatrixData.localMatrix.m[2][0] = 0;
+    g_playerEntity.scaMatrixData.localMatrix.m[2][1] = 0;
+    g_playerEntity.scaMatrixData.localMatrix.m[2][2] = 0x1000;
     g_playerEntity.unk_ca = 0;
 }
 
@@ -621,7 +624,7 @@ void InitializeGame(void)
         g_SpecialRoomLightState = (short)0xFFFF;
         g_CharacterModelId = g_playerEntity.id;
 
-        if ((g_InputFlags & 0x10000000) == 0) {
+        if ((g_main_state_flags2 & 0x10000000) == 0) {
             InitPlayerData();
             /*
             * chris: 140hp
@@ -714,22 +717,45 @@ void InitializeGame(void)
 }
 
 // ============================================================================
-// game_loop (0x00480b30) — STUB
+// game_loop (0x00480b30)
 // Main gameplay loop: entities, cameras, rooms, menus, combat.
 // Returns: 1 = died/quit to title, 0 = game completed → ending.
+//
+// 0x00480b30: while ((g_menu_choice_id & 0x80) != 0) Task_sleep(1)
+// 0x00480b45: g_main_state_flags |= 0x2000000
+// 0x00480b6c: g_main_state_flags &= 0x3fffffff; g_main_state_flags |= 0x80000000
+// 0x00480e02: do { ... Task_sleep(1); ... } while ((g_menu_choice_id & 0x80) != 0)
+// 0x004813b9: do { ... } while (true) — main gameplay loop
 // ============================================================================
 int game_loop(void)
 {
-    // 0x00480b30
-    OutputDebugStringA("[GAME] game_loop — stub (returning 1 = died)\n");
-
-    g_main_state_flags |= 0x2000000;
-    g_message_flags = 0xfd3f;
-
-    // Stub: wait a few frames then return "died" to go back to title
-    for (int i = 0; i < 60; i++) {
+    // 0x00480b30: wait for the loading message (queued by
+    // display_game_loading_message during InitializeGame) to be dismissed
+    // before entering gameplay. The message is rendered each frame by
+    // FUN_004557b0 in main_loop on the blanking (black) screen.
+    while ((g_menu_choice_id & 0x80) != 0) {
         Task_sleep(1);
     }
+
+    // 0x00480b45: mark gameplay active
+    g_main_state_flags |= 0x2000000;
+
+    // The full game loop is not yet implemented. The original (0x00480b6c)
+    // clears 0x40000000 and sets 0x80000000 here, then arms a black fade-in
+    // and renders the loaded room background. Until room rendering exists,
+    // keep the screen in blanking mode (0x40000000, set by InitializeGame) so
+    // the stale character-select background held in g_displayImageSRV is NOT
+    // re-drawn (OT_InsertPrimitive/display_texture are gated by this flag) and
+    // no white flashing occurs. Also drop any leftover fade state from the
+    // character-select screen (g_fade_type_id=1 white flash) and hide the
+    // transition for 6 frames (matches original 0x00480b5c StMask(0,6)).
+    g_fading_state = -1;
+    g_fading_counter = 0;
+    StMask(0, 6);
+
+    do {
+        Task_sleep(1);
+    } while (true);
 
     return 1;  // 1 = died, chains to title_state
 }
@@ -772,42 +798,28 @@ void ending_state(void)
 void game_start(void)
 {
     int end_game_status;
-    // 0x00480710: MOV dword ptr [g_playingGameFlag], 1
     g_playingGameFlag = 1;
 
-    // 0x0048071a: AND word ptr [g_message_flags], 0xFDFF — clear bit 9
     g_message_flags = g_message_flags & 0xfdff;
 
-    // 0x00480723: CALL InitializeGame
     InitializeGame();
 
-    // 0x00480728: CALL game_loop — returns end_game_status in EAX
     end_game_status = game_loop();
 
-    // 0x0048072d: MOV dword ptr [g_main_state_flags], 0
     g_main_state_flags = 0;
 
-    // 0x0048073c: CMP end_game_status, 1
     if (end_game_status == 1) {
-        // 0x00480745: AND dword ptr [g_InputFlags], 0x20080000
-        g_InputFlags = g_InputFlags & 0x20080000;
-        // 0x0048074f: Task_chain(title_state)
+        g_main_state_flags2 = g_main_state_flags2 & 0x20080000;
         Task_chain((void*)title_state);
     }
 
-    // 0x0048075c: AND dword ptr [g_InputFlags], 0x20080000
-    g_InputFlags = g_InputFlags & 0x20080000;
+    g_main_state_flags2 = g_main_state_flags2 & 0x20080000;
 
-    // 0x00480766: CMP end_game_status, 0
     if (end_game_status == 0) {
-        // 0x0048076f: MOV EAX, [Game_timer]
-        // 0x00480779: MOV [g_gameTimerSnapshot], EAX
         g_gameTimerSnapshot = Game_timer;
-        // 0x00480774: Task_chain(ending_state)
         Task_chain((void*)ending_state);
     }
 
-    // 0x00480786: Task_chain(logos_state)
     Task_chain((void*)logos_state);
 }
 
@@ -833,8 +845,95 @@ void title_select_sfx(void) { }
 // (0x00462e90) - Check if player moved to different camera zone
 void check_camera_switch(int param) { }
 
-// (0x00462740) - Load RDT file for current room
-void LoadRoomRdt(void) { }
+// (0x00477d90) - Load RDT file for current room
+// Loads the Room Definition Table for the current stage/room, resolves internal
+// relative pointers to absolute addresses, and sets up SCD script pointers.
+void LoadRoomRdt(void)
+{
+    static const char hexDigits[] = "0123456789abcdef";
+
+    // 0x00477d97: Set g_RdtPointer to the current load buffer
+    g_RdtPointer = (RDT*)g_loadDataDestPointer;
+
+    // 0x00477d9c: ESI = start of camera data (past RDT header)
+    unsigned char* cameras = (unsigned char*)(g_RdtPointer + 1);
+
+    // 0x00477da4-0x00477e02: Build RDT file path
+    // Format: ./usa/stageX/roomXYYZ.rdt where X=stage, YY=room, Z=flag
+    sprintf(FILE_PATH, ".\\usa\\stage%c\\room%c%c%c%c.rdt",
+            hexDigits[g_stageId + 1],
+            hexDigits[g_stageId + 1],
+            hexDigits[g_roomId >> 4],
+            hexDigits[g_roomId & 0xF],
+            hexDigits[(g_main_state_flags & 0x800000) ? 1 : 0]);
+
+    SetSpriteBufferFlag();
+
+    LoadFile(FILE_PATH, g_RdtPointer, 1);
+
+    // 0x00477e2a-0x00477e46: Resolve camera pointers
+    // Each camera has 2 relative pointer fields (mask_pointer, tim_mask_pointer)
+    // that need to be converted to absolute addresses.
+    int cameraCount = g_RdtPointer->cameras_count;
+    for (int i = 0; i < cameraCount; i++) {
+        *(int*)(cameras) += (int)g_RdtPointer;
+        *(int*)(cameras + 4) += (int)g_RdtPointer;
+        cameras += 0x2C; // sizeof(RDT_Camera)
+    }
+
+    // 0x00477e48-0x00477e75: Resolve RDT pointer fields (offset 0x48 to 0x93)
+    // These are relative offsets stored as ints, converted to absolute pointers.
+    int* ptrField = (int*)((unsigned char*)g_RdtPointer + 0x48);
+    int* ptrEnd = (int*)((unsigned char*)g_RdtPointer + 0x94);
+    while (ptrField < ptrEnd) {
+        *ptrField += (int)g_RdtPointer;
+        ptrField++;
+    }
+
+    // 0x00477e7e-0x00477ec0: Resolve item model pointers
+    // Iterates forward through entries, zeros table backward
+    int* itemPtr = (int*)g_RdtPointer->items_models;
+    int itemCount = g_RdtPointer->sound_banks_count;
+    for (int i = itemCount; i > 0; i--) {
+        // Zero out table entry (reverse order: table[count-1] down to table[0])
+        ((int*)g_itemboxes_covers_table)[i - 1] = 0;
+        if (itemPtr[0] != 0) itemPtr[0] += (int)g_RdtPointer;
+        if (itemPtr[1] != 0) itemPtr[1] += (int)g_RdtPointer;
+        itemPtr += 2;
+    }
+
+    // 0x00477ec9-0x00477f0b: Resolve obstacle model pointers
+    // Same pattern: forward through entries, backward through table
+    int* obstPtr = (int*)g_RdtPointer->obstacles_models;
+    int obstCount = g_RdtPointer->unknown_03[0];
+    for (int i = obstCount; i > 0; i--) {
+        ((int*)g_desks_pointers_table)[i - 1] = 0;
+        if (obstPtr[0] != 0) obstPtr[0] += (int)g_RdtPointer;
+        if (obstPtr[1] != 0) obstPtr[1] += (int)g_RdtPointer;
+        obstPtr += 2;
+    }
+
+    // 0x00477f12-0x00477f27: Set up SCD script pointers
+    g_RoomInitScd = g_RdtPointer->initialization_scd;
+    g_RoomScdOpcodes = g_RdtPointer->scd_opcodes;
+    g_EvtScripts = g_RdtPointer->scd_opcodes2;
+
+    // 0x00477f2d-0x00477f3f: Resolve EVT script relative offsets
+    int* evtPtr = (int*)g_EvtScripts;
+    while (*evtPtr != 0) {
+        *evtPtr += (int)g_EvtScripts;
+        evtPtr++;
+    }
+
+    // 0x00477f49-0x00477f64: Set back color from ambient light
+    setBackColor(
+        (unsigned char)g_RdtPointer->ambient_light_r,
+        (unsigned char)g_RdtPointer->ambient_light_g,
+        (unsigned char)g_RdtPointer->ambient_light_b);
+
+    // 0x00477f6e: empty_40ae40(0)
+    empty_40ae40(0);
+}
 
 // (0x00462990) - Display room camera background image
 void display_room_camera_bg(void) { }
@@ -850,6 +949,9 @@ void play_sound_and_voice_effect(int type, int id) { }
 
 // (0x00455260) - Set background clear color
 void setBackColor(unsigned char r, unsigned char g, unsigned char b) { }
+
+// (0x0040ae40) - Empty function called by LoadRoomRdt
+void empty_40ae40(int param) { }
 
 // (0x00473b10) - Texture bank setup variant
 void FUN_00473b10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6) { }
@@ -907,9 +1009,6 @@ unsigned char Effect_CreateBillboard(unsigned char type, unsigned char param, un
 
 // (0x0047b410) - Build sound fade table
 void BuildSndFadeTbl(char fadeType, int maxVol) { }
-
-// (0x00455150) - Display message with pause
-void set_message_display(unsigned short msg_id, unsigned short pause_game) { }
 
 // (0x0040c560) - Camera/viewport operation
 void FUN_0040c560(int param) { }

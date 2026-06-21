@@ -245,20 +245,20 @@ void load_room_bg(void) // 0x00462b00
         if (g_RdtPointer->cameras_count != 0) {
             do {
                 DAT_004c2090 = g_hexCharTable[cameraIdx];
-                g_bgPathTemplate[0x0F] = g_hexCharTable[g_stageId + 1];
-                g_bgPathTemplate[0x10] = g_hexCharTable[g_roomId >> 4];
-                g_bgPathTemplate[0x11] = g_hexCharTable[g_roomId & 0xf];
+                g_bgPathTemplate[15] = g_hexCharTable[g_stageId + 1];
+                g_bgPathTemplate[16] = g_hexCharTable[g_roomId >> 4];
+                g_bgPathTemplate[17] = g_hexCharTable[g_roomId & 0xf];
                 if (g_stageId > 4) {
-                    g_bgPathTemplate[0x0F] = g_bgPathTemplate[0x11] - 5;
+                    g_bgPathTemplate[15] = g_bgPathTemplate[17] - 5;
                 }
-                g_bgPathTemplate[0x0B] = g_bgPathTemplate[0x0F];
+                g_bgPathTemplate[11] = g_bgPathTemplate[15];
 
                 SetSpriteBufferFlag();
                 LoadFile(g_bgPathTemplate, g_bgPakLoadBuffer, 2);
                 unpack_pakfile_(g_bgPakLoadBuffer, g_BackgroundImageBuffer);
 
                 int width, height;
-                if ((g_InputFlags & 4) == 0) {
+                if ((g_main_state_flags2 & 4) == 0) {
                     width = 320;
                     height = 240;
                 } else {
@@ -276,15 +276,15 @@ void load_room_bg(void) // 0x00462b00
         int camCounter = 0;
         if (g_RdtPointer->cameras_count != 0) {
             do {
-                g_bgPathTemplate[0x12] = g_hexCharTable[camCounter];
-                g_bgPathTemplate[0x0F] = g_hexCharTable[g_stageId + 1];
-                g_bgPathTemplate[0x10] = g_hexCharTable[g_roomId >> 4];
-                g_bgPathTemplate[0x11] = g_hexCharTable[g_roomId & 0xf];
+                g_bgPathTemplate[18] = g_hexCharTable[camCounter];
+                g_bgPathTemplate[15] = g_hexCharTable[g_stageId + 1];
+                g_bgPathTemplate[16] = g_hexCharTable[g_roomId >> 4];
+                g_bgPathTemplate[17] = g_hexCharTable[g_roomId & 0xf];
                 if (g_stageId > 4) {
-                    g_bgPathTemplate[0x0F] = g_bgPathTemplate[0x0F] - 5;
+                    g_bgPathTemplate[15] = g_bgPathTemplate[15] - 5;
                 }
                 camCounter++;
-                g_bgPathTemplate[0x0B] = g_bgPathTemplate[0x0F];
+                g_bgPathTemplate[11] = g_bgPathTemplate[15];
 
                 SetSpriteBufferFlag();
                 g_bgCameraOffsets[camCounter] = totalSize;
@@ -309,11 +309,11 @@ void load_room_bg_image(void) // 0x004629c0
 
     void* pakData;
     if (g_stageId == 2 && g_roomId == 0x11) {
-        g_bgPathTemplate[0x10] = g_hexCharTable[1];
-        g_bgPathTemplate[0x11] = g_hexCharTable[1];
-        g_bgPathTemplate[0x12] = g_hexCharTable[g_roomCameraId];
-        g_bgPathTemplate[0x0F] = g_hexCharTable[3];
-        g_bgPathTemplate[0x0B] = g_bgPathTemplate[0x0F];
+        g_bgPathTemplate[16] = g_hexCharTable[1];
+        g_bgPathTemplate[17] = g_hexCharTable[1];
+        g_bgPathTemplate[18] = g_hexCharTable[g_roomCameraId];
+        g_bgPathTemplate[15] = g_hexCharTable[3];
+        g_bgPathTemplate[11] = g_bgPathTemplate[15];
         LoadFile(g_bgPathTemplate, g_bgPakLoadBuffer, 2);
         pakData = g_bgPakLoadBuffer;
     } else {
@@ -323,7 +323,7 @@ void load_room_bg_image(void) // 0x004629c0
     unpack_pakfile_(pakData, g_BackgroundImageBuffer);
 
     int width, height;
-    if ((g_InputFlags & 4) == 0) {
+    if ((g_main_state_flags2 & 4) == 0) {
         width = 0x140;
         height = 0xf0;
     } else {
