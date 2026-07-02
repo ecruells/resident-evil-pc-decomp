@@ -916,7 +916,7 @@ LRESULT CALLBACK WindowProc(
 
 **Address:** `0x00474e00`
 
-**Purpose:** FMV playback state machine for both hardware and software rendering modes.
+**Purpose:** FMV playback state machine for both hardware and software rendering modes. Handles MCI AVI playback, skip detection, and cleanup.
 
 **Signature:**
 ```cpp
@@ -929,10 +929,10 @@ void UpdateVideoPlayback(void);
 
 | State | Operation |
 |-------|-----------|
-| 0 | Initialize: Clear screen, flip to GDI, open MCI device |
-| 1 | Start playback: Begin video, init skip detection |
-| 2 | Playing: Check for skip/end, handle events |
-| 3 | Cleanup: Close MCI, restore surfaces, resume audio |
+| 0 | Initialize: `ClearScreen()` × 2, `MarniPresent()`, open MCI device, pause sounds, store FMV path |
+| 1 | Start playback: `MCI_OpenAndPlay()`, `InputUpdate()` + `PlayerPad_Update()` to seed `g_videoSkipInput`, set `g_videoSkipCounter = 100` |
+| 2 | Playing: each call decrements `g_videoSkipCounter`, polls input, checks skip edge, watches `g_bMCIVideoEvent`, transitions to state 3 when `g_mciVideoDeviceID == 0` |
+| 3 | Cleanup: `MCI_CloseAll()`, resume sounds, `StMask(3, 0)` |
 
 #### Software Rendering Path
 
@@ -942,14 +942,32 @@ void UpdateVideoPlayback(void);
 | 1 | Playing: Check for skip, wait for completion |
 | 2 | Cleanup: Restore window, resume audio |
 
+#### FMV Skip Mechanism
+
+Skip is per-FMV and gated by both a skip mask and a 100-call grace period.
+
+- **Per-FMV skip mask** — Each entry in `g_FMVTable` (declared in `src/video/VideoPlayback.cpp`, data sourced from Ghidra at `0x004c39dc`) carries a `field_4` WORD. `0x0fff` = skippable (all action buttons), `0x0000` = un-skippable. Verified against the original binary at `0x004c39d8` (8-byte stride, ptr + DWORD mask).
+- **Counter (`g_videoSkipCounter`)** — Initialized to 100 when state 1 starts, decremented each state-2 call. Must reach 0 before any skip is accepted (prevents accidental skip at video start).
+- **Edge detection** — State 1 seeds `g_videoSkipInput = (WORD)PlayerPad_Update()`. State 2 computes `currentInput = (WORD)PlayerPad_Update()` and checks `(skipMask & ~g_videoSkipInput & currentInput) != 0 && g_videoSkipCounter == 0`. Only a rising edge of a masked button while the counter is 0 triggers the skip.
+- **Accept key** — Default keymap binds PC bit 11 to `'C'` (action/confirm), which `g_JoyRemapTbl[0]` maps to PSX `0x0080` (R1). Any bit in `0x0fff` (Cross, Circle, Square, Triangle, L1, L2, R1, R2, Select, Start, L3, R3) will skip.
+
+**Input polling note:** During FMV playback `UpdateVideoPlayback()` runs in place of `main_loop()` (which normally calls `InputUpdate()` + `PlayerPad_Update()`). State 1 and state 2 therefore poll input themselves. `GetAsyncKeyState` works regardless of which window has focus, so the MCI child window receiving focus does not block skip input.
+
+**Skippable FMVs (mask 0x0fff):** 0 (OU.avi opening), 1 (PU.avi), 3-9, 11 (DMB.avi), 12 (DMC.avi), 13 (DMD.avi), 23 (capcom.avi logo), 28 (vlogo.avi logo).
+
+**Un-skippable FMVs (mask 0x0000):** 2 (DMF.avi), 14 (DME.avi), 15-22 (endings ED1-ED8), 24-27 (stfc_r/stfj_r/stfz_r/staf_r staff intros).
+
 **Dependencies:**
-- `ClearScreen()` - Clear display
+- `ClearScreen()` - Clear display (alias for `MarniClear()`)
 - `OpenMCIAviVideo()` - Open MCI device
+- `MCI_OpenAndPlay()` - Open + start MCI playback
+- `MCI_CloseAll()` - Close MCI device
+- `MCISend()` - Send MCI command string
 - `CheckVideoFileExists()` - Verify video file
 - `setMenuScreenOffset()` - Set screen offset
 - `CenterScreenOrigin()` - Center screen
-- `InputUpdate()` - Update input
-- `PlayerPad_Update()` - Get player input
+- `InputUpdate()` - Poll keyboard + joysticks
+- `PlayerPad_Update()` - Edge-detect pad, returns `g_button_pressed_id`
 - `PauseGameSoundsAsync()` - Pause audio
 - `ResumeGameSoundsAsync()` - Resume audio
 - `ShowMessageBox()` - Display errors

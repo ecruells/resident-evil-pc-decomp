@@ -195,7 +195,7 @@ struct QuadVertex {
 |----------|-------------|------------------|
 | `InitializeMarniSystem()` | Creates CMarniDirect3D instance, inputs, lights, joysticks | — |
 | `MarniPresent()` | Presents frame via `vtable[4]` → `IDXGISwapChain::Present` | `0x00448ff0` |
-| `MarniClear()` | Clears render target via `vtable[3]` → `ClearRenderTargetView` | `0x0044b320` |
+| `MarniClear()` | Clears render target via `vtable[3]` → `ClearRenderTargetView`. Also exposed as `ClearScreen()` (alias, matches the Ghidra decomp name used in `UpdateVideoPlayback` state 0) | `0x0044b320` |
 | `MarniDrawSprite()` | Draws textured colored quad at screen coordinates via D3D11 | — |
 | `MarniDrawRect()` | Debug helper: filled rectangle | — |
 | `MarniCreateTexture()` | Creates `ID3D11Texture2D` + SRV from raw pixel data | — |
@@ -206,7 +206,7 @@ struct QuadVertex {
 | `InitJoysticks()` | Initializes XInput gamepads | — |
 | `IsSideWinderPadConnected()` | Checks for Microsoft SideWinder pad | — |
 | `CreateLights(int numLights)` | Creates 3D scene lights | — |
-| `UpdateVideoPlayback()` | FMV playback state machine | — |
+| `UpdateVideoPlayback()` | FMV playback state machine (state 0 init / state 1 start / state 2 play+skip / state 3 cleanup). State 1 and state 2 call `InputUpdate()` + `PlayerPad_Update()` themselves because `main_loop()` is bypassed during FMV playback | — |
 
 ---
 

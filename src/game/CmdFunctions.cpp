@@ -52,8 +52,8 @@ extern void empty_00470960(int param);
 extern void*          g_RoomInitScd;
 // g_message_flags already declared in Globals.h
 extern DWORD          g_main_state_flags;
-extern int            g_menu_choice_id;
-extern DWORD          DAT_00be9830;
+// g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see Items.h)
+// DAT_00be9830 is now a macro to g_BioCard.dat_0x210 (see Items.h)
 extern unsigned int   DAT_00d213a0[2];
 
 // Item event table pointer (used for bounds checking)
@@ -138,7 +138,7 @@ int cmd_bit_test(void)
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
     case 5: flagBank = (unsigned int*)&g_main_state_flags; break;
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
-    case 7: flagBank = (unsigned int*)&g_PlayerFlags2; break;
+    case 7: flagBank = (unsigned int*)&g_roomItemsFlags; break;
     case 8: flagBank = (unsigned int*)&g_RoomFlags; break;
     case 9: flagBank = (unsigned int*)&DAT_00d213a0; break;
     default: return 0;
@@ -173,7 +173,7 @@ int cmd_bit_op(void)
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
     case 5: flagBank = (unsigned int*)&g_main_state_flags; break;
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
-    case 7: flagBank = (unsigned int*)&g_PlayerFlags2; break;
+    case 7: flagBank = (unsigned int*)&g_roomItemsFlags; break;
     case 8: flagBank = (unsigned int*)&g_RoomFlags; break;
     case 9: flagBank = (unsigned int*)&DAT_00d213a0; break;
     default: return 0;
@@ -552,7 +552,7 @@ int cmd_item_model_set(void)
     // Check for '/' character special case with Jill
     if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
         if (Flg_ck((int)&g_PlayerFlags, 0x7b) == 0) {
-            FUN_00473f10((int*)&g_PlayerFlags2, g_ScdOpcodes[0x16]);
+            FUN_00473f10((int*)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
             g_ScdOpcodes += 0x1a;
             return 1;
         }
@@ -567,14 +567,14 @@ int cmd_item_model_set(void)
     unsigned char visFlag;
     if (itemType < 0x54) {
         if (itemType < 0x4e) {
-            visFlag = (Flg_ck((int)&g_PlayerFlags2, g_ScdOpcodes[0x16]) == 0) - 1;
+            visFlag = (Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]) == 0) - 1;
             visFlag &= 4;
         } else {
-            visFlag = (Flg_ck((int)&g_PlayerFlags2, g_ScdOpcodes[0x16]) == 0) - 1;
+            visFlag = (Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]) == 0) - 1;
             visFlag &= 0xf;
         }
     } else {
-        visFlag = (Flg_ck((int)&g_PlayerFlags2, g_ScdOpcodes[0x16]) == 0) - 1;
+        visFlag = (Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]) == 0) - 1;
         visFlag &= 0xd;
     }
     entry[0] = visFlag;
@@ -625,7 +625,7 @@ int cmd_item_model_set(void)
     deskPtr[0x86] = 0;
     deskPtr[0x87] = 0;
 
-    int flagResult = Flg_ck((int)&g_PlayerFlags2, g_ScdOpcodes[0x16]);
+    int flagResult = Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
     if (flagResult != 0 && (flags18 & 0x8000) != 0) {
         unsigned int animType = (unsigned int)(flags18 & 0xf00);
         unsigned char effectId;
@@ -654,7 +654,7 @@ int cmd_item_model_set(void)
         *(short*)(deskPtr + 0x86) = (short)(char)effResult;
     }
 
-    flagResult = Flg_ck((int)&g_PlayerFlags2, g_ScdOpcodes[0x16]);
+    flagResult = Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
     entry[0] = 1 - (flagResult == 0);
 
     if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
@@ -1638,7 +1638,7 @@ int cmd_0x37(void)
     unsigned short op2 = scd_read_u16(0);
     g_ScdOpcodes += 2;
     unsigned int idx = ((op1 & 0x07) >> 3) + (op2 & 0xff);
-    g_RoomBgmStateData[idx] = (unsigned char)(op2 >> 8);
+    g_roomBgmState[idx] = (unsigned char)(op2 >> 8);
     return 1;
 }
 

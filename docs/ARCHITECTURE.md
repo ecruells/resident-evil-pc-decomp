@@ -558,11 +558,11 @@ The game loop is implemented in `main_loop()` at `0x00428eb0`.
 │  │ FMV Playback    │        │ Normal Game     │             │
 │  │ - draw_rect     │        │ - Task update   │             │
 │  │ - StMask()      │        │ - Menu handling │             │
-│  │                 │        │ - Fading        │             │
-│  └─────────────────┘        │ - Room lighting │             │
-│                             │ - Screen shake  │             │
-│                             │ - Debug overlay │             │
-│                             └─────────────────┘             │
+│  │ - UpdateVideo   │        │ - Fading        │             │
+│  │   Playback()    │        │ - Room lighting │             │
+│  │   (polls input  │        │ - Screen shake  │             │
+│  │    itself)      │        │ - Debug overlay │             │
+│  └─────────────────┘        └─────────────────┘             │
 │                         │                                    │
 │                         ▼                                    │
 │  ┌──────────────────────────────────────────────────────┐   │
@@ -582,7 +582,7 @@ The game loop is implemented in `main_loop()` at `0x00428eb0`.
 |-----|------|-------------|
 | 16 | `0x10000` | Pause screen active |
 | 17 | `0x20000` | Menu active |
-| 18 | `0x40000` | FMV playback active |
+| 18 | `0x40000` | FMV playback active (triggers `UpdateVideoPlayback()` in main loop instead of `main_loop()`; FMV state machine polls its own input) |
 | 19 | `0x80000` | Reset screen panning |
 | 23 | `0x800000` | Special room lighting |
 | 29 | `0x20000000` | Fade/pause state transition |
@@ -649,7 +649,9 @@ init_and_start_game()
               │
               └─► Task_chain(logos_state)
                     │
-                    ├─ (FMV playback — skipped in dev)
+                    ├─ (FMV playback — see Video Playback Subsystem)
+                    │   Skippable: 0x0fff mask (most intros, Capcom/Virgin logos)
+                    │   Un-skippable: 0x0000 mask (endings, staff intros)
                     │
                     └─► Task_chain(title_state)
                           │
@@ -962,18 +964,56 @@ The D3D11 pipeline uses two samplers:
 
 ### Video Playback Subsystem
 
+**File:** `src/video/VideoPlayback.cpp` — FMV state machine at `0x00474e00`
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                  Video Playback Subsystem                    │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
-│  (MCI-based AVI playback — skipped in dev/debug builds)     │
+│  MCI-based AVI playback (mciSendStringA)                    │
 │                                                              │
 │  FMV State Machine (g_FMVPlaybackState):                    │
-│  - State 0: Initialize                                      │
+│  - State 0: Initialize                                       │
+│      ClearScreen() × 2, MarniPresent(),                     │
+│      OpenMCIAviVideo(), PauseGameSoundsAsync()              │
 │  - State 1: Start playback                                  │
+│      MCI_OpenAndPlay(),                                     │
+│      InputUpdate() + PlayerPad_Update() → g_videoSkipInput, │
+│      g_videoSkipCounter = 100                               │
 │  - State 2: Playing (check for end/skip)                    │
+│      Each call:                                             │
+│        - decrement g_videoSkipCounter (if > 0)              │
+│        - InputUpdate() + PlayerPad_Update()                 │
+│        - skip = (skipMask & ~prev & curr) && counter==0     │
+│        - if skip: stop MCI, g_mciVideoDeviceID = 0          │
+│        - if g_mciVideoDeviceID == 0 → state 3               │
 │  - State 3: Cleanup                                         │
+│      MCI_CloseAll(), ResumeGameSoundsAsync(),               │
+│      StMask(3, 0)                                           │
+│                                                              │
+│  FMV Skip Mechanism:                                         │
+│  ┌─────────────────────────────────────────────────────┐    │
+│  │ g_FMVTable[i].field_4  (per-FMV WORD mask)          │    │
+│  │   0x0fff = skippable (all action buttons)           │    │
+│  │   0x0000 = un-skippable (endings, staff intros)     │    │
+│  │   Sourced from Ghidra 0x004c39dc (8-byte entries)   │    │
+│  ├─────────────────────────────────────────────────────┤    │
+│  │ g_videoSkipCounter  (grace period)                  │    │
+│  │   Starts at 100 when state 1 runs                   │    │
+│  │   Decrements each state-2 call                      │    │
+│  │   Skip only fires when counter reaches 0            │    │
+│  ├─────────────────────────────────────────────────────┤    │
+│  │ Edge detection                                      │    │
+│  │   skip = (mask & ~g_videoSkipInput & currentInput)  │    │
+│  │   Only rising edges of masked buttons trigger skip  │    │
+│  └─────────────────────────────────────────────────────┘    │
+│                                                              │
+│  Note: During FMV playback, UpdateVideoPlayback() replaces │
+│  main_loop() in the main message loop (g_bMCINotifyEnabled │
+│  branch at main.cpp:600). State 1 and state 2 must poll   │
+│  input themselves — InputUpdate() + PlayerPad_Update()    │
+│  are normally only called by main_loop().                  │
 │                                                              │
 └─────────────────────────────────────────────────────────────┘
 ```

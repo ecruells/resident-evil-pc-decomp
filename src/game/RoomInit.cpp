@@ -85,15 +85,6 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
 
     g_MessageStateCounter = 0;
 
-    // Consume any stale button press from the transition that triggered this
-    // message (e.g., the ENTER/CROSS press that confirmed character selection
-    // and skipped the FMV). The main_loop checks g_PlayerPadPressed against
-    // g_lastScanCodeOrMsgID (which we just set to msg_id above) — if a stale
-    // press survives, the check at main_loop line 52 would clear
-    // g_menu_choice_id and kill the message before it renders.
-    g_button_pressed_id = 0;
-    g_PlayerPadPressed = 0;
-
     if ((*(((BYTE*)&g_main_state_flags) + 1) == 0)) {
         screenY = 181;
     } else {
@@ -143,7 +134,7 @@ void init_room(void)
     g_loadDataDestPointer = g_image_buffer;
     g_StageDataPtr = (void*)g_StageVoiceOffsetTable[g_stageId];
     // Set pointer to current stage's 32-room BGM state block (used by update_room_bgm)
-    g_RoomBgmStatePtr = &g_RoomBgmStateData[g_stageId * 32];
+    g_RoomBgmStatePtr = &g_roomBgmState[g_stageId * 32];
 
     set_player_animations_functions();
 

@@ -61,7 +61,10 @@ extern RectDrawDesc  g_window_rect;                    // 0x00d227b0
 
 // Marni System objects
 extern void*         g_pMarniDirect3D;                 // 0x00ac4028
-extern MasterInputState* g_pMasterInputState;
+
+// 0x00ac4030 - MasterInputState (keyboard + joystick states)
+extern MasterInputState g_pMasterInputState;
+
 int __stdcall VideoDriver_ClearState348(void* obj, void* context);
 
 // ============================================================================
@@ -183,26 +186,50 @@ extern DWORD         g_scaData2[4];                    // 0x004d4520
 extern DWORD         g_scaJillData[4];                 // 0x004d4530
 extern BYTE          g_entityDataBlock[0x200];         // 0x00d211d0
 extern DWORD         g_scaPoolPtr;                     // 0x00d21354
-extern DWORD         g_scaPoolBase;                    // 0x00d21358
-extern DWORD g_RawPadPressed;                          // 0x00be05b4
+extern DWORD         g_scaPoolBase;                     // 0x00d21358
+
+extern DWORD g_RawPadHeld;                             // 0x00bf0a04 - raw held state (input to edge detect)
 extern DWORD g_PlayerPadPressed;                       // 0x00bf0a08
-extern DWORD g_PlayerPadHeld;                          // 0x00bf0a10
 extern DWORD g_button_pressed_id;                      // 0x00bf0a0c
+extern DWORD g_PlayerPadHeld;                          // 0x00bf0a10 - edge-detected held state (output)
 extern DWORD g_PlayerPadHeldPrev;                      // 0x004bae30
-extern WORD g_RawPadState;                             // 0x00bf0a12
-extern DWORD g_PadRawP2;
+
+extern WORD  g_RawPadState;                            // 0x00be05b2
+extern WORD  g_padEdgeDetectedWord;                    // 0x00be05b4 - edge-detected raw pad word
+
+// Joystick/controller globals (used by ReadPadBoth / JoyToPSX)
+// NOTE: g_PadActiveP1 (0x00ac422c), g_PadActiveP2 (0x00ac4404),
+// g_PadRawP1 (0x00ac4058), g_PadRawP2 (0x00ac4230) are aliases for
+// g_pMasterInputState fields and have been merged into the struct.
+extern DWORD g_PadBtnWord;                             // 0x00ac4018
+extern int   g_NumControllers;                         // 0x00ac7b58
+extern int   g_JoyWarnPrinted;                         // 0x004b1958
+extern const DWORD g_JoyRemapTbl[2][32];              // 0x004b1858 - PC joystick → PSX button remap
 extern BOOL g_DisablePad;                              // 0x004bcb3c
+
+// Pad remap tables and dpad globals (used by PlayerPad_Update)
+extern const WORD* g_padRemapTable[4];                // 0x004bf300 - pointers to remap sub-tables
+extern WORD g_padRemapSubTable3[16];                  // 0x00be9a3c - runtime configurable remap table
+extern WORD g_PlayerDpadHeldPrev;                      // 0x00bf0a14 - previous dpad held state
+// g_PlayerDpadPressed is now a macro to g_BioCard.playerDpadPressed (see Items.h)
+extern WORD g_demoPadData[512];                       // 0x00d21d10 - attract demo input data
 
 // Bio Card
 extern BioCardLayout g_BioCard;                        // 0x00be9620
 
 // Menu / dialog flags
-extern int           g_menu_choice_id;                 // 0x00be0e28
 extern BOOL          g_displayReturnToTitleScreen_Flag;// 0x004d466c
 extern BOOL          g_displayExitGameScreen_flag;     // 0x004D4668
 extern int           g_demoTimer;                      // 0x004bcb5c
 extern short         g_DemoTimerCur;                   // 0x00d21cee
 extern short         g_DemoTimerMax;                   // 0x00d21cf0
+
+// F9 key handling state (used by OnKeyDown)
+extern DWORD         g_lastF9PressTime;                 // 0x004d46e0 - timeGetTime() of last F9 press
+extern int           g_blockF9Flag;                    // 0x004b3870 - blocks F9 processing when set
+extern int           g_F1DebugMode;                    // 0x004d4654 - cycles 0-3 on F1 press
+extern int           g_pressF9Flag;                    // 0x004ba718 - set when F9 triggers game reset
+extern int           g_resetGameFlag;                  // 0x004d4670 - triggers game state reset
 
 // Sound system
 extern int           g_SndFadeType;                    // 0x00BF0A2D
@@ -579,7 +606,9 @@ void SetFrameRateMode(int status_flags);
 
 // Input
 void InputUpdate(void);
-void PlayerPad_Update(void);
+DWORD PlayerPad_Update(void);
+DWORD ReadPadBoth(void);
+DWORD JoyToPSX(DWORD pcMask, int player);
 
 // Sound
 void PauseSounds(void);
@@ -613,7 +642,7 @@ void CreateLights(int count);
 void ResetScreenPanning(void);
 void SetScreenOffset(int x, int y);
 void ApplyScreenShake(void);
-void FUN_004557b0(void);
+void UpdateMessageDisplay(void);
 void ResetScreenAndRebuildSprites(int param);
 void ApplyShakeAndRebuildSprites(void);
 void SetScreenReadyWithDebugColor(int r, int g, int b);
@@ -643,6 +672,7 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
 void init_and_start_game(void);
 void load_global_assets(void);
 void logos_state(void);
+void input_test_state(void);
 void title_state(void);
 void debug_state(void);
 void UpdateDemoTimer(void);
@@ -870,9 +900,7 @@ extern MATRIX        MATRIX_00d22680;                   // 0x00d22680
 extern void*         g_RdtLoadDataBackup;
 extern int           end_game_status;
 
-// Entity data
-extern unsigned char g_RoomBgmStateData[224];
-extern unsigned char g_RoomFlags[16];             // 0x00be98d0 - room flags bitfield
+
 extern const unsigned char g_StageRoomFlagOffset[5]; // 0x004d31e0 - per-stage room flag base offsets
 extern unsigned char g_ItemSlotsIndexes;
 extern DWORD         g_ItemSlotsBitmask;
@@ -883,7 +911,7 @@ extern const unsigned char g_ItemImageLookupTable[0x50 * 4];
 
 // Room state (reset by room_state_reset / room_set)
 extern DWORD         g_SysFlags[2];                 // 0x00be41c8 - SCD flag bank 4 (system flags, case 4 in cmd_bit_test)
-extern DWORD         DAT_00be9830;                // 0x00be9830
+// DAT_00be9830 is now a macro to g_BioCard.dat_0x210 (see Items.h)
 
 // Room item event table (24 entries x 12 bytes, used by item/door commands)
 extern unsigned char g_RoomItemEventTable[288];   // 0x00d91aa0
@@ -975,7 +1003,6 @@ extern unsigned short HEALTH_STATUS_BKP;               // 0x008f87b4 - backup of
 extern void*          g_ItemSlotsPointer;              // 0x00d22768
 
 // Room event flags (Flg_on/Flg_ck bitfield, SCD flag bank 3)
-extern unsigned int   g_RoomEventFlags[8];             // 0x00be987c
 
 // Sound bank pointer tables (populated by room_set from RDT vab_sound_file data)
 extern void*          g_itemboxes_covers_table[8];     // 0x00d226b0
@@ -1024,7 +1051,7 @@ extern BOOL          g_bFullScreenFlag_68;
 extern int           g_FmvCharacterId;
 
 // Desks/locks flags (SCD flag bank 2)
-extern unsigned int   g_desks_locks_flags[16];          // 0x00be9840
+extern unsigned int   g_desks_locks_flags[16];          // 0x00be9874
 
 // Player entity fields used by cmd functions
 extern unsigned short DAT_00d211c4;                     // 0x00d211c4
@@ -1036,7 +1063,7 @@ extern unsigned int   DAT_00d22770;                     // 0x00d22770
 extern unsigned char  DAT_00bf07ef;                     // 0x00bf07ef
 extern int            DAT_00bf07f0;                     // 0x00bf07f0
 
-// Room BGM state table (separate from g_RoomBgmStateData which is per-stage)
+// Room BGM state table (separate from g_roomBgmState which is per-stage)
 extern unsigned char  g_abRoomBgmState[224];            // 0x00ac98e8
 
 // Screen effect parameter storage

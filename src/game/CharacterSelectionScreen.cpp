@@ -22,8 +22,8 @@ extern void game_start(void);
 static void DisplayIntroAndStartGame(void)
 {
     sounds_reset();
-    g_CurrentFMVID = 1;
-    g_main_state_flags |= (0x00000000 | 0x00080000);
+    g_selectedFmvId = 1;
+    g_main_state_flags |= (0x00040000 | 0x00080000);
     title_select_sfx();
     Task_sleep(1);
     Task_chain((void*)game_start);
@@ -50,7 +50,7 @@ static BYTE g_charSelImageBuffer[320 * 240 * 2];
 // Selection state
 static unsigned char g_selState = 0;       // DAT_00ac9880 - main state
 static unsigned char g_selSubState = 0;    // DAT_00ac9881
-static unsigned char g_resetGameFlag = 0;  // 0x00ac9882
+static unsigned char g_bSelResetGameFlag = 0;  // 0x00ac9882
 
 static unsigned char g_selSelected = 0;    // DAT_00ac93f0 - 0=Chris, 1=Jill
 static char g_selTimer = 0;                // DAT_00ac93f1
@@ -462,7 +462,7 @@ void characterSelectionScreen(void)
 
     g_selState = 0;
     g_selSubState = 0;
-    g_resetGameFlag = 0;
+    g_bSelResetGameFlag = 0;
 
     sounds_reset();
     g_loadDataDestPointer = g_image_buffer;
@@ -622,8 +622,8 @@ void characterSelectionScreen(void)
     // Main loop
     while (1) {
         // Check game reset flag
-        if (g_resetGameFlag != 0) {
-            g_resetGameFlag = 0;
+        if (g_bSelResetGameFlag != 0) {
+            g_bSelResetGameFlag = 0;
             StMask(0, 3);
             g_main_state_flags2 = g_main_state_flags2 & 0x20080000;
             g_main_state_flags = (g_main_state_flags & 0x2FFFFFFF) | 0x40000000;
@@ -653,61 +653,59 @@ void characterSelectionScreen(void)
         case 1:
         {
             // Character selection input handling
-            // Cancel: hold R3 (0x04) + START (0x08) → return to title
-            if ((g_PlayerPadHeld & 4) && (g_PlayerPadHeld & 8)) {
+
+            if (((g_RawPadHeld & 4) == 0) || ((g_RawPadHeld & 8) == 0)) {
+                // SideWinder check
+                DWORD sidewinderPress = 0;
+                if (g_isSideWinderConnected) {
+                    sidewinderPress = read_sidewinder_pad();
+                    sidewinderPress &= 0x10000;
+                }
+
+                // Swap characters on LEFT or RIGHT press
+                if (((g_PlayerPadPressed & 0x8f0) == 0) && (sidewinderPress == 0)) {
+                    if ((g_RawPadHeld & 0xa100) != 0) {
+                        g_selSubState = 0;
+                        g_selState = 2;
+                        g_selSwapDir = (g_RawPadHeld & 0x8000) ? 1 : 0;
+        
+                        play_sfx(1, 0);
+        
+                        if (g_selSwapDir == g_selSelected) {
+                            g_char0AccX = 2;
+                            g_char0AccY = 1;
+                        } else {
+                            g_char0AccX = -2;
+                            g_char0AccY = -1;
+                        }
+        
+                        g_char0VelX = 0;
+                        g_char0VelY = 0;
+                        g_char1AccX = -g_char0AccX;
+                        g_char1AccY = -g_char0AccY;
+                        g_char1VelX = 0;
+                        g_char1VelY = 0;
+                        g_selTimer = 8;
+                        goto case_2;
+                    }
+
+                    g_selTimer--;
+                    CharSelectDrawCursor();
+
+                } else {
+                    play_sfx(1, 1);
+                    g_selSubState = 0;
+                    g_selState = 3;
+                    g_fade_type_id = 1;
+                    g_fading_counter = 0x100;
+                    fade_update();
+                }
+            } else {
                 g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
                 g_selSubState = 0;
                 g_selState = 7;
                 SetFading(2, 0xC00);
-                break;
             }
-
-            // SideWinder check
-            DWORD sidewinderPress = 0;
-            if (g_isSideWinderConnected) {
-                sidewinderPress = read_sidewinder_pad();
-                sidewinderPress &= 0x10000;
-            }
-
-            // Swap characters on LEFT or RIGHT press
-            if (g_PlayerPadPressed & (PAD_LEFT | PAD_RIGHT)) {
-                g_selSubState = 0;
-                g_selState = 2;
-                g_selSwapDir = (g_PlayerPadPressed & PAD_RIGHT) ? 1 : 0;
-
-                play_sfx(1, 0);
-
-                if (g_selSwapDir == g_selSelected) {
-                    g_char0AccX = 2;
-                    g_char0AccY = 1;
-                } else {
-                    g_char0AccX = -2;
-                    g_char0AccY = -1;
-                }
-
-                g_char0VelX = 0;
-                g_char0VelY = 0;
-                g_char1AccX = -g_char0AccX;
-                g_char1AccY = -g_char0AccY;
-                g_char1VelX = 0;
-                g_char1VelY = 0;
-                g_selTimer = 8;
-                goto case_2;
-            }
-
-            // Confirm selection on CROSS or START press
-            if ((g_PlayerPadPressed & (PAD_CROSS | PAD_START)) || sidewinderPress) {
-                play_sfx(1, 1);
-                g_selSubState = 0;
-                g_selState = 3;
-                g_fade_type_id = 1;
-                g_fading_counter = 0x100;
-                fade_update();
-                break;
-            }
-
-            // Idle: decrement blink timer
-            g_selTimer--;
             break;
         }
 

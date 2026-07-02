@@ -1,7 +1,80 @@
-// WindowProc.cpp - Main window procedure
-// Original function: WindowProc at 0x00441170 (Ghidra)
-// Adapted from Ghidra decompilation
+// WindowProc.cpp - Main window procedure + keyboard input handling
+// WindowProc (0x00441170), OnKeyDown (0x00497830)
 #include "Globals.h"
+#include <mmsystem.h>
+
+// ============================================================================
+// OnKeyDown - Handle keyboard input (0x00497830)
+//
+// F1 (0x70): Cycles g_F1DebugMode through 0-3
+// F9 (0x78): Complex escape/return-to-title logic with debounce and state checks
+// Any other key: Clears g_displayReturnToTitleScreen_Flag and g_displayExitGameScreen_flag
+// ============================================================================
+void OnKeyDown(HWND hwnd, WPARAM wparam)
+{
+	bool bBlocked;
+	DWORD now;
+
+	switch (wparam) {
+	case VK_F1: // 0x70
+		g_F1DebugMode++;
+		if (g_F1DebugMode > 3) {
+			g_F1DebugMode = 0;
+		}
+		break;
+
+	case VK_F9: // 0x78
+		now = timeGetTime();
+
+		// Debounce/cooldown: block if within 3 seconds of game init
+		bBlocked = (now < g_GameInitTime + 3000);
+		// Block if within 2ms of last F9 press
+		if ((now < g_lastF9PressTime) || (now - g_lastF9PressTime < 2)) {
+			bBlocked = true;
+		}
+		// Don't block if already showing a dialog
+		if (g_displayReturnToTitleScreen_Flag != 0 || g_displayExitGameScreen_flag != 0) {
+			bBlocked = false;
+		}
+		// Block during MCI video playback
+		if (g_mciVideoDeviceID != 0) {
+			bBlocked = true;
+		}
+		// Block if block flag is set
+		if (g_blockF9Flag == 1) {
+			bBlocked = true;
+		}
+
+		if (!bBlocked) {
+			if (g_playingGameFlag == 0) {
+				// Title/menu: toggle exit dialog
+				if (g_displayExitGameScreen_flag == 0) {
+					g_displayExitGameScreen_flag = 1;
+				} else {
+					g_displayExitGameScreen_flag = 0;
+					CleanupVideoConfigAndSaveAllSettings();
+					DestroyWindow(g_hWnd);
+				}
+			} else if (g_displayReturnToTitleScreen_Flag == 0) {
+				// In-game: set return-to-title flag
+				g_displayReturnToTitleScreen_Flag = 1;
+			} else {
+				// In-game, already returning: toggle off and trigger reset
+				g_displayReturnToTitleScreen_Flag = 0;
+				g_pressF9Flag = 0;
+				g_resetGameFlag = 1;
+			}
+		}
+		g_lastF9PressTime = now;
+		break;
+	}
+
+	// Any key other than F9 clears the dialog flags
+	if (wparam != VK_F9) {
+		g_displayReturnToTitleScreen_Flag = 0;
+		g_displayExitGameScreen_flag = 0;
+	}
+}
 
 // ============================================================================
 // WindowProc - Handle window messages (0x00441170)

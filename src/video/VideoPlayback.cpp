@@ -14,39 +14,43 @@
 // ============================================================================
 struct FMVEntry {
     const char* filename;
-    int         field_4;
+    int         isSkippable;
 };
 
+// Original skip-mask table at 0x004c39dc in Ghidra (one WORD per FMV entry).
+// 0x0fff = bits 0..11 of the PSX button word (Cross, Circle, Square, Triangle,
+// L1, L2, R1, R2, Select, Start, L3, R3) - all standard accept/skip buttons.
+// 0x0000 = FMV cannot be skipped.
 static const FMVEntry g_FMVTable[] = {
-    { ".\\usa\\MOVIE\\OU.avi",      0 },   // 0  - Opening / title movie
-    { ".\\usa\\MOVIE\\PU.avi",      0 },   // 1
-    { ".\\usa\\MOVIE\\DMF.avi",     0 },   // 2
-    { ".\\usa\\MOVIE\\DM3.avi",     0 },   // 3
-    { ".\\usa\\MOVIE\\DM4.avi",     0 },   // 4
-    { ".\\usa\\MOVIE\\DM1.avi",     0 },   // 5
-    { ".\\usa\\MOVIE\\DM6.avi",     0 },   // 6
-    { ".\\usa\\MOVIE\\DM7.avi",     0 },   // 7
-    { ".\\usa\\MOVIE\\DM8.avi",     0 },   // 8
-    { ".\\usa\\MOVIE\\DM2.avi",     0 },   // 9
-    { NULL,                         0 },   // 10 - null entry
-    { ".\\usa\\MOVIE\\DMB.avi",     0 },   // 11
-    { ".\\usa\\MOVIE\\DMC.avi",     0 },   // 12
-    { ".\\usa\\MOVIE\\DMD.avi",     0 },   // 13
-    { ".\\usa\\MOVIE\\DME.avi",     0 },   // 14
-    { ".\\usa\\MOVIE\\ED1.avi",     0 },   // 15
-    { ".\\usa\\MOVIE\\ED2.avi",     0 },   // 16
-    { ".\\usa\\MOVIE\\ED3.avi",     0 },   // 17
-    { ".\\usa\\MOVIE\\EU4.avi",     0 },   // 18
-    { ".\\usa\\MOVIE\\EU5.avi",     0 },   // 19
-    { ".\\usa\\MOVIE\\ED6.avi",     0 },   // 20
-    { ".\\usa\\MOVIE\\ED7.avi",     0 },   // 21
-    { ".\\usa\\MOVIE\\ED8.avi",     0 },   // 22
-    { ".\\usa\\MOVIE\\capcom.avi",  0 },   // 23 - Capcom logo
-    { ".\\usa\\MOVIE\\stfc_r.avi",  0 },   // 24
-    { ".\\usa\\MOVIE\\stfj_r.avi",  0 },   // 25
-    { ".\\usa\\MOVIE\\stfz_r.avi",  0 },   // 26
-    { ".\\usa\\MOVIE\\staf_r.avi",  0 },   // 27
-    { ".\\usa\\MOVIE\\vlogo.avi",   0 },   // 28 - Virgin logo
+    { ".\\usa\\MOVIE\\OU.avi",      0x0fff },   // 0  - Opening / title movie
+    { ".\\usa\\MOVIE\\PU.avi",      0x0fff },   // 1
+    { ".\\usa\\MOVIE\\DMF.avi",     0x0000 },   // 2
+    { ".\\usa\\MOVIE\\DM3.avi",     0x0fff },   // 3
+    { ".\\usa\\MOVIE\\DM4.avi",     0x0fff },   // 4
+    { ".\\usa\\MOVIE\\DM1.avi",     0x0fff },   // 5
+    { ".\\usa\\MOVIE\\DM6.avi",     0x0fff },   // 6
+    { ".\\usa\\MOVIE\\DM7.avi",     0x0fff },   // 7
+    { ".\\usa\\MOVIE\\DM8.avi",     0x0fff },   // 8
+    { ".\\usa\\MOVIE\\DM2.avi",     0x0fff },   // 9
+    { NULL,                         0x0fff },   // 10 - null entry
+    { ".\\usa\\MOVIE\\DMB.avi",     0x0fff },   // 11
+    { ".\\usa\\MOVIE\\DMC.avi",     0x0fff },   // 12
+    { ".\\usa\\MOVIE\\DMD.avi",     0x0fff },   // 13
+    { ".\\usa\\MOVIE\\DME.avi",     0x0000 },   // 14
+    { ".\\usa\\MOVIE\\ED1.avi",     0x0000 },   // 15
+    { ".\\usa\\MOVIE\\ED2.avi",     0x0000 },   // 16
+    { ".\\usa\\MOVIE\\ED3.avi",     0x0000 },   // 17
+    { ".\\usa\\MOVIE\\EU4.avi",     0x0000 },   // 18
+    { ".\\usa\\MOVIE\\EU5.avi",     0x0000 },   // 19
+    { ".\\usa\\MOVIE\\ED6.avi",     0x0000 },   // 20
+    { ".\\usa\\MOVIE\\ED7.avi",     0x0000 },   // 21
+    { ".\\usa\\MOVIE\\ED8.avi",     0x0000 },   // 22
+    { ".\\usa\\MOVIE\\capcom.avi",  0x0fff },   // 23 - Capcom logo (skippable)
+    { ".\\usa\\MOVIE\\stfc_r.avi",  0x0000 },   // 24
+    { ".\\usa\\MOVIE\\stfj_r.avi",  0x0000 },   // 25
+    { ".\\usa\\MOVIE\\stfz_r.avi",  0x0000 },   // 26
+    { ".\\usa\\MOVIE\\staf_r.avi",  0x0000 },   // 27
+    { ".\\usa\\MOVIE\\vlogo.avi",   0x0fff },   // 28 - Virgin logo (skippable)
 };
 
 static const int g_FMVTableCount = sizeof(g_FMVTable) / sizeof(g_FMVTable[0]);
@@ -58,7 +62,7 @@ static int   g_FMVPlaybackState = 0;
 static BOOL  g_bIsMCIVideoOpenSuccess = FALSE;
 static BOOL  g_mciWindowCreated = FALSE;
 static DWORD g_videoFlagA4 = 0;
-static DWORD g_videoSkipInput = 0;
+static WORD  g_videoSkipInput = 0;
 static int   g_videoSkipCounter = 0;
 static BOOL  g_savedFullScreen = FALSE;
 static char  g_videoFilePath[MAX_PATH] = {};
@@ -256,8 +260,8 @@ void UpdateVideoPlayback(void)
     switch (g_FMVPlaybackState) {
     case 0: // Initialize
         {
-            MarniClear();
-            MarniClear();
+            ClearScreen();
+            ClearScreen();
 
             // Present current frame before video overlay
             if (g_pMarniDirect3D != NULL) {
@@ -319,7 +323,7 @@ void UpdateVideoPlayback(void)
             g_FMVPlaybackState = 2;
 
             InputUpdate();
-            g_videoSkipInput = g_RawPadPressed;
+            g_videoSkipInput = (WORD)PlayerPad_Update();
             g_videoSkipCounter = 100;
         }
         break;
@@ -331,10 +335,11 @@ void UpdateVideoPlayback(void)
             }
 
             InputUpdate();
-            DWORD currentInput = g_RawPadPressed;
+            WORD currentInput = (WORD)PlayerPad_Update();
 
-            // Check for skip input
-            if (((currentInput & ~g_videoSkipInput) != 0) && (g_videoSkipCounter == 0)) {
+            // Check for skip input (per-FMV skip mask from g_FMVTable[i].isSkippable)
+            WORD skipMask = (WORD)g_FMVTable[g_CurrentFMVID].isSkippable;
+            if (((skipMask & ~g_videoSkipInput & currentInput) != 0) && (g_videoSkipCounter == 0)) {
                 // Skip requested - stop playback
                 MCISend("stop movie", FALSE);
                 g_mciVideoDeviceID = 0;

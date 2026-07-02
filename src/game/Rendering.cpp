@@ -730,12 +730,12 @@ static void message_dismiss_handler(void)
 }
 
 // ============================================================================
-// FUN_004557b0 (0x004557b0) - Message display state machine
+// UpdateMessageDisplay (0x004557b0) - Message display state machine
 // Called each frame from main_loop to advance the message display.
 // Manages character-by-character text reveal, timing, yes/no prompts,
 // and message dismissal.
 // ============================================================================
-void FUN_004557b0(void)
+void UpdateMessageDisplay(void)
 {
     unsigned char bVar1;
     int lineCount;
@@ -908,7 +908,7 @@ msg_skip_char:
 
     // === State 2: Waiting with blinking cursor ===
     case 2:
-        if ((g_button_pressed_id & (PAD_CROSS | PAD_SQUARE)) != 0) {
+        if ((g_PlayerDpadPressed & 0xC000) != 0) {
             // Button pressed: restart text reveal
             g_MessageStateCounter = 1;
             g_MessagePtr = g_MessageCurrentPtr;
@@ -952,10 +952,8 @@ msg_skip_char:
 
     // === State 4: Yes/No prompt ===
     case 4:
-        // Check if confirm button pressed
-        if ((g_button_pressed_id & PAD_CROSS) == 0) {
-            // No confirm: handle navigation
-            if ((g_PlayerPadHeld & (PAD_UP | PAD_DOWN)) != 0) {
+        if ((g_PlayerDpadPressed & 0x4000) == 0) {
+            if ((g_RawPadHeld & (0x2000 | 0x8000)) != 0) {
                 g_menu_choice_id = g_menu_choice_id ^ 1;
                 g_MessageCharTimer = 0;
             }
@@ -999,11 +997,11 @@ msg_skip_char:
 
     // === State 5: Waiting for player input to dismiss ===
     case 5:
-        if ((g_button_pressed_id & (PAD_CROSS | PAD_SQUARE)) != 0) {
+        if ((g_PlayerDpadPressed & 0xC000) != 0) {
             g_menu_choice_id = g_menu_choice_id & 0x7f;
             if ((g_message_flags & 1) == 0) {
-                // Clear movement buttons, keep only face buttons
-                g_PlayerPadHeld &= (PAD_TRIANGLE | PAD_CIRCLE | PAD_CROSS | PAD_SQUARE);
+                g_PlayerDpadHeld = g_PlayerDpadHeld & 0xf000;
+                g_PlayerDpadHeldPrev = g_PlayerDpadHeldPrev & 0xf000;
             }
             g_message_flags = g_messageFlagsBackup;
             return;
@@ -1016,8 +1014,8 @@ msg_skip_char:
         if (g_MessageCharTimer == 0) {
             g_menu_choice_id = g_menu_choice_id & 0x7f;
             if ((g_message_flags & 1) == 0) {
-                // Clear movement buttons, keep only face buttons
-                g_PlayerPadHeld &= (PAD_TRIANGLE | PAD_CIRCLE | PAD_CROSS | PAD_SQUARE);
+                g_PlayerDpadHeld = g_PlayerDpadHeld & 0xf000;
+                g_PlayerDpadHeldPrev = g_PlayerDpadHeldPrev & 0xf000;
             }
             g_message_flags = g_messageFlagsBackup;
             return;

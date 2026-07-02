@@ -215,20 +215,6 @@ void DrawSaveCursor(short x, short y, int mode)
 }
 
 // ============================================================================
-// InitInputKeyBindings (0x00497c20)
-// Copies key binding configuration from config area to active binding vectors.
-// ============================================================================
-void InitInputKeyBindings(void)
-{
-    // Copy key binding configuration to active input state
-    // Original: copies 31 bytes from g_KeyBindingConfig (0x004d4730) area
-    //           to g_KeyBindingVectors (0x00ac4030) area, then sets
-    //           g_pMasterInputState = g_keyBindingData
-    g_pMasterInputState = (MasterInputState*)g_keyBindingData;
-    memcpy(g_KeyBindingVectors + 1, g_KeyBindingConfig, 31);
-}
-
-// ============================================================================
 // Flg_ck (0x00473f40)
 // Checks a bit flag in a flag array.
 // baseAddr: base address of the flag array
@@ -426,8 +412,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 blink_timer--;
             }
 
-            // UP Pressed
-            if ((g_PlayerPadHeld & PAD_UP) != 0) {
+            // UP Pressed (use g_RawPadHeld for continuous held detection)
+            if ((g_RawPadHeld & 0x1000) != 0) {
                 blink_state = 0;
                 blink_timer = 5;
                 input_delay = 6;
@@ -436,8 +422,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 play_sfx(SFX_BANKS, 30);
             }
 
-            // Down pressed
-            if ((g_PlayerPadHeld & PAD_DOWN) != 0) {
+            // Down pressed (use g_RawPadHeld for continuous held detection)
+            if ((g_RawPadHeld & 0x4000) != 0) {
                 blink_state = 0;
                 blink_timer = 5;
                 input_delay = 6;
@@ -453,7 +439,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
             }
 
             // PAD_CROSS pressed (confirm) or SideWinder start
-            if ((g_PlayerPadPressed & PAD_CROSS) != 0 || sidewinderBtn != 0) {
+            if ((g_PlayerDpadPressed & 0x4000) != 0 || sidewinderBtn != 0) {
                 if (selected_slot == SAVE_SLOT_COUNT) {
                     // Exit option selected
                     play_sfx(SFX_BANKS, 29);
@@ -477,8 +463,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 }
             }
 
-            // PAD_SQUARE pressed (cancel/back)
-            if (g_PlayerPadPressed < 0) {
+            // (cancel/back)
+            if ((g_PlayerDpadPressed & 0x8000) != 0) {
 
                 play_sfx(SFX_BANKS, 29);
 
@@ -506,8 +492,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // ================================================================
         case STATE_INPUT_DELAY:
         {
-            // no direction held
-            if ((g_PlayerPadHeld & (PAD_UP | PAD_DOWN)) == 0) {
+            // no direction held (use g_RawPadHeld for continuous held detection)
+            if ((g_RawPadHeld & (0x1000 | 0x4000)) == 0) {
                 input_delay = 0;
             }
 
@@ -735,8 +721,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         {
             PrintFormattedText(49, 209, 0, s_pftNoFreeSpace);
             PrintFormattedText(49, 225, 0, s_pftOnHardDrive);
-            if (((g_PlayerPadHeld & PAD_FACE) != 0) ||
-                ((g_PlayerPadPressed & (PAD_CROSS | PAD_SQUARE)) != 0)) {
+            if (((g_PlayerPadHeld & 0x0) != 0) ||
+                ((g_PlayerPadPressed & 0x0) != 0)) {
                 g_PlayerPadHeld = 0;
                 g_PlayerPadPressed = 0;
                 state = STATE_IDLE;

@@ -1125,18 +1125,14 @@ void InitJoysticks(void)
 }
 
 // IsSideWinderPadConnected - 0x0040b610
-// Checks if a Microsoft SideWinder pad is connected (legacy check)
-// For modern implementation, use XInput instead
+// Checks if a Microsoft SideWinder pad is connected (legacy check).
+// The SideWinder was a specific Microsoft gamepad from the 1990s.
+// Modern PCs should return "not connected" since the SideWinder
+// check in MainLoop ORs 0x800 into g_PlayerPadHeld which corrupts input.
+// Returns: 0 = connected, 1 = not connected
 int IsSideWinderPadConnected(void)
 {
-    // Check if any XInput controller is connected
-    XINPUT_STATE state;
-    for (DWORD i = 0; i < 4; i++) {
-        if (XInputGetState(i, &state) == ERROR_SUCCESS) {
-            return 0; // Connected
-        }
-    }
-    return 1; // Not connected
+    return 1; // Not connected (no real SideWinder on modern PC)
 }
 
 // CreateLights - 0x00448440

@@ -624,7 +624,7 @@ void SetupCharacterData(void)
     SetWeaponBodyParts(0xe);
     g_playerEntity.equippedWeaponId = 0;
     if (g_equippedItemId != 0) {
-        g_playerEntity.equippedWeaponId = ((ItemSlot*)&g_BioCard.itemsArea[0])[(unsigned int)g_equippedItemId].Id;
+        g_playerEntity.equippedWeaponId = g_ItemsSlots[(unsigned int)g_equippedItemId].Id;
     }
     LoadEquippedWeaponAnimation(
         g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animLoadBuffer, (unsigned int)&g_animObjectBuffer);

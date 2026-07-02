@@ -89,6 +89,138 @@ void load_global_assets(void)
     // FUN_0047b950(0);
 
     // Task_chain((void*)debug_state);
+    // Task_chain((void*)input_test_state);
+    Task_chain((void*)logos_state);
+}
+
+// ============================================================================
+// input_test_state — Input system verification screen
+// Displays all input globals each frame to verify the pipeline:
+//   InputUpdate → ReadPadBoth → PlayerPad_Update
+//
+// After PlayerPad_Update:
+//   g_RawPadState       = raw newHeldRaw low 16 (NOT edge-detected)
+//   g_PlayerPadHeld     = edge-detected full 32-bit (== g_PlayerPadPressed)
+//   g_PlayerPadPressed  = edge-detected full 32-bit
+//   g_button_pressed_id = full 32-bit copy of g_PlayerPadHeld (pre-overwrite)
+//
+// Controls:
+//   F1 → proceed to logos_state
+// ============================================================================
+void input_test_state(void)
+{
+    OutputDebugStringA("[INPUT] input_test_state - entering\n");
+
+    static int prevF1 = 0;
+
+    while (1) {
+        // Run the full input pipeline
+        InputUpdate();
+        PlayerPad_Update();
+
+        // --- F1 detection (direct GetAsyncKeyState, not via PS1 pipeline) ---
+        int f1Down = (GetAsyncKeyState(VK_F1) & 0x8000) ? 1 : 0;
+        int f1Pressed = f1Down && !prevF1;
+        prevF1 = f1Down;
+
+        // --- Display ---
+        g_window_rect.w = 320;
+        g_window_rect.textureId = 0;
+        g_window_rect.r = 0;
+        g_window_rect.g = 0;
+        g_window_rect.b = 0;
+        g_window_rect.x = -g_ScreenOffsetX;
+        g_window_rect.h = 240;
+        g_window_rect.y = -g_ScreenOffsetY;
+        draw_rect(&g_window_rect, 100, 1);
+
+        int y = 2;
+        int col1 = 2;
+        int col2 = 170;
+
+        sprintf(PRINT_TEXT_BUFFER, "=== INPUT TEST ===");
+        PrintText8x14(col1, y, 0x8F, 0); y += 16;
+
+        // Raw pipeline output (NOT edge-detected)
+        sprintf(PRINT_TEXT_BUFFER, "PadBtnWord:   0x%04X", (WORD)g_PadBtnWord);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "RawPadHeld:   0x%08X  (raw, for menu nav)", g_RawPadHeld);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "RawPadState:  0x%04X  (newHeldRaw lo16)", g_RawPadState);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "RawPadPressed:0x%04X  (edge-det via Prev)", g_padEdgeDetectedWord);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "HeldPrev:     0x%04X  (prev RawPadState)", (WORD)g_PlayerPadHeldPrev);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+
+        y += 4;
+
+        // Edge-detected full 32-bit state
+        sprintf(PRINT_TEXT_BUFFER, "--- Edge-detected (32-bit) ---");
+        PrintText8x14(col1, y, 0x8F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "PadHeld:      0x%08X  (edge-det, gameplay)", g_PlayerPadHeld);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "PadPressed:   0x%08X", g_PlayerPadPressed);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "btn_pressed:  0x%08X  (copy of RawPadHeld)", g_button_pressed_id);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+
+        y += 4;
+
+        // DPad states (remapped via padRemapTable)
+        sprintf(PRINT_TEXT_BUFFER, "--- DPad (remapped) ---");
+        PrintText8x14(col1, y, 0x8F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "DpadHeld:     0x%04X", (WORD)g_PlayerDpadHeld);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "DpadPressed:  0x%04X", g_PlayerDpadPressed);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+        sprintf(PRINT_TEXT_BUFFER, "DpadPrev:     0x%04X", g_PlayerDpadHeldPrev);
+        PrintText8x14(col1, y, 0x7F, 0); y += 14;
+
+        y += 4;
+
+        // Button status (right column)
+        y = 2;
+        sprintf(PRINT_TEXT_BUFFER, "--- PS1 Buttons ---");
+        PrintText8x14(col2, y, 0x8F, 0); y += 14;
+
+        WORD held = (WORD)g_RawPadHeld;
+        WORD pressed = (WORD)g_PlayerPadPressed;
+        WORD dpad = (WORD)g_PlayerDpadHeld;
+
+        #define BTN(name, mask, cy) \
+            sprintf(PRINT_TEXT_BUFFER, "%-10s held=%c press=%c dpad=%c", name, \
+                    (held & mask) ? 'X' : '-', \
+                    (pressed & mask) ? 'X' : '-', \
+                    (dpad & mask) ? 'X' : '-'); \
+            PrintText8x14(col2, cy, (held & mask) ? 0x8F : 0x5F, 0)
+
+        BTN("UP",       0x0010, y); y += 14;
+        BTN("DOWN",     0x0040, y); y += 14;
+        BTN("LEFT",     0x0080, y); y += 14;
+        BTN("RIGHT",    0x0020, y); y += 14;
+        BTN("TRIANGLE", 0x1000, y); y += 14;
+        BTN("CIRCLE",   0x2000, y); y += 14;
+        BTN("CROSS",    0x4000, y); y += 14;
+        BTN("SQUARE",   0x8000, y); y += 14;
+        BTN("L1",       0x0004, y); y += 14;
+        BTN("R1",       0x0008, y); y += 14;
+        BTN("L2",       0x0002, y); y += 14;
+        BTN("R2",       0x0001, y); y += 14;
+        BTN("START",    0x0800, y); y += 14;
+        #undef BTN
+
+        y = 220;
+        sprintf(PRINT_TEXT_BUFFER, "F1=proceed  Arrows=Dpad  Enter=START+CROSS  Space=CROSS  Esc=SQUARE");
+        PrintText8x14(2, y, 0x5F, 0);
+
+        // Exit condition: F1 pressed → proceed to logos_state
+        if (f1Pressed) break;
+
+        Task_sleep(1);
+    }
+
+    OutputDebugStringA("[INPUT] input_test_state - exiting, chaining to logos_state\n");
     Task_chain((void*)logos_state);
 }
 
@@ -113,7 +245,7 @@ void logos_state(void)
     setSomeColor(128, 128, 128);
 
     // if (g_bIsSoftwareRendering == FALSE) {
-        // g_currentFMVID = 28;
+        // g_CurrentFMVID = 28;
         // g_FmvCharacterId = 0;
         // g_main_state_flags |= 0x40000;
     // } else {
@@ -123,9 +255,10 @@ void logos_state(void)
     Task_sleep(3);
 
     // if (g_bIsSoftwareRendering == FALSE) {
-        // g_currentFMVID = 23;
-        // g_FmvCharacterId = 0;
-        // g_main_state_flags |= 0x40000;
+        // g_selectedFmvId = 23;
+        g_CurrentFMVID = 23;
+        g_FmvCharacterId = 0;
+        g_main_state_flags |= 0x40000;
     // } else {
     //     QueueVideoPlayback(29, 0);
     // }
@@ -390,12 +523,25 @@ void memclr(void* start, void* end)
 
 // ---------------------------------------------------------------------------
 // ResetGetAsyncKeyStateFlags (0x00497e60)
-// Clears async key state tracking flags.
+//
+// Calls GetAsyncKeyState() for every possible virtual key (0-255) to reset
+// the internal low-bit flag that indicates whether a key was pressed since
+// the last query. This flushes stale/buffered keyboard input when
+// transitioning between game states (menus, gameplay, cutscenes, pause,
+// camera changes), preventing unintended actions from leftover key presses.
+// This does NOT disable input or read gameplay input — it only resets the
+// OS-level key press history so that only new key presses after this call
+// will be detected.
+// Called via ScheduleInputFlush to prevent FMV-skip button from immediately
+// dismissing loading messages.
 // ---------------------------------------------------------------------------
 void ResetGetAsyncKeyStateFlags(void)
 {
-    // In the original, this resets per-frame key state tracking.
-    // With GetAsyncKeyState-based input, this is effectively a no-op.
+    BYTE vk;
+    GetAsyncKeyState(0);
+    for (vk = 1; vk != 0; vk++) {
+        GetAsyncKeyState(vk);
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -431,23 +577,28 @@ void SetInitialItems(void)
         ITEM_NONE,              0
     };
 
-    // Set player flags (secondary flags array at 0x00be989c)
-    g_PlayerFlags2[0] = 0xbfffffff;    // first DWORD has cleared bit 30
-    g_PlayerFlags2[1] = 0xffffffff;
-    g_PlayerFlags2[2] = 0xffffffff;
-    g_PlayerFlags2[3] = 0xffffffff;
-    g_PlayerFlags2[4] = 0xffffffff;
-    g_PlayerFlags2[5] = 0xfff7ffff;    // 5th DWORD has cleared bit 19
-    g_PlayerFlags2[6] = 0xffffffff;
-    g_PlayerFlags2[7] = 0xffffffff;
+    // init room items flags (bit set = item not taken)
+    {
+        static const unsigned char roomItemsFlagsInit[32] = {
+            0xff, 0xff, 0xff, 0xbf,
+            0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xf7, 0xff,
+            0xff, 0xff, 0xff, 0xff,
+            0xff, 0xff, 0xff, 0xff
+        };
+        memcpy(g_roomItemsFlags, roomItemsFlagsInit, 32);
+    }
 
     // Set display values
     DAT_00be982c = 7;
     DAT_00be982d = 0xf0;
     DAT_00be982e = 0xf0;
 
-    if ((g_playerEntity.id & 3) == 0) {
-        // Chris: 6 slots, Rebecca gets Baretta + 15
+    if ((g_playerEntity.id & 3) == CHAR_CHRIS) {
+        // Chris: 6 slots, Rebecca gets Baretta with 15 bullets
         item_slot = initial_items;           // Chris items at offset 0
         total_items_slots = 6;
         g_RebeccaItemSlots[0].Id = ITEM_BERETTA;
@@ -707,7 +858,7 @@ void InitializeGame(void)
     if ((g_playerEntity.id & 3) == CHAR_JILL) {
         has_alternate_outfit = Flg_ck((int)g_PlayerFlags, 0x7b);
         if (has_alternate_outfit == 0) {
-            Flg_on((int)g_PlayerFlags2, 0x34);
+            Flg_on((int)g_roomItemsFlags, 0x34);
             Flg_on((int)g_PlayerFlags3, 0x0b);
         }
     }
@@ -721,18 +872,9 @@ void InitializeGame(void)
 // Main gameplay loop: entities, cameras, rooms, menus, combat.
 // Returns: 1 = died/quit to title, 0 = game completed → ending.
 //
-// 0x00480b30: while ((g_menu_choice_id & 0x80) != 0) Task_sleep(1)
-// 0x00480b45: g_main_state_flags |= 0x2000000
-// 0x00480b6c: g_main_state_flags &= 0x3fffffff; g_main_state_flags |= 0x80000000
-// 0x00480e02: do { ... Task_sleep(1); ... } while ((g_menu_choice_id & 0x80) != 0)
-// 0x004813b9: do { ... } while (true) — main gameplay loop
 // ============================================================================
 int game_loop(void)
 {
-    // 0x00480b30: wait for the loading message (queued by
-    // display_game_loading_message during InitializeGame) to be dismissed
-    // before entering gameplay. The message is rendered each frame by
-    // FUN_004557b0 in main_loop on the blanking (black) screen.
     while ((g_menu_choice_id & 0x80) != 0) {
         Task_sleep(1);
     }
@@ -740,15 +882,6 @@ int game_loop(void)
     // 0x00480b45: mark gameplay active
     g_main_state_flags |= 0x2000000;
 
-    // The full game loop is not yet implemented. The original (0x00480b6c)
-    // clears 0x40000000 and sets 0x80000000 here, then arms a black fade-in
-    // and renders the loaded room background. Until room rendering exists,
-    // keep the screen in blanking mode (0x40000000, set by InitializeGame) so
-    // the stale character-select background held in g_displayImageSRV is NOT
-    // re-drawn (OT_InsertPrimitive/display_texture are gated by this flag) and
-    // no white flashing occurs. Also drop any leftover fade state from the
-    // character-select screen (g_fade_type_id=1 white flash) and hide the
-    // transition for 6 frames (matches original 0x00480b5c StMask(0,6)).
     g_fading_state = -1;
     g_fading_counter = 0;
     StMask(0, 6);

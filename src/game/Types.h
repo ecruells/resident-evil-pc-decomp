@@ -477,7 +477,7 @@ struct D3DRendererInfo {
 #define PAD_MENU_UP     PAD_UP
 #define PAD_MENU_DOWN   PAD_DOWN
 #define PAD_CONFIRM     (PAD_CROSS|PAD_START)
-#define PAD_TITLE_ANY   (PAD_SELECT|PAD_L3|PAD_R3|PAD_START|PAD_RIGHT|PAD_LEFT|PAD_R2|PAD_L1|PAD_R1)
+#define PAD_TITLE_ANY   (PAD_SELECT|PAD_L3|PAD_R3|PAD_START|PAD_RIGHT|PAD_LEFT|PAD_R2|PAD_L1|PAD_R1|PAD_CROSS)
 
 // ============================================================================
 // Registry

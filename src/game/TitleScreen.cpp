@@ -153,10 +153,11 @@ void fade_update(void)
 
 // ============================================================================
 // read_sidewinder_pad (0x00497e30)
+// Original: return g_pMasterInputState.field466_0x200 (joystick[0].currPress)
 // ============================================================================
 int read_sidewinder_pad(void)
 {
-    return g_PadRawP2;
+    return g_pMasterInputState.joysticks[0].currPress;
 }
 
 // ============================================================================
@@ -245,7 +246,7 @@ void update_title_options(void)
 	case 2:
 		UpdateTitleTextSprite(128, g_titleSelectionId);
 
-		if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+		if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
 			play_sfx(SFX_BANKS, SFX_TITLE_EVIL01);
 			play_sfx(SFX_BANKS, 1); // null sfx
 			g_titleOptionsFading = 6;
@@ -256,8 +257,8 @@ void update_title_options(void)
 			return;
 		}
 
-		if (g_PlayerPadPressed & (PAD_L2 | PAD_UP | PAD_DOWN)) {
-			if (!(g_PlayerPadPressed & (PAD_L2 | PAD_UP))) {
+		if (g_PlayerPadPressed & 0x5100) {
+			if (!(g_PlayerPadPressed & 0x1100)) {
 				if (g_titleSelectionId == 2) g_titleSelectionId = 0;
 				g_titleSelectionId++;
 			} else {
@@ -288,7 +289,7 @@ void update_title_options(void)
                 return;
             }
             UpdateTitleTextSprite(128, g_titleSelectionId);
-            if ((g_PlayerPadPressed & PAD_TITLE_ANY) == 0) {
+            if ((g_PlayerPadPressed & 0xeff) == 0) {
                 return;
             }
             g_titleOptionsFading = 0;
@@ -365,7 +366,7 @@ void update_title_options(void)
                 g_titleOptionsFading = 2;
                 g_titleDemoTime = 0x708;
             }
-            if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+            if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
                 g_titleOptionsFading = 2;
                 g_titleDemoTime = 0x708;
             }
@@ -380,7 +381,7 @@ void update_title_options(void)
                 g_fading_counter = 0x400;
                 fade_update();
             }
-            if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+            if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
                 g_titleMode = 1;
                 g_titleOptionsFading = 2;
             }
@@ -394,7 +395,7 @@ void update_title_options(void)
                 g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
                 title_exit_loop();
             }
-            if ((g_PlayerPadPressed & PAD_TITLE_ANY) || sidewinderPress) {
+            if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
                 g_titleOptionsFading = 2;
                 g_fading_state = -1;
                 g_titleDemoTime = 0x708;
@@ -427,6 +428,7 @@ void title_state(void)
 	g_main_state_flags &= 0xFFFEFFFF;
 	g_PlayerPadHeldPrev = 0;
 	g_PlayerPadHeld = 0;
+	g_RawPadHeld = 0;
 	g_PlayerPadPressed = 0;
 	g_playingGameFlag = 0;
 	g_menu_choice_id = 0;
@@ -457,14 +459,13 @@ void title_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 1);
     Task_sleep(1);
 
-    // if (g_fmvPlayCount < 1) {
-    //     // g_selectedFmvId = 0;
-    //     g_currentFMVID = 0;
-    //     g_fmvDataPointer = g_loadDataDestPointer;
-    //     g_fmvPlayCount = 0x10;
-    //     g_main_state_flags = g_main_state_flags | 0x40000;
-    //     Task_sleep(1);
-    // }
+    if (g_fmvPlayCount < 1) {
+        g_selectedFmvId = 0;
+        g_fmvDataPointer = g_loadDataDestPointer;
+        g_fmvPlayCount = 0x10;
+        g_main_state_flags = g_main_state_flags | 0x40000;
+        Task_sleep(1);
+    }
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
     Task_sleep(1);

@@ -9,23 +9,19 @@
 #define MAX_JOYSTICKS 32
 
 // Joystick entry (stride 0x1D8 = 472 bytes)
-// Fields at offsets relative to start of joystick array at +0x200 in MasterInputState
+// Original layout (confirmed from UpdateAllInputStates ASM at 0x00420570):
+//   puVar6 (uint*) starts at entry+0x34
+//   puVar6[-0xD] = currPress (0x00), puVar6[-0xC] = newPress (0x04), puVar6[-0xB] = prevPress (0x08)
+//   puVar6[-10]  = JOYINFOEX (0x0C), puVar6[-8] = dwXpos, puVar6[-7] = dwYpos
+//   puVar6[0]    = dwPOV (0x34), puVar6[0x1B] = povFlags (0xA0), puVar6[0x68] = enabled (0x1D4)
 struct JoystickEntry {
-    JOYINFOEX  info;              // +0x00 - JOYINFOEX (0x34 bytes)
-    BYTE       pad1[0x18];        // +0x34
-    DWORD      xPos;              // +0x4C - puVar6[-8] scaled to 0x0000-0xFFFF
-    DWORD      yPos;              // +0x50 - puVar6[-7]
-    BYTE       pad2[0x18];        // +0x54
-    DWORD      prevPress;         // +0x6C - puVar6[-0xB] previous button state
-    DWORD      currPress;         // +0x70 - puVar6[-0xD] current button state
-    DWORD      newPress;          // +0x74 - puVar6[-0xC] newly pressed buttons
-    BYTE       pad3[0x8];         // +0x78
-    DWORD      extraFlags;        // +0x80 - puVar6[-2] flags shifted left 8
-    BYTE       pad4[0x1C];        // +0x84
-    DWORD      povValue;          // +0xA0 - puVar6[0x00] POV hat value
-    BYTE       pad5[0x64];        // +0xA4
-    DWORD      povFlags;          // +0x108 - puVar6[0x1B] bit 0x10 = POV enabled
-    BYTE       pad6[0xC8];        // +0x10C - padding to reach 0x1D4
+    DWORD      currPress;         // +0x00 - puVar6[-0xD] current button/axis state
+    DWORD      newPress;          // +0x04 - puVar6[-0xC] newly pressed this frame
+    DWORD      prevPress;         // +0x08 - puVar6[-0xB] previous frame state
+    JOYINFOEX  info;              // +0x0C - JOYINFOEX (0x34 bytes), puVar6[-10]
+    BYTE       pad_40[0x60];      // +0x40 - padding to povFlags at +0xA0
+    DWORD      povFlags;          // +0xA0 - puVar6[0x1B] bit 0x10 = POV enabled
+    BYTE       pad_A4[0x130];     // +0xA4 - padding to enabled at +0x1D4
     DWORD      enabled;           // +0x1D4 - puVar6[0x68] 0=disabled, 1=enabled
 };
 
@@ -58,8 +54,8 @@ struct MasterInputState {
     DWORD      joystickCount;     // 0x3B28 - number of joysticks + 1
 };
 
-// Global pointer to the master input state
-extern MasterInputState* g_pMasterInputState;
+// Global master input state instance (0x00ac4030)
+extern MasterInputState g_pMasterInputState;
 
 // Key binding data (persistent, saved to registry)
 extern BYTE g_keyBindingData[32];

@@ -39,11 +39,10 @@ int main_loop(void)
     PlayerPad_Update();
 
     // 0x00428eff: Check for special key combination (F9/F10/F11 scan codes)
-    if (g_RawPadPressed != 0) {
-        if (g_lastScanCodeOrMsgID == 0x5B || g_lastScanCodeOrMsgID == 0x5C || g_lastScanCodeOrMsgID == 0x5D) {
-            DAT_00d91bc8 = 1;
-            g_menu_choice_id = 0;
-        }
+    // Only fires when no message is currently displayed (bit 0x80 of g_menu_choice_id = message active)
+    if ((g_padEdgeDetectedWord != 0) && (((g_lastScanCodeOrMsgID == 0x5b || (g_lastScanCodeOrMsgID == 0x5c)) || (g_lastScanCodeOrMsgID == 0x5d)))) {
+        DAT_00d91bc8 = 1;
+        g_menu_choice_id = 0;
     }
 
     if ((g_main_state_flags2 & 0x10000000) == 0) {
@@ -217,7 +216,7 @@ _fade_done:
         TaskScheduler_Update();
 
         if ((g_menu_choice_id & 0x80) != 0) {
-            FUN_004557b0();
+            UpdateMessageDisplay();
         }
 
         if (g_fading_state >= 0) {

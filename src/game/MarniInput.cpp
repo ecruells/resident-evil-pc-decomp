@@ -181,17 +181,20 @@ void CMarniDirectInput::InitJoysticks(MasterInputState* pState)
     UINT numDevs = joyGetNumDevs();
     pState->joystickCount = numDevs + 1;
 
-    // 0x00420788-0x0042079d: Clamp to 32 max
-    if (pState->joystickCount > 32) {
+    // 0x00420788-0x0042079d: If > 32 joysticks, print warning and return
+    if ((int)(numDevs + 1) > 0x1F) {
         printf("DirectInput::WM_Create: too many joysticks (%d) [%s]\n",
                pState->joystickCount, "MarniSystem DirectInput Class");
-        pState->joystickCount = 32;
+        return;
     }
 
-    // 0x004207a5-0x004207b5: Zero all joystick entries (0x3B00 bytes from +0x200)
-    // Also zeros frameFlag at +0x1FC since the original zeroed from +0x28
-    memset(&pState->joysticks[0], 0, sizeof(pState->joysticks));
-    pState->frameFlag = 0;
+    // 0x004207a5-0x004207b5: Zero from +0x28 through +0x3B28
+    // This covers keyboardPrev/keyboardNewPress/keyboardRepeat, pad area,
+    // frameFlag, and all joystick entries (0xEC0 DWORDs = 0x3B00 bytes)
+    DWORD* pZero = (DWORD*)((BYTE*)pState + 0x28);
+    for (int i = 0xEC0; i != 0; i--) {
+        *pZero++ = 0;
+    }
 
     // 0x004207c0-0x0042087f: Validate each joystick device
     for (int i = 1; i < (int)pState->joystickCount; i++) {
