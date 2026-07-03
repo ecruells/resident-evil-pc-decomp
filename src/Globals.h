@@ -152,11 +152,11 @@ extern short         g_spriteAnimIntensity;            // 0x00be41d4
 // Task system globals
 extern DWORD         g_StackPointer;                   // 0x007e0cc8
 extern TaskControlBlock g_TasksTable[3];               // 0x00d1fde4
-extern void*         g_CurrentTask;                    // 0x00bf09ec
+extern TaskControlBlock*         g_CurrentTask;                    // 0x00bf09ec
 extern DWORD         g_TasksESP[3];                    // 0x00d91a70
 extern DWORD         g_TasksEIP[3];                    // 0x00d91a80
 extern DWORD         g_CurrentTaskID;                  // 0x00d91a7c
-extern void*         g_CurrentTaskPtr;                 // 0x00d91a68
+extern TaskControlBlock*         g_CurrentTaskPtr;                 // 0x00d91a68
 extern DWORD         g_SchedulerESP;                   // 0x00d91a8c
 extern DWORD         g_SchedulerRunningFlag;           // 0x004ba0b8
 extern void*         g_AsyncRpcCallback;               // 0x00d91a90
@@ -918,8 +918,18 @@ extern unsigned char g_RoomItemEventTable[288];   // 0x00d91aa0
 extern void*         g_RoomItemEventHead;         // 0x00d91bc0
 
 // Lab slides state (reset by lab_slides_reset)
-extern int           g_labSlidesFuncIndex;        // 0x00d22790
+extern unsigned char g_labSlidesFuncIndex;        // 0x00d22790
+extern unsigned char g_labSlidesAnimState;        // 0x00d22791 - animation phase (0-3)
+extern int           g_labSlidesScrollX;          // 0x00d22794 - slide scroll X position
+extern unsigned int  g_labSlidesScrollY;          // 0x00d22798
+extern unsigned char g_labSlidesSlideIndex;       // 0x00d227a0 - current slide frame
+extern unsigned char g_labSlidesLoopDone;         // 0x00d227a1 - loop completion flag
+extern unsigned char g_labSlidesMsgId;            // 0x00d227a2 - current slide message id
+extern unsigned char g_labSlidesCountdown;        // 0x00d227a3 - delay countdown timer
 extern int           g_labSlidesState;            // 0x007d9120
+
+// Room event index (SCD event pointer for current room entity)
+extern void*         g_room_event_index;          // 0x00d226a4
 
 // Effect system (billboard/sprite effect pool)
 extern Effect        g_effectPool[MAX_EFFECTS];           // 0x00be41e4 - 64 slots x 0x84 bytes

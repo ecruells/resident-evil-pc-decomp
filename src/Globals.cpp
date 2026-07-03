@@ -184,9 +184,9 @@ __declspec(allocate(".sched")) DWORD g_StackPointer = 0;
 // 0x00d1fde4
 __declspec(allocate(".sched")) TaskControlBlock g_TasksTable[3] = {};
 // 0x00bf09ec
-__declspec(allocate(".sched")) void* g_CurrentTask = NULL;
+__declspec(allocate(".sched")) TaskControlBlock* g_CurrentTask = NULL;
 // 0x00d91a68
-__declspec(allocate(".sched")) void* g_CurrentTaskPtr = NULL;
+__declspec(allocate(".sched")) TaskControlBlock* g_CurrentTaskPtr = NULL;
 // 0x00d91a70
 __declspec(allocate(".sched")) DWORD g_TasksESP[3] = {};
 // 0x00d91a7c
@@ -432,6 +432,8 @@ BOOL g_bFrameSkipDetected = TRUE;  // DAT_004d46dc (allow frame timing check)
 char PRINT_TEXT_BUFFER[256] = {};
 
 // --- Texture descriptor for text rendering ---
+// 0x00be1150
+RectDrawDesc g_rect = {};
 // 0x00be1160
 TextureDesc g_TextureDesc = {};
 // 0x00be1180
@@ -839,10 +841,20 @@ unsigned char g_RoomItemEventTable[288] = {};
 // 0x00d91bc0 - Pointer to current room item event entry (reset to g_RoomItemEventTable)
 void*         g_RoomItemEventHead = NULL;
 
-// 0x00d22790 - Lab slides function index (reset by lab_slides_reset)
-int           g_labSlidesFuncIndex = 0;
+// 0x00d22790 - Lab slides state block (reset by lab_slides_reset)
+unsigned char g_labSlidesFuncIndex = 0;
+unsigned char g_labSlidesAnimState = 0;     // 0x00d22791
+int           g_labSlidesScrollX = 0;       // 0x00d22794
+unsigned int  g_labSlidesScrollY = 0;       // 0x00d22798
+unsigned char g_labSlidesSlideIndex = 0;    // 0x00d227a0
+unsigned char g_labSlidesLoopDone = 0;      // 0x00d227a1
+unsigned char g_labSlidesMsgId = 0;         // 0x00d227a2
+unsigned char g_labSlidesCountdown = 0;     // 0x00d227a3
 // 0x007d9120 - Lab slides state (reset by lab_slides_reset)
 int           g_labSlidesState = 0;
+
+// 0x00d226a4 - Room event index (SCD event pointer for current room entity)
+void*         g_room_event_index = NULL;
 
 // 0x00be9a3c - Item slot index table (first byte AFTER bio_card range)
 unsigned char g_ItemSlotsIndexes = 0;

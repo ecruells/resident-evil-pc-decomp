@@ -124,65 +124,46 @@ __declspec(naked) void ReturnToScheduler_Resume() {
 // ============================================================================
 void TaskScheduler_Update(void)
 {
-    g_CurrentTask = (void*)g_TasksTable;
-    g_CurrentTaskPtr = (void*)g_TasksTable;
+    g_CurrentTask = g_TasksTable;
+    g_CurrentTaskPtr = g_TasksTable;
     g_CurrentTaskID = 0;
     g_SchedulerRunningFlag = 1;
 
-    BYTE* endPtr = (BYTE*)&g_TasksTable[TASK_MAX - 1] + TASK_SIZE;
+    TaskControlBlock* endPtr = &g_TasksTable[TASK_MAX];
 
-    for (;;) {
-        BYTE* pTask = (BYTE*)g_CurrentTask;
-        short state = *(volatile short*)pTask;
-        short rawState = state & 0x3F;  // TASK_STATE_MASK
-
-        if ((state & TASK_SUSPENDED) == 0) {
-            if (rawState == TASK_SLEEPING) {
-                // Decrement sleep counter
-                (*(volatile short*)(pTask + 2))--;
-                if (*(volatile short*)(pTask + 2) == 0) {
-                    goto resume_or_yield;
-                }
-            }
-            else if (rawState == TASK_START) {
-                // Initialize task stack pointer (original formula)
-                g_TasksESP[g_CurrentTaskID] =
-                    g_CurrentTaskID * TASK_STACK_SIZE + g_StackPointer + TASK_STACK_SIZE;
-                g_TasksTable[g_CurrentTaskID].state = TASK_ACTIVE;
-
-                SwitchToTask_Asm();
-
-                // Task yielded (Task_sleep/Task_chain/Task_exit) — state already set by task.
-                // Original jumps directly to advance (0x00420181: JMP 0x00420146).
-                // Do NOT set state to DEAD here — the task may have just slept.
-                goto advance;
-            }
-            else if (rawState == TASK_YIELD) {
-                goto resume_or_yield;
+    do {
+        int state = g_CurrentTask->state;
+        if (state == TASK_SLEEPING) {
+            g_CurrentTask->sleepCounter -= 1;
+            if (g_CurrentTask->sleepCounter == 0) {
+_resume_task:
+                g_CurrentTask->state = TASK_ACTIVE;
+                ReturnToScheduler_Resume();
             }
         }
+        else if (state == TASK_START) {
+            g_TasksESP[g_CurrentTaskID] = g_CurrentTaskID * TASK_STACK_SIZE + g_StackPointer + TASK_STACK_SIZE;
+            SwitchToTask_Asm();
+        }
+        else if (state == TASK_YIELD) {
+            goto _resume_task;
+        }
 
-    advance:
         if (g_AsyncRpcCallback == NULL) {
-            g_CurrentTaskID++;
-            g_CurrentTask = (BYTE*)g_CurrentTask + TASK_SIZE;
-            if ((BYTE*)g_CurrentTask >= endPtr) {
+            ++g_CurrentTaskID;
+            ++g_CurrentTask;
+
+            if (g_CurrentTask >= endPtr) {
                 g_SchedulerRunningFlag = 0;
                 return;
             }
-        } else {
-            void (*callback)() = (void (*)())g_AsyncRpcCallback;
-            g_AsyncRpcCallback = NULL;
-            callback();
         }
-        continue;
-
-    resume_or_yield:
-        g_TasksTable[g_CurrentTaskID].state = TASK_ACTIVE;
-        ReturnToScheduler_Resume();
-        // Returns here when task calls Yield/Task_chain/Task_exit
-        goto advance;
-    }
+        else {
+            void (*callback)() = (void (*)())g_AsyncRpcCallback;
+            callback();
+            g_AsyncRpcCallback = NULL;
+        }
+    } while(1);
 }
 
 // ============================================================================
@@ -286,11 +267,25 @@ void Task_Resume(int id)
 }
 
 // ============================================================================
-// ExecAsync (0x00420290 — FUN_00420290 is an empty stub)
+// ExecAsync (0x004202a0)
+// Executes a callback asynchronously via the task scheduler.
+// If the scheduler is not running, calls the callback directly.
+// If running, waits for any pending async callback, registers the new one,
+// yields via Task_sleep(1) so the scheduler fires it in the advance block,
+// then clears it after the task wakes up.
 // ============================================================================
 void ExecAsync(void* callback)
 {
+    if (g_SchedulerRunningFlag == 0) {
+        ((void(*)())callback)();
+        return;
+    }
+    while (g_AsyncRpcCallback != NULL) {
+        Task_sleep(1);
+    }
     g_AsyncRpcCallback = callback;
+    Task_sleep(1);
+    g_AsyncRpcCallback = NULL;
 }
 
 // ============================================================================

@@ -90,8 +90,8 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
     } else {
         screenY = 186;
     }
-    g_MessageScreenY = screenY - (short)g_ScreenOffsetY;
 
+    g_MessageScreenY = screenY - (short)g_ScreenOffsetY;
     g_lastScanCodeOrMsgID = (DWORD)msg_id;
     g_MessageSpeedUpFlag = (unsigned char)(msg_id & 0x80);
 

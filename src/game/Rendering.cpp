@@ -7,6 +7,15 @@
 #include <cstdlib>
 
 extern unsigned int set_message_display(unsigned short msg_id, unsigned short pause_game);
+extern void Flg_on(int baseAddr, unsigned int bitIndex);
+extern void room_event_item_pickup(void);        // 0x00451700
+extern void lab_slides_stop_snd(short slot);      // 0x0047f960
+extern void lab_slides_set_snd_slot(short slot);  // 0x0047f930
+extern void lab_slides_set_snd_params(int a, int b, int c); // 0x0047f990
+extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex); // 0x00473f10
+extern int AddTintSprite_Ex(TextureDesc* texture, unsigned short brightness); // 0x0046f8a0
+extern void display_room_camera_bg(void);
+extern void rearrange_item_slots(void);
 
 // ============================================================================
 // Pending sprite queue (filled by AddTintSprite / draw_rect / OT_InsertPrimitive,
@@ -670,51 +679,84 @@ msg_next_char:
 }
 
 // ============================================================================
-// FUN_00455fb0 (0x00455fb0) - Message dismissal handler
-// Handles message-triggered actions: yes/no selection, item usage,
-// lab slides, and other conditional actions.
+// handle_message_post_action (0x00455fb0)
+// Handles the action that follows a dismissed message: item usage,
+// room events, lab slides, follow-up messages, and other conditional actions.
 // ============================================================================
-static void message_dismiss_handler(void)
+static void handle_message_post_action(void)
 {
-    // Advance past current position
-    g_MessageCurrentPtr++;
+    short* psVar6;
+    short* psVar7;
 
+    g_MessageCurrentPtr = (unsigned char*)((int)g_MessageCurrentPtr + 1);
     unsigned char* pbVar2 = g_MessageCurrentPtr;
-    unsigned int choiceOffset = (unsigned int)(g_menu_choice_id & 1) * (unsigned int)*g_MessageCurrentPtr;
-    g_MessageCurrentPtr = g_MessageCurrentPtr + choiceOffset + 1;
+    int iVar5 = (unsigned int)(g_menu_choice_id & 1) * (unsigned int)*g_MessageCurrentPtr;
+    g_MessageCurrentPtr = g_MessageCurrentPtr + iVar5 + 1;
+    unsigned char bVar1 = *g_MessageCurrentPtr;
+    g_MessageCurrentPtr = pbVar2 + iVar5 + 2;
 
-    unsigned char cmdByte = *g_MessageCurrentPtr;
-    g_MessageCurrentPtr = pbVar2 + choiceOffset + 2;
-
-    if (cmdByte == 9) {
-        // Display follow-up message
+    if (bVar1 == 9) {
         set_message_display(*g_MessageCurrentPtr, g_PauseGameInMsgFlag);
         return;
     }
-
-    if (cmdByte != 10) {
+    if (bVar1 != 10) {
         return;
     }
 
-    // cmdByte == 10: conditional actions based on sub-command
     switch (*g_MessageCurrentPtr) {
     case 0: // Room event / flag action
-        // TODO: Original checks g_room_event_index and calls FUN_00451700
+        if (*(char*)(*(int*)((char*)g_room_event_index + 8) + 8) == 'M') {
+            Flg_on((int)g_PlayerFlags, 0x7f);
+            return;
+        }
+        room_event_item_pickup();
         return;
 
     case 1: // Use selected item
-        g_usedItemId = g_selectedItemId;
+        {
+            g_usedItemId = g_selectedItemId;
+            if (g_selectedItemId != 0x31) {
+                unsigned char bVar4 = 0;
+                unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
+                bVar1 = slots[0];
+                while (bVar1 != g_selectedItemId) {
+                    bVar4 = bVar4 + 1;
+                    bVar1 = slots[(unsigned int)bVar4 * 2];
+                }
+                if (g_selectedItemId < 0xb) {
+                    slots[(unsigned int)bVar4 * 2] = 0;
+                    if ((unsigned int)g_EquippedItemId - (unsigned int)bVar4 == 1) {
+                        g_EquippedItemId = 0;
+                    }
+                    rearrange_item_slots();
+                    return;
+                }
+                bVar1 = slots[(unsigned int)bVar4 * 2 + 1];
+                if (bVar1 != 0) {
+                    slots[(unsigned int)bVar4 * 2 + 1] = bVar1 - 1;
+                    if (slots[(unsigned int)bVar4 * 2 + 1] == 0) {
+                        if ((0x32 < g_selectedItemId) && (g_selectedItemId < 0x3d)) {
+                            g_main_state_flags = g_main_state_flags | 0x2000;
+                            return;
+                        }
+                        slots[(unsigned int)bVar4 * 2] = 0;
+                        rearrange_item_slots();
+                    }
+                }
+            }
+        }
         return;
 
     case 2: // Discard selected item from inventory
         {
-            unsigned char slotIdx = 0;
-            unsigned char itemId = *(unsigned char*)g_ItemSlotsPointer;
-            while (itemId != g_selectedItemId) {
-                slotIdx++;
-                itemId = ((unsigned char*)g_ItemSlotsPointer)[(unsigned int)slotIdx * 2];
+            unsigned char bVar4 = 0;
+            unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
+            bVar1 = slots[0];
+            while (bVar1 != g_selectedItemId) {
+                bVar4 = bVar4 + 1;
+                bVar1 = slots[(unsigned int)bVar4 * 2];
             }
-            ((unsigned char*)g_ItemSlotsPointer)[(unsigned int)slotIdx * 2] = 0;
+            slots[(unsigned int)bVar4 * 2] = 0;
             rearrange_item_slots();
         }
         return;
@@ -723,9 +765,140 @@ static void message_dismiss_handler(void)
         return;
 
     case 4: // Lab slides / cutscene start
-    case 6: // Lab slides end
-        // Deferred to full implementation
+        g_cutId = g_roomCameraId;
+        g_labSlidesAnimState = 0;
+        g_bGameActive = 0;
+        g_labSlidesFuncIndex = 1;
+        g_roomCameraId = 4;
+        g_message_flags = g_message_flags & ~0x100;
+        display_room_camera_bg();
+        g_labSlidesSlideIndex = 0;
+        g_labSlidesLoopDone = 0;
+        g_labSlidesMsgId = 0;
+        g_labSlidesCountdown = 0x10;
+        lab_slides_stop_snd(0);
+        lab_slides_set_snd_slot(1);
+        lab_slides_set_snd_params(2, 0x14, 0x14);
+        lab_slides_set_snd_slot(2);
+        g_labSlidesScrollX = -96;
+        g_labSlidesScrollY = 0xffffffbe;
+        TexturePage_Refresh(0x2e, 0);
         return;
+
+    case 6: // Lab slides end
+        TexturePage_DeleteSet(0x2e);
+        g_roomCameraId = g_cutId;
+        display_room_camera_bg();
+        FUN_00473f10((int*)g_PlayerFlags, 0x20);
+        lab_slides_stop_snd(1);
+        lab_slides_stop_snd(2);
+        lab_slides_set_snd_slot(0);
+        g_message_flags = g_message_flags | 0x100;
+        g_main_state_flags = g_main_state_flags & 0xfffeffff;
+        g_bGameActive = 2;
+        return;
+    }
+
+    // Default: Lab slides animation state machine
+    switch (g_labSlidesAnimState) {
+    case 0:
+        g_labSlidesCountdown = g_labSlidesCountdown - 1;
+        if (g_labSlidesCountdown != 0) break;
+        g_labSlidesAnimState = 1;
+        g_labSlidesScrollX = 0x66;
+        // fall through
+    case 1:
+        g_labSlidesScrollX = g_labSlidesScrollX - 0x12;
+        if (g_labSlidesScrollX == 0x1e) {
+            play_sfx(2, 0x1b);
+        }
+        if (g_labSlidesScrollX == -0x60) {
+            g_labSlidesAnimState = 2;
+            set_message_display(g_labSlidesMsgId, 0);
+        }
+        break;
+    case 2:
+        if ((g_menu_choice_id & 0x80) == 0) {
+            g_labSlidesAnimState = 3;
+            play_sfx(2, 0x1a);
+        }
+        break;
+    case 3:
+        g_labSlidesScrollX = g_labSlidesScrollX - 0x12;
+        if (g_labSlidesScrollX < -0x127) {
+            g_labSlidesAnimState = 0;
+            g_labSlidesCountdown = 0x10;
+            if (g_labSlidesSlideIndex < 5) {
+                g_labSlidesSlideIndex = g_labSlidesSlideIndex + 1;
+                g_labSlidesMsgId = g_labSlidesMsgId + 1;
+            }
+            else if (g_labSlidesLoopDone == 0) {
+                g_labSlidesLoopDone = 1;
+                g_labSlidesMsgId = g_labSlidesMsgId + 1;
+            }
+            else {
+                g_labSlidesFuncIndex = 2;
+                g_labSlidesMsgId = g_labSlidesMsgId + 1;
+            }
+        }
+        break;
+    }
+
+    // Draw lab slides background rectangles
+    g_rect.r = 0x80;
+    g_rect.g = 0x80;
+    g_rect.b = 0x80;
+    g_rect.textureId = 0x60000000;
+    psVar6 = (short*)0x4c2170;
+    do {
+        g_rect.h = psVar6[-1];
+        psVar7 = psVar6 + -4;
+        g_rect.w = psVar6[-2];
+        g_rect.y = psVar6[-3];
+        g_rect.x = *psVar7;
+        draw_rect(&g_rect, 4, 1);
+        psVar6 = psVar7;
+    } while ((short*)0x4c2150 < psVar7);
+
+    // Draw lab slides scroll sprite
+    if (g_labSlidesAnimState != 0) {
+        g_TextureDesc.texU = 0;
+        g_rect.y = -0x42;
+        g_rect.h = 0x7f;
+        if ((unsigned int)(g_labSlidesScrollX + 0x67) < 0xe) {
+            g_rect.w = 0xbf;
+            g_rect.x = (short)g_labSlidesScrollX;
+        }
+        else if (g_labSlidesAnimState == 1) {
+            g_rect.w = 0x66 - (short)g_labSlidesScrollX;
+            g_rect.x = (short)g_labSlidesScrollX;
+        }
+        else {
+            g_rect.x = -0x67;
+            g_rect.w = (short)g_labSlidesScrollX + 0x126;
+            g_TextureDesc.texU = 0x99 - (char)g_labSlidesScrollX;
+        }
+        if ((g_labSlidesLoopDone == 0) && (g_labSlidesSlideIndex == 5)) {
+            g_rect.r = 0x38;
+            g_rect.g = 0x38;
+            g_rect.b = 0x38;
+        }
+        else {
+            g_TextureDesc.screenX = g_rect.x;
+            g_rect.r = 0x70;
+            g_rect.g = 0x70;
+            g_rect.b = 0x70;
+            g_TextureDesc.flags = 0x41000040;
+            g_TextureDesc.screenY = -0x42;
+            g_TextureDesc.height = 0x7f;
+            g_TextureDesc.texV = g_labSlidesSlideIndex << 7;
+            g_TextureDesc.width = g_rect.w;
+            g_TextureDesc.unk10 = 0;
+            g_TextureDesc.printClutTint = g_labSlidesSlideIndex + 0x1ed;
+            g_TextureDesc.depth = (short)(((unsigned short)g_labSlidesSlideIndex & 0xfffe) * 0x60 >> 7) + 9;
+            AddTintSprite_Ex(&g_TextureDesc, 4);
+        }
+        draw_rect(&g_rect, 4, 1);
     }
 }
 
@@ -771,20 +944,17 @@ void UpdateMessageDisplay(void)
         g_MessageCharTimer = g_MessageCharTimer - 1;
 
         if (g_MessageSpeedUpFlag == 0) {
+    state1_check_timer:
             // Normal speed: wait for timer
             if (g_MessageCharTimer != 0) break;
-        } else {
+        
             // Speed-up mode: reduce timer faster
-            if (g_MessageCharTimer != 0) {
-                if ((g_PlayerDpadHeld & 0x4000) != 0) {
-                    g_MessageCharTimer = bVar1 - 2; // double speed
-                }
-                goto state1_check_timer;
+        } else if (g_MessageCharTimer != 0) {
+            if ((g_PlayerDpadHeld & 0x4000) != 0) {
+                g_MessageCharTimer = bVar1 - 2; // double speed
             }
+            goto state1_check_timer;
         }
-
-    state1_check_timer:
-        if (g_MessageCharTimer != 0) break;
 
         // Timer expired: process next character
         bVar1 = *g_MessageCurrentPtr;
@@ -849,12 +1019,12 @@ void UpdateMessageDisplay(void)
                 bVar1 = *g_MessageCurrentPtr;
                 while (bVar1 != 4) {
                     switch (*g_MessageCurrentPtr) {
-                    case 5:
-                    case 6:
-                    case 0xf8:
-                    case 0xf9:
-                    case 0xfa:
-                        g_MessageCurrentPtr++;
+                        case 5:
+                        case 6:
+                        case 0xf8:
+                        case 0xf9:
+                        case 0xfa:
+                            g_MessageCurrentPtr++;
                     }
                     g_MessageCurrentPtr++;
                     bVar1 = *g_MessageCurrentPtr;
@@ -923,10 +1093,10 @@ msg_skip_char:
             // Draw cursor indicator
             g_TextureDesc.flags = 0x40;
             g_TextureDesc.width = 8;
-            g_TextureDesc.height = 0xe;
+            g_TextureDesc.height = 14;
             g_TextureDesc.depth = 0x1e;
-            g_TextureDesc.texU = 0x58;
-            g_TextureDesc.texV = 0x1c;
+            g_TextureDesc.texU = 88;
+            g_TextureDesc.texV = 28;
             g_TextureDesc.unk10 = 0x100;
             g_TextureDesc.printClutTint = 0x1e0;
             g_TextureDesc.screenX = 0x99 - g_ScreenOffsetX;
@@ -953,7 +1123,7 @@ msg_skip_char:
     // === State 4: Yes/No prompt ===
     case 4:
         if ((g_PlayerDpadPressed & 0x4000) == 0) {
-            if ((g_RawPadHeld & (0x2000 | 0x8000)) != 0) {
+            if ((g_PlayerPadHeld & (0x2000 | 0x8000)) != 0) {
                 g_menu_choice_id = g_menu_choice_id ^ 1;
                 g_MessageCharTimer = 0;
             }
@@ -962,12 +1132,12 @@ msg_skip_char:
             if ((((unsigned int)g_MessageCharTimer & (0x18 << (g_bGameActive == 0)))) != 0) {
                 g_TextureDesc.flags = 0x40;
                 if ((g_menu_choice_id & 1) == 0) {
-                    screenX = 0xd0;
+                    screenX = 208;
                 } else {
-                    screenX = 0xf8;
+                    screenX = 248;
                 }
                 g_TextureDesc.width = 8;
-                g_TextureDesc.height = 0xe;
+                g_TextureDesc.height = 14;
                 g_TextureDesc.texU = 0x10;
                 g_TextureDesc.texV = 0x1c;
                 g_TextureDesc.depth = 0x1e;
@@ -984,7 +1154,7 @@ msg_skip_char:
                 AddTintSprite(&g_TextureDesc, fade);
             }
             sprintf(PRINT_TEXT_BUFFER, "Yes No");
-            PrintText8x14(0xd8, g_ScreenOffsetY + g_MessageScreenY + 0x10, 0, 0);
+            PrintText8x14(216, g_ScreenOffsetY + g_MessageScreenY + 16, 0, 0);
             message_render_chars();
             return;
         }
@@ -992,7 +1162,7 @@ msg_skip_char:
         // Confirm pressed: dismiss message
         g_menu_choice_id = g_menu_choice_id & 0x7f;
         g_message_flags = g_messageFlagsBackup;
-        message_dismiss_handler();
+        handle_message_post_action();
         return;
 
     // === State 5: Waiting for player input to dismiss ===

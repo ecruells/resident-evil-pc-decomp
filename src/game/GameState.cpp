@@ -255,8 +255,8 @@ void logos_state(void)
     Task_sleep(3);
 
     // if (g_bIsSoftwareRendering == FALSE) {
-        // g_selectedFmvId = 23;
-        g_CurrentFMVID = 23;
+        g_selectedFmvId = 23;
+        // g_CurrentFMVID = 23;
         g_FmvCharacterId = 0;
         g_main_state_flags |= 0x40000;
     // } else {
@@ -1151,3 +1151,18 @@ unsigned long g_gameTimerSnapshot = 0;            // 0x00be9844
 unsigned char g_equippedItemId = 0;               // 0x00be9849
 extern const unsigned char DAT_004bec80[] = { 0 };  // 0x004bec80
 void* room_check_actions[] = { nullptr };          // 0x004c1420
+
+// (0x00451700) - Room event item pickup action
+void room_event_item_pickup(void) { }
+
+// (0x0047f960) - Lab slides: stop sound slot
+void lab_slides_stop_snd(short slot) { }
+
+// (0x0047f930) - Lab slides: set sound slot
+void lab_slides_set_snd_slot(short slot) { }
+
+// (0x0047f990) - Lab slides: set sound params
+void lab_slides_set_snd_params(int a, int b, int c) { }
+
+// (0x0046f8a0) - AddTintSprite variant for lab slides texture rendering
+int AddTintSprite_Ex(TextureDesc* texture, unsigned short brightness) { return 0; }
