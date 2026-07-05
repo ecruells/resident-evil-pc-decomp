@@ -127,9 +127,9 @@
     <ClCompile Include="src\game\PrintText.cpp" />
     <ClCompile Include="src\game\TextureLoader.cpp" />
     <ClCompile Include="src\game\SpriteRenderer.cpp" />
-    <ClCompile Include="src\game\Marni3DObject.cpp" />
+    <ClCompile Include="src\marni\Marni3DObject.cpp" />
     <ClCompile Include="src\game\InputSystem.cpp" />
-    <ClCompile Include="src\game\MarniInput.cpp" />
+    <ClCompile Include="src\marni\MarniInput.cpp" />
     <ClCompile Include="src\game\SoundSystem.cpp" />
     <ClCompile Include="src\game\TitleScreen.cpp" />
     <ClCompile Include="src\game\CharacterSelectionScreen.cpp" />

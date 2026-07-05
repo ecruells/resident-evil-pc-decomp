@@ -1,6 +1,6 @@
 // Marni3DObject.cpp - 3D object / execute buffer / polyhedra / TMD implementations
 // All functions decompiled from Ghidra with original addresses
-#include "../marni/Marni3DObject.h"
+#include "Marni3DObject.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>

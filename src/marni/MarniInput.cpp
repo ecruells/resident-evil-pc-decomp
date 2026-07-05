@@ -2,7 +2,7 @@
 // Wraps Win32 GetAsyncKeyState + WinMM joyGetPosEx for PS1 controller emulation
 // Original class: MarniSystem::DirectInput (debug string at 0x004ba154)
 
-#include "../marni/MarniInput.h"
+#include "MarniInput.h"
 #include <cstdio>
 #include <cstring>
 

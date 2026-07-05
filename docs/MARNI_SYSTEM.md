@@ -435,7 +435,7 @@ Offset +0x0C: Pixel data
 
 ## 3A. CDirect3DObject / CMarniExecuteBuffer — 3D Object Classes
 
-**File:** `src/marni/Marni3DObject.h`, `src/game/Marni3DObject.cpp`
+**File:** `src/marni/Marni3DObject.h`, `src/marni/Marni3DObject.cpp`
 
 ### CDirect3DObject (Base Class)
 **Size:** 0x38 bytes (14 DWORDs)  
@@ -479,7 +479,7 @@ Adds `CopyFrom()` (0x00426600) for copying vertex/index data between polyhedra. 
 
 ## 3B. CMarniDirect3DTMD — TMD 3D Model Renderer
 
-**File:** `src/marni/Marni3DObject.h`, `src/game/Marni3DObject.cpp`  
+**File:** `src/marni/Marni3DObject.h`, `src/marni/Marni3DObject.cpp`  
 **Object Size:** 0x1594+ bytes (~5524 bytes)  
 **Constructor:** 0x00415910  
 **Debug String:** `"MarniSystem Direct3DTMD"` at 0x004b45e8
@@ -505,7 +505,7 @@ Manages up to 16 3D mesh objects with per-object transform matrices and texture/
 
 ## 3C. CMarniViewport2 — 3D Viewport Class
 
-**File:** `src/marni/Marni3DObject.h`, `src/game/Marni3DObject.cpp`  
+**File:** `src/marni/Marni3DObject.h`, `src/marni/Marni3DObject.cpp`  
 **VTable:** 0x004af0f8 (Type 2)  
 **Object Size:** 0x40 bytes (16 DWORDs)  
 **Constructor:** 0x004272e0  
@@ -541,7 +541,7 @@ Share the same memory layout as CDirect3DObject but with a different vtable and 
 
 ## 3D. DirectInput — Marni Input System
 
-**File:** `src/marni/MarniInput.h`, `src/game/MarniInput.cpp`  
+**File:** `src/marni/MarniInput.h`, `src/marni/MarniInput.cpp`  
 **Debug String:** `"MarniSystem DirectInput Class"` at 0x004ba154
 
 NOT the real DirectInput API — Capcom's custom wrapper using Win32 `GetAsyncKeyState` for keyboard and WinMM `joyGetPosEx` for joysticks. Maps PS1 controller semantics to PC input.
@@ -879,8 +879,8 @@ Screen
 | `src/marni/PSXTexture.cpp` | PSXTexture TIM/PIX parser, Store, operator= |
 | `src/marni/Marni3DObject.h` | CDirect3DObject, CMarniExecuteBuffer, CMarniPolyhedra, CMarniDirect3DTMD, CMarniViewport2 |
 | `src/marni/MarniInput.h` | CMarniDirectInput class, MasterInputState struct |
-| `src/game/Marni3DObject.cpp` | 3D object class implementations (all vtable + non-virtual methods) |
-| `src/game/MarniInput.cpp` | DirectInput keyboard/joystick polling |
+| `src/marni/Marni3DObject.cpp` | 3D object class implementations (all vtable + non-virtual methods) |
+| `src/marni/MarniInput.cpp` | DirectInput keyboard/joystick polling |
 | `src/game/TextureLoader.cpp` | Texture page creation, async workers, page management |
 | `src/game/SpriteRenderer.h` | SpriteCommand struct, OT entry, sprite functions |
 | `src/game/SpriteRenderer.cpp` | PSYQ GPU sprite emulation (19 functions) |
