@@ -603,9 +603,6 @@ void ClearAnimTiming(void)
     joints[15].rotDeltaX = 0;
 }
 
-// Animation load buffer (0x00C0B9C0 in original — large buffer for weapon animation data)
-static BYTE g_animLoadBuffer[0x40000] = {};
-
 // ============================================================================
 // SetupCharacterData (0x00494fc0)
 // Sets up the player character: loads the player model, weapon animation,
@@ -627,7 +624,7 @@ void SetupCharacterData(void)
         g_playerEntity.equippedWeaponId = g_ItemsSlots[(unsigned int)g_equippedItemId].Id;
     }
     LoadEquippedWeaponAnimation(
-        g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animLoadBuffer, (unsigned int)&g_animObjectBuffer);
+        g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animationBuffer, (unsigned int)&g_animObjectBuffer);
     g_playerEntity.unk_8e = 0;
     g_playerEntity.jointsStructs[1].rotDeltaX = 0;
     g_playerEntity.jointsStructs[1].rotDeltaY = 0;

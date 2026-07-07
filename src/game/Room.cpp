@@ -226,8 +226,8 @@ void load_room_masks(int param_1) // 0x00475a90
         } else {
             pakData = &g_bgMaskDataBuffer[g_bgMaskOffsets[param_1]];
         }
-        unpack_pakfile_(pakData, &g_displayImageBuffer);
-        TexturePage_SetupFull(&g_displayImageBuffer, g_TextureBankID, g_TextureDepthByte, 0);
+        unpack_pakfile_(pakData, &g_TimImageBuffer__bitmap);
+        TexturePage_SetupFull(&g_TimImageBuffer__bitmap, g_TextureBankID, g_TextureDepthByte, 0);
     } else {
         TexturePage_DeleteSet(4);
     }
@@ -255,7 +255,7 @@ void load_room_bg(void) // 0x00462b00
 
                 SetSpriteBufferFlag();
                 LoadFile(g_bgPathTemplate, g_bgPakLoadBuffer, 2);
-                unpack_pakfile_(g_bgPakLoadBuffer, g_BackgroundImageBuffer);
+                unpack_pakfile_(g_bgPakLoadBuffer, g_TimImageBuffer);
 
                 int width, height;
                 if ((g_main_state_flags2 & 4) == 0) {
@@ -266,7 +266,7 @@ void load_room_bg(void) // 0x00462b00
                     height = 236;
                 }
 
-                display_image(cameraIdx, g_displayImageBuffer, width, height);
+                display_image(cameraIdx, g_TimImageBuffer__bitmap, width, height);
                 title_setup_texture_pages(cameraIdx, 1);
                 cameraIdx++;
             } while (cameraIdx < (int)(unsigned int)g_RdtPointer->cameras_count);
@@ -320,18 +320,18 @@ void load_room_bg_image(void) // 0x004629c0
         pakData = &g_bgCacheBuffer[g_bgCameraOffsets[g_roomCameraId]];
     }
 
-    unpack_pakfile_(pakData, g_BackgroundImageBuffer);
+    unpack_pakfile_(pakData, g_TimImageBuffer);
 
     int width, height;
     if ((g_main_state_flags2 & 4) == 0) {
-        width = 0x140;
-        height = 0xf0;
+        width = 320;
+        height = 240;
     } else {
-        width = 0x13c;
-        height = 0xec;
+        width = 316;
+        height = 236;
     }
 
-    display_image(8, g_displayImageBuffer, width, height);
+    display_image(8, g_TimImageBuffer__bitmap, width, height);
     title_setup_texture_pages(8, 1);
     empty_00470960(8);
 }

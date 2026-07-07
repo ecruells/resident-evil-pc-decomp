@@ -47,6 +47,19 @@ struct POLY_F4 {
     short x3, y3; // Vertex coordinates
 }; 
 
+// PSX TIM Image format structs
+
+struct TIMHeader {
+    unsigned int magic; // always 0x10
+    unsigned int flags;
+};
+
+struct TIMBlockHeader {
+    unsigned int size;
+    short x, y;
+    short width, height;
+};
+
 // Forward declarations for circular references
 struct JointStruct;
 struct ScaMatrixData;

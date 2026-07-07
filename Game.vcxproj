@@ -112,6 +112,9 @@
     <ClCompile Include="src\game\GameInit.cpp" />
     <ClCompile Include="src\game\MainLoop.cpp" />
     <ClCompile Include="src\game\GameState.cpp" />
+    <ClCompile Include="src\game\GameLoop.cpp" />
+    <ClCompile Include="src\game\MainMenu.cpp" />
+    <ClCompile Include="src\game\MenuData.cpp" />
     <ClCompile Include="src\game\TaskScheduler.cpp" />
     <ClCompile Include="src\game\PlayerAnimations.cpp" />
     <ClCompile Include="src\game\ObjectManager.cpp" />

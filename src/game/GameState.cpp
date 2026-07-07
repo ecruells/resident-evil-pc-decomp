@@ -24,7 +24,7 @@ extern void vram_clr(int x, int y, int w, int h);
 // ---------------------------------------------------------------------------
 static void LoadAllItemsTexture(void)
 {
-    LoadFile(".\\usa\\data\\item_all.pix", g_ITEMS_IMAGES_BUFFER, 0x20);
+    LoadFile(".\\usa\\data\\item_all.pix", g_ItemsImageBuffer, 0x20);
 }
 
 // ============================================================================
@@ -38,43 +38,37 @@ void load_global_assets(void)
 {
     LoadAllItemsTexture();
 
-    if (g_image_buffer == NULL) {
-        OutputDebugStringA("[ASSET] FATAL: g_image_buffer is NULL in load_global_assets!\n");
-        Task_exit();
-        return;
-    }
-
-    LoadFile(".\\usa\\data\\fontus.tim", g_image_buffer, 0x20);
+    LoadFile(".\\usa\\data\\fontus.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 30;
-    ProcessTextureImage(g_image_buffer, 30, 0, 0);
+    ProcessTextureImage(g_DataBuffer, 30, 0, 0);
 
     OutputDebugStringA("fontus.tim loaded\n");
 
-    LoadFile(".\\usa\\data\\Font03t.tim", g_image_buffer, 0x20);
+    LoadFile(".\\usa\\data\\Font03t.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 1;
-    ProcessTextureImage(g_image_buffer, 1, 0, 2);
+    ProcessTextureImage(g_DataBuffer, 1, 0, 2);
 
-    LoadFile(".\\usa\\data\\Optkey03.tim", g_image_buffer, 0x20);
+    LoadFile(".\\usa\\data\\Optkey03.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 2;
-    LoadTexturePage(g_image_buffer, 2, 0, 0xB, 0, 0, 0, 0);
+    LoadTexturePage(g_DataBuffer, 2, 0, 0xB, 0, 0, 0, 0);
 
-    LoadFile(".\\usa\\data\\status.tim", g_image_buffer, 0x20);
+    LoadFile(".\\usa\\data\\status.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 0x41C;
-    LoadTexturePage(g_image_buffer, 0x1C, 4, 0, 0, 0, 1, 0);
+    LoadTexturePage(g_DataBuffer, 0x1C, 4, 0, 0, 0, 1, 0);
 
     SetupTexturePageHandles(0, 1);
 
-    LoadFile(".\\usa\\data\\statface.tim", g_image_buffer, 0x20);
-    LoadTexturePage(g_image_buffer, g_TextureBankID & 0xFF, 0, 9, 0, 0, 0, 0);
+    LoadFile(".\\usa\\data\\statface.tim", g_DataBuffer, 0x20);
+    LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 9, 0, 0, 0, 0);
 
-    LoadFile(".\\usa\\data\\blue.tim", g_image_buffer, 0x20);
-    LoadTexturePage(g_image_buffer, g_TextureBankID & 0xFF, 0, 10, 0, 0, 0, 0);
+    LoadFile(".\\usa\\data\\blue.tim", g_DataBuffer, 0x20);
+    LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 10, 0, 0, 0, 0);
 
-    LoadFile(".\\usa\\data\\staitem.tim", g_image_buffer, 0x20);
-    LoadTexturePage(g_image_buffer, 0, 0, 0x1E, 0, 0, 0, 0);
+    LoadFile(".\\usa\\data\\staitem.tim", g_DataBuffer, 0x20);
+    LoadTexturePage(g_DataBuffer, 0, 0, 0x1E, 0, 0, 0, 0);
 
-    LoadFile(".\\usa\\data\\kage.tim", g_image_buffer, 0x20);
-    LoadShadowMaskTexture(g_image_buffer, 0);
+    LoadFile(".\\usa\\data\\kage.tim", g_DataBuffer, 0x20);
+    LoadShadowMaskTexture(g_DataBuffer, 0);
 
     int rectConfig[24] = {
         -400,     400,     -400,     400,
@@ -639,11 +633,11 @@ void SetInitialItems(void)
 void CountHeldItems(void) // 0x00451600
 {
     g_TotalHeldItems = 0;
-    unsigned char itemSlot = *g_firstItemSlotPointer;
+    unsigned char itemSlot = *(unsigned char*)g_ItemSlotsPointer;
     while (itemSlot != 0 &&
            g_TotalHeldItems < (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2)) {
         g_TotalHeldItems = g_TotalHeldItems + 1;
-        itemSlot = g_firstItemSlotPointer[(unsigned int)g_TotalHeldItems * 2];
+        itemSlot = ((unsigned char*)g_ItemSlotsPointer)[(unsigned int)g_TotalHeldItems * 2];
     }
 }
 
@@ -657,19 +651,24 @@ void LoadHeldItemsImages(void* buf) // 0x00451640
 {
     unsigned char totalItems;
     unsigned int index;
+    void* savedSlotPointer;
 
     CountHeldItems();
     g_ItemSlotsBitmask = (1 << (g_TotalHeldItems & 0x1f)) - 1;
     totalItems = g_TotalHeldItems;
+    savedSlotPointer = g_ItemSlotsPointer;
 
     while (totalItems != 0) {
         totalItems = totalItems - 1;
         index = (unsigned int)totalItems;
+        g_ItemSlotsPointer = savedSlotPointer;
         (&g_ItemSlotsIndexes)[index] = totalItems;
-        unsigned char itemId = g_firstItemSlotPointer[index * 2];
+        unsigned char itemId = ((unsigned char*)savedSlotPointer)[index * 2];
         unsigned char imageType = g_ItemImageLookupTable[itemId * 4];
         LoadItemImage(imageType - 1, (int)index, buf);
+        savedSlotPointer = g_ItemSlotsPointer;
     }
+    g_ItemSlotsPointer = savedSlotPointer;
 }
 
 // ---------------------------------------------------------------------------
@@ -755,7 +754,7 @@ void InitializeGame(void)
 
     memclr(&g_defaultItemSlot, g_BioCardData);
 
-    g_loadDataDestPointer = g_image_buffer;
+    g_loadDataDestPointer = g_DataBuffer;
     g_SpecialRoomLightDelta = 0;
     g_fading_counter = 0;
 
@@ -814,14 +813,15 @@ void InitializeGame(void)
     g_RoomCameraDataCopy = (DWORD)&g_RoomCameraData;
     g_lightMatrixPtr = (DWORD)&g_lightMatrix;
 
-    g_firstItemSlotPointer = (unsigned char*)g_ItemsSlots;
+    // 0x004809c5: g_ItemSlotsPointer = g_ItemsSlots
+    g_ItemSlotsPointer = g_ItemsSlots;
     g_usedItemId = 0;
     DAT_00be9833 = 0;
     DAT_00be41e1 = 0;
     g_defaultItemSlot = 0;
     DAT_00be9614 = 0;
 
-    LoadHeldItemsImages(g_image_buffer);
+    LoadHeldItemsImages(g_TimImageBuffer__bitmap);
 
     g_playerEntity.pSca_hit_data = (DWORD)g_entityDataBlock;
 
@@ -840,13 +840,13 @@ void InitializeGame(void)
     load_shoot_direction_data();
 
     g_SndFadeType = 0;
-    g_loadDataDestPointer = g_image_buffer;
+    g_loadDataDestPointer = g_DataBuffer;
     g_BGM_STATE = 0xFF;
 
     load_room_sfx(0);
     load_character_sfx(g_playerEntity.id & 1);
 
-    LoadSoundBank(g_playerEntity.equippedWeaponId, g_image_buffer);
+    LoadSoundBank(g_playerEntity.equippedWeaponId, g_DataBuffer);
 
     g_main_state_flags = g_main_state_flags & 0xfbffffff;
 
@@ -868,32 +868,6 @@ void InitializeGame(void)
 }
 
 // ============================================================================
-// game_loop (0x00480b30)
-// Main gameplay loop: entities, cameras, rooms, menus, combat.
-// Returns: 1 = died/quit to title, 0 = game completed → ending.
-//
-// ============================================================================
-int game_loop(void)
-{
-    while ((g_menu_choice_id & 0x80) != 0) {
-        Task_sleep(1);
-    }
-
-    // 0x00480b45: mark gameplay active
-    g_main_state_flags |= 0x2000000;
-
-    g_fading_state = -1;
-    g_fading_counter = 0;
-    StMask(0, 6);
-
-    do {
-        Task_sleep(1);
-    } while (true);
-
-    return 1;  // 1 = died, chains to title_state
-}
-
-// ============================================================================
 // ending_state (0x00410820) — STUB
 // Ending sequence: plays ending FMVs, credits, result screen.
 // Sets up next-cycle save data and chains to title_state.
@@ -907,7 +881,7 @@ void ending_state(void)
     Task_sleep(1);
 
     sounds_reset();
-    LoadSoundBank(0xe, g_image_buffer);
+    LoadSoundBank(0xe, g_DataBuffer);
 
     // Stub: brief delay then return to title
     for (int i = 0; i < 90; i++) {

@@ -167,6 +167,15 @@ int g_CurrentFMVID = 0;
 short g_ScreenOffsetX = 0;
 // 0x04bcaca
 short g_ScreenOffsetY = 0;
+
+
+// 0x00aea0d0 - Per-camera background PAK load buffer (128KB)
+BYTE           g_bgPakLoadBuffer[0x20000] = {};
+
+// 0x00b0a0d0 - All-camera cached background buffer (768KB)
+// Ghidra detects 786440 bytes (0xC0008) until the next global
+BYTE           g_bgCacheBuffer[0xC0008] = {};
+
 // 0x00bca0d8
 signed char g_ScreenShakeOffsetX = 0;
 // 0x00bca0d9
@@ -216,6 +225,9 @@ DWORD g_button_pressed_id = 0;
 DWORD g_PlayerPadHeld = 0;
 // 0x004bae30
 DWORD g_PlayerPadHeldPrev = 0;
+
+// 0x00bcb430
+BYTE g_ItemsImageBuffer[86400] = {};
 
 // 0x00be05b2 (raw pad state snapshot)
 WORD g_RawPadState = 0;
@@ -439,6 +451,13 @@ TextureDesc g_TextureDesc = {};
 // 0x00be1180
 int unk_00be1180 = 0;
 
+// EKG line drawing data (primary line at 0x00be1198, secondary at 0x00be1184)
+unsigned char g_EkgPrimaryLine[16] = {};               // 0x00be1198
+unsigned char g_EkgSecondaryLine[24] = {};             // 0x00be1184
+
+// Item image texture V lookup table (indexed by item ID)
+unsigned char DAT_00d21ccf[256] = {};                   // 0x00d21ccf
+
 // --- Counters ---
 int g_numFramesRendered = 0;    // DAT_004d4694
 int g_numFramesPresented = 0;   // DAT_004d469c
@@ -493,9 +512,7 @@ CMarniBits    g_MarniBitsWorkBuffer;      // DAT_008ed478
 DWORD         g_MarniBitsOutput = 0;      // DAT_008ed470
 DWORD         g_ObjectWorkBuffer[64] = {};// DAT_008ec9c8
 
-// Asset loading globals
-void* g_image_buffer = NULL;
-void* g_ITEMS_IMAGES_BUFFER = NULL;
+
 int   g_InstallFlagDataLoaded = 0;      // DAT_004b3998
 int   g_SpriteBufferFlag = 0;           // DAT_004b399c
 int   g_SpriteAsyncFlag = 0;            // DAT_00d91bc8
@@ -552,19 +569,11 @@ unsigned char g_TextureBankID = 0;       // 0x00bebcc4
 unsigned char g_TextureDepthByte = 0;    // 0x00bebcc5
 unsigned short g_SavedTextureBankID = 0; // 0x00bebcc6
 
-// Animation buffer globals
-void*  ANIMATION_BUFFER = NULL;          // 0x00be6440
-DWORD  ANIMATION_BUFFER_END = 0;        // 0x00be6444
 
 // Model data buffers
 BYTE   g_entityModelBuffer[0xCC00] = {};// 0x00bf11c0
 DWORD  g_entityModelBuffer2[0xB4] = {};// 0x00bfddc0
 
-// Animation object data buffer
-DWORD  g_animObjectBuffer[0x680] = {};  // 0x00c133c0
-
-// Shoot direction ESP data buffer (loaded from core00.esp)
-BYTE   g_shootDirEspBuffer[0x10000] = {};  // 0x00c14dc0 - ESP effect data
 
 // File path construction buffer
 char   FILE_PATH[260] = {};             // global file path buffer
@@ -668,8 +677,6 @@ DWORD         g_heItemsX2Less1 = 0;            // 0x00be63a8
 unsigned char g_itemSlotIndices[8] = {};        // 0x00be63b0
 char          g_saveFileName[260] = {};         // 0x004d42d8
 
-
-BYTE g_BackgroundImageBuffer[(320 * 240 * 2) + 20] = {};           // 0x00cf2298 - save screen TIM background buffer (320x240 16-bit + TIM header)
 
 // --- Game start / game loop globals ---
 // 0x00bebcc0
@@ -1123,8 +1130,22 @@ int            DAT_00be0e00 = 0;               // 0x00be0e00
 unsigned int   STAGE_ID_00ac9cf0 = 0;          // 0x00ac9cf0
 unsigned int   ROOM_ID_00ac9cf4 = 0;           // 0x00ac9cf4
 
+
+// 0x00c0b9c0
+BYTE    g_animationBuffer[37888] = {};
+
+// 0x00c133c0
+DWORD   g_animObjectBuffer[0x680] = {};
+
+// Shoot direction ESP data buffer (loaded from core00.esp)
+// 0x00c14dc0 - ESP effect data
+BYTE   g_shootDirEspBuffer[73728] = {};
+
+// 0x00c26dc0 - General purpose data buffer (832728 bytes)
+BYTE    g_DataBuffer[832728];
+
 // Display image buffer for TIM slide loading (at 0x00cf22ac in original)
-BYTE           g_displayImageBuffer[0x30000] = {};
+BYTE    g_TimImageBuffer[187160+20] = {};
 
 // ============================================================================
 // Background loading globals
@@ -1150,11 +1171,22 @@ char           g_bgPathTemplate[28] = {
 // 0x004c2090 - Camera hex char (stored after path template)
 char           DAT_004c2090 = 0;
 
-// 0x00aea0d0 - Per-camera background PAK load buffer (128KB)
-BYTE           g_bgPakLoadBuffer[0x20000] = {};
+// ============================================================================
+// Critical small globals - declared BEFORE large buffers to protect them from
+// buffer overflows. In the original binary g_ItemSlotsPointer (0x00d22768) is
+// ~2MB after g_bgCacheBuffer (0x00b0a0d0), so forward overflow never reaches it.
+// In the recompiled binary the linker may place them adjacent, so we force them
+// to lower addresses by declaring them first.
+// ============================================================================
 
-// 0x00b0a0d0 - All-camera cached background buffer (128KB)
-BYTE           g_bgCacheBuffer[0x20000] = {};
+// 0x008f87b0 - Backup of player health during character switch
+short          HEALTH_BKP = 0;
+
+// 0x008f87b4 - Backup of health status flags during character switch
+unsigned short HEALTH_STATUS_BKP = 0;
+
+// 0x00d22768 - Pointer to active character's item slots (g_ItemsSlots or g_RebeccaItemSlots)
+void*          g_ItemSlotsPointer = NULL;
 
 // 0x00aea08c/0x00aea090 - Per-camera offset into g_bgCacheBuffer
 int            g_bgCameraOffsets[16] = {};
@@ -1205,19 +1237,6 @@ char           g_pakDictChar[8192] = {};
 
 // 0x00d227d0 - String output buffer for building decoded strings
 char           g_pakStringBuf[512] = {};
-
-// ============================================================================
-// Character switch backup globals (used by room_set for Jill/Chris ↔ Rebecca)
-// ============================================================================
-
-// 0x008f87b0 - Backup of player health during character switch
-short          HEALTH_BKP = 0;
-
-// 0x008f87b4 - Backup of health status flags during character switch
-unsigned short HEALTH_STATUS_BKP = 0;
-
-// 0x00d22768 - Pointer to active character's item slots (g_ItemsSlots or g_RebeccaItemSlots)
-void*          g_ItemSlotsPointer = NULL;
 
 // ============================================================================
 // Room data globals (populated by room_set from RDT file data)
@@ -1303,3 +1322,34 @@ unsigned char  DAT_008e1c74 = 0;                        // 0x008e1c74
 
 // Bullet effect parent sprite info pointer
 int            DAT_00bf0a34 = 0;                        // 0x00bf0a34
+
+// ============================================================================
+// game_loop globals (0x00480b30)
+// ============================================================================
+
+// 0x00d22760 - Menu open state machine: 0=none, 1=open requested, 2=initializing, 3=closing
+int            g_openMenuFlag = 0;
+
+// 0x00bebcc2 - Backup of g_message_flags when menu is requested
+unsigned short g_short_message_flags = 0xFFFF;
+
+// 0x008f8898 - Saved special room light state across room transitions
+int            g_int_008f8898 = -1;
+
+// 0x004d2294 - Countdown frame counter (counts 0-29, then increments countdown timer)
+int            DAT_004d2294 = 0;
+
+// 0x004d2288 - Death delay countdown (set to 90 frames before triggering fade)
+int            DAT_004d2288 = 0;
+
+// 0x004d46a4 - Camera/lighting update enable flag (set by room_set)
+int            DAT_004d46a4 = 0;
+
+// 0x004d4680 - Debug save menu display trigger (toggled by debug key)
+int            g_displayDebugSaveMenu = 0;
+
+// 0x004d4684 - Debug save menu state flag (prevents re-trigger until re-armed)
+int            g_debugSaveMenuFlag = 0;
+
+// 0x004d228c - Menu processing active flag (set during menu open/close)
+int            DAT_004d228c = 0;

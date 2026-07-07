@@ -131,7 +131,7 @@ void init_room(void)
 {
     g_AttractMode_RoomCameraId = 0x1f;
     g_BGM_STATE = 0xFF;
-    g_loadDataDestPointer = g_image_buffer;
+    g_loadDataDestPointer = g_DataBuffer;
     g_StageDataPtr = (void*)g_StageVoiceOffsetTable[g_stageId];
     // Set pointer to current stage's 32-room BGM state block (used by update_room_bgm)
     g_RoomBgmStatePtr = &g_roomBgmState[g_stageId * 32];

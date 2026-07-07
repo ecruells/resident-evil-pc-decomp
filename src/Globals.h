@@ -134,6 +134,17 @@ extern int           g_CurrentFMVID;                   // 0x008f8790
 // Screen pos
 extern short         g_ScreenOffsetX;                  // 0x004BCAC8
 extern short         g_ScreenOffsetY;                  // 0x004BCACA
+
+
+// 0x00aea0d0
+//
+// Per-camera background load buffer (one PAK file worth)
+extern BYTE          g_bgPakLoadBuffer[131072];       
+
+// 0x00b0a0d0
+// Cached all-camera background buffer
+extern BYTE          g_bgCacheBuffer[786440];
+
 extern signed char   g_ScreenShakeOffsetX;             // 0x00bca0d8
 extern signed char   g_ScreenShakeOffsetY;             // 0x00bca0d9
 
@@ -193,6 +204,9 @@ extern DWORD g_PlayerPadPressed;                       // 0x00bf0a08
 extern DWORD g_button_pressed_id;                      // 0x00bf0a0c
 extern DWORD g_PlayerPadHeld;                          // 0x00bf0a10 - edge-detected held state (output)
 extern DWORD g_PlayerPadHeldPrev;                      // 0x004bae30
+
+
+extern BYTE g_ItemsImageBuffer[86400];                 // 0x00bcb430
 
 extern WORD  g_RawPadState;                            // 0x00be05b2
 extern WORD  g_padEdgeDetectedWord;                    // 0x00be05b4 - edge-detected raw pad word
@@ -318,16 +332,27 @@ extern int           g_ScreenAccessCheck;              // 0x004d2290
 extern int           g_RenderAccessCheck;
 
 extern RectDrawDesc  g_rect;                           // 0x00be1150
+extern RectDrawDesc  g_FadingRect;                    // 0x004ba720 - fade overlay rect
 extern TextureDesc   g_TextureDesc;                    // 0x00be1160
 extern int           unk_00be1180;                     // 0x00be1180
+
+// EKG line drawing data (primary line at 0x00be1198, secondary at 0x00be1184)
+// Primary EKG line primitive (16 bytes): used by menu_draw_health_bar
+extern unsigned char g_EkgPrimaryLine[16];             // 0x00be1198
+// Secondary EKG line primitive (24 bytes): used by menu_draw_health_bar
+// Extended with gradient color endpoints at offsets 15-17
+extern unsigned char g_EkgSecondaryLine[24];           // 0x00be1184
+
+// Item image texture V lookup table (indexed by item ID, BSS at 0x00d21ccf)
+extern unsigned char DAT_00d21ccf[256];                // 0x00d21ccf
+
+// Menu frame end boundary markers (used by menu_draw_inventory loops)
+extern const unsigned short DAT_004c26d0[];            // 0x004c26d0
+extern const unsigned short DAT_004c2940[];            // 0x004c2940
 
 // Print text
 extern char          PRINT_TEXT_BUFFER[256];           // 0x00be0e20
 extern int           g_PrintClutTint;
-
-// Image buffer for asset loading
-extern void*         g_image_buffer;
-extern void*         g_ITEMS_IMAGES_BUFFER;
 
 // Asset loading globals
 extern int           g_InstallFlagDataLoaded;
@@ -547,7 +572,6 @@ extern char          g_saveFileName[260];              // 0x004d42d8
 extern char          g_saveDirPrefix[260];
 extern char          g_saveSlotTextBuf[80];
 extern BYTE          g_saveFileBuffer[0x1000];
-extern BYTE          g_BackgroundImageBuffer[320 * 240 * 2 + 20]; // 0x00cf2298
 extern char          g_characterNameTable[4][16];
 extern char          g_locationNameTable[7][40];
 
@@ -683,6 +707,53 @@ void CenterScreenOrigin(void);
 void SetSubpixelOffset(int x, int y);
 void CreateTimestampedLogFile(void);
 void ShowVideoModeDebugText(void);
+int  game_loop(void);
+
+// game_loop dependency functions (called per-frame from 0x00480b30)
+void check_camera_switch(int param);                  // 0x00462cc0
+void display_room_camera_bg(void);                    // 0x00462d50
+void check_desk_state(void);                          // 0x0041bc90
+void check_itembox_state(void);                       // 0x0041c240
+void check_typewriter_state(void);                    // 0x0041c330
+void check_event_item_usage(void);                    // 0x0041c490
+void check_and_display_interactive_screen(void);      // 0x0042a030
+void empty_00412380(void);                            // 0x00412380 - unknown init/cleanup
+void TexturePage_ClearAll(void);                      // 0x0046c360
+void SetupJointStructures(void* buf);                 // 0x0048b9e0
+void LoadEquippedWeaponAnimation(int weaponId, int slot, void* animBuf, void* objBuf); // 0x00462620
+void FUN_0048c020(int param);                         // 0x0048c020 - entity weapon setup
+void FUN_004844b0(void);                              // 0x004844b0 - menu cleanup sub
+void FUN_00470a40(void);                              // 0x00470a40 - texture cleanup
+void FUN_0047d0e0(void);                              // 0x0047d0e0 - effect cleanup
+void FUN_00462940(void);                              // 0x00462940 - room camera restore
+void FUN_0040ac80(int idx, void* lightData);          // 0x0040ac80 - set light data
+void setBackColor(unsigned char r, unsigned char g, unsigned char b); // 0x00455260
+void empty_40ae40(int param);                         // 0x0040ae40
+void update_entities(void);                           // 0x0048f0f0
+void update_player_anim(void);                        // 0x00494d90
+void update_player_position(PlayerEntity* ent, int a);// 0x0041c060
+void DrawFadeSpr(void);                               // 0x00456d30
+void update_sounds(void);                             // 0x00474090
+void room_camera_and_lighting_update(void);            // 0x00473ff0
+void some_camera_transform_fun_0048c190(int ca);      // 0x0048c190
+void entity_matrix_update_0045a2e0(void);             // 0x0045a2e0
+void calc_entity_lighting(Entity* ent);               // 0x0048c350
+void update_2d_effects(void);                         // 0x0047c0c0
+void DrawRoomSpr(void);                               // 0x00475b80
+void DebugSaveMenu(void);                             // 0x00494050
+void die_state(void);                                 // 0x00481310
+void TimeoutDeathFadeOut(void);                       // 0x00481250
+void StartAttractDemo(void);                          // 0x004818b0
+void check_menus_state(void);                         // 0x004815f0
+void main_menu(void);                                 // 0x00463710 - in-game menu (status/inventory/map)
+void options_menu(void);                              // 0x004761b0 - options/configuration menu
+void FUN_004813c0(void);                              // 0x004813c0 - room load/restore for menu
+void set_fading(int type, int counter);               // 0x0047b980
+int  cmd_0x4c(void);                                  // 0x00460b80 - stop sound banks
+void display_die_screen(void);                        // 0x004... - death screen display
+void FUN_0047eb60(void);                              // 0x0047eb60 - post-death cleanup
+void play_sfx(int bank, int soundId, int mode);       // 0x0047f870
+unsigned int set_message_display(unsigned short msgId, unsigned short flags); // 0x004...
 
 // System check functions
 DWORD GetFreeDiskSpaceMB(LPCSTR lpPath);
@@ -857,10 +928,6 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
 void RoomSpr_SetActive(char id);    // 0x00476170
 void RoomSpr_SetInactive(char id);  // 0x00476130
 
-// Animation buffer globals
-extern void*  ANIMATION_BUFFER;                       // 0x00be6440
-extern DWORD  ANIMATION_BUFFER_END;                   // 0x00be6444
-extern BYTE   g_shootDirEspBuffer[0x10000];           // 0x00c14dc0
 extern char   FILE_PATH[260];
 
 void  Play3DSnd(int bank, int soundId, int vol, int pos);
@@ -899,6 +966,17 @@ extern MATRIX        MATRIX_00d22680;                   // 0x00d22680
 // Game state
 extern void*         g_RdtLoadDataBackup;
 extern int           end_game_status;
+
+// game_loop globals (0x00480b30)
+extern int           g_openMenuFlag;                   // 0x00d22760 - menu state machine (0=none,1=open,2=init,3=close)
+extern unsigned short g_short_message_flags;            // 0x00bebcc2 - backup of g_message_flags when menu opens
+extern int           g_int_008f8898;                   // 0x008f8898 - saved light state for room transitions
+extern int           DAT_004d2294;                     // 0x004d2294 - countdown frame counter (0-29)
+extern int           DAT_004d2288;                     // 0x004d2288 - death delay countdown
+extern int           DAT_004d46a4;                     // 0x004d46a4 - camera/lighting update enable flag
+extern int           g_displayDebugSaveMenu;           // 0x004d4680 - debug save menu trigger
+extern int           g_debugSaveMenuFlag;              // 0x004d4684 - debug save menu state flag
+extern int           DAT_004d228c;                     // 0x004d228c - menu processing active flag
 
 
 extern const unsigned char g_StageRoomFlagOffset[5]; // 0x004d31e0 - per-stage room flag base offsets
@@ -955,9 +1033,41 @@ extern int           DAT_00be0e00;                  // 0x00be0e00
 extern unsigned int  STAGE_ID_00ac9cf0;             // 0x00ac9cf0
 extern unsigned int  ROOM_ID_00ac9cf4;              // 0x00ac9cf4
 
-// Display image buffer (TIM slide data loaded here)
-// In original binary at 0x00cf22ac (g_BackgroundImageBuffer + 0x14)
-extern BYTE          g_displayImageBuffer[0x30000];
+
+
+
+// 0x00c0b9c0
+//
+// animation data buffer
+extern BYTE         g_animationBuffer[37888];
+
+// 0x00c14dc0
+// 
+// Shoot direction data buffer
+extern BYTE   g_shootDirEspBuffer[73728];           
+
+
+// 0x00c26dc0
+//
+// General purpose data buffer
+//
+// Size: 832728 bytes
+//
+extern BYTE          g_DataBuffer[832728];
+
+
+// 0x00cf2298
+//
+// TIM Image buffer, first 20 bytes are the header
+//
+// Buffer Size: 187180 bytes (187160 headless)
+//
+// For PIX Images (Headless TIM Images), the buffer points directly to the bitmap
+// address at 0x00cf22ac (g_TimImageBuffer__bitmap)
+//
+extern BYTE          g_TimImageBuffer[187160+20];
+
+#define g_TimImageBuffer__bitmap    g_TimImageBuffer+20
 
 // Background loading mode flag (0 = per-camera load/display, non-zero = cache all cameras)
 extern int           g_bgCacheMode;                    // 0x004d46b4
@@ -970,12 +1080,6 @@ extern char          g_bgPathTemplate[28];             // 0x004c2078 ".\usa\stag
 
 // Camera hex char (stored after path template, set by load_room_bg)
 extern char          DAT_004c2090;                     // 0x004c2090
-
-// Per-camera background load buffer (one PAK file worth)
-extern BYTE          g_bgPakLoadBuffer[0x20000];       // 0x00aea0d0
-
-// Cached all-camera background buffer
-extern BYTE          g_bgCacheBuffer[0x20000];         // 0x00b0a0d0
 
 // Per-camera offset into g_bgCacheBuffer (index 0 unused, 1..N = cameras)
 extern int           g_bgCameraOffsets[16];            // 0x00aea08c (base at +4)

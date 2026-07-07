@@ -21,9 +21,9 @@ embedded relative pointers are relocated to absolute memory addresses by
 | 0x01   | 1     | char  | Number of cameras in this room |
 | 0x02   | 1     | char  | Number of sound bank table entries |
 | 0x03   | 3     | char  | Unknown |
-| 0x06   | 2     | short | Ambient light — Red component |
-| 0x08   | 2     | short | Ambient light — Green component |
-| 0x0A   | 2     | short | Ambient light — Blue component |
+| 0x06   | 2     | short | Ambient light ï¿½ Red component |
+| 0x08   | 2     | short | Ambient light ï¿½ Green component |
+| 0x0A   | 2     | short | Ambient light ï¿½ Blue component |
 
 ### Lights (0x0C - 0x47)
 
@@ -50,7 +50,7 @@ base address minus 3 (due to the PS1 pointer format).
 
 | Offset | Size  | Type   | Description | Asset Type |
 |--------|-------|--------|-------------|------------|
-| 0x48   | 4     | ptr    | Camera switch zone definitions | — |
+| 0x48   | 4     | ptr    | Camera switch zone definitions | ï¿½ |
 | 0x4C   | 4     | ptr    | Room collision boundaries | .blk |
 | 0x50   | 4     | ptr    | Room 3D item models & textures | .tmd/.tim |
 | 0x54   | 4     | ptr    | Obstacles & movable object models | .tmd/.tim |
@@ -59,10 +59,10 @@ base address minus 3 (due to the PS1 pointer format).
 | 0x60   | 4     | ptr    | Initialization scripts (run once at room load) | .scd |
 | 0x64   | 4     | ptr    | Main scripts (run every frame) | .scd |
 | 0x68   | 4     | ptr    | Event/conditional scripts | .scd |
-| 0x6C   | 4     | ptr    | Unknown | — |
-| 0x70   | 4     | ptr    | Unknown | — |
+| 0x6C   | 4     | ptr    | Unknown | ï¿½ |
+| 0x70   | 4     | ptr    | Unknown | ï¿½ |
 | 0x74   | 4     | ptr    | Message text data | .msg |
-| 0x78   | 4     | ptr    | Unknown | — |
+| 0x78   | 4     | ptr    | Unknown | ï¿½ |
 | 0x7C   | 4     | ptr    | Effect animation index | .esp |
 | 0x80   | 4     | ptr    | Effect animation data | .eff |
 | 0x84   | 4     | ptr    | Effect sprite image textures | .tim |
@@ -122,11 +122,11 @@ Script opcodes are processed by `run_command_functions()` during `game_loop()`.
 | `init_room` | 0x00409990 | Initializes room: stage tables, animations, room_set |
 | `room_set` | 0x00477720 | Sets up room collision, cameras, items, obstacles |
 | `set_message_display` | 0x00455670 | Resolves message from RDT or global table |
-| `run_command_functions` | — | Processes SCD script opcodes |
+| `run_command_functions` | ï¿½ | Processes SCD script opcodes |
 
 ## Memory Layout
 
-The RDT is loaded into `g_loadDataDestPointer` (typically `g_image_buffer`).
+The RDT is loaded into `g_loadDataDestPointer` (typically `g_DataBuffer`).
 After pointer relocation, `g_RdtPointer` points to the loaded RDT header.
 
 Key globals:

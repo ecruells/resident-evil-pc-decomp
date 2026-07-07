@@ -655,7 +655,7 @@ init_and_start_game()
                     │
                     └─► Task_chain(title_state)
                           │
-                          ├─ LoadSoundBank(BANK_EVIL, g_image_buffer)
+                          ├─ LoadSoundBank(BANK_EVIL, g_DataBuffer)
                           ├─ Title menu loop (attract → main menu)
                           │
                           └─► Task_chain(game_start)
@@ -775,9 +775,9 @@ g_pMarniDirect3D = CMarniDirect3D_Constructor(pNewObject, ...);
 ### Asset Loading Buffers
 
 ```c
-static BYTE g_AssetLoadBuffer[256 * 1024];    // 256KB for texture loads
-static BYTE g_ItemsImageBuffer[128 * 1024];   // 128KB for item images
-static BYTE g_titleLoadBuffer[320 * 240 * 2]; // 153.6KB for title screen
+static BYTE g_DataBuffer[832728]; // general purpose buffer, usually used to load textures, sound banks and room data
+static BYTE g_TimImageBuffer[187180]; // TIM Images buffer, used mainly for background images
+static BYTE g_ItemsImageBuffer[86400];  // 86400 allocated bytes for items image texture atlas (ITEM_ALL.PIX) at 0x00bcb430
 ```
 
 ### PSXTexture Ownership

@@ -22,7 +22,7 @@ extern void game_start(void);
 static void DisplayIntroAndStartGame(void)
 {
     sounds_reset();
-    g_selectedFmvId = 1;
+    g_selectedFmvId = 0;
     g_main_state_flags |= (0x00040000 | 0x00080000);
     title_select_sfx();
     Task_sleep(1);
@@ -44,8 +44,6 @@ static void SetFading(unsigned char fade_type, short fade_counter)
 // ============================================================================
 // Character selection screen state variables (0xac9xxx range)
 // ============================================================================
-
-static BYTE g_charSelImageBuffer[320 * 240 * 2];
 
 // Selection state
 static unsigned char g_selState = 0;       // DAT_00ac9880 - main state
@@ -465,27 +463,27 @@ void characterSelectionScreen(void)
     g_bSelResetGameFlag = 0;
 
     sounds_reset();
-    g_loadDataDestPointer = g_image_buffer;
+    g_loadDataDestPointer = g_DataBuffer;
     g_roomId = 0x1B;
 
-    LoadSoundBank(BANK_SELECT, g_image_buffer);
+    LoadSoundBank(BANK_SELECT, g_DataBuffer);
 
     // Load characters police cards texture (select_b.tim → slot 0xC)
-    LoadFile(".\\usa\\data\\select_b.tim", g_charSelImageBuffer, 0x20);
+    LoadFile(".\\usa\\data\\select_b.tim", g_TimImageBuffer__bitmap, 0x20);
     g_TextureBankID = 0x0A;
     g_TextureDepthByte = 5;
-    LoadTexturePage(g_charSelImageBuffer, 5, 10, 0x0C, 0, 0, 0, 0);
+    LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0C, 0, 0, 0, 0);
 
     // Load card round borders masks texture (select_k.tim → slot 0xD)
-    LoadFile(".\\usa\\data\\select_k.tim", g_charSelImageBuffer, 0x20);
-    LoadTexturePage(g_charSelImageBuffer, 5, 10, 0x0D, 7, 0, 0, 0);
+    LoadFile(".\\usa\\data\\select_k.tim", g_TimImageBuffer__bitmap, 0x20);
+    LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0D, 7, 0, 0, 0);
 
     // Bake border mask alpha into card texture for round corner transparency
     BakeBorderMaskIntoCardTexture();
 
     // Load background image
-    LoadFile(".\\usa\\data\\sel_back.pix", g_charSelImageBuffer, 0x20);
-    display_image(0, g_charSelImageBuffer, 320, 240);
+    LoadFile(".\\usa\\data\\sel_back.pix", g_TimImageBuffer__bitmap, 0x20);
+    display_image(0, g_TimImageBuffer__bitmap, 320, 240);
 
     title_setup_texture_pages(0, 1);
     empty_00470960(0);

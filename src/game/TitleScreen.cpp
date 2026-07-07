@@ -77,8 +77,8 @@ void init_title_screen(void)
 
     g_roomCameraId = 0;
 
-    LoadFile(".\\usa\\data\\title.pix", g_BackgroundImageBuffer+20, 0x20);
-    display_image(0, g_BackgroundImageBuffer+20, 320, 240);
+    LoadFile(".\\usa\\data\\title.pix", g_TimImageBuffer__bitmap, 0x20);
+    display_image(0, g_TimImageBuffer__bitmap, 320, 240);
 
     title_setup_texture_pages(0, 1);
 
@@ -90,13 +90,13 @@ void init_title_screen(void)
     } else {
         buttonTexPath = ".\\usa\\data\\t_start.tim";
     }
-    LoadFile(buttonTexPath, g_BackgroundImageBuffer+20, 0x20);
+    LoadFile(buttonTexPath, g_TimImageBuffer__bitmap, 0x20);
 
     g_titleTextureDepthData[4] = 26;
     g_titleTextureDepthData[0] = 8;
     g_TextureDepthByte = 26;
     g_TextureBankID = 8;
-    LoadTexturePage(g_BackgroundImageBuffer+20, 8, 0, 12, 4, 0, 0, 0);
+    LoadTexturePage(g_TimImageBuffer__bitmap, 8, 0, 12, 4, 0, 0, 0);
 
     g_titleTextureDepthData[1] = g_TextureBankID;
     g_titleLoopFlag = 1;
@@ -439,8 +439,8 @@ void title_state(void)
     set_title_render_param(0xc0);
     sounds_reset();
 
-    g_loadDataDestPointer = g_image_buffer;
-    LoadSoundBank(BANK_TITLE, g_image_buffer);
+    g_loadDataDestPointer = g_DataBuffer;
+    LoadSoundBank(BANK_TITLE, g_DataBuffer);
 
     g_fading_state = -1;
     g_titleLoopFlag = 0;

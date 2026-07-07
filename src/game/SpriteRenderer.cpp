@@ -337,7 +337,7 @@ void TexturePage_Load(int slotIndex, void* imageData) {
 
 void TexturePage_ClearAll(void) {
     for (int i = 0; i < 256; i++) {
-        if (g_TexturePageSRV[i] != NULL) {
+        if (g_TexturePageSRV[i] != NULL && (DWORD)g_TexturePageSRV[i] > 0xFFFF) {
             g_TexturePageSRV[i]->Release();
             g_TexturePageSRV[i] = NULL;
         }
@@ -383,7 +383,7 @@ void TexturePage_DeleteSet(int slotIndex) {
                 destroy_texture_page(handle);
                 g_TexturePageTable_DAT[pageIdx] = 0;
             }
-            if (g_TexturePageSRV[pageIdx] != NULL) {
+            if (g_TexturePageSRV[pageIdx] != NULL && (DWORD)g_TexturePageSRV[pageIdx] > 0xFFFF) {
                 g_TexturePageSRV[pageIdx]->Release();
                 g_TexturePageSRV[pageIdx] = NULL;
             }

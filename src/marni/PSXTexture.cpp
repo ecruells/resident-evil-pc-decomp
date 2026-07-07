@@ -92,7 +92,7 @@ PSXTexture::~PSXTexture()
     // ~CMarniBits() -> Release() runs, it checks:
     //     if (m_dataSource != 0 && m_ownsPalette != 0) { free(m_pPixelData); free(m_pPalette); }
     // This triggers a double-free of pixelBuf (already freed above) AND
-    // attempts to free m_pPalette which points to the global g_image_buffer
+    // attempts to free m_pPalette which points to the global g_DataBuffer
     // (BSS memory, not heap), causing _CrtIsValidHeapPointer assertion.
     //
     // Fix: Reset ownership and pointer fields so Release() becomes a no-op.

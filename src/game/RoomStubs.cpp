@@ -248,8 +248,8 @@ static void load_effect_sprites(void)
             ((unsigned int)g_stageId * 32 + (unsigned int)g_roomId) * 4 + i];
         if (relIdx != 0xFF) {
             sprintf(pathBuf, ".\\usa\\effspr\\%s.tim", g_EffectSpriteNames[relIdx]);
-            LoadFile(pathBuf, g_displayImageBuffer, 0x20);
-            TexturePage_Load(i, g_displayImageBuffer);
+            LoadFile(pathBuf, g_TimImageBuffer__bitmap, 0x20);
+            TexturePage_Load(i, g_TimImageBuffer__bitmap);
         }
     }
 
@@ -433,9 +433,9 @@ void SetupTextureBankData(short param_1)
 void load_slides_images(void)
 {
     // 0x00478110: Load slide TIM file into display image buffer
-    LoadFile("./usa/data/slide.tim", g_displayImageBuffer, 0x20);
+    LoadFile("./usa/data/slide.tim", g_TimImageBuffer__bitmap, 0x20);
     // 0x00478124: Create texture page from loaded TIM data
-    TexturePage_LoadImage(g_displayImageBuffer, 9, 0xd);
+    TexturePage_LoadImage(g_TimImageBuffer__bitmap, 9, 0xd);
 }
 
 // ============================================================================

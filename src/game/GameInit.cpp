@@ -8,11 +8,6 @@
 // Forward declaration for task function registered from init_and_start_game
 extern void load_global_assets(void);
 
-// ---------------------------------------------------------------------------
-// Global asset loading buffer (original: DAT_00bebce8, 320x240 x 2 bytes = 153600)
-// ---------------------------------------------------------------------------
-static BYTE g_AssetLoadBuffer[256 * 1024];  // 256KB for texture loads
-static BYTE g_ItemsImageBuffer[128 * 1024]; // 128KB for item images
 
 // ---------------------------------------------------------------------------
 // setPolyF4 (0x0040abe0)
@@ -98,9 +93,6 @@ void init_and_start_game(void)
 
     ClearGameStateFlags();
     InitSoundAndFadeState();
-
-    g_image_buffer = g_AssetLoadBuffer;
-    g_ITEMS_IMAGES_BUFFER = g_ItemsImageBuffer;
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
 

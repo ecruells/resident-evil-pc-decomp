@@ -361,9 +361,9 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
     // Set save/load active flag
     g_loadSaveStateFlag = 1;
 
-    LoadFile("./usa/data/type00.tim", g_BackgroundImageBuffer, 0x20);
+    LoadFile("./usa/data/type00.tim", g_TimImageBuffer, 0x20);
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
-    display_image(8, g_BackgroundImageBuffer + 0x14, 320, 240);
+    display_image(8, g_TimImageBuffer__bitmap, 320, 240);
     title_setup_texture_pages(8, 1);
     empty_00470960(8);
 
