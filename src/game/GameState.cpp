@@ -13,7 +13,7 @@ extern void SetVideoResolution(int w, int h);
 extern void setSomeColor(int r, int g, int b);
 extern void empty_00412380(void);
 extern void SetSpriteBufferFlag(void);
-extern void setBackColor(unsigned char r, unsigned char g, unsigned char b);
+extern void setBackColor(unsigned short r, unsigned short g, unsigned short b);
 extern void empty_40ae40(int);
 extern void vram_clr(int x, int y, int w, int h);
 
@@ -33,40 +33,47 @@ static void LoadAllItemsTexture(void)
 // After loading, chains to logos_state.
 // ============================================================================
 void logos_state(void);
+void texture_viewer_state(void);
 
 void load_global_assets(void)
 {
     LoadAllItemsTexture();
 
+    // Load main Fonts textures
     LoadFile(".\\usa\\data\\fontus.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 30;
     ProcessTextureImage(g_DataBuffer, 30, 0, 0);
 
-    OutputDebugStringA("fontus.tim loaded\n");
-
+    // Load numeric panel and puzzles font textures
     LoadFile(".\\usa\\data\\Font03t.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 1;
     ProcessTextureImage(g_DataBuffer, 1, 0, 2);
 
+    // Load Options menu textures (24bits)
     LoadFile(".\\usa\\data\\Optkey03.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 2;
     LoadTexturePage(g_DataBuffer, 2, 0, 0xB, 0, 0, 0, 0);
 
+    // Load Main menu textures (8bits)
     LoadFile(".\\usa\\data\\status.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 0x41C;
     LoadTexturePage(g_DataBuffer, 0x1C, 4, 0, 0, 0, 1, 0);
 
     SetupTexturePageHandles(0, 1);
 
+    // Loan Main menu characters faces texture (8bits)
     LoadFile(".\\usa\\data\\statface.tim", g_DataBuffer, 0x20);
     LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 9, 0, 0, 0, 0);
 
+    // Load Inventory slot background texture (8bits)
     LoadFile(".\\usa\\data\\blue.tim", g_DataBuffer, 0x20);
     LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 10, 0, 0, 0, 0);
 
+    // Load unused weapons texture (Uzi and machinegun) (8bits)
     LoadFile(".\\usa\\data\\staitem.tim", g_DataBuffer, 0x20);
     LoadTexturePage(g_DataBuffer, 0, 0, 0x1E, 0, 0, 0, 0);
 
+    // Load character shadow texture (8bits)
     LoadFile(".\\usa\\data\\kage.tim", g_DataBuffer, 0x20);
     LoadShadowMaskTexture(g_DataBuffer, 0);
 
@@ -80,10 +87,10 @@ void load_global_assets(void)
     };
     CreateTexturedQuad(0, 0x2F, rectConfig);
 
-    // FUN_0047b950(0);
-
     // Task_chain((void*)debug_state);
     // Task_chain((void*)input_test_state);
+    // Task_chain((void*)texture_viewer_state);
+    //Task_chain((void*)game_start);
     Task_chain((void*)logos_state);
 }
 
@@ -215,6 +222,194 @@ void input_test_state(void)
     }
 
     OutputDebugStringA("[INPUT] input_test_state - exiting, chaining to logos_state\n");
+    Task_chain((void*)logos_state);
+}
+
+// ============================================================================
+// texture_viewer_state — Texture page verification screen
+// Scans g_TexturePageSRV for loaded textures and displays them visually.
+// Shows texture info and a preview of each loaded page.
+//
+// Controls:
+//   LEFT/RIGHT      : Navigate textures
+//   UP/DOWN         : Navigate textures
+//   A+ARROWS        : Move texture preview offset
+//   Z+LEFT/RIGHT    : Cycle CLUT palette (for multi-CLUT textures)
+//   R               : Reset offset to 0
+//   F1              : Proceed to logos_state
+//   ESC             : Proceed to logos_state
+// ============================================================================
+void texture_viewer_state(void)
+{
+    OutputDebugStringA("[TEX] texture_viewer_state - entering\n");
+
+    static int selectedPage = 0;
+    static int prevKeys = 0;
+    static int foundCount = 0;
+    static int validPages[256];
+    static float texOffsetX = 0.0f;
+    static float texOffsetY = 0.0f;
+    static int clutIndex[256];  // current CLUT palette index per slot
+
+    // Scan for loaded texture pages once on entry
+    foundCount = 0;
+    for (int i = 0; i < 256; i++) {
+        clutIndex[i] = 0;
+        if (g_TexturePageSRV[i] != NULL) {
+            validPages[foundCount] = i;
+            foundCount++;
+        }
+    }
+
+    char dbg[128];
+    sprintf(dbg, "[TEX] texture_viewer_state: found %d loaded texture pages\n", foundCount);
+    OutputDebugStringA(dbg);
+
+    if (foundCount > 0) selectedPage = 0;
+    else selectedPage = -1;
+
+    while (1) {
+        // --- Background (drawn via draw_rect which queues PendingSprites) ---
+        g_window_rect.w = 320;
+        g_window_rect.textureId = 0;
+        g_window_rect.r = 0;
+        g_window_rect.g = 0;
+        g_window_rect.b = 0;
+        g_window_rect.x = -g_ScreenOffsetX;
+        g_window_rect.h = 240;
+        g_window_rect.y = -g_ScreenOffsetY;
+        draw_rect(&g_window_rect, 100, 1);
+
+        // Title line
+        sprintf(PRINT_TEXT_BUFFER, "TEXTURE VIEWER [%d]", foundCount);
+        PrintText8x14(2, 2, 0x8F, 0);
+
+        if (foundCount == 0) {
+            sprintf(PRINT_TEXT_BUFFER, "No textures loaded!");
+            PrintText8x14(2, 18, 0x4F, 0);
+        } else {
+            int pageIdx = validPages[selectedPage];
+            int texW = g_TexturePageWidth[pageIdx];
+            int texH = g_TexturePageHeight[pageIdx];
+            int texBpp = g_TexturePageBpp[pageIdx];
+            int numCLUTs = GetTextureNumCLUTs(pageIdx);
+
+            // Info line: slot, index, dimensions, bpp, offset, CLUT
+            if (numCLUTs > 1) {
+                sprintf(PRINT_TEXT_BUFFER, "[%d/%d] %dx%d %dbpp clut=%d/%d off=(%d,%d)",
+                        selectedPage + 1, foundCount, texW, texH, texBpp,
+                        clutIndex[pageIdx] + 1, numCLUTs,
+                        (int)texOffsetX, (int)texOffsetY);
+            } else {
+                sprintf(PRINT_TEXT_BUFFER, "[%d/%d] %dx%d %dbpp off=(%d,%d)",
+                        selectedPage + 1, foundCount, texW, texH, texBpp,
+                        (int)texOffsetX, (int)texOffsetY);
+            }
+            PrintText8x14(2, 18, 0x7F, 0);
+
+            // Page list: show rows of page indices, 5 columns
+            int listY = 34;
+            int cols = 5;
+            for (int i = 0; i < foundCount && i < 25; i++) {
+                int col = i % cols;
+                int row = i / cols;
+                unsigned char color = (i == selectedPage) ? 0x8F : 0x5F;
+                sprintf(PRINT_TEXT_BUFFER, "%d", validPages[i]);
+                PrintText8x14((short)(2 + col * 60), (short)(listY + row * 14), color, 0);
+            }
+            int listRows = (foundCount + cols - 1) / cols;
+            if (listRows > 3) listRows = 3;
+            int previewY = listY + listRows * 14 + 6;
+
+            // Texture preview: queue a PendingSprite with the texture's SRV
+            // Coordinates must be in game-space (320x240)
+            if (texW > 0 && texH > 0) {
+                // Available preview area in game coords
+                float availW = 310.0f;
+                float availH = 236.0f - (float)previewY;
+
+                // Show textures at native pixel size (1:1): never upscale
+                // small textures, only downscale large ones to fit the area.
+                float scX = availW / (float)texW;
+                float scY = availH / (float)texH;
+                float sc = (scX < scY) ? scX : scY;
+                if (sc > 1.0f) sc = 1.0f;
+
+                float drawW = (float)texW * sc;
+                float drawH = (float)texH * sc;
+                float drawX = 5.0f + (availW - drawW) * 0.5f + texOffsetX;
+                float drawY = (float)previewY + texOffsetY;
+
+                QueueTexturedSprite(drawX, drawY, drawW, drawH,
+                                    g_TexturePageSRV[pageIdx], 200);
+            }
+        }
+
+        // Controls line at bottom
+        sprintf(PRINT_TEXT_BUFFER, "Arrows:Nav A+Arrows:Move Z+LR:CLUT R:Reset F1/ESC:Exit");
+        PrintText8x14(2, 228, 0x5F, 0);
+
+        // --- Input handling (direct GetAsyncKeyState with edge detection) ---
+        int keys = 0;
+        int aHeld = (GetAsyncKeyState('A') & 0x8000) ? 1 : 0;
+        int zHeld = (GetAsyncKeyState('Z') & 0x8000) ? 1 : 0;
+        if (GetAsyncKeyState(VK_LEFT)   & 0x8000) keys |= 0x001;
+        if (GetAsyncKeyState(VK_RIGHT)  & 0x8000) keys |= 0x002;
+        if (GetAsyncKeyState(VK_UP)     & 0x8000) keys |= 0x004;
+        if (GetAsyncKeyState(VK_DOWN)   & 0x8000) keys |= 0x008;
+        if (GetAsyncKeyState('R')       & 0x8000) keys |= 0x010;
+        if (GetAsyncKeyState(VK_F1)     & 0x8000) keys |= 0x020;
+        if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) keys |= 0x040;
+
+        int newKeys = keys & ~prevKeys;
+        prevKeys = keys;
+
+        if (aHeld) {
+            // A+Arrow: move texture offset (hold for continuous movement)
+            float moveSpeed = 1.0f;
+            if (keys & 0x001) texOffsetX -= moveSpeed;
+            if (keys & 0x002) texOffsetX += moveSpeed;
+            if (keys & 0x004) texOffsetY -= moveSpeed;
+            if (keys & 0x008) texOffsetY += moveSpeed;
+        } else if (zHeld && foundCount > 0) {
+            // Z+Left/Right: cycle CLUT palette
+            int pageIdx = validPages[selectedPage];
+            int numCLUTs = GetTextureNumCLUTs(pageIdx);
+            if (numCLUTs > 1 && (newKeys & (0x001 | 0x002))) {
+                if (newKeys & 0x001) {
+                    clutIndex[pageIdx]--;
+                    if (clutIndex[pageIdx] < 0) clutIndex[pageIdx] = numCLUTs - 1;
+                }
+                if (newKeys & 0x002) {
+                    clutIndex[pageIdx]++;
+                    if (clutIndex[pageIdx] >= numCLUTs) clutIndex[pageIdx] = 0;
+                }
+                if (RebuildTextureSRV(pageIdx, clutIndex[pageIdx])) {
+                    sprintf(dbg, "[TEX] Rebuilt SRV[%d] with CLUT %d/%d\n",
+                            pageIdx, clutIndex[pageIdx], numCLUTs);
+                    OutputDebugStringA(dbg);
+                }
+            }
+        } else {
+            // Arrow keys: navigate pages
+            if (foundCount > 0) {
+                if (newKeys & 0x001) { selectedPage--; if (selectedPage < 0) selectedPage = foundCount - 1; }
+                if (newKeys & 0x002) { selectedPage++; if (selectedPage >= foundCount) selectedPage = 0; }
+                if (newKeys & 0x004) { selectedPage--; if (selectedPage < 0) selectedPage = foundCount - 1; }
+                if (newKeys & 0x008) { selectedPage++; if (selectedPage >= foundCount) selectedPage = 0; }
+            }
+        }
+
+        // R: reset offset (edge-triggered)
+        if (newKeys & 0x010) { texOffsetX = 0.0f; texOffsetY = 0.0f; }
+
+        if (newKeys & 0x020) break;  // F1
+        if (newKeys & 0x040) break;  // ESC
+
+        Task_sleep(1);
+    }
+
+    OutputDebugStringA("[TEX] texture_viewer_state - exiting, chaining to logos_state\n");
     Task_chain((void*)logos_state);
 }
 
@@ -609,7 +804,7 @@ void SetInitialItems(void)
     while (item_qty != 0) {
         g_ItemsSlots[slot_index].Id = *item_slot;
         item_qty = item_slot[1];
-        (&g_ItemSlotsIndexes)[slot_index] = slot_index;
+        g_ItemSlotsIndexes[slot_index] = slot_index;
         g_ItemsSlots[slot_index].qty = item_qty;
         item_qty = item_slot[2];
         item_slot = item_slot + 2;
@@ -646,8 +841,10 @@ void CountHeldItems(void) // 0x00451600
 // Loads inventory item images into the image buffer for HUD display.
 // Counts held items, sets up slot bitmask and indices, then loads each
 // item's image sprite via LoadItemImage using the item image lookup table.
+// After loading, composites all items into a single D3D11 SRV at the
+// texture slot the renderer expects.
 // ---------------------------------------------------------------------------
-void LoadHeldItemsImages(void* buf) // 0x00451640
+void LoadHeldItemsImages(void) // 0x00451640
 {
     unsigned char totalItems;
     unsigned int index;
@@ -662,10 +859,10 @@ void LoadHeldItemsImages(void* buf) // 0x00451640
         totalItems = totalItems - 1;
         index = (unsigned int)totalItems;
         g_ItemSlotsPointer = savedSlotPointer;
-        (&g_ItemSlotsIndexes)[index] = totalItems;
+        g_ItemSlotsIndexes[index] = totalItems;
         unsigned char itemId = ((unsigned char*)savedSlotPointer)[index * 2];
         unsigned char imageType = g_ItemImageLookupTable[itemId * 4];
-        LoadItemImage(imageType - 1, (int)index, buf);
+        LoadItemImage(imageType - 1, (int)index, (int)g_ItemsImageBuffer);
         savedSlotPointer = g_ItemSlotsPointer;
     }
     g_ItemSlotsPointer = savedSlotPointer;
@@ -821,7 +1018,7 @@ void InitializeGame(void)
     g_defaultItemSlot = 0;
     DAT_00be9614 = 0;
 
-    LoadHeldItemsImages(g_TimImageBuffer__bitmap);
+    LoadHeldItemsImages();
 
     g_playerEntity.pSca_hit_data = (DWORD)g_entityDataBlock;
 
@@ -911,6 +1108,8 @@ void game_start(void)
 
     InitializeGame();
 
+    // Task_chain((void*)texture_viewer_state);
+
     end_game_status = game_loop();
 
     g_main_state_flags = 0;
@@ -934,8 +1133,13 @@ void game_start(void)
 // Stub implementations for functions not yet decompiled
 // ============================================================================
 
-// (0x0045fbb0) - Load item image into display buffer
-void LoadItemImage(int imageType, int index, void* buf) { }
+// 0x00443000 - LoadItemImage
+// Wrapper around LoadImage for inventory item sprites.
+// Loads a 20x30 16-bit item image from the buffer into a texture page slot.
+void LoadItemImage(int item_id, int image_index, int img_buffer) // 0x00443000
+{
+    LoadImage(item_id * 1200 + img_buffer, 0, image_index + 1, 1, 108, (short)image_index << 5, 20, 30, 2);
+}
 
 // (0x00481060) - Load attract mode (demo) player save data
 void LoadAttractModePlayerData(void) { }
@@ -1054,8 +1258,18 @@ void cmd_room_action(void) { }
 // (0x0047f870) - Play 3D sound with voice effect
 void play_sound_and_voice_effect(int type, int id) { }
 
-// (0x00455260) - Set background clear color
-void setBackColor(unsigned char r, unsigned char g, unsigned char b) { }
+// (0x0040ada0) - Set background clear color
+void setBackColor(unsigned short r, unsigned short g, unsigned short b) {
+    // 0x0040ada0-0x0040ae36: Clamp PS1 12-bit color (0-4095) and convert to 8-bit (0-255)
+    if (r > 0xFFF) r = 0x1000;
+    g_red_color = (unsigned char)((r * 255) / 4096);
+
+    if (g > 0xFFF) g = 0x1000;
+    g_green_color = (unsigned char)((g * 255) / 4096);
+
+    if (b > 0xFFF) b = 0x1000;
+    g_blue_color = (unsigned char)((b * 255) / 4096);
+}
 
 // (0x0040ae40) - Empty function called by LoadRoomRdt
 void empty_40ae40(int param) { }

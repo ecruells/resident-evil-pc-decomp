@@ -22,8 +22,8 @@
 // These globals are used exclusively by the menu system.
 // ============================================================================
 
-// Texture display depth counter
-static unsigned short DAT_00ae9f08;       // 0x00ae9f08
+// Inventory draw depth layer (Z-order for render sorting)
+static unsigned short g_invDepthLayer;    // 0x00ae9f08
 
 // Menu mode (0=status, 1=use item, 2=itembox, 3=desk locked, 4=desk take,
 //            5=map, 6=item model viewer)
@@ -31,13 +31,14 @@ static unsigned char  DAT_00ae9f10;       // 0x00ae9f10
 
 // Menu state (0=init, 1=status/nav, 2=message wait, 3=itembox, 4=model view,
 //             5=map anim, 6=model view2, 7=exit anim, 8=exit wait)
-static char           DAT_00ae9f11;       // 0x00ae9f11
+static char           g_MainMenuState;       // 0x00ae9f11
 
 static unsigned char  DAT_00ae9f12;       // 0x00ae9f12
 static unsigned char  DAT_00ae9f13;       // 0x00ae9f13
 
+// 0x00ae9f14
 // Frame part data pointer (used by load_main_menu_frame_part_tex_area)
-static unsigned short* DAT_00ae9f14;      // 0x00ae9f14
+static unsigned short* g_CurrentMenuFramesDataPtr;      
 
 static char           DAT_00ae9f18;       // 0x00ae9f18
 
@@ -45,7 +46,7 @@ static char           DAT_00ae9f18;       // 0x00ae9f18
 static unsigned char  DAT_00ae9f19;       // 0x00ae9f19
 
 // Max inventory slots (6 for chris, 8 for jill)
-static unsigned char  DAT_00ae9f1a;       // 0x00ae9f1a
+static unsigned char  g_totalInventorySlots;       // 0x00ae9f1a
 
 // Selected item ID for 3D model display
 static unsigned char  DAT_00ae9f1b;       // 0x00ae9f1b
@@ -130,6 +131,7 @@ static int  menu_itembox_interaction(void);       // 0x004941f0
 static void load_main_menu_frame_part_tex_area(void);
 static void draw_itembox_menu(void);              // 0x004947c0
 static void loadMenuAssets(void);                 // 0x00494730
+static void display_item_qty(unsigned char itemId, unsigned char qty, int depth); // 0x004645b0
 
 // External function stubs (pending decompilation)
 extern void empty_00470a20(void);
@@ -143,19 +145,12 @@ extern void FUN_00420b80(void);
 extern void FUN_00420bb0(void);
 extern void FUN_00420a70(void);
 extern void FUN_00454fd0(int itemId, int mode, short x, short y);
-extern void display_item_qty(unsigned char itemId, unsigned char qty, int depth);
-extern void draw_texture(TextureDesc* tex, int depth);
+extern int draw_texture(TextureDesc* tex, unsigned short depth);
 extern int   FUN_0044e1b0(void);
 extern void  FUN_00470c60(void* prim, int depth);
 extern void  FUN_00438800(int a, int b, int c);
 
-// External data tables (read-only, in .rdata)
-extern const unsigned short DAT_004c2960[];
-extern const unsigned short DAT_004c2808[];
-extern const unsigned short DAT_004c27d8[];
-extern const unsigned short DAT_004c2840[];
-extern const unsigned short DAT_004c28c0[];
-extern const unsigned short DAT_004c2940[];
+
 extern const char DAT_004c29a0[];
 extern const char DAT_004c29a8[];
 extern const char DAT_004bd348[];
@@ -185,6 +180,8 @@ extern const unsigned char DAT_004d3206[];
 // ============================================================================
 void main_menu(void)
 {
+    OutputDebugStringA("[MENU] main_menu: entered\n");
+
     // 0x00463710-0x0046373e: Suspend gameplay task and set up menu environment
     g_bGameActive = 0;
     Task_suspend(0);
@@ -206,7 +203,7 @@ void main_menu(void)
 
     // 0x00463768-0x0046377d: Check if opening for message display (bit 8)
     if ((g_main_state_flags & 0x100) != 0) {
-        DAT_00ae9f11 = 8;
+        g_MainMenuState = 8;
         goto LAB_00463966;
     }
 
@@ -219,7 +216,7 @@ void main_menu(void)
 
     // 0x004637ae-0x0046381c: Initialize menu state variables
     DAT_00ae9f23 = 8;
-    DAT_00ae9f11 = 0;
+    g_MainMenuState = 0;
     DAT_00ae9f49 = 0;
     DAT_00ae9f4a = 0;
     SUBMENU_STATE_ID = 0;
@@ -249,7 +246,7 @@ LAB_0046381c:
 
     // 0x0046381c-0x00463880: Set character display flags
     unsigned char charBits = ((g_playerEntity.id + 1) & 2);
-    DAT_00ae9f1a = charBits + 6;
+    g_totalInventorySlots = charBits + 6;
     DAT_00ae9f19 = charBits | (g_playerEntity.id & 1);
 
     // 0x00463880-0x004638e3: Check if map is available
@@ -290,6 +287,7 @@ LAB_0046381c:
 
 LAB_00463966:
     StMask(0, 1);
+    OutputDebugStringA("[MENU] Entering main loop\n");
 
     // ====================================================================
     // Main menu frame loop
@@ -313,35 +311,35 @@ LAB_00463966:
         g_TextureDesc.colorMulB = 0x80;
 
         // 0x004639b5: Menu state machine
-        switch (DAT_00ae9f11) {
+        switch (g_MainMenuState) {
         case 0:
             // Wait for fade-in to complete, then enter appropriate submenu
             if (-1 < (short)g_fading_state) break;
             switch (DAT_00ae9f10) {
             case 0:
-                DAT_00ae9f11 = 1;
+                g_MainMenuState = 1;
                 DAT_00ae9f20 = 0;
                 menu_init_map_screen();
                 menu_init_status_screen();
                 break;
             case 1:
-                DAT_00ae9f11 = 2;
+                g_MainMenuState = 2;
                 set_message_display(0xC4, 0);
                 break;
             case 2:
-                DAT_00ae9f11 = 3;
+                g_MainMenuState = 3;
                 DAT_00ae9f20 = 0;
                 break;
             case 3:
             case 4:
-                DAT_00ae9f11 = 4;
+                g_MainMenuState = 4;
                 goto LAB_00463a53;
             case 5:
-                DAT_00ae9f11 = 5;
+                g_MainMenuState = 5;
                 menu_init_map_display();
                 break;
             case 6:
-                DAT_00ae9f11 = 6;
+                g_MainMenuState = 6;
                 menu_init_map_screen();
                 menu_init_status_screen();
 LAB_00463a53:
@@ -359,7 +357,7 @@ LAB_00463a53:
                 if (cond1 && cond2) {
                     menu_handle_input();
                     if ((DAT_00ae9f13 & 0x41) == 0) {
-                        if (DAT_00ae9f11 != 7) {
+                        if (g_MainMenuState != 7) {
                             menu_draw_health_bar();
                         }
                         if ((DAT_00ae9f13 & 0x41) == 0) break;
@@ -412,7 +410,7 @@ LAB_00463a53:
             if (FUN_0044e1b0() != 0) {
                 DAT_00ae9f10 = 0;
                 DAT_00ae9f20 = 0;
-                DAT_00ae9f11 = 1;
+                g_MainMenuState = 1;
             }
             menu_draw_health_bar();
             break;
@@ -495,8 +493,8 @@ LAB_00463a53:
         }
 
         // 0x00463d33-0x00463d70: Draw inventory and item box
-        if ((DAT_00ae9f11 != 7) && (menu_draw_inventory(), DAT_00ae9f10 == 2)) {
-            draw_itembox_menu();
+        if ((g_MainMenuState != 7) && (menu_draw_inventory(), DAT_00ae9f10 == 2)) {
+                draw_itembox_menu();
         }
 
         Task_sleep(1);
@@ -513,7 +511,7 @@ LAB_00463a53:
 static void menu_exit_cleanup(void)
 {
     FUN_004844b0();
-    DAT_00ae9f11 = 7;
+    g_MainMenuState = 7;
     set_fading(2, 0xC00);
     g_spriteAnimR = 0;
     g_spriteAnimG = 0;
@@ -527,7 +525,7 @@ static void menu_exit_cleanup(void)
 // (0x00463e10) - Restore game state after menu close
 static void menu_restore_game_state(void)
 {
-    setMenuScreenOffset(0x140, 0xF0, 0, 0, 0);
+    setMenuScreenOffset(320, 240, 0, 0, 0);
     CenterScreenOrigin();
     menu_update_fading_rect();
     FUN_00462940();
@@ -592,7 +590,7 @@ static void menu_draw_inventory(void)
     unsigned char local_2;
     char local_1;
 
-    // 0x00463f20-0x00463f80: Draw equipped weapon/item icon
+    // 0x00463f20-0x00463f80: Draw equipped weapon or no equipped empty slot
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.unk10 = 0;
     g_TextureDesc.depth = 0x1c;
@@ -600,7 +598,7 @@ static void menu_draw_inventory(void)
     g_TextureDesc.screenY = 0x92;
     g_TextureDesc.width = 0x28;
     g_TextureDesc.height = 0x1e;
-    DAT_00ae9f08 = 10;
+    g_invDepthLayer = 10;
 
     if (g_EquippedItemId == 0) {
         uVar11 = 1;
@@ -629,7 +627,7 @@ static void menu_draw_inventory(void)
     display_texture(&g_TextureDesc, 10, uVar10, uVar11);
 
     // 0x00464050: Draw equipped item quantity
-    DAT_00ae9f08 = 9;
+    g_invDepthLayer = 9;
     if (g_EquippedItemId != 0) {
         iVar5 = (int)((unsigned int)g_EquippedItemId * 2 + (unsigned int)(uintptr_t)g_ItemSlotsPointer);
         g_TextureDesc.depth = 0x1c;
@@ -643,20 +641,20 @@ static void menu_draw_inventory(void)
     }
 
     // 0x004640d0: Draw each held inventory item
-    DAT_00ae9f08 = 9;
+    g_invDepthLayer = 9;
     bVar6 = g_TotalHeldItems;
     while (bVar6 != 0) {
         g_TextureDesc.depth = 0x1d;
-        g_TextureDesc.width = 0x28;
+        g_TextureDesc.width = 40;
         bVar6 = bVar6 - 1;
-        g_TextureDesc.height = 0x1e;
+        g_TextureDesc.height = 30;
         uVar7 = (unsigned int)bVar6;
         g_TextureDesc.printClutTint = 0x1e4;
-        g_TextureDesc.texU = 0x58;
-        g_TextureDesc.screenY = *(short*)((int)DAT_004c2960 + (unsigned int)(unsigned char)(local_2 - 1) * 2);
+        g_TextureDesc.texU = 88;
+        g_TextureDesc.screenY = *(short*)((int)g_inventorySlotsPos + (unsigned int)(unsigned char)(local_2 - 1) * 2);
         local_2 = local_2 - 2;
-        g_TextureDesc.screenX = *(short*)((int)DAT_004c2960 + (unsigned int)local_2 * 2);
-        g_TextureDesc.texV = (&g_ItemSlotsIndexes)[uVar7] << 5;
+        g_TextureDesc.screenX = *(short*)((int)g_inventorySlotsPos + (unsigned int)local_2 * 2);
+        g_TextureDesc.texV = g_ItemSlotsIndexes[uVar7] << 5;
         pbVar2 = (unsigned char*)g_ItemSlotsPointer + uVar7 * 2;
         if (*pbVar2 < 0x6f) {
             uVar11 = 8;
@@ -669,42 +667,43 @@ static void menu_draw_inventory(void)
             g_TextureDesc.printClutTint = 0x1e0;
             g_TextureDesc.texV = *pbVar2 * 0x1e - 2;
         }
-        display_texture(&g_TextureDesc, (unsigned short)DAT_00ae9f08 + 1, uVar10, uVar11);
+        display_texture(&g_TextureDesc, (unsigned short)g_invDepthLayer + 1, uVar10, uVar11);
+
         g_TextureDesc.depth = 0x1c;
         pbVar2 = (unsigned char*)g_ItemSlotsPointer + uVar7 * 2;
-        display_item_qty(*pbVar2, *(pbVar2 + 1), DAT_00ae9f08);
+        display_item_qty(*pbVar2, *(pbVar2 + 1), g_invDepthLayer);
     }
 
     // 0x00464200: Draw empty inventory slots
     g_TextureDesc.texU = 0;
     g_TextureDesc.texV = 0;
-    bVar6 = 0x18;
-    g_TextureDesc.width = 0x28;
-    DAT_00ae9f08 = 10;
-    g_TextureDesc.height = 0x1e;
+    bVar6 = 24;
+    g_TextureDesc.width = 40;
+    g_invDepthLayer = 10;
+    g_TextureDesc.height = 30;
     g_TextureDesc.printClutTint = 0x1e0;
-    for (char cVar4 = DAT_00ae9f1a - g_TotalHeldItems; cVar4 != 0; cVar4 = cVar4 - 1) {
-        g_TextureDesc.screenY = *(short*)((int)DAT_004c2960 + (unsigned int)(unsigned char)(bVar6 - 1) * 2);
+    for (char cVar4 = g_totalInventorySlots - g_TotalHeldItems; cVar4 != 0; cVar4 = cVar4 - 1) {
+        g_TextureDesc.screenY = *(short*)((int)g_inventorySlotsPos + (unsigned int)(unsigned char)(bVar6 - 1) * 2);
         bVar6 = bVar6 - 2;
-        g_TextureDesc.screenX = *(short*)((int)DAT_004c2960 + (unsigned int)bVar6 * 2);
-        display_texture(&g_TextureDesc, (unsigned short)DAT_00ae9f08, 10, 1);
+        g_TextureDesc.screenX = *(short*)((int)g_inventorySlotsPos + (unsigned int)bVar6 * 2);
+        display_texture(&g_TextureDesc, (unsigned short)g_invDepthLayer, 10, 1);
     }
 
     // 0x00464290: Draw character portrait
     g_TextureDesc.screenX = 0x16;
     g_TextureDesc.screenY = 0x92;
-    g_TextureDesc.width = 0x1e;
-    g_TextureDesc.height = 0x1e;
+    g_TextureDesc.width = 30;
+    g_TextureDesc.height = 30;
     g_TextureDesc.printClutTint = 0x1e0;
-    DAT_00ae9f08 = 10;
+    g_invDepthLayer = 10;
     g_TextureDesc.texU = (g_playerEntity.id & 1) << 5;
     g_TextureDesc.texV = (g_playerEntity.id & 2) << 4;
     bVar6 = 8;
     display_texture(&g_TextureDesc, 10, 9, 1);
 
-    // 0x00464310: Draw menu tab buttons (Status, Map, Item, etc.)
-    DAT_00ae9f14 = (unsigned short*)&DAT_004c2808;
-    DAT_00ae9f08 = 0x14;
+    // 0x00464310: Draw top options menu (Map, File, Radio, Exit)
+    g_CurrentMenuFramesDataPtr = (unsigned short*)g_MainMenuTopOptionsPos;
+    g_invDepthLayer = 20;
     g_TextureDesc.printClutTint = 0x1e4;
     do {
         bVar6 = bVar6 - 2;
@@ -715,33 +714,40 @@ static void menu_draw_inventory(void)
 LAB_004642e7:
                 g_TextureDesc.flags = 0x01000040;
             }
-        } else if (((DAT_00ae9f11 == 1) && (DAT_00ae9f23 == bVar6)) && (DAT_00ae9f20 < 2)) {
+        } else if (((g_MainMenuState == 1) && (DAT_00ae9f23 == bVar6)) && (DAT_00ae9f20 < 2)) {
             goto LAB_004642e7;
         }
         if ((bVar6 == 4) && (DAT_00ae9f1f == 0)) {
             g_TextureDesc.texV = 0x40;
         }
-        display_texture(&g_TextureDesc, (unsigned short)DAT_00ae9f08, 0, 1);
+        display_texture(&g_TextureDesc, (unsigned short)g_invDepthLayer, 0, 1);
 
-        // 0x00464370: After all tabs drawn, draw frame decorations
+        // 0x00464370: Draw frames
         if (bVar6 == 0) {
             g_TextureDesc.flags = 0x01000040;
 
-            // Draw bottom frame decoration parts
-            DAT_00ae9f14 = (unsigned short*)&DAT_004c27d8;
-            DAT_00ae9f08 = 0x15;
+            // main frame (left-top-right borders)
+            // Health frame
+            // equipped weapon frame
+            // bottom frames
+            // options menu top and bottom borders
+            // inventory outer frame bottom border
+            g_CurrentMenuFramesDataPtr = (unsigned short*)g_MainMenuFrames2Pos;
+            g_invDepthLayer = 0x15;
             do {
                 load_main_menu_frame_part_tex_area();
-                display_texture(&g_TextureDesc, (unsigned short)DAT_00ae9f08, 0, 1);
-            } while ((unsigned short*)DAT_004c26d0 < DAT_00ae9f14);
+                display_texture(&g_TextureDesc, (unsigned short)g_invDepthLayer, 0, 1);
+            } while ((unsigned short*)g_MainMenuFramesPos < g_CurrentMenuFramesDataPtr);
 
-            // Draw left/right frame border segments (tiled)
-            DAT_00ae9f14 = (unsigned short*)&DAT_004c2840;
-            DAT_00ae9f08 = 10;
+            // Main frame bottom border
+            // Inventory bottom inner border
+            // Top options menu left and right borders
+            g_CurrentMenuFramesDataPtr = (unsigned short*)g_MainMenuFrames3Pos;
+            g_invDepthLayer = 10;
             do {
-                puVar3 = DAT_00ae9f14;
-                DAT_00ae9f14 = DAT_00ae9f14 - 1;
-                g_TextureDesc.flags = (*DAT_00ae9f14 & 0xc0) << 0x10 | 0x1000040;
+                puVar3 = g_CurrentMenuFramesDataPtr;
+                g_CurrentMenuFramesDataPtr = g_CurrentMenuFramesDataPtr - 1;
+                g_TextureDesc.flags = (*g_CurrentMenuFramesDataPtr & 0xc0) << 0x10 | 0x1000040;
                 bVar6 = *(unsigned char*)((int)puVar3 - 1);
                 load_main_menu_frame_part_tex_area();
                 if ((bVar6 & 0x80) == 0) {
@@ -753,26 +759,26 @@ LAB_004642e7:
                 }
                 bVar6 = bVar6 & 0x7f;
                 do {
-                    display_texture(&g_TextureDesc, (unsigned short)bVar6 + (unsigned short)DAT_00ae9f08, 0, 1);
+                    display_texture(&g_TextureDesc, (unsigned short)bVar6 + (unsigned short)g_invDepthLayer, 0, 1);
                     g_TextureDesc.screenX = g_TextureDesc.screenX + uVar9;
                     g_TextureDesc.screenY = g_TextureDesc.screenY + uVar8;
                     bVar6 = bVar6 - 1;
                 } while (bVar6 != 0);
-            } while ((unsigned short*)&DAT_004c2808 < DAT_00ae9f14);
+            } while ((unsigned short*)g_MainMenuTopOptionsPos < g_CurrentMenuFramesDataPtr);
 
-            // Draw second set of border segments (character-dependent)
-            DAT_00ae9f14 = (unsigned short*)&DAT_004c28c0;
+            // Invntory top, left and right borders
+            g_CurrentMenuFramesDataPtr = (unsigned short*)g_MainMenuFrames4Pos;
             if ((DAT_00ae9f19 & 2) == 0) {
-                DAT_00ae9f14 = (unsigned short*)&DAT_004c2840;
+                g_CurrentMenuFramesDataPtr = (unsigned short*)g_MainMenuFrames3Pos;
             }
-            DAT_00ae9f14 = (unsigned short*)((int)DAT_00ae9f14 + 0x7e);
+            g_CurrentMenuFramesDataPtr = (unsigned short*)((int)g_CurrentMenuFramesDataPtr + 0x7e);
             local_1 = 9;
-            DAT_00ae9f08 = 0x14;
+            g_invDepthLayer = 0x14;
             do {
-                puVar3 = DAT_00ae9f14;
-                DAT_00ae9f14 = DAT_00ae9f14 - 1;
+                puVar3 = g_CurrentMenuFramesDataPtr;
+                g_CurrentMenuFramesDataPtr = g_CurrentMenuFramesDataPtr - 1;
                 local_1 = local_1 - 1;
-                g_TextureDesc.flags = (*DAT_00ae9f14 & 0xc0) << 0x10 | 0x1000040;
+                g_TextureDesc.flags = (*g_CurrentMenuFramesDataPtr & 0xc0) << 0x10 | 0x1000040;
                 bVar6 = *(unsigned char*)((int)puVar3 - 1);
                 load_main_menu_frame_part_tex_area();
                 if ((bVar6 & 0x80) == 0) {
@@ -784,31 +790,125 @@ LAB_004642e7:
                 }
                 bVar6 = bVar6 & 0x7f;
                 do {
-                    display_texture(&g_TextureDesc, (unsigned short)bVar6 + (unsigned short)DAT_00ae9f08, 0, 1);
+                    display_texture(&g_TextureDesc, (unsigned short)bVar6 + (unsigned short)g_invDepthLayer, 0, 1);
                     g_TextureDesc.screenX = g_TextureDesc.screenX + uVar9;
                     g_TextureDesc.screenY = g_TextureDesc.screenY + uVar8;
                     bVar6 = bVar6 - 1;
                 } while (bVar6 != 0);
             } while (local_1 != 0);
 
-            // 0x00464510: Draw black inventory grid rectangles
-            DAT_00ae9f14 = (unsigned short*)&DAT_004c2960;
+            // 0x00464510: Draw background black rect
+            g_CurrentMenuFramesDataPtr = (unsigned short*)g_inventorySlotsPos;
             g_rect.textureId = 0;
             g_rect.r = 0;
             g_rect.g = 0;
-            DAT_00ae9f08 = 0x1e;
+            g_invDepthLayer = 0x1e;
             g_rect.b = 0;
             do {
-                g_rect.h = *(short*)((int)DAT_00ae9f14 - 2);
-                g_rect.w = *(short*)((int)DAT_00ae9f14 - 4);
-                g_rect.y = *(short*)((int)DAT_00ae9f14 - 6);
-                g_rect.x = *(short*)((int)DAT_00ae9f14 - 8);
-                draw_rect(&g_rect, (unsigned short)DAT_00ae9f08, 1);
-                DAT_00ae9f14 = (unsigned short*)((int)DAT_00ae9f14 - 8);
-            } while ((unsigned short*)DAT_004c2940 < DAT_00ae9f14);
+                g_rect.h = *(short*)((int)g_CurrentMenuFramesDataPtr - 2);
+                g_rect.w = *(short*)((int)g_CurrentMenuFramesDataPtr - 4);
+                g_rect.y = *(short*)((int)g_CurrentMenuFramesDataPtr - 6);
+                g_rect.x = *(short*)((int)g_CurrentMenuFramesDataPtr - 8);
+                draw_rect(&g_rect, (unsigned short)g_invDepthLayer, 1);
+                g_CurrentMenuFramesDataPtr = (unsigned short*)((int)g_CurrentMenuFramesDataPtr - 8);
+            } while ((unsigned short*)DAT_004c2940 < g_CurrentMenuFramesDataPtr);
             return;
         }
     } while (true);
+}
+
+// ============================================================================
+// display_item_qty (0x004645b0)
+// Draw item quantity text (or infinite symbol for special items).
+// Reads g_TextureDesc for screenX/Y and modifies it for subsequent draws.
+// ============================================================================
+static void display_item_qty(unsigned char itemId, unsigned char qty, int depth)
+{
+    // Only draw for quantifiable items:
+    //   Weapons and ammo (2-18, excluding knife), ink ribbon (0x2F),
+    //   or high-numbered special items (> ITEM_ID_MAX).
+    if (!(((itemId < ITEM_EMPTY_BOTTLE && itemId != ITEM_KNIFE) ||
+           itemId == ITEM_INK_RIBBONS) ||
+           itemId > ITEM_ID_MAX))
+        return;
+
+    g_TextureDesc.printClutTint = 0x1E4;
+    g_TextureDesc.screenY = g_TextureDesc.screenY + 0x14;
+    g_TextureDesc.height = 8;
+
+    int hasFlag = Flg_ck((int)g_PlayerFlags, 0x7e);
+
+    // Normal numeric quantity display
+    // (flag 0x7E grants infinite quantity for certain items like the rocket launcher)
+    if (((hasFlag == 0 && itemId <= ITEM_ID_MAX) ||
+         (itemId != ITEM_ROCKET_LAUNCHER && itemId <= ITEM_ID_MAX)))
+    {
+        // Clip quantity display for certain weapon types
+        if (itemId != ITEM_FLAMETHROWER && itemId < ITEM_CLIP)
+            qty = qty & 0x7F;
+
+        sprintf(PRINT_TEXT_BUFFER, "%03d", (unsigned int)qty);
+
+        // Position text relative to the item icon
+        if (itemId < ITEM_CLIP)
+            g_TextureDesc.screenX = g_TextureDesc.screenX + 4;
+        else
+            g_TextureDesc.screenX = g_TextureDesc.screenX + 0xE;
+
+        g_TextureDesc.width = 8;
+
+        // Select digit font column based on item type.
+        // Different columns in STATUS.tim hold different glyph variants.
+        switch (itemId)
+        {
+        case ITEM_COLT_PYTHON_DUM:
+        case ITEM_BAZOOKA_ACID:
+        case ITEM_DUM_DUM_ROUNDS:
+        case ITEM_ACID_ROUNDS:
+            g_TextureDesc.texU = 0x88;
+            break;
+        case ITEM_BAZOOKA_FLAME:
+        case ITEM_FLAME_ROUNDS:
+            g_TextureDesc.texU = 0xC0;
+            break;
+        default:
+            g_TextureDesc.texU = 0x80;
+            break;
+        }
+
+        char* pch = PRINT_TEXT_BUFFER;
+        bool drawnAny = false;
+        int remaining = 3;
+
+        do {
+            remaining--;
+            unsigned char digit = (unsigned char)(*pch & 0xF);  // ASCII '0'-'9' → 0-9
+
+            // Draw digit if: non-zero, OR already drawn one, OR it's the last position
+            if (digit != 0 || drawnAny || remaining == 0)
+            {
+                g_TextureDesc.texV = digit << 3;  // digit × 8 pixels
+                display_texture(&g_TextureDesc, (unsigned short)depth, 0, 1);
+                drawnAny = true;
+            }
+
+            // Advance cursor: always for items beyond weapons (> ITEM_ROCKET_LAUNCHER),
+            // otherwise only after first drawn digit (suppresses leading-zero spacing)
+            if (drawnAny || itemId > ITEM_ROCKET_LAUNCHER)
+                g_TextureDesc.screenX = g_TextureDesc.screenX + 8;
+
+            pch++;
+        } while (remaining != 0);
+    }
+    else
+    {
+        // Draw infinite (∞) symbol for unlimited-quantity items
+        g_TextureDesc.texU = 152;
+        g_TextureDesc.texV = 112;
+        g_TextureDesc.screenX = g_TextureDesc.screenX + 6;
+        g_TextureDesc.width = 10;
+        display_texture(&g_TextureDesc, (unsigned short)depth, 0, 1);
+    }
 }
 
 // (0x00464770) - Load item 3D model TIM for menu display
@@ -1158,17 +1258,17 @@ static void loadMenuAssets(void) { }
 // (0x004947c0) - Draw item box menu overlay
 static void draw_itembox_menu(void) { }
 
-// (0x00464560) - Load frame part texture area from DAT_00ae9f14 table pointer.
+// (0x00464560) - Load frame part texture area from g_CurrentMenuFramesDataPtr table pointer.
 // Each call reads a 12-byte entry backwards: screenX(short), screenY(short),
 // width(ushort), height(ushort), texU(byte), texV(byte), then advances the pointer.
 static void load_main_menu_frame_part_tex_area(void)
 {
-    int base = (int)DAT_00ae9f14;
+    int base = (int)g_CurrentMenuFramesDataPtr;
     g_TextureDesc.texV    = *(unsigned char*)(base - 2);
     g_TextureDesc.texU    = *(unsigned char*)(base - 4);
     g_TextureDesc.height  = *(unsigned short*)(base - 6);
     g_TextureDesc.width   = *(unsigned short*)(base - 8);
     g_TextureDesc.screenY = *(short*)(base - 10);
     g_TextureDesc.screenX = *(short*)(base - 12);
-    DAT_00ae9f14 = (unsigned short*)(base - 12);
+    g_CurrentMenuFramesDataPtr = (unsigned short*)(base - 12);
 }

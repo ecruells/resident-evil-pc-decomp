@@ -89,10 +89,28 @@ void init_and_start_game(void)
     InitInputKeyBindings();
     CenterScreenOrigin();
 
-    g_demoIdleTimer1 = 10;
+    g_bGameActive = 2; // 0x00be41dc
+
+    // Initialize sprite animation slot table (6 entries x 0x14 bytes)
+    // Entries accessed by g_spriteAnimActive in rendering functions
+    g_spriteAnimSlots[2].count = 10;                     // 0x00be9a88
+    g_spriteAnimSlots[3].count = 10;                     // 0x00be9a9c
+    g_spriteAnimSlots[4].count = 4;                      // 0x00be9ab0
+    g_spriteAnimSlots[3].dataPtr = g_entityLightData_bad8; // 0x00be9aa0
+    g_spriteAnimSlots[4].dataPtr = g_entityLightData_bad8; // 0x00be9ab4
+    g_spriteAnimSlots[5].count = 4;                      // 0x00be9ac4
+    g_spriteAnimSlots[5].dataPtr = g_entityLightData_bb58; // 0x00be9ac8
+    g_spriteAnimSlots[0].count = 4;                      // 0x00be9a60
+    g_spriteAnimSlots[0].dataPtr = g_entityLightData_bb58; // 0x00be9a64
+    g_spriteAnimSlots[1].count = 4;                      // 0x00be9a74
+    g_spriteAnimSlots[2].dataPtr = g_entityLightData_9ad8; // 0x00be9a8c
+    g_spriteAnimSlots[1].dataPtr = g_playerAnimFunctions;  // 0x00be9a78
 
     ClearGameStateFlags();
     InitSoundAndFadeState();
+
+    g_imageBufferPtr = g_imageBufferDataA;               // 0x00bebce8
+    g_imageBufferPtr2 = g_imageBufferDataB;              // 0x00bee268
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
 

@@ -205,6 +205,40 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
 }
 
 // ============================================================================
+// QueueTexturedSprite — Queue a textured sprite for rendering
+// Uses a specific SRV instead of the white fallback. Coordinates are in
+// game-space (320x240) and get scaled to actual screen resolution.
+// ============================================================================
+void QueueTexturedSprite(float gameX, float gameY, float gameW, float gameH,
+                         ID3D11ShaderResourceView* srv, unsigned int depth)
+{
+    if (srv == NULL) return;
+    if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return;
+
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (pD3D == NULL) return;
+
+    float scaleX = (float)pD3D->m_width / 320.0f;
+    float scaleY = (float)pD3D->m_height / 240.0f;
+
+    PendingSprite* spr = &g_pendingSprites[g_pendingSpriteCount];
+    spr->x = (gameX + (float)g_ScreenOffsetX) * scaleX;
+    spr->y = (gameY + (float)g_ScreenOffsetY) * scaleY;
+    spr->w = gameW * scaleX;
+    spr->h = gameH * scaleY;
+    spr->u0 = 0.0f;
+    spr->v0 = 0.0f;
+    spr->u1 = 1.0f;
+    spr->v1 = 1.0f;
+    spr->color = 0xFFFFFFFF;
+    spr->srv = srv;
+    spr->valid = TRUE;
+    spr->depth = depth;
+
+    g_pendingSpriteCount++;
+}
+
+// ============================================================================
 // FrameRateGovernor (0x004973d0)
 // ============================================================================
 void FrameRateGovernor(void)
@@ -391,48 +425,111 @@ void ResetSpriteQueue(void)
 }
 
 // ============================================================================
-// display_texture (0x0046e8d0)
+// display_texture (0x0046ea05)
+// Original 4-param version: takes a texture descriptor, depth/fade value,
+// starting slot, and page count. Searches texture page descriptors to find
+// the VRAM page containing the texture, computes page-relative UVs, and
+// enqueues a sprite command.
+//
+// DX11 adaptation: The original's page descriptor table spans ~393KB in
+// Marni memory (0x008ed838 to 0x008f7890), but our g_VideoDriverArray_838
+// is only 8KB. The search loop cannot work with undersized arrays, so we
+// use the caller-provided slot+0xF directly as the SRV index. UVs are
+// scaled by the BPP factor because PS1 texU/texV are in VRAM-pixel
+// coordinates and the SRV is expanded to full RGBA texels.
 // ============================================================================
-void display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount)
+int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount)
 {
-    if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return;
-    if ((g_main_state_flags & 0x40000000) != 0) return;
+    // 0x0046ea05: Queue overflow check
+    if ((MAX_SPRITE_COMMANDS - 1) < g_SpriteQueueCount) {
+        return 0;
+    }
 
+    // 0x0046ea0f: Scale factor from flags bits 24-25
+    // Original: *(int *)(&DAT_004c2d78 + ((texture->flags & 0x3000000) >> 0x16))
+    static const int s_TextureScaleTable[4] = { 4, 2, 1, 1 };
+    int scale = s_TextureScaleTable[(texture->flags >> 24) & 3];
+
+    // 0x0046ec44: Validate SRV exists at slot+0xF
     int shiftedSlot = slot + 0xF;
-    if (shiftedSlot < 0 || shiftedSlot >= 256) return;
-    if (g_TexturePageSRV[shiftedSlot] == NULL) return;
+    if (shiftedSlot < 0 || shiftedSlot >= 256) {
+        return 0;
+    }
+    if (g_TexturePageSRV[shiftedSlot] == NULL) {
+        return 0;
+    }
+
+    // 0x0046ec8e: Build sprite command
+    short sx = texture->screenX + g_ScreenOffsetX;
+    short sy = texture->screenY + g_ScreenOffsetY;
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
 
+    // 0x0046ecf0: Render flags
     unsigned int flags;
     BuildSpriteRenderFlags(texture->flags, &flags);
     int variant = GetTextureVariant(texture->flags);
-    cmd->unk1c = (float)((variant != 0) ? (flags | 8) : flags);
+    if (variant == 0) {
+        cmd->unk1c = (float)flags;
+    } else {
+        cmd->unk1c = (float)(flags | 8);
+    }
 
+    // 0x0046ed4a: Color
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
     cmd->b = (float)texture->colorMulB * g_ColorScaleFactor;
 
-    cmd->texturePage = 0;
+    // 0x0046ed8e: Blend mode / texture page variant
+    if (variant == 0) {
+        cmd->texturePage = 0;
+    } else {
+        static const int s_VariantBlendTable[5] = { 0, 0x80, 0x80, 0, 0x80 };
+        cmd->texturePage = (int)((float)s_VariantBlendTable[variant] * 0.00390625f);
+    }
 
-    short sx = texture->screenX + g_ScreenOffsetX;
-    short sy = texture->screenY + g_ScreenOffsetY;
+    // 0x0046ede0: Position
     cmd->x0 = sx - texture->pivotX;
     cmd->y0 = sy - texture->pivotY;
-    cmd->x1 = (texture->width - texture->pivotX) + sx - 1;
-    cmd->y1 = (texture->height - texture->pivotY) + sy - 1;
+    cmd->x1 = (texture->width - texture->pivotX) + sx + -1;
+    cmd->y1 = (texture->height - texture->pivotY) + sy + -1;
 
-    cmd->depthSort = (unsigned int)depth * 16 + 500;
+    // 0x0046ee30: Depth sort
+    cmd->depthSort = (unsigned int)depth * 0x10 + 500;
 
+    // 0x0046ee48: UV computation
+    // Original: u0 = texU - posX * scale, v0 = texV - posY
+    // All LoadTexturePage calls use posX=0, posY=0/1, so page-relative UVs
+    // are effectively texU/texV. The SRV (from PSXTexture) stores pixels at
+    // texel resolution (m_WidthPixels = imgW * bppMultiplier), so texU/texV
+    // map directly to SRV texel coordinates without additional scaling.
     cmd->u0 = (unsigned short)texture->texU;
     cmd->v0 = (unsigned short)texture->texV;
-    cmd->u1 = cmd->u0 + texture->width - 1;
-    cmd->v1 = cmd->v0 + texture->height - 1;
+    cmd->u1 = cmd->u0 + texture->width + -1;
+    cmd->v1 = cmd->v0 + texture->height + -1;
 
+    // 0x0046ef20: Store SRV page index (DX11: replaces Marni handle)
     cmd->extraFlags = shiftedSlot;
 
-    g_SpriteQueueCount++;
+    // 0x0046ef2a: Fade inversion
+    unsigned short fadeVal = depth;
+    if (g_nFadeInverted != 0) {
+        if (g_MaxFadeValue < (int)(unsigned short)depth) {
+            fadeVal = (unsigned short)g_MaxFadeValue;
+        }
+        fadeVal = (unsigned short)g_MaxFadeValue - fadeVal;
+    }
+    if (0xFFF < fadeVal) {
+        fadeVal = 0xFFF;
+    }
+
+    // 0x0046ef6a: Render disable check and enqueue
+    if ((g_RenderDisableFlags & 0x21) == 0) {
+        g_SpriteQueueCount = g_SpriteQueueCount + 1;
+    }
+
+    return 1;
 }
 
 // ============================================================================

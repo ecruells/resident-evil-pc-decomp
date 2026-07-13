@@ -4,6 +4,7 @@
 #include "../marni/PSXTexture.h"
 #include "../marni/MarniBits.h"
 #include <cstdio>
+#include <algorithm>
 
 // ============================================================================
 // Global variables
@@ -16,7 +17,8 @@ int g_SubpixelOffsetX        = 0;
 int g_SubpixelOffsetY        = 0;
 int g_MaxFadeValue           = 4095;
 int g_DepthSortOverride      = 0;
-float g_ColorScaleFactor     = 1.0f / 255.0f;
+float g_ColorScaleFactor     = 2.0f / 255.0f;
+int g_nFadeInverted          = 0;   // 0x004c333c
 
 // Page width factors indexed by flags bits 22-23 (0x004c2d78)
 static const int g_PageWidthFactor[4] = { 1, 2, 4, 8 };
@@ -57,7 +59,23 @@ void SpriteQueue_Reset(void) {
 // to D3D11 draw calls at the current display resolution.
 // ============================================================================
 void FlushSpriteCommands(void) {
-    if (g_SpriteQueueCount == 0) return;
+
+    if (g_SpriteQueueCount == 0) {
+        return;
+    }
+
+    // 0x0046d...: Emulate the PS1 ordering table (OT). The original GPU linked
+    // primitives by Z-depth so that a LOWER depthSort value rendered ON TOP
+    // (nearer the camera). Without this, sprites are drawn in submission order,
+    // which makes later-drawn frames occlude the icons/textures they should sit
+    // behind (e.g. the equipped-weapon frame covering the weapon texture).
+    // Stable sort so equal-depth draws keep their submission order.
+    std::stable_sort(
+        g_SpriteCommandBuffer,
+        g_SpriteCommandBuffer + g_SpriteQueueCount,
+        [](const TextureDraw& a, const TextureDraw& b) {
+            return a.depthSort > b.depthSort;
+        });
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     float scaleX = pD3D ? (float)pD3D->m_width / 320.0f : 2.0f;
@@ -90,22 +108,33 @@ void FlushSpriteCommands(void) {
 
         int texSlot = cmd->extraFlags;
         ID3D11ShaderResourceView* srv = NULL;
-        float pageW = 256.0f;
-        float pageH = 256.0f;
+        // pageW/pageH must come from g_TexturePageWidth/Height, which every
+        // SRV-creating path sets. A 0 here means the slot's SRV metadata was
+        // lost (or never set); we must NOT fall back to 256, because that
+        // would under-sample a smaller SRV and render a tiny sub-region
+        // stretched across the sprite (the statface/blue/staitem 8x8 bug).
+        float pageW = 0.0f;
+        float pageH = 0.0f;
         if (texSlot >= 0 && texSlot < 256) {
             srv = g_TexturePageSRV[texSlot];
-            if (g_TexturePageWidth[texSlot] > 0) pageW = (float)g_TexturePageWidth[texSlot];
+            if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
             if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
         }
         if (srv == NULL) {
             texSlot = cmd->texturePage;
             if (texSlot >= 0 && texSlot < 256) {
                 srv = g_TexturePageSRV[texSlot];
-                if (g_TexturePageWidth[texSlot] > 0) pageW = (float)g_TexturePageWidth[texSlot];
+                if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
                 if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
             }
         }
-        if (srv == NULL) continue;
+        if (srv == NULL) {
+            continue;
+        }
+        if (pageW <= 0.0f || pageH <= 0.0f) {
+            // SRV exists but its dimensions are unknown — can't normalize UVs.
+            continue;
+        }
 
         float u0 = (float)cmd->u0 / pageW;
         float v0 = (float)cmd->v0 / pageH;
@@ -336,13 +365,14 @@ void TexturePage_Load(int slotIndex, void* imageData) {
 }
 
 void TexturePage_ClearAll(void) {
+    // Only clear the legacy PSX texture-page handle table. The D3D11 SRV
+    // metadata (g_TexturePageWidth/Height/Bpp) must stay in sync with
+    // g_TexturePageSRV, which is NOT released here — see the preservation
+    // note in TexturePage_DeleteSet. Zeroing width/height while the SRV
+    // persists made FlushSpriteCommands fall back to pageW=256, which
+    // under-sampled 64x64 global textures (statface/blue/staitem) and
+    // rendered their sprites as a tiny 8x8 region stretched to size.
     for (int i = 0; i < 256; i++) {
-        if (g_TexturePageSRV[i] != NULL && (DWORD)g_TexturePageSRV[i] > 0xFFFF) {
-            g_TexturePageSRV[i]->Release();
-            g_TexturePageSRV[i] = NULL;
-        }
-        g_TexturePageWidth[i] = 0;
-        g_TexturePageHeight[i] = 0;
         g_TexturePageTable_DAT[i] = 0;
     }
 }
@@ -383,12 +413,8 @@ void TexturePage_DeleteSet(int slotIndex) {
                 destroy_texture_page(handle);
                 g_TexturePageTable_DAT[pageIdx] = 0;
             }
-            if (g_TexturePageSRV[pageIdx] != NULL && (DWORD)g_TexturePageSRV[pageIdx] > 0xFFFF) {
-                g_TexturePageSRV[pageIdx]->Release();
-                g_TexturePageSRV[pageIdx] = NULL;
-            }
-            g_TexturePageWidth[pageIdx] = 0;
-            g_TexturePageHeight[pageIdx] = 0;
+            // SRVs, width, height, and Bpp are preserved across clear_textures()
+            // so global textures (fonts, status.tim) remain valid for rendering.
         }
     }
 }

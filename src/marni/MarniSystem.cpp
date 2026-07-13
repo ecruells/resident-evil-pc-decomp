@@ -1326,25 +1326,12 @@ void MarniDrawSprite(float x, float y, float w, float h,
         pBindSRV = pD3D->m_pWhiteSRV;
     }
     pD3D->m_pD3DContext->PSSetShaderResources(0, 1, &pBindSRV);
-    // Use point sampler for fonts, linear for other textures
-    static int s_fontDrawCount = 0;
-    if (pBindSRV == pD3D->m_pFontSRV && pD3D->m_pSamplerPoint) {
-        if (s_fontDrawCount < 5) {
-            char dbg[128];
-            sprintf(dbg, "[FONT] point sampler applied, draw #%d, srv=%p, sampler=%p\n",
-                    s_fontDrawCount, pBindSRV, pD3D->m_pSamplerPoint);
-            OutputDebugStringA(dbg);
-            s_fontDrawCount++;
-        }
+    // PS1 textures use nearest-point (pixelated) filtering, matching the
+    // original hardware. Fonts already use the point sampler; apply it to
+    // all textured sprites too so backgrounds/items/faces stay crisp.
+    if (pD3D->m_pSamplerPoint) {
         pD3D->m_pD3DContext->PSSetSamplers(0, 1, &pD3D->m_pSamplerPoint);
     } else {
-        if (pBindSRV == pD3D->m_pFontSRV && s_fontDrawCount < 5) {
-            char dbg[128];
-            sprintf(dbg, "[FONT] WARNING: point sampler MISSING! srv=%p, sampler=%p\n",
-                    pBindSRV, pD3D->m_pSamplerPoint);
-            OutputDebugStringA(dbg);
-            s_fontDrawCount++;
-        }
         pD3D->m_pD3DContext->PSSetSamplers(0, 1, &pD3D->m_pSamplerLinear);
     }
 

@@ -5,6 +5,96 @@
 #include "../marni/MarniBits.h"
 #include <stdio.h>
 
+#undef LoadImage  // Win32 WinUser.h macro conflicts with Marni LoadImage
+
+// ============================================================================
+// CLUT cache — stores parsed pixel data + all CLUT palettes per texture slot
+// so we can rebuild the SRV with a different CLUT palette index.
+// ============================================================================
+struct TextureCLUTCache {
+    BYTE*  pixelData;     // copy of the indexed pixel data (4bpp nibble-packed or 8bpp)
+    int    pixelDataSize; // size in bytes
+    WORD*  clutData;      // copy of all CLUT palettes (clutW * clutH entries)
+    int    clutDataSize;  // size in bytes
+    int    numCLUTs;      // number of CLUT palettes (from psxTex.m_NumCLUTs)
+    int    clutEntries;   // entries per CLUT (16 for 4bpp, 256 for 8bpp)
+    int    bpp;           // bit depth (4 or 8)
+};
+static TextureCLUTCache g_CLUTCache[256];
+
+// ============================================================================
+// RebuildTextureSRV — Rebuild the D3D11 SRV for a slot using a different CLUT
+// palette index. Uses cached pixel + CLUT data (no re-parsing).
+// Returns 1 on success, 0 on failure.
+// ============================================================================
+int RebuildTextureSRV(int slotIndex, int clutIndex)
+{
+    if (slotIndex < 0 || slotIndex >= 256) return 0;
+    TextureCLUTCache* cache = &g_CLUTCache[slotIndex];
+    if (cache->pixelData == NULL || cache->numCLUTs <= 1) return 0;
+    if (clutIndex < 0 || clutIndex >= cache->numCLUTs) return 0;
+
+    int w = g_TexturePageWidth[slotIndex];
+    int h = g_TexturePageHeight[slotIndex];
+    if (w <= 0 || h <= 0) return 0;
+
+    int bpp = cache->bpp;
+    int entriesPerCLUT = cache->clutEntries;
+
+    // Build RGBA palette from the selected CLUT
+    WORD* selectedCLUT = cache->clutData + clutIndex * entriesPerCLUT;
+    DWORD* clutRGBA = new DWORD[entriesPerCLUT];
+    for (int c = 0; c < entriesPerCLUT; c++) {
+        WORD clr = selectedCLUT[c];
+        DWORD a = (c == 0) ? 0x00 : 0xFF;
+        DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
+        DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
+        DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
+        clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
+    }
+
+    DWORD* rgba = new DWORD[w * h];
+    if (bpp == 4) {
+        BYTE* src = cache->pixelData;
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                int byteIdx = y * (w / 2) + x / 2;
+                BYTE nibble = (x & 1) ? (src[byteIdx] >> 4) : (src[byteIdx] & 0xF);
+                rgba[y * w + x] = clutRGBA[nibble];
+            }
+        }
+    } else {
+        BYTE* src = cache->pixelData;
+        for (int i = 0; i < w * h; i++) {
+            rgba[i] = clutRGBA[src[i]];
+        }
+    }
+
+    // Create new SRV first, then swap (avoids NULL SRV during render pass)
+    ID3D11ShaderResourceView* newSRV = NULL;
+    ID3D11Texture2D* tex = NULL;
+    MarniCreateTexture(w, h, 32, rgba, &tex, &newSRV);
+    if (tex) tex->Release();
+
+    if (newSRV != NULL) {
+        if (g_TexturePageSRV[slotIndex]) {
+            g_TexturePageSRV[slotIndex]->Release();
+        }
+        g_TexturePageSRV[slotIndex] = newSRV;
+    }
+
+    delete[] rgba;
+    delete[] clutRGBA;
+
+    return (newSRV != NULL) ? 1 : 0;
+}
+
+int GetTextureNumCLUTs(int slotIndex)
+{
+    if (slotIndex < 0 || slotIndex >= 256) return 0;
+    return g_CLUTCache[slotIndex].numCLUTs;
+}
+
 // 0x0046c130 - async texture page creation worker
 // Calls CMarniDirect3D vtable[6] = CreateTextureHandle
 void AsyncCreateTexturePage(void)
@@ -237,7 +327,8 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
     }
 
     PSXTexture psxTex;
-    if (psxTex.Store((int*)imageBuffer, 1) == 0) return;
+    int storeResult = psxTex.Store((int*)imageBuffer, 1);
+    if (storeResult == 0) return;
 
     WORD* texDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + slotOffset);
     texDesc[0] = posX;
@@ -282,11 +373,6 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
 
     // 0x0046c870: Create D3D11 SRV from the loaded PSXTexture
     // Store SRV indexed by shifted slot index (slotIndex = original + 0xF)
-    {
-        char dbg[256];
-        sprintf(dbg, "[TEX] LoadTexturePage slot=%d w=%d h=%d bpp=%d\n", slotIndex, (int)psxTex.m_WidthPixels, (int)psxTex.m_Height, (int)psxTex.m_BitDepth);
-        OutputDebugStringA(dbg);
-    }
     if (psxTex.m_pPixelData != NULL && psxTex.m_WidthPixels > 0 && psxTex.m_Height > 0) {
         int w = psxTex.m_WidthPixels;
         int h = psxTex.m_Height;
@@ -302,7 +388,7 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                 DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
                 DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
-                clutRGBA[c] = (a << 24) | (r << 16) | (g << 8) | b;
+                clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
             }
 
             DWORD* rgba = new DWORD[w * h];
@@ -325,23 +411,49 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                 }
             }
 
-            {
-                char dbg[256];
-                sprintf(dbg, "[TEX] rgba pixels: total=%d opaque=%d sample[0]=%08X [100]=%08X clut[1]=%08X\n",
-                    w*h, opaqueCount, rgba[0], rgba[100], clutRGBA[1]);
-                OutputDebugStringA(dbg);
-            }
-
             if (slotIndex >= 0 && slotIndex < 256) {
+                if (g_TexturePageSRV[slotIndex] != NULL) {
+                    g_TexturePageSRV[slotIndex]->Release();
+                    g_TexturePageSRV[slotIndex] = NULL;
+                }
                 ID3D11Texture2D* tex = NULL;
                 MarniCreateTexture(w, h, 32, rgba, &tex, &g_TexturePageSRV[slotIndex]);
                 if (tex) tex->Release();
                 g_TexturePageWidth[slotIndex] = w;
                 g_TexturePageHeight[slotIndex] = h;
-                {
-                    char dbg[256];
-                    sprintf(dbg, "[TEX] SRV[%d] created=%s w=%d h=%d bpp=%d\n", slotIndex, g_TexturePageSRV[slotIndex] ? "YES" : "NO", w, h, bpp);
-                    OutputDebugStringA(dbg);
+                g_TexturePageBpp[slotIndex] = bpp;
+
+                // Cache pixel + CLUT data for CLUT palette cycling in texture viewer
+                if (psxTex.m_NumCLUTs > 1 && psxTex.m_pPixelData != NULL) {
+                    // Free previous cache if any
+                    if (g_CLUTCache[slotIndex].pixelData != NULL) {
+                        delete[] g_CLUTCache[slotIndex].pixelData;
+                    }
+                    if (g_CLUTCache[slotIndex].clutData != NULL) {
+                        delete[] g_CLUTCache[slotIndex].clutData;
+                    }
+
+                    int entriesPerCLUT = (bpp == 4) ? 16 : 256;
+                    int totalCLUTEntries = (int)psxTex.m_NumCLUTs * entriesPerCLUT;
+                    int pixelBytes = (bpp == 4) ? (w / 2) * h : w * h;
+
+                    // Copy indexed pixel data
+                    g_CLUTCache[slotIndex].pixelData = new BYTE[pixelBytes];
+                    memcpy(g_CLUTCache[slotIndex].pixelData, psxTex.m_pPixelData, pixelBytes);
+                    g_CLUTCache[slotIndex].pixelDataSize = pixelBytes;
+
+                    // Copy all CLUT palettes from the raw TIM buffer
+                    // (m_CLUT_Data gets partially overwritten by multi-CLUT metadata
+                    //  in PSXTexture::Store, so read from the original file data)
+                    int* hdr = (int*)imageBuffer;
+                    WORD* rawCLUT = (WORD*)(hdr + 5);  // CLUT data starts at imageData[5]
+                    g_CLUTCache[slotIndex].clutData = new WORD[totalCLUTEntries];
+                    memcpy(g_CLUTCache[slotIndex].clutData, rawCLUT, totalCLUTEntries * sizeof(WORD));
+                    g_CLUTCache[slotIndex].clutDataSize = totalCLUTEntries * sizeof(WORD);
+
+                    g_CLUTCache[slotIndex].numCLUTs = (int)psxTex.m_NumCLUTs;
+                    g_CLUTCache[slotIndex].clutEntries = entriesPerCLUT;
+                    g_CLUTCache[slotIndex].bpp = bpp;
                 }
             }
             delete[] rgba;
@@ -364,23 +476,19 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                 rgba[i] = (a << 24) | (b8 << 16) | (g8 << 8) | r8;
             }
             if (slotIndex >= 0 && slotIndex < 256) {
+                if (g_TexturePageSRV[slotIndex] != NULL) {
+                    g_TexturePageSRV[slotIndex]->Release();
+                    g_TexturePageSRV[slotIndex] = NULL;
+                }
                 ID3D11Texture2D* tex = NULL;
                 MarniCreateTexture(w, h, 32, rgba, &tex, &g_TexturePageSRV[slotIndex]);
                 if (tex) tex->Release();
                 g_TexturePageWidth[slotIndex] = w;
                 g_TexturePageHeight[slotIndex] = h;
-                {
-                    char dbg[256];
-                    sprintf(dbg, "[TEX] SRV[%d] created=%s w=%d h=%d bpp=16\n", slotIndex, g_TexturePageSRV[slotIndex] ? "YES" : "NO", w, h);
-                    OutputDebugStringA(dbg);
-                }
+                g_TexturePageBpp[slotIndex] = 16;
             }
             delete[] rgba;
         }
-    } else {
-        char dbg[256];
-        sprintf(dbg, "[TEX] LoadTexturePage SKIP SRV: pData=%p w=%d h=%d\n", psxTex.m_pPixelData, (int)psxTex.m_WidthPixels, (int)psxTex.m_Height);
-        OutputDebugStringA(dbg);
     }
 }
 
@@ -635,4 +743,252 @@ void SetupTexturePageHandles(int slotIndex, int pageIndex)
         int pageSlot = slotIndex * 0xDF + pageIndex - 1;
         ((DWORD*)&g_TexturePageTable_DAT)[pageSlot] = (DWORD)handle;
     }
+}
+
+// ============================================================================
+// LoadImage (0x0046d3b0)
+// Marni System PSYQ LoadImage equivalent.
+// Copies raw pixel data from main memory into a CMarniBits surface within the
+// texture page table, then creates texture page handles.
+//
+// Parameters (from Ghidra + assembly analysis):
+//   srcData  - pointer to raw pixel data (e.g. 16-bit RGB555)
+//   srcSlot  - source texture slot index (template CMarniBits for format)
+//   dstSlot  - destination texture slot index
+//   format   - pixel format index (1 = 16-bit, bpp=2; indexed into table at 0x4c2d78)
+//   x        - X position in destination surface (pixels)
+//   y        - Y position in destination surface (pixels)
+//   width    - width in pixels to copy
+//   height   - height in pixels to copy
+//   mode     - CMarniBits sub-page index within the source slot
+// ============================================================================
+void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
+               short x, short y, short width, short height, int mode) // 0x0046d3b0
+{
+    int destSlot = dstSlot + 0xF;
+    int destCheck = destSlot * 0xDF;
+    int destOff = destSlot * 0x37C;
+    int srcOff = (srcSlot + 0xF) * 0x37C + mode * 0x68;
+
+    // Bytes per pixel from format index (table at 0x4c2d78)
+    static const int bppTable[] = { 1, 2, 4 };
+    int bpp = (format >= 0 && format < 3) ? bppTable[format] : 2;
+
+    // Destroy existing texture pages at destination slot
+    if (g_VideoDriverArray_814[destCheck] != 0) {
+        for (DWORD i = 0; i < g_VideoDriverArray_810[destCheck]; i++) {
+            DWORD* handles = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + destCheck * sizeof(DWORD));
+            if (handles[i] != 0) {
+                destroy_texture_page(handles[i]);
+                handles[i] = 0;
+            }
+        }
+        VideoDriver_ClearArrayD0();
+    }
+
+    // VRAM page simulation: maintain a persistent RGBA buffer per source page
+    // (identified by srcOff). LoadImage composites pixel data at position (x, y)
+    // within this buffer, just like the PS1 BIOS LoadImage copies to VRAM.
+    // The D3D11 SRV is then created from the full VRAM page buffer.
+    // Multiple destSlots may share the same source VRAM page (e.g. item images
+    // composited at different y-offsets all share srcSlot=0, mode=2). We track
+    // all destSlots per VRAM page so the SRV is updated everywhere it's needed.
+    #define VRAM_PAGE_W 256
+    #define VRAM_PAGE_H 256
+    #define VRAM_PAGE_MAX_SLOTS 64
+    #define VRAM_MAX_DESTS 16
+    struct VRAMPage {
+        DWORD* rgba;
+        int destSlots[VRAM_MAX_DESTS];
+        int numDests;
+    };
+    static VRAMPage s_vramPages[VRAM_PAGE_MAX_SLOTS];
+    static int s_vramInit = 0;
+    if (!s_vramInit) { memset(s_vramPages, 0, sizeof(s_vramPages)); s_vramInit = 1; }
+
+    int vramIdx = srcOff & (VRAM_PAGE_MAX_SLOTS - 1);
+    if (srcData != 0 && bpp == 2 && (int)width > 0 && (int)height > 0 && vramIdx >= 0 && vramIdx < VRAM_PAGE_MAX_SLOTS) {
+        VRAMPage* vp = &s_vramPages[vramIdx];
+        if (vp->rgba == NULL) {
+            vp->rgba = new DWORD[VRAM_PAGE_W * VRAM_PAGE_H]();
+            vp->numDests = 0;
+        }
+
+        if (destSlot >= 0 && destSlot < 256) {
+            int found = 0;
+            for (int i = 0; i < vp->numDests; i++) {
+                if (vp->destSlots[i] == destSlot) { found = 1; break; }
+            }
+            if (!found && vp->numDests < VRAM_MAX_DESTS) {
+                vp->destSlots[vp->numDests++] = destSlot;
+            }
+        }
+
+        DWORD* page = vp->rgba;
+        int dstX = ((int)x & 0x3F) * 2;
+        int dstY = (int)y;
+
+        // item_all.pix is 8bpp indexed data. The CLUT comes from status.tim
+        // (slot 15), loaded earlier by LoadTexturePage with 8bpp + CLUT.
+        // LoadImage format=1 (16-bit) copies raw bytes; at 8bpp this means
+        // width*2 bytes per row = width*2 pixels per row.
+        TextureCLUTCache* clut = &g_CLUTCache[15];
+        if (clut->clutData != NULL && clut->bpp == 8 && clut->clutEntries >= 256) {
+            BYTE* src8 = (BYTE*)srcData;
+            int pixW = (int)width * 2;
+            int pixH = (int)height;
+            // Use CLUT from printClutTint: 0x1E4 → X=4, 0x1E0 → X=0.
+            // CLUT X is in units of 16 halfwords. For 256-entry CLUT (512 bytes
+            // = 256 halfwords), CLUT index = X / 16. 0x1E4 X=4 → CLUT 0,
+            // but items use 0x1E4 for normal and 0x1E0 for special.
+            // Try CLUT 0 first; the correct palette is the one that matches
+            // the original PS1 game.
+            int clutIndex = 2;
+            WORD* clutPalette = clut->clutData + clutIndex * 256;
+
+            for (int row = 0; row < pixH; row++) {
+                for (int col = 0; col < pixW; col++) {
+                    BYTE idx = src8[row * pixW + col];
+                    WORD clr = clutPalette[idx];
+                    DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
+                    DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
+                    DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
+                    DWORD a = (idx == 0) ? 0x00 : 0xFF;
+                    DWORD rgba = (a << 24) | (b << 16) | (g << 8) | r;
+                    int px = dstX + col;
+                    int py = dstY + row;
+                    if (px >= 0 && px < VRAM_PAGE_W && py >= 0 && py < VRAM_PAGE_H) {
+                        page[py * VRAM_PAGE_W + px] = rgba;
+                    }
+                }
+            }
+        } else {
+            WORD* pixels = (WORD*)srcData;
+            int w = (int)width;
+            int h = (int)height;
+
+            for (int row = 0; row < h; row++) {
+                for (int col = 0; col < w; col++) {
+                    WORD pixel = pixels[row * w + col];
+                    DWORD r = ((pixel >> 0)  & 0x1F) * 255 / 31;
+                    DWORD g = ((pixel >> 5)  & 0x1F) * 255 / 31;
+                    DWORD b = ((pixel >> 10) & 0x1F) * 255 / 31;
+                    DWORD a = (r == 0 && g == 0 && b == 0) ? 0x00 : 0xFF;
+                    DWORD rgba = (a << 24) | (b << 16) | (g << 8) | r;
+                    for (int sx = 0; sx < 2; sx++) {
+                        int px = dstX + col * 2 + sx;
+                        int py = dstY + row;
+                        if (px >= 0 && px < VRAM_PAGE_W && py >= 0 && py < VRAM_PAGE_H) {
+                            page[py * VRAM_PAGE_W + px] = rgba;
+                        }
+                    }
+                }
+            }
+        }
+
+        for (int d = 0; d < vp->numDests; d++) {
+            int slot = vp->destSlots[d];
+            if (slot >= 0 && slot < 256) {
+                if (g_TexturePageSRV[slot] != NULL) {
+                    g_TexturePageSRV[slot]->Release();
+                    g_TexturePageSRV[slot] = NULL;
+                }
+                ID3D11Texture2D* tex = NULL;
+                MarniCreateTexture(VRAM_PAGE_W, VRAM_PAGE_H, 32, page, &tex, &g_TexturePageSRV[slot]);
+                if (tex) tex->Release();
+                g_TexturePageWidth[slot] = VRAM_PAGE_W;
+                g_TexturePageHeight[slot] = VRAM_PAGE_H;
+                g_TexturePageBpp[slot] = 16;
+            }
+        }
+    }
+
+    // Lock source CMarniBits to get its pixel data buffer
+    CMarniBits* srcBits = (CMarniBits*)((BYTE*)&g_VideoDriverArray_4d0 + srcOff);
+    void* lockedPixels = NULL;
+    void* lockedPalette = NULL;
+    if (!srcBits->Lock(&lockedPixels, (DWORD*)&lockedPalette))
+        return;
+
+    // Copy raw pixel data from srcData into the locked CMarniBits buffer.
+    // The copy writes width*height 16-bit pixels starting at position (x, y)
+    // in the destination surface, row by row.
+    BYTE* destPixels = (BYTE*)lockedPixels;
+    int srcPitch = srcBits->m_pitch;       // row stride in bytes
+    int rowStride = srcPitch / bpp;        // row stride in pixels
+    int dstOffset = rowStride * (int)y + (int)x; // starting pixel offset
+    BYTE* srcPtr = (BYTE*)srcData;
+
+    for (int row = 0; row < (int)height; row++) {
+        if ((int)width > 0) {
+            int byteOff = dstOffset * 2;
+            for (int col = 0; col < (int)width; col++) {
+                *(WORD*)(destPixels + byteOff) = *(WORD*)srcPtr;
+                srcPtr += 2;
+                byteOff += 2;
+            }
+        }
+        dstOffset += rowStride;
+    }
+
+    // CalcAddress on source, then Unlock source
+    void* calcAddr = srcBits->CalcAddress(bpp * (int)(short)(WORD)dstSlot, (int)format);
+    srcBits->Unlock();
+
+    // SetAddress on destination CMarniBits (first sub-page at destOff)
+    CMarniBits* dstBits = (CMarniBits*)((BYTE*)&g_VideoDriverArray_4d0 + destOff);
+    dstBits->SetAddress(calcAddr, lockedPixels);
+
+    // Copy pixel format descriptor from source to dest (6 DWORDs + 1 WORD = 26 bytes)
+    BYTE* srcDesc = (BYTE*)srcBits + 0x10;
+    BYTE* dstDesc = (BYTE*)dstBits + 0x10;
+    memcpy(dstDesc, srcDesc, 26);
+
+    // Copy bitDepth and paletteFormat from source
+    dstBits->m_bitDepth = srcBits->m_bitDepth;
+    dstBits->m_paletteFormat = srcBits->m_paletteFormat;
+
+    // Set destination surface dimensions
+    dstBits->m_pitch = (int)width * bpp;
+    dstBits->m_height = (int)height;
+    dstBits->m_field38 = srcBits->m_field38;
+
+    // Set flags
+    dstBits->m_isValid = 1;
+    dstBits->m_dataSource = 0;
+    dstBits->m_hasPalette = 1;
+    dstBits->m_ownsPalette = 1;
+    dstBits->m_flag50 = 1;
+
+    // Set texture descriptor (VRAM position and size)
+    WORD* texDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + destOff);
+    short sign = x >> 15;
+    short wrappedX = (short)((((x ^ sign) - sign) & 0x3F) ^ sign) - sign;
+    texDesc[0] = (WORD)wrappedX;
+    texDesc[1] = (WORD)y;
+    texDesc[2] = (WORD)width;
+    texDesc[3] = (WORD)height;
+
+    // Copy additional descriptor fields from source slot
+    WORD* srcTexDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + (srcSlot + 0xF) * 0x37C);
+    texDesc[4] = srcTexDesc[4];
+    texDesc[5] = srcTexDesc[5];
+    texDesc[6] = srcTexDesc[6];
+    texDesc[7] = srcTexDesc[7];
+    texDesc[8] = srcTexDesc[8] + (short)(((int)(short)x + ((int)(short)x >> 31 & 0x3F)) >> 6);
+
+    // Set slot metadata: 1 page, copy flag from source
+    g_VideoDriverArray_810[destCheck] = 1;
+    g_VideoDriverArray_814[destCheck] = g_VideoDriverArray_814[(srcSlot + 0xF) * 0xDF];
+
+    // Create texture page handles for each CMarniBits sub-page
+    DWORD* pageHandles = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + destCheck * sizeof(DWORD));
+    BYTE* pageData = (BYTE*)dstBits + 0x50; // start at m_flag50 of first CMarniBits
+    for (DWORD i = 0; i < g_VideoDriverArray_810[destCheck]; i++) {
+        *(DWORD*)pageData = 1; // set m_flag50
+        int handle = create_texture_page(pageData - 0x50, 2); // pass CMarniBits base
+        pageHandles[i] = (DWORD)handle;
+        pageData += 0x68; // next CMarniBits
+    }
+
 }

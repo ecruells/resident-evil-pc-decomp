@@ -303,7 +303,7 @@ void room_set(void)
 
         // 0x00477950: Common character setup (reached when bit3 set or ids < 4)
         if ((g_CharacterModelId & 8) != 0 || (g_CharacterModelId < 4 && g_playerEntity.id <= 3)) {
-            LoadHeldItemsImages(g_loadDataDestPointer);
+            LoadHeldItemsImages();
             g_playerEntity.animationId = 0;
             g_playerEntity.animFrameId = 0;
             g_playerEntity.anim_86 = 0;

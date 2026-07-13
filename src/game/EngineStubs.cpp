@@ -356,8 +356,5 @@ void loadMenuAssets(void) { }
 // (0x004947c0) - Draw item box menu
 void draw_itembox_menu(void) { }
 
-// display_item_qty - Draw item quantity text
-void display_item_qty(unsigned char itemId, unsigned char qty, int depth) { }
 
-// draw_texture - Draw textured primitive
-void draw_texture(TextureDesc* tex, int depth) { }
+

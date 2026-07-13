@@ -80,8 +80,8 @@ public:
     //   0x140 - 0x33F: Remaining slots 3-7 (0x200 bytes)
     // ========================================================================
     BYTE   pad_68_BF[0x58];           // 0x68 - 0xBF (88 bytes)
-    DWORD  m_CLUT_Data[32];           // 0xC0 - 0x13F (128 bytes) — multi-CLUT entries
-    BYTE   pad_140_33F[0x200];        // 0x140 - 0x33F (512 bytes)
+    DWORD  m_CLUT_Data[512];          // 0xC0 - 0x8BF (2048 bytes) — multi-CLUT entries (8bpp needs up to 1536 bytes)
+    BYTE   pad_140_33F[0x200];        // padding (512 bytes)
 
     // ========================================================================
     // Trailing fields (0x340 - 0x347)

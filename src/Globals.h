@@ -293,6 +293,23 @@ extern short         g_CurSlot;
 extern int           g_SndFadeStepTbl[64];
 
 
+// Sprite animation slot table (6 entries x 0x14 bytes at 0x00be9a60)
+// Indexed by g_spriteAnimActive in room_camera_and_lighting_update / calc_entity_lighting
+extern SpriteAnimSlot g_spriteAnimSlots[6];             // 0x00be9a60
+
+// Sprite animation data buffers (pointed to by g_spriteAnimSlots entries)
+extern BYTE          g_entityLightData_9ad8[];          // 0x00be9ad8 - entry[2] target
+extern BYTE          g_entityLightData_bad8[];          // 0x00bebad8 - entry[3]/[4] target
+extern BYTE          g_entityLightData_bb58[];          // 0x00bebb58 - entry[0]/[5] target
+
+// Image buffer data (pointed to by g_imageBufferPtr / g_imageBufferPtr2)
+extern BYTE          g_imageBufferDataA[];              // 0x00bebce8 - primary image buffer data
+extern BYTE          g_imageBufferDataB[];              // 0x00bee268 - secondary image buffer data
+
+// Image buffer pointers (set by init_and_start_game, swapped by display_die_screen)
+extern void*         g_imageBufferPtr;                  // 0x00d213a8 - primary image buffer pointer
+extern void*         g_imageBufferPtr2;                 // 0x00d213ac - secondary image buffer pointer
+
 extern POLY_F4      Poly_F4_ARRAY_004ba750[4];          // 0x004ba750
 
 // Game init
@@ -346,9 +363,19 @@ extern unsigned char g_EkgSecondaryLine[24];           // 0x00be1184
 // Item image texture V lookup table (indexed by item ID, BSS at 0x00d21ccf)
 extern unsigned char DAT_00d21ccf[256];                // 0x00d21ccf
 
-// Menu frame end boundary markers (used by menu_draw_inventory loops)
-extern const unsigned short DAT_004c26d0[];            // 0x004c26d0
-extern const unsigned short DAT_004c2940[];            // 0x004c2940
+// Menu frame/rect data block (original binary 0x004c26d0..0x004c2998, 712 bytes)
+// Defined in MenuData.cpp as one contiguous block. The code reads entries
+// BACKWARDS from various label pointers that sit WITHIN this block
+extern const unsigned char g_MenuFrameDataBlock[712];    // 0x004c26d0
+
+// Label pointers into the menu frame data block (byte offsets from 0x004c26d0)
+#define g_MainMenuFramesPos     (g_MenuFrameDataBlock + 0)     // 0x004c26d0 bottom-frame end marker
+#define g_MainMenuFrames2Pos    (g_MenuFrameDataBlock + 264)   // 0x004c27d8 bottom frame decoration
+#define g_MainMenuTopOptionsPos (g_MenuFrameDataBlock + 312)   // 0x004c2808 top options buttons frame parts
+#define g_MainMenuFrames3Pos    (g_MenuFrameDataBlock + 368)   // 0x004c2840 frame border segments
+#define g_MainMenuFrames4Pos    (g_MenuFrameDataBlock + 506)   // 0x004c28c0 alternate border
+#define DAT_004c2940            (g_MenuFrameDataBlock + 634)   // 0x004c2940 rect outline end marker
+#define g_inventorySlotsPos     (g_MenuFrameDataBlock + 656)   // 0x004c2960 inventory slot positions
 
 // Print text
 extern char          PRINT_TEXT_BUFFER[256];           // 0x00be0e20
@@ -373,6 +400,7 @@ extern DWORD         g_TexturePageTable_DAT[256];
 extern ID3D11ShaderResourceView* g_TexturePageSRV[256];
 extern int           g_TexturePageWidth[256];
 extern int           g_TexturePageHeight[256];
+extern int           g_TexturePageBpp[256];
 
 // Player input data fields
 extern int           g_PlayerInputConfig_3c;
@@ -612,6 +640,10 @@ void PrintText8x8(short x, short y, unsigned char color, char shadow);
 void PrintText8x14(short x, short y, unsigned char color, char flags);
 void PrintTextFormatted(short x, short y, unsigned char color, const unsigned char* data);
 void draw_rect(RectDrawDesc* rect, int blend, int flags);
+void QueueTexturedSprite(float gameX, float gameY, float gameW, float gameH,
+                         ID3D11ShaderResourceView* srv, unsigned int depth);
+int  RebuildTextureSRV(int slotIndex, int clutIndex);
+int  GetTextureNumCLUTs(int slotIndex);
 
 // Task scheduler
 void TaskScheduler_Init(void);
@@ -727,7 +759,7 @@ void FUN_00470a40(void);                              // 0x00470a40 - texture cl
 void FUN_0047d0e0(void);                              // 0x0047d0e0 - effect cleanup
 void FUN_00462940(void);                              // 0x00462940 - room camera restore
 void FUN_0040ac80(int idx, void* lightData);          // 0x0040ac80 - set light data
-void setBackColor(unsigned char r, unsigned char g, unsigned char b); // 0x00455260
+void setBackColor(unsigned short r, unsigned short g, unsigned short b); // 0x0040ada0
 void empty_40ae40(int param);                         // 0x0040ae40
 void update_entities(void);                           // 0x0048f0f0
 void update_player_anim(void);                        // 0x00494d90
@@ -805,8 +837,10 @@ void empty_00470960(int slot);
 int  check_save_files_exist(void);
 int  create_texture_page(void* data, int mode);
 void destroy_texture_page(int handle);
+#undef LoadImage  // Win32 macro conflicts with Marni LoadImage
+void LoadImage(int srcData, int srcSlot, int dstSlot, short format, short x, short y, short width, short height, int mode);
 void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId);
-void display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount);
+int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount);
 int  AddTintSprite(TextureDesc* texture, unsigned short brightness);
 void title_exit_loop(void);
 void fade_update(void);
@@ -907,7 +941,7 @@ void init_room(void);
 void room_set(void);
 void LoadRoomRdt(void);
 void update_room_bgm(void);
-void LoadHeldItemsImages(void* buf);
+void LoadHeldItemsImages(void);
 void load_room_bg(void);
 void load_room_bg_image(void);
 void load_room_bg_masks(void);
@@ -921,7 +955,7 @@ void empty_0047eb90(int param);
 void load_shoot_direction_data(void);
 void load_room_sfx(unsigned char soundTableIndex);
 void load_character_sfx(unsigned char charId);
-void LoadItemImage(int imageType, int index, void* buf);
+void LoadItemImage(int item_id, int image_index, int img_buffer);
 void PrintFormattedText(short x, short y, unsigned char color, const unsigned char* data);
 
 // Room sprite visibility control
@@ -980,12 +1014,12 @@ extern int           DAT_004d228c;                     // 0x004d228c - menu proc
 
 
 extern const unsigned char g_StageRoomFlagOffset[5]; // 0x004d31e0 - per-stage room flag base offsets
-extern unsigned char g_ItemSlotsIndexes;
+extern unsigned char g_ItemSlotsIndexes[16];
 extern DWORD         g_ItemSlotsBitmask;
 extern unsigned char g_defaultItemSlot;
 extern unsigned char DAT_00be41e1;
 extern unsigned char DAT_00be9614;
-extern const unsigned char g_ItemImageLookupTable[0x50 * 4];
+extern const unsigned char g_ItemImageLookupTable[459];
 
 // Room state (reset by room_state_reset / room_set)
 extern DWORD         g_SysFlags[2];                 // 0x00be41c8 - SCD flag bank 4 (system flags, case 4 in cmd_bit_test)
@@ -993,7 +1027,7 @@ extern DWORD         g_SysFlags[2];                 // 0x00be41c8 - SCD flag ban
 
 // Room item event table (24 entries x 12 bytes, used by item/door commands)
 extern unsigned char g_RoomItemEventTable[288];   // 0x00d91aa0
-extern void*         g_RoomItemEventHead;         // 0x00d91bc0
+extern void*         g_RoomItemEventHead;         // 0x00d91bc0b
 
 // Lab slides state (reset by lab_slides_reset)
 extern unsigned char g_labSlidesFuncIndex;        // 0x00d22790
@@ -1199,6 +1233,9 @@ extern unsigned char  DAT_008e1c7c;                     // 0x008e1c7c
 extern unsigned char  DAT_008e1c74;                     // 0x008e1c74
 extern DWORD          DAT_004d2bdc;                     // 0x004d2bdc
 extern int            DAT_004d2be0;                     // 0x004d2be0
+extern unsigned char  g_red_color;                      // 0x004d2be4 - back color red (0-255)
+extern unsigned char  g_green_color;                    // 0x004d2be5 - back color green (0-255)
+extern unsigned char  g_blue_color;                     // 0x004d2be6 - back color blue (0-255)
 // DAT_004d6444 already declared at line 365
 
 // Bullet effect parent sprite info pointer (set by cmd_bullet_0x3d)

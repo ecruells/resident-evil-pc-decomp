@@ -46,6 +46,7 @@ extern int   g_SubpixelOffsetY;
 extern int   g_MaxFadeValue;
 extern int   g_DepthSortOverride;
 extern float g_ColorScaleFactor;
+extern int   g_nFadeInverted;
 
 void BuildSpriteRenderFlags(unsigned int textureFlags, unsigned int* outFlags);
 int  GetTextureVariant(unsigned int textureFlags);

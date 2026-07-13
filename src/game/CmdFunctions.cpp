@@ -30,7 +30,7 @@ extern void FUN_00473d10(unsigned char p1, unsigned short p2, unsigned short p3,
 extern void FUN_00473d60(char p1, unsigned char p2, unsigned char p3);
 extern void RoomSpr_SetInactive(char id);  // 0x00476130
 extern void RoomSpr_SetActive(char id);    // 0x00476170
-extern void setBackColor(unsigned char r, unsigned char g, unsigned char b);
+extern void setBackColor(unsigned short r, unsigned short g, unsigned short b);
 extern void FUN_0048bfe0(void);
 extern void FUN_0048c020(int param);
 extern void FUN_004870d0(int param);

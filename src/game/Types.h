@@ -217,6 +217,9 @@ static_assert(sizeof(ScaMatrixData) == 0x50, "ScaMatrixData size mismatch");
 #define ITEM_BOTTLE_WATER2      0x4E
 #define ITEM_EAGLE_WOLF_BOOK    0x4F
 
+// Highest item ID used by the game (special items with quantity)
+#define ITEM_ID_MAX             0x6E
+
 // ============================================================================
 // RDT Light structure (0x14 / 20 bytes each)
 // ============================================================================
@@ -498,3 +501,18 @@ struct D3DRendererInfo {
 #define REGKEY_PATH "Software\\CAPCOM\\RESIDENT EVIL"
 #define MAX_DISPLAY_MODES 100
 #define MAX_DRIVES 26
+
+// ============================================================================
+// SpriteAnimSlot (0x14 / 20 bytes each)
+// Sprite animation data table entry. 6 entries at 0x00be9a60.
+// Indexed by g_spriteAnimActive in room_camera_and_lighting_update and
+// calc_entity_lighting (stride 0x14).
+// ============================================================================
+#pragma pack(push, 1)
+struct SpriteAnimSlot {
+    int   count;        // 0x00 - count / OT shift value (4 or 10)
+    void* dataPtr;      // 0x04 - pointer to sprite/lighting data buffer
+    BYTE  pad_08[0x0C]; // 0x08 - unused/unknown
+};
+#pragma pack(pop)
+static_assert(sizeof(SpriteAnimSlot) == 0x14, "SpriteAnimSlot size mismatch");
