@@ -529,6 +529,7 @@ int           g_OTIndex = 0;              // OT index
 DWORD         g_SpriteQueueIndex = 0;     // DAT_004c2d10
 CMarniBits    g_MarniBitsWorkBuffer;      // DAT_008ed478
 DWORD         g_MarniBitsOutput = 0;      // DAT_008ed470
+CMarniBits    g_MarniFrameBuffer;         // framebuffer proxy for screenshots
 DWORD         g_ObjectWorkBuffer[64] = {};// DAT_008ec9c8
 
 

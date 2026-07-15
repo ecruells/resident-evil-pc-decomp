@@ -5,6 +5,7 @@
 #include "../marni/PSXTexture.h"
 #include "SpriteRenderer.h"
 #include <cstdlib>
+#include <time.h>
 
 extern unsigned int set_message_display(unsigned short msg_id, unsigned short pause_game);
 extern void Flg_on(int baseAddr, unsigned int bitIndex);
@@ -1394,6 +1395,52 @@ void StMask(int param_1, int param_2)
     }
     g_ScreenAccessReady = 0;
     g_ScreenAccessCountdown = (char)param_2;
+}
+
+// ============================================================================
+// CreateTimestampedLogFile - 0x004427a0
+// Triggered by PrintScreen (VK_SNAPSHOT). Builds a timestamped .BMP filename
+// from the current local time, prepends the install path, and saves the
+// current screen to that file. The save is skipped when free disk space on
+// the target drive is <= 1 MB.
+// Original: calls SaveBitmapToFile on the framebuffer CMarniBits at
+// g_pMarniDirect3D + 0x2064 (always populated by software rendering).
+// Modern: g_MarniFrameBuffer has m_isValid=1 / m_pPixelData=NULL;
+// SaveBitmapToFile captures the D3D11 backbuffer before writing BMP.
+// ============================================================================
+void CreateTimestampedLogFile(void)
+{
+    time_t rawTime;
+    struct tm* timeInfo;
+    char fileName[260];
+    char fullPath[MAX_PATH];
+
+    time(&rawTime);
+    timeInfo = localtime(&rawTime);
+    if (timeInfo == NULL) {
+        return;
+    }
+
+    // asctime() yields e.g. "Wed Jul 14 20:14:08 2026\n"
+    sprintf(fileName, "%s", asctime(timeInfo));
+
+    // Replace ':' with '-' so the timestamp is filesystem-safe
+    int len = (int)strlen(fileName);
+    for (int i = 0; i < len; i++) {
+        if (fileName[i] == ':') {
+            fileName[i] = '-';
+        }
+    }
+
+    // Append the .BMP extension, overwriting the trailing newline
+    sprintf(fileName + len - 1, ".BMP");
+
+    // Prepend the install path (g_szInstallPath)
+    sprintf(fullPath, "%s%s", g_szInstallPath, fileName);
+
+    // if (GetFreeDiskSpaceMB(fullPath) > 1) {
+        g_MarniFrameBuffer.SaveBitmapToFile(fullPath);
+    // }
 }
 
 // ============================================================================

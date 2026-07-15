@@ -3,6 +3,7 @@
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
+#include "../marni/MarniBits.h"
 
 // Forward declarations for TmdAnimation.cpp
 extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
@@ -71,9 +72,6 @@ void UpdateDemoTimer(void) {
 void empty_0047b950(int param)
 {
 }
-
-// CreateTimestampedLogFile - stub
-void CreateTimestampedLogFile(void)                           { /* stub */ }
 
 // ShowVideoModeDebugText - stub
 void ShowVideoModeDebugText(void)                            { /* stub */ }

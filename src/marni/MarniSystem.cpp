@@ -6,6 +6,7 @@
 // Original functions referenced by address throughout
 
 #include "MarniSystem.h"
+#include "MarniBits.h"
 #include "Globals.h"
 #include <cstdio>
 #include <cstring>
@@ -545,6 +546,12 @@ static CMarniDirect3D* MarniDirect3D_Construct(CMarniDirect3D* pThis, HWND hWnd,
 
     pThis->m_isInitialized = TRUE;
     OutputDebugStringA("[Marni] Initialization complete\n");
+
+    // Pre-validate the framebuffer proxy surface so SaveBitmapToFile will
+    // capture the D3D11 backbuffer when called on it (original: the
+    // framebuffer CMarniBits at g_pMarniDirect3D + 0x2064 was always
+    // populated by software rendering).
+    g_MarniFrameBuffer.m_isValid = 1;
 
     return pThis;
 }

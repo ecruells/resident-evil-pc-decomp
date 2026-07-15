@@ -580,6 +580,7 @@ extern int           g_OTIndex;
 extern DWORD         g_SpriteQueueIndex;
 extern CMarniBits    g_MarniBitsWorkBuffer;
 extern DWORD         g_MarniBitsOutput;
+extern CMarniBits    g_MarniFrameBuffer;
 extern DWORD         g_ObjectWorkBuffer[64];
 
 // Save/Load game state globals

@@ -17,6 +17,10 @@
 #include <cstring>
 #include <windows.h>
 
+#include "MarniSystem.h"
+
+extern void* g_pMarniDirect3D;
+
 // ============================================================================
 // External memory operators (defined in MarniSystem.cpp / Globals)
 // ============================================================================
@@ -1282,8 +1286,101 @@ int CMarniBits::CreateWork(int width, int height, int bitDepth, DWORD paletteFla
 // ============================================================================
 // SaveBitmapToFile  - 0x00403210
 // Saves surface as a 24-bit BMP file.
+// When the surface has no pixel data (m_pPixelData == NULL) but is marked
+// valid with dimensions, it captures the D3D11 backbuffer as the source.
+// This mirrors the original design where the framebuffer CMarniBits at
+// g_pMarniDirect3D + 0x2064 was always populated by software rendering;
+// in the modern D3D11 pipeline we read back the swap chain on demand.
 // ============================================================================
 int CMarniBits::SaveBitmapToFile(const char* filename) {
+    // If no pixel data, capture from the D3D11 backbuffer into this surface.
+    // This handles the framebuffer proxy case (original: g_pMarniDirect3D + 0x2064).
+    // The surface may not be marked valid yet (m_isValid == 0 from constructor),
+    // so this check must come before the m_isValid guard below.
+    bool captured = false;
+    if (m_pPixelData == NULL) {
+        CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+        if (pD3D && pD3D->m_isInitialized && pD3D->m_pSwapChain &&
+            pD3D->m_pD3DDevice && pD3D->m_pD3DContext) {
+
+            ID3D11Texture2D* pBackBuffer = NULL;
+            HRESULT hr = pD3D->m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBackBuffer);
+            if (SUCCEEDED(hr) && pBackBuffer) {
+                D3D11_TEXTURE2D_DESC bbDesc;
+                pBackBuffer->GetDesc(&bbDesc);
+                DWORD w = bbDesc.Width;
+                DWORD h = bbDesc.Height;
+
+                D3D11_TEXTURE2D_DESC stagingDesc = {};
+                stagingDesc.Width = w;
+                stagingDesc.Height = h;
+                stagingDesc.MipLevels = 1;
+                stagingDesc.ArraySize = 1;
+                stagingDesc.Format = bbDesc.Format;
+                stagingDesc.SampleDesc.Count = 1;
+                stagingDesc.Usage = D3D11_USAGE_STAGING;
+                stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
+
+                ID3D11Texture2D* pStaging = NULL;
+                hr = pD3D->m_pD3DDevice->CreateTexture2D(&stagingDesc, NULL, &pStaging);
+                if (SUCCEEDED(hr) && pStaging) {
+                    pD3D->m_pD3DContext->CopyResource(pStaging, pBackBuffer);
+
+                    D3D11_MAPPED_SUBRESOURCE mapped;
+                    hr = pD3D->m_pD3DContext->Map(pStaging, 0, D3D11_MAP_READ, 0, &mapped);
+                    if (SUCCEEDED(hr)) {
+                        DWORD bufSize = w * h * 4;
+                        BYTE* rgba = (BYTE*)operator_new(bufSize);
+                        if (rgba) {
+                            BYTE* dst = rgba;
+                            BYTE* src = (BYTE*)mapped.pData;
+                            for (DWORD y = 0; y < h; y++) {
+                                memcpy(dst, src, w * 4);
+                                dst += w * 4;
+                                src += mapped.RowPitch;
+                            }
+
+                            // Set up this surface as 32-bit RGBA with the captured pixels.
+                            // Memory is R8G8B8A8 → DWORD is 0xAABBGGRR (little-endian):
+                            //   Red byte[0] → DWORD bits [0:7]   → shift 0
+                            //   Green byte[1] → DWORD bits [8:15]  → shift 8
+                            //   Blue byte[2] → DWORD bits [16:23] → shift 16
+                            //   Alpha byte[3] → DWORD bits [24:31] → shift 24
+                            m_redShift   = 0;    m_pad11 = 0;
+                            m_redMask    = 0xFF;
+                            m_redWidth   = 8;    m_pad15 = 0;
+                            m_greenShift = 8;    m_pad17 = 0;
+                            m_greenMask  = 0xFF;
+                            m_greenWidth = 8;    m_pad1B = 0;
+                            m_blueShift  = 16;   m_pad1D = 0;
+                            m_blueMask   = 0xFF;
+                            m_blueWidth  = 8;    m_pad21 = 0;
+                            m_alphaShift = 24;   m_pad23 = 0;
+                            m_alphaMask  = 0xFF;
+                            m_alphaWidth = 8;    m_pad27 = 0;
+                            m_bitDepth      = 32;
+                            m_paletteFormat = 0;
+                            m_width         = w;
+                            m_height        = h;
+                            m_pitch         = w * 4;
+                            m_pPixelData    = rgba;
+                            m_pPalette      = NULL;
+                            m_hasPalette    = 0;
+                            m_ownsPalette   = 1;
+                            m_isValid       = 1;
+                            m_dataSource    = 1;
+
+                            captured = true;
+                        }
+                        pD3D->m_pD3DContext->Unmap(pStaging, 0);
+                    }
+                    pStaging->Release();
+                }
+                pBackBuffer->Release();
+            }
+        }
+    }
+
     if (m_isValid == 0) {
         printf("invalid class: MarniBits::FileOut\n");
         return 0;
@@ -1293,6 +1390,7 @@ int CMarniBits::SaveBitmapToFile(const char* filename) {
     DWORD bmpSize = m_width * m_height * 3 + 0x3A;
     BYTE* buffer = (BYTE*)operator_new(bmpSize);
     if (!buffer) {
+        if (captured) { free(m_pPixelData); m_pPixelData = NULL; }
         printf("allocation failed: MarniBits::FileOut\n");
         return 0;
     }
@@ -1317,24 +1415,46 @@ int CMarniBits::SaveBitmapToFile(const char* filename) {
     *(DWORD*)(buffer + 46) = 0;           // colors used
     *(DWORD*)(buffer + 50) = 0;           // colors important
 
-    // Create a temporary 24-bit destination surface for the BMP conversion.
-    // The original creates a CMarniBits on the heap, sets up its fields manually,
-    // then calls BltFast to copy from this surface to the BMP buffer.
+    // Construct a temporary 24-bit surface that uses the BMP buffer as pixel data.
+    // The original code constructs a CMarniBits on the stack, manually sets up
+    // its pixel format descriptor for 24-bit BGR output, and points its pixel
+    // buffer at the BMP header+data allocation (via SetAddress).
     CMarniBits tempBmp;
-    // Set up tempBmp for 24-bit output buffer
-    tempBmp.CreateWork((int)m_width, (int)m_height, 24, 0);
-    // Override pixel data to point to the BMP buffer past the headers
-    tempBmp.m_pPixelData = buffer + 0x3A;
-    // Mark as valid with read-only pixel data (dataSource=1 for CreateWork allocation)
-    // Actually CreateWork already set dataSource=1, so we override
-    tempBmp.m_ownsPalette = 0;
-    tempBmp.m_isValid = 1;
-    tempBmp.m_dataSource = 1;
 
-    // Blt from this surface (source) to tempBmp (the 24-bit BMP buffer)
-    // Call tempBmp.BltFast to draw INTO tempBmp FROM this
+    // Pixel format for 24-bit BGR (BMP native byte order):
+    //   Red:   shift=16, mask=0xFF, width=8
+    //   Green: shift=8,  mask=0xFF, width=8
+    //   Blue:  shift=0,  mask=0xFF, width=8
+    //   Alpha: shift=0,  mask=0x00, width=0 (left at constructor zero)
+    tempBmp.m_redShift   = 16;   tempBmp.m_pad11 = 0;
+    tempBmp.m_redMask    = 0xFF;
+    tempBmp.m_redWidth   = 8;    tempBmp.m_pad15 = 0;
+    tempBmp.m_greenShift = 8;    tempBmp.m_pad17 = 0;
+    tempBmp.m_greenMask  = 0xFF;
+    tempBmp.m_greenWidth = 8;    tempBmp.m_pad1B = 0;
+    tempBmp.m_blueShift  = 0;    tempBmp.m_pad1D = 0;
+    tempBmp.m_blueMask   = 0xFF;
+    tempBmp.m_blueWidth  = 8;    tempBmp.m_pad21 = 0;
+    // Alpha fields already zeroed by constructor
+
+    tempBmp.m_bitDepth      = 24;
+    tempBmp.m_paletteFormat = 0;
+    tempBmp.m_width         = m_width;
+    tempBmp.m_height        = m_height;
+    tempBmp.m_pitch         = m_width * 3;
+
+    // Set pixel data to point into the BMP buffer (past the headers)
+    tempBmp.SetAddress(buffer + 0x3A, NULL);
+
+    // Mark the temp surface as valid with owned pixel data
+    tempBmp.m_ownsPalette = 1;
+    tempBmp.m_isValid     = 1;
+    tempBmp.m_dataSource  = 1;
+
+    // Blt from source (this) to tempBmp (24-bit BMP buffer).
+    // flags=0x20 mirrors Y because BMP stores rows bottom-to-top.
     tempBmp.BltFast(NULL, this, NULL, 0x20, 0, NULL);
-    tempBmp.m_isValid = 0;
+    tempBmp.m_dataSource = 0;
 
     // Write to file
     HANDLE hFile = CreateFileA(filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -1345,6 +1465,20 @@ int CMarniBits::SaveBitmapToFile(const char* filename) {
     }
 
     free(buffer);
+
+    // Clean up: if we captured from D3D11, free the temporary pixel data
+    if (captured) {
+        free(m_pPixelData);
+        m_pPixelData    = NULL;
+        m_width         = 0;
+        m_height        = 0;
+        m_pitch         = 0;
+        m_bitDepth      = 0;
+        m_isValid       = 0;
+        m_dataSource    = 0;
+        m_ownsPalette   = 0;
+    }
+
     return 1;
 }
 

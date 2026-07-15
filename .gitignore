@@ -4,3 +4,4 @@ assets/
 .vs/
 bin/
 obj/
+*.BMP

@@ -9,6 +9,15 @@
 DWORD GetFreeDiskSpaceMB(LPCSTR lpPath)
 {
     // 0x0040c510
+    // GetDiskFreeSpaceEx accepts a full path or a root, so it also works when
+    // lpPath is a full file path (e.g. install path + filename) rather than a
+    // bare drive root like the original GetDiskFreeSpaceA-based logic required.
+    ULARGE_INTEGER freeBytes;
+    if (GetDiskFreeSpaceExA(lpPath, &freeBytes, NULL, NULL)) {
+        return (DWORD)(freeBytes.QuadPart >> 20); // bytes -> MB
+    }
+
+    // Fallback: original logic using the drive root (e.g. "C:\")
     CHAR szRootPath[4];
     DWORD dwSectorsPerCluster, dwBytesPerSector;
     DWORD dwNumberOfFreeClusters, dwTotalNumberOfClusters;
@@ -18,9 +27,11 @@ DWORD GetFreeDiskSpaceMB(LPCSTR lpPath)
     szRootPath[2] = '\\';
     szRootPath[3] = '\0';
 
-    GetDiskFreeSpaceA(szRootPath, &dwSectorsPerCluster,
-        &dwBytesPerSector, &dwNumberOfFreeClusters,
-        &dwTotalNumberOfClusters);
+    if (!GetDiskFreeSpaceA(szRootPath, &dwSectorsPerCluster,
+            &dwBytesPerSector, &dwNumberOfFreeClusters,
+            &dwTotalNumberOfClusters)) {
+        return 0;
+    }
 
     return (dwNumberOfFreeClusters * dwBytesPerSector *
             dwSectorsPerCluster) >> 20; // Divide by 1MB (2^20)
