@@ -57,7 +57,7 @@ void load_global_assets(void)
     // Load Main menu textures (8bits)
     LoadFile(".\\usa\\data\\status.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 0x41C;
-    LoadTexturePage(g_DataBuffer, 0x1C, 4, 0, 0, 0, 1, 0);
+    LoadTexturePage(g_DataBuffer, 0x1C, 4, 0, 0, 0, 0, 1);
 
     SetupTexturePageHandles(0, 1);
 
@@ -90,7 +90,7 @@ void load_global_assets(void)
     // Task_chain((void*)debug_state);
     // Task_chain((void*)input_test_state);
     // Task_chain((void*)texture_viewer_state);
-    //Task_chain((void*)game_start);
+    // Task_chain((void*)game_start);
     Task_chain((void*)logos_state);
 }
 
@@ -949,13 +949,13 @@ void InitializeGame(void)
 
     empty_00412380();
 
-    memclr(&g_defaultItemSlot, g_BioCardData);
+    // memclr(&g_defaultItemSlot, g_BioCardData);
 
     g_loadDataDestPointer = g_DataBuffer;
     g_SpecialRoomLightDelta = 0;
     g_fading_counter = 0;
 
-    Task_execute(1, (void*)display_game_loading_message);
+    //Task_execute(1, (void*)display_game_loading_message);
 
     LoadFile(".\\usa\\data\\bio_card.dat", g_loadDataDestPointer, 32);
 

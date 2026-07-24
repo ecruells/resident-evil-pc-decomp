@@ -1,171 +1,151 @@
 // MarniSystem.h - Marni System wrapper interface
-// Modern implementation using Direct3D 11, XAudio2, XInput
-// Replaces original DirectX 5.0 (DirectDraw/Direct3D/DirectSound/DirectInput)
+//
+// The original Marni System is Capcom's abstraction above DirectX 5
+// (DirectDraw/Direct3D/DirectSound/DirectInput) that allowed PS1 game code
+// to run on Windows with minimal changes. On current Windows the DX5 APIs
+// are unavailable, so the whole backend is re-routed through a MarniDX
+// D3D11 shim layer that keeps the same C++ class ABI (vtable at offset 0,
+// field names/offsets unchanged) while hiding every ID3D11*/DXGI COM pointer
+// behind opaque MarniHandle handles.
+//
+// Game-layer code must NOT include <d3d11.h> — only MarniSystem.h.
 #pragma once
 
 #include <windows.h>
-#include <new>
-#include <d3d11.h>
-#include <dxgi.h>
-#include <xaudio2.h>
-#include <xinput.h>
-#include <d3dcompiler.h>
 #include "MarniBits.h"
-
-#pragma comment(lib, "d3d11.lib")
-#pragma comment(lib, "dxgi.lib")
-#pragma comment(lib, "xinput.lib")
-#pragma comment(lib, "d3dcompiler.lib")
+#include "MarniDX.h"
 
 // ============================================================================
-// CMarniDirect3D - Replaces the original Direct3D 5 wrapper
-// Object size in original: 0x21DC (8676 bytes)
-// vtable at 0x004af230
+// CMarniDirect3D - Capcom's original D3D wrapper class (vtable at 0x004af230)
+// Object size: 0x21DC (8676 bytes) — preserved via trailing padding.
+//
+// Field offsets MUST match the original binary exactly, because game-layer
+// code reads them by offset: WindowProc.cpp walks the vtable by index,
+// Rendering.cpp / PrintText.cpp / TmdAnimation.cpp / ObjectManager.cpp read
+// m_width, m_height, m_isInitialized, m_isFullScreen, m_isActive,
+// m_deviceType, m_currentMode, and m_scratch by name through the
+// CMarniDirect3D* cast from g_pMarniDirect3D.
+//
+// All D3D11 ownership now lives inside the MarniDX* m_pDX member — there is
+// not a single ID3D11*/DXGI type visible from this header.
 // ============================================================================
 class CMarniDirect3D {
 public:
     // VTable pointer at offset 0x00
     void** vtable;
-    
-    // Screen dimensions (offset 0x10, 0x14, 0x18)
-    DWORD m_width;          // 0x10
-    DWORD m_height;         // 0x14
-    DWORD m_bitDepth;       // 0x18
-    
-    // Padding to reach 0x3C (initialization flag)
-    BYTE  m_pad1[0x20];    // 0x1C - 0x3B
-    BOOL  m_isInitialized; // 0x3C - initialization flag
-    
-    // Padding to reach 0x68 (fullscreen flag)
-    BYTE  m_pad2[0x28];    // 0x40 - 0x67
-    BOOL  m_isFullScreen;  // 0x68 - fullscreen mode
-    
-    // Window active flag at 0x74
-    BOOL  m_isActive;      // 0x74
-    
-    // Display mode index at 0x78
-    DWORD m_selectedMode;  // 0x78
-    
-    // Padding to D3D11 members area
-    BYTE  m_pad3[0x290];   // 0x7C - 0x30B (approximate)
-    DWORD m_deviceType;    // 0x30C - device type (0-6, 5=SW)
-    DWORD m_currentMode;   // 0x314 - current display mode
-    
-    // Custom data at 0x324 (field792 in original)
-    BYTE  m_pad4[0x10];    // 0x318 - 0x327
-    DWORD m_scratch;       // 0x324 - scratch/state field
-    
-    // --- Modern D3D11 members (placed at high offsets) ---
-    // These map to original DirectDraw/D3D5 interface pointers
-    // Original had:
-    //   0x761: LPDIRECTDRAW m_lpDD
-    //   0x762: LPDIRECTDRAW2 m_lpDD2
-    //   0x7B4: LPDIRECTDRAWSURFACE m_lpDDS_Front
-    //   0x7B5: LPDIRECTDRAWSURFACE m_lpDDS_Back
-    
-    // D3D11 equivalents
-    ID3D11Device*           m_pD3DDevice;       // D3D11 device
-    ID3D11DeviceContext*    m_pD3DContext;      // D3D11 immediate context
-    IDXGISwapChain*         m_pSwapChain;       // D3D11 swap chain
-    ID3D11RenderTargetView* m_pRenderTargetView; // Back buffer RTV
-    ID3D11Texture2D*        m_pDepthStencil;     // Depth/stencil buffer
-    ID3D11DepthStencilView* m_pDepthStencilView; // DSV
-    ID3D11RasterizerState*  m_pRasterStateScissor; // Rasterizer with scissor enabled
-    ID3D11VertexShader*     m_pQuadVS;             // Quad vertex shader
-    ID3D11PixelShader*      m_pQuadPS;             // Quad pixel shader (solid color)
-    ID3D11InputLayout*      m_pQuadInputLayout;    // Input layout for quad vertices
-    ID3D11Buffer*           m_pQuadVB;             // Reusable quad vertex buffer
-    ID3D11Buffer*           m_pSpriteCB;           // Sprite constant buffer (MVP matrix)
-    ID3D11BlendState*       m_pBlendAlpha;         // Alpha blend state
-    ID3D11SamplerState*     m_pSamplerLinear;      // Linear texture sampler
-    ID3D11SamplerState*     m_pSamplerPoint;       // Point sampler (pixelated, for fonts)
-    ID3D11DepthStencilState* m_pDepthDisabled;     // Depth-disabled state for 2D sprites
 
-    // Font texture (created during ProcessTextureImage for bank 0x1E)
-    ID3D11Texture2D*        m_pFontTexture;        // Font texture (from fontus.tim)
-    ID3D11ShaderResourceView* m_pFontSRV;          // Font SRV
-    int                     m_FontTexWidth;         // Font texture width in pixels
-    int                     m_FontTexHeight;        // Font texture height in pixels
-    ID3D11Texture2D*        m_pWhiteTex;           // 1x1 white fallback texture
-    ID3D11ShaderResourceView* m_pWhiteSRV;         // White SRV (for solid color quads)
+    // Known-access fields (must keep exact offsets and names)
+    // ---
+    DWORD  m_hWnd;                   // 0x04 — original: window handle (base ctor 0x0044efc0)
+    DWORD  m_logicalWidth;           // 0x08 — LOGICAL render resolution; SetVideoResolution (0x00497f30) writes this
+    DWORD  m_logicalHeight;          // 0x0C — LOGICAL render resolution; SetVideoResolution (0x00497f30) writes this
+    DWORD  m_width;                  // 0x10 — PHYSICAL backbuffer width (read by PrintText/Rendering/VideoPlayback)
+    DWORD  m_height;                 // 0x14 — PHYSICAL backbuffer height
+    DWORD  m_bitDepth;                 // 0x18 — the original bit-depth setting
 
-    // Constructor / Destructor
+    // 0x1C - 0x3B: gap from original binary analysis (32 bytes)
+    BYTE   m_pad1[0x20];
+    BOOL   m_isInitialized;            // 0x3C — tested in many places; TRUE after Create succeeds
+
+    // 0x40 - 0x67: gap (40 bytes)
+    BYTE   m_pad2[0x28];
+    BOOL   m_isFullScreen;             // 0x68 — read by InitializeMarniSystem / Cleanup
+    BYTE   m_pad_6C_73[8];             // 0x6C..0x73 (unused)
+    BOOL   m_isActive;                 // 0x74 — set/read by WindowProc (vtable[5] handler)
+    DWORD  m_selectedMode;             // 0x78 — original display-mode index
+
+    // 0x7C - 0x30B: gap (656 bytes — the original DirectDraw/D3D/DDsurface
+    //                  COM pointer region lives inside this span)
+    BYTE   m_pad3[0x290];
+
+    DWORD  m_deviceType;               // 0x30C — renderer/adapter type (0-6, 5=software)
+    // 0x310: implicit gap (4 bytes)
+    DWORD  m_currentMode;              // 0x314 — active display-mode index after change
+    BYTE   m_pad4[0x0C];               // 0x318..0x323 (filled from original binary offsets)
+    DWORD  m_scratch;                  // 0x324 — scratch/state field (read in several paths)
+
+    // -----------------------------------------------------------------------
+    // The rest of the 0x21DC block is now just padding. All D3D11 state moved
+    // to a heap-allocated MarniDX owned by m_pDX. The game layer only ever
+    // accesses CMarniDirect3D through the fields above + the 12-entry vtable.
+    // -----------------------------------------------------------------------
+
+    // Single D3D11-backend owner (populated during construction and destroyed
+    // alongside this object). Game code never dereferences this pointer
+    // directly — it's for the MarniSystem.cpp vtable + wrapper functions.
+    MarniDX* m_pDX;
+
+    // Font texture (created during ProcessTextureImage / bank 0x1E).
+    // Dimensions cached here so PrintText.cpp / Rendering.cpp can look them
+    // up without including d3d11.h.
+    MarniHandle m_FontTexHandle;       // 0-based handle from MarniDX
+    int         m_FontTexWidth;        // pixels
+    int         m_FontTexHeight;       // pixels
+
+    // Ensure total instance size = 0x21DC (the `operator_new(0x21DC)`
+    // allocation in InitializeMarniSystem). The leading members sum to
+    // 0x334; 0x21DC - 0x334 = 0x1EA8 (7848 bytes). Verified by static_assert
+    // in MarniSystem.cpp.
+    BYTE   m_pad_endfix[0x1EA8];
+
+    // ---- C'tor / d'tor (keep same signatures as before) ----------------
     CMarniDirect3D(HWND hWnd, int width, int height, int modeID, int adapterID);
     ~CMarniDirect3D();
-    
-    // Virtual function interface (matching original vtable)
-    // [0] RequestVideoMemory  - 0x00448630
-    // [1] ChangeDisplayMode   - 0x00449300
-    // [2] SetD3DRenderer      - 0x0044a0d0
-    // [3] Clear               - 0x0044b320
-    // [4] Present             - 0x00448ff0
-    // [5] HandleWindowMessage - 0x00448b60
-    // [6] CreateTextureHandle - 0x0044c900
-    // [7] CreateObjectHandle  - 0x0044af90
-    // [8] DeleteTextureHandle - 0x0044b220
-    // [9] DeleteObjectHandle  - 0x0044b1c0
-    // [10] SetTexture         - 0x00448300
-    // [11] ResetTextures      - 0x00448380
+
+    // ---- VTable (12 entries, indexed 0-11 — must stay in sync with
+    // MarniSystem.cpp g_CMarniDirect3D_VTable) --------------------------
+    // [0] RequestVideoMemory  (0x00448630)
+    // [1] ChangeDisplayMode   (0x00449300)
+    // [2] SetD3DRenderer      (0x0044a0d0)
+    // [3] Clear               (0x0044b320)
+    // [4] Present             (0x00448ff0)
+    // [5] HandleWindowMessage (0x00448b60)
+    // [6] CreateTextureHandle (0x0044c900)
+    // [7] CreateObjectHandle  (0x0044af90)
+    // [8] DeleteTextureHandle (0x0044b220)
+    // [9] DeleteObjectHandle  (0x0044b1c0)
+    // [10] SetTexture          (0x00448300)
+    // [11] ResetTextures       (0x00448380)
 };
 
 // ============================================================================
-// Global Marni system functions
+// Global Marni system functions (unchanged ABI)
 // ============================================================================
 
-// Create the Marni D3D object (original constructor wrapper)
-void* CMarniDirect3D_Constructor(void* self, HWND hWnd, int width, int height, int modeID, int adapterID);
+void* CMarniDirect3D_Constructor(void* self, HWND hWnd, int width,
+                                  int height, int modeID, int adapterID);
 
-// Check if graphics system is initialized and ready
-BOOL IsGraphicsSystemReadyForOperation(void);
+BOOL  IsGraphicsSystemReadyForOperation(void);
+void  InitializeMarniSystem(void);
+void  EnumerateDisplayModes(void);
+void  EnumerateD3DRenderers(void);
+void  InitJoysticks(void);
+int   IsSideWinderPadConnected(void);
+void  CreateLights(int numLights);
+void  UpdateVideoPlayback(void);
 
-// Initialize the Marni System (creates graphics, input, lights)
-void InitializeMarniSystem(void);
+void  MarniPresent(void);             // -> vtable[4] Present
+void  MarniClear(void);               // -> vtable[3] Clear
+void  MarniDrawRect(int x, int y, int w, int h, DWORD color);
+void  MarniDrawSprite(float x, float y, float w, float h,
+                      float u0, float v0, float u1, float v1,
+                      DWORD color, MarniHandle tex);
 
-// Enumerate available display modes
-void EnumerateDisplayModes(void);
+// Game-space (320x240) -> real D3D11 backbuffer scale factors. Use this for
+// ALL game-space -> screen-space conversion; never derive the scale from
+// CMarniDirect3D::m_width/m_height (SetVideoResolution stomps those with the
+// logical video resolution while the swapchain keeps the window size).
+void  MarniGetRenderScale(float* outScaleX, float* outScaleY);
 
-// Enumerate available D3D renderers
-void EnumerateD3DRenderers(void);
+// Create a texture from raw host pixels; returns an opaque MarniHandle.
+// bpp may be 4, 8, 16, 24, or 32. On success the handle is written to
+// *outTex (if non-NULL) and the function returns TRUE, otherwise FALSE.
+BOOL  MarniCreateTexture(int width, int height, int bpp, const void* pixelData,
+                         MarniHandle* outTex);
 
-// Initialize joystick/gamepad input
-void InitJoysticks(void);
-
-// Check if Microsoft SideWinder pad is connected
-int IsSideWinderPadConnected(void);
-
-// Create 3D scene lights
-void CreateLights(int numLights);
-
-// Video playback state machine (FMV)
-void UpdateVideoPlayback(void);
-
-// Present frame to screen
-void MarniPresent(void);        // Forward to CMarniDirect3D vtable[4] Present
-
-// Clear render target
-void MarniClear(void);          // Forward to CMarniDirect3D vtable[3] Clear
-
-    // Debug: draw a filled rectangle on screen (test helper)
-void MarniDrawRect(int x, int y, int w, int h, DWORD color);
-
-// Sprite drawing: textured colored quad at screen coordinates
-void MarniDrawSprite(float x, float y, float w, float h,
-                     float u0, float v0, float u1, float v1,
-                     DWORD color, ID3D11ShaderResourceView* srv);
-
-// Create a D3D11 texture from raw pixel data (e.g. parsed TIM)
-void MarniCreateTexture(int width, int height, int bpp, void* pixelData,
-                        ID3D11Texture2D** outTex, ID3D11ShaderResourceView** outSRV);
-
-// Get the Marni D3D object for direct access
 void* MarniGetDevice(void);
+void  PresentFrame(void);             // alias for MarniPresent
+void  ClearScreen(void);             // alias for MarniClear
 
-// Present frame to screen (for external callers)
-void PresentFrame(void);        // Equivalent to vtable[4]=Present
-
-// Clear screen
-void ClearScreen(void);
-
-// Memory operators used by Marni
 void* operator_new(size_t size);
-void operator_delete(void* ptr);
+void  operator_delete(void* ptr);

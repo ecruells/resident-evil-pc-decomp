@@ -14,6 +14,7 @@
 extern void logos_state(void);
 extern void title_state(void);
 extern void game_start(void);
+extern void texture_viewer_state(void);
 
 // ============================================================================
 // DisplayIntroAndStartGame (0x00420060)
@@ -22,7 +23,7 @@ extern void game_start(void);
 static void DisplayIntroAndStartGame(void)
 {
     sounds_reset();
-    g_selectedFmvId = 0;
+    g_selectedFmvId = 1;
     g_main_state_flags |= (0x00040000 | 0x00080000);
     title_select_sfx();
     Task_sleep(1);
@@ -80,9 +81,6 @@ static unsigned char g_char1Bright = 0;   // DAT_00ac964d
 static short g_selRotVec[3] = {};          // DAT_00ac93d0
 static int g_selTransVec[3] = {};          // DAT_00ac93e0
 static int g_selMatrix[12] = {};           // DAT_00ac93b0
-
-// Global TextureDesc for rendering
-static TextureDesc g_selTexDesc;
 
 // PS1-style sprite primitive data blocks (0xac9410, 0xac94b0, 0xac9650, 0xac96f0)
 static unsigned char g_char0PortraitSprites[0x28 * 4];
@@ -218,22 +216,22 @@ static void CharSelectRenderSprite(unsigned char texU, unsigned char texV,
 // ============================================================================
 static void CharSelectDrawCursor(void)
 {
-    g_selTexDesc.texU = 0xC0;
-    g_selTexDesc.texV = 0x30;
-    g_selTexDesc.screenX = -0x88;
-    g_selTexDesc.screenY = -0x16;
-    g_selTexDesc.width = 0x0C;
-    g_selTexDesc.height = 0x0B;
-    g_selTexDesc.printClutTint = 0x1EA;
+    g_TextureDesc.texU = 0xC0;
+    g_TextureDesc.texV = 0x30;
+    g_TextureDesc.screenX = -0x88;
+    g_TextureDesc.screenY = -0x16;
+    g_TextureDesc.width = 0x0C;
+    g_TextureDesc.height = 0x0B;
+    g_TextureDesc.printClutTint = 0x1EA;
 
     if ((g_selTimer & 0x30) == 0) {
-        g_selTexDesc.texV = 0x50;
+        g_TextureDesc.texV = 0x50;
     }
 
-    display_texture(&g_selTexDesc, 1, 0x0C, 1);
-    g_selTexDesc.texV += 0x10;
-    g_selTexDesc.screenX = 0x4C;
-    display_texture(&g_selTexDesc, 1, 0x0C, 1);
+    display_texture(&g_TextureDesc, 1, 0x0C, 1);
+    g_TextureDesc.texV += 0x10;
+    g_TextureDesc.screenX = 0x4C;
+    display_texture(&g_TextureDesc, 1, 0x0C, 1);
 }
 
 // ============================================================================
@@ -260,165 +258,11 @@ static void CharSelectApplyPosition(void)
     g_char1PosY += g_char1VelY;
 }
 
-// ============================================================================
-// BakeBorderMaskIntoCardTexture (post-load helper)
-// Reads the card texture (slot 0x0C) and mask texture (slot 0x0D) from D3D11,
-// then zeroes the card texture's alpha wherever the mask is transparent.
-// This replicates the PS1 mask-bit feature that clips card round corners.
-// ============================================================================
-static void BakeBorderMaskIntoCardTexture(void)
-{
-    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    if (!pD3D || !pD3D->m_pD3DDevice || !pD3D->m_pD3DContext) return;
-
-    int cardSlot = 0x0C + 0xF;  // 27
-    int maskSlot = 0x0D + 0xF;  // 28
-
-    ID3D11ShaderResourceView* cardSRV = g_TexturePageSRV[cardSlot];
-    ID3D11ShaderResourceView* maskSRV = g_TexturePageSRV[maskSlot];
-    if (!cardSRV || !maskSRV) {
-        OutputDebugStringA("[MASK] Card or mask SRV is NULL, skipping bake\n");
-        return;
-    }
-
-    // Get the underlying textures from the SRVs
-    ID3D11Resource* cardRes = NULL;
-    ID3D11Resource* maskRes = NULL;
-    cardSRV->GetResource(&cardRes);
-    maskSRV->GetResource(&maskRes);
-    if (!cardRes || !maskRes) { 
-        if (cardRes) cardRes->Release();
-        if (maskRes) maskRes->Release();
-        return;
-    }
-
-    // Get texture dimensions
-    D3D11_TEXTURE2D_DESC cardDesc, maskDesc;
-    ((ID3D11Texture2D*)cardRes)->GetDesc(&cardDesc);
-    ((ID3D11Texture2D*)maskRes)->GetDesc(&maskDesc);
-
-    int w = (int)cardDesc.Width;
-    int h = (int)cardDesc.Height;
-    int mw = (int)maskDesc.Width;
-    int mh = (int)maskDesc.Height;
-
-    // Create staging textures for CPU read/write
-    D3D11_TEXTURE2D_DESC stagingDesc = cardDesc;
-    stagingDesc.Usage = D3D11_USAGE_STAGING;
-    stagingDesc.BindFlags = 0;
-    stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ | D3D11_CPU_ACCESS_WRITE;
-    stagingDesc.MiscFlags = 0;
-
-    ID3D11Texture2D* cardStaging = NULL;
-    ID3D11Texture2D* maskStaging = NULL;
-    HRESULT hr = pD3D->m_pD3DDevice->CreateTexture2D(&stagingDesc, NULL, &cardStaging);
-    if (FAILED(hr)) { cardRes->Release(); maskRes->Release(); return; }
-
-    D3D11_TEXTURE2D_DESC maskStagingDesc = maskDesc;
-    maskStagingDesc.Usage = D3D11_USAGE_STAGING;
-    maskStagingDesc.BindFlags = 0;
-    maskStagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-    maskStagingDesc.MiscFlags = 0;
-    hr = pD3D->m_pD3DDevice->CreateTexture2D(&maskStagingDesc, NULL, &maskStaging);
-    if (FAILED(hr)) { cardStaging->Release(); cardRes->Release(); maskRes->Release(); return; }
-
-    // Copy card and mask textures to staging
-    pD3D->m_pD3DContext->CopyResource(cardStaging, (ID3D11Texture2D*)cardRes);
-    pD3D->m_pD3DContext->CopyResource(maskStaging, (ID3D11Texture2D*)maskRes);
-
-    // Map both for reading
-    D3D11_MAPPED_SUBRESOURCE cardMap, maskMap;
-    hr = pD3D->m_pD3DContext->Map(cardStaging, 0, D3D11_MAP_READ_WRITE, 0, &cardMap);
-    if (FAILED(hr)) { cardStaging->Release(); maskStaging->Release(); cardRes->Release(); maskRes->Release(); return; }
-    hr = pD3D->m_pD3DContext->Map(maskStaging, 0, D3D11_MAP_READ, 0, &maskMap);
-    if (FAILED(hr)) { pD3D->m_pD3DContext->Unmap(cardStaging, 0); cardStaging->Release(); maskStaging->Release(); cardRes->Release(); maskRes->Release(); return; }
-
-    DWORD* cardPixels = (DWORD*)cardMap.pData;
-    DWORD* maskPixels = (DWORD*)maskMap.pData;
-    int cardModified = 0;
-
-    // Apply mask alpha to card texture
-    // Where mask alpha is 0, set card alpha to 0 (transparent corners)
-    for (int y = 0; y < h && y < mh; y++) {
-        for (int x = 0; x < w && x < mw; x++) {
-            int ci = y * (cardMap.RowPitch / 4) + x;
-            int mi = y * (maskMap.RowPitch / 4) + x;
-            DWORD maskPixel = maskPixels[mi];
-            DWORD maskAlpha = (maskPixel >> 24) & 0xFF;
-            if (maskAlpha == 0) {
-                // Mask is transparent here → make card pixel transparent
-                cardPixels[ci] = cardPixels[ci] & 0x00FFFFFF;  // zero alpha
-                cardModified++;
-            }
-        }
-    }
-
-    // Cursor arrow UV regions in the card texture (4 arrows: normal+blink × left+right)
-    // Each is 0x0C×0x0B (12×11) pixels. Background should be fully transparent.
-    static const struct { int u, v; } s_cursorRegions[] = {
-        { 0xC0, 0x30 },  // left arrow normal
-        { 0xC0, 0x40 },  // right arrow normal
-        { 0xC0, 0x50 },  // left arrow blink
-        { 0xC0, 0x60 },  // right arrow blink
-    };
-    int cursorW = 0x0C, cursorH = 0x0B;
-
-    for (int rc = 0; rc < 4; rc++) {
-        int cu = s_cursorRegions[rc].u;
-        int cv = s_cursorRegions[rc].v;
-        // Sample the top-left corner pixel — it should be background
-        if (cu >= w || cv >= h) continue;
-        int cornerIdx = cv * (cardMap.RowPitch / 4) + cu;
-        DWORD cornerRGB = cardPixels[cornerIdx] & 0x00FFFFFF;
-        DWORD cornerAlpha = (cardPixels[cornerIdx] >> 24) & 0xFF;
-
-        if (cornerAlpha == 0) continue;  // already transparent
-
-        // Background pixel is opaque — make all matching pixels in this region transparent
-        int cursorFixed = 0;
-        for (int dy = 0; dy < cursorH && (cv + dy) < h; dy++) {
-            for (int dx = 0; dx < cursorW && (cu + dx) < w; dx++) {
-                int pi = (cv + dy) * (cardMap.RowPitch / 4) + (cu + dx);
-                DWORD pixRGB = cardPixels[pi] & 0x00FFFFFF;
-                if (pixRGB == cornerRGB) {
-                    cardPixels[pi] = pixRGB;  // zero alpha
-                    cursorFixed++;
-                }
-            }
-        }
-        cardModified += cursorFixed;
-        {
-            char dbg[128];
-            sprintf(dbg, "[MASK] Cursor region (%d,%d): bg=0x%06X, cleared %d pixels\n",
-                    cu, cv, (unsigned)cornerRGB, cursorFixed);
-            OutputDebugStringA(dbg);
-        }
-    }
-
-    {
-        char dbg[128];
-        sprintf(dbg, "[MASK] Total: %d/%d pixels made transparent (card %dx%d, mask %dx%d)\n",
-                cardModified, w * h, w, h, mw, mh);
-        OutputDebugStringA(dbg);
-    }
-
-    pD3D->m_pD3DContext->Unmap(maskStaging, 0);
-    pD3D->m_pD3DContext->Unmap(cardStaging, 0);
-
-    // Copy modified card staging back to the actual texture
-    pD3D->m_pD3DContext->CopyResource((ID3D11Texture2D*)cardRes, cardStaging);
-
-    cardStaging->Release();
-    maskStaging->Release();
-    cardRes->Release();
-    maskRes->Release();
-}
 
 // ============================================================================
 // CharSelectDrawPortraits (FUN_00492d80)
 // Renders the character portrait sprites with scaling and shadow
 // Back card (higher tpage) is drawn first, shadow on back card, then front card
-// Border mask alpha is baked into the card texture (see BakeBorderMaskIntoCardTexture)
 // ============================================================================
 static void CharSelectDrawPortraits(void)
 {
@@ -475,11 +319,17 @@ void characterSelectionScreen(void)
     LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0C, 0, 0, 0, 0);
 
     // Load card round borders masks texture (select_k.tim → slot 0xD)
+    // NOTE: select_k.tim is loaded into VRAM slot 0xD but is not actually
+    // used by the original character selection rendering — verified against the
+    // Ghidra disassembly of FUN_00492340 / FUN_00492d80. The card (slot 0xC)
+    // is rendered directly via AddSprite_Ex, with the cursor glyphs rendered
+    // on top by display_texture using the same slot 0xC UV region 0xC0..0xCC ×
+    // 0x30..0x6B. There is NO PS1 mask-bit pre-bake in the original, so we
+    // deliberately do NOT call BakeBorderMaskIntoCardTexture here — that helper
+    // was a fabricated step (no Ghidra counterpart) that punched transparent
+    // holes into the card's legitimate solid-color regions.
     LoadFile(".\\usa\\data\\select_k.tim", g_TimImageBuffer__bitmap, 0x20);
     LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0D, 7, 0, 0, 0);
-
-    // Bake border mask alpha into card texture for round corner transparency
-    BakeBorderMaskIntoCardTexture();
 
     // Load background image
     LoadFile(".\\usa\\data\\sel_back.pix", g_TimImageBuffer__bitmap, 0x20);
@@ -629,15 +479,15 @@ void characterSelectionScreen(void)
         }
 
         // Common texture descriptor setup
-        g_selTexDesc.unk10 = 0;
-        g_selTexDesc.pivotX = 0;
-        g_selTexDesc.pivotY = 0;
-        g_selTexDesc.printClutTint = 0;
-        g_selTexDesc.flags = 0x01000040;
-        g_selTexDesc.colorMulR = 0x80;
-        g_selTexDesc.colorMulG = 0x80;
-        g_selTexDesc.colorMulB = 0x80;
-        g_selTexDesc.depth = 5;
+        g_TextureDesc.unk10 = 0;
+        g_TextureDesc.pivotX = 0;
+        g_TextureDesc.pivotY = 0;
+        g_TextureDesc.printClutTint = 0;
+        g_TextureDesc.flags = 0x01000040;
+        g_TextureDesc.colorMulR = 0x80;
+        g_TextureDesc.colorMulG = 0x80;
+        g_TextureDesc.colorMulB = 0x80;
+        g_TextureDesc.depth = 5;
 
         switch (g_selState) {
         case 0:

@@ -160,8 +160,8 @@ _resume_task:
         }
         else {
             void (*callback)() = (void (*)())g_AsyncRpcCallback;
-            callback();
             g_AsyncRpcCallback = NULL;
+            callback();
         }
     } while(1);
 }

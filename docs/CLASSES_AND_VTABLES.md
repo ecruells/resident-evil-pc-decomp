@@ -357,6 +357,46 @@ CMarniDirectSound (Sound system)
 
 ---
 
+## VTable Calling Conventions
+
+The decomp project uses static vtable adapter functions (not virtual C++ methods)
+because the original binary stored vtable pointers as plain fields at offset 0x00.
+Each vtable family uses a specific adapter calling convention:
+
+### CMarniDirect3D vtable (g_CMarniDirect3D_VTable)
+- **Convention:** `__cdecl` — caller cleans stack
+- **Adapter pattern:** `static int VTable_XXX(void* self, ...)` — `self` is first stack arg
+- **Impl:** `src/marni/MarniSystem.cpp`
+
+### CDirect3DObject / CMarniViewport2 vtable (g_CMarniViewport2VTable)
+- **Convention:** `__stdcall` — callee cleans stack (`RET N`)
+- **Adapter pattern:** `static int __stdcall XXX_Adapter(CMarniViewport2* self, ...)`
+- **Impl:** `src/marni/Marni3DObject.cpp:392-399`
+- **Raw calls must use `__stdcall` function pointer types**, e.g.:
+  ```c
+  ((int (__stdcall *)(void*))eVtable[0])(elem);   // Release
+  ```
+  Using `__cdecl` here causes ESP mismatch (adapter does `RET 4`, caller then does `add esp, 4`).
+
+### CMarniBits vtable (CMarniBits_vtable)
+- **Convention:** `__cdecl` — caller cleans stack
+- **Adapter pattern:** `static int VTable_XXX(void* self, ...)` — `self` is first stack arg
+- **Impl:** `src/marni/MarniBits.cpp:77-85`
+- **Lock second output** (`outPitch`): reads `[ECX+0x08]` (m_pPalette), NOT m_pitch (0x34).
+  ```c
+  *outPitch = (DWORD)(ULONG_PTR)m_pPalette;  // correct
+  *outPitch = m_pitch;                       // WRONG (offset 0x34)
+  ```
+
+### Common pitfall: calling vtable functions through raw function pointers
+When the original code uses `__thiscall` (`this` in ECX, stack args), but the decomp
+uses `__cdecl` static wrappers (`self` as first stack arg), raw calls must pass `self`
+explicitly. Omitting `self` causes the wrapper to read garbage from the stack:
+- `CheckTextureRecreation` (FUN_00483f40), `FixClutVertexData` (FUN_00483eb0):
+  both call `CMarniBits::Lock`/`Unlock` through the vtable with `matEntry` as `self`.
+
+---
+
 ## Task System
 
 The game uses a task-based architecture for game logic:

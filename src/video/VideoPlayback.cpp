@@ -418,12 +418,25 @@ void SignalVideoSkip(void)
 
 // ============================================================================
 // SetVideoResolution - Set video display resolution (0x00497f30)
+// Original: writes ONLY the logical render resolution (CMarniDirect3D
+// field_0x8/0xc) and rescales the 0x34/0x38 float factors (x2.0 for 320x240,
+// x0.5 for 640x480). It never touches the physical surface dims
+// (field_0x10/0x14). The Marni draw layer scales game-space primitives by
+// physical/logical at render time, which is how a 640x480 surface gets
+// filled while the game runs at logical 320x240.
+// (The original callee also read only its first argument.)
 // ============================================================================
 void SetVideoResolution(int width, int height)
 {
+    (void)height; // unused, same as the original
     if (g_pMarniDirect3D != NULL) {
         CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-        pD3D->m_width = (DWORD)width;
-        pD3D->m_height = (DWORD)height;
+        if (width == 320) {
+            pD3D->m_logicalWidth  = 320;
+            pD3D->m_logicalHeight = 240;
+        } else {
+            pD3D->m_logicalWidth  = 640;
+            pD3D->m_logicalHeight = 480;
+        }
     }
 }

@@ -4,7 +4,7 @@
 #include <windows.h>
 #include <mmsystem.h>
 #include <cstdio>
-#include <d3d11.h>
+#include "../marni/MarniDX.h"
 #include "../marni/MarniBits.h"
 #include "../marni/Marni3DObject.h"
 #include "../marni/MarniInput.h"

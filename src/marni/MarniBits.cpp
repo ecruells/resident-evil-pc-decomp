@@ -187,10 +187,11 @@ CMarniBits::~CMarniBits() {
 // Frees owned pixel and palette data, zeros all fields.
 // ============================================================================
 int CMarniBits::Release() {
-    // If locked, unlock via vtable first
+    // If locked, unlock directly (not through vtable — the vtable may be
+    // corrupted if this CMarniBits lives inside a PSXTexture allocated in a
+    // zero-initialised global buffer whose constructor was never called).
     if (m_locked != 0) {
-        // Call vtable[5] = Unlock
-        ((PFN_CMarniBits_Unlock)vtable[5])(this);
+        Unlock();
     }
 
     // If owns data, free pixel and palette buffers
@@ -251,7 +252,11 @@ int CMarniBits::Lock(void** outData, DWORD* outPitch) {
         *outData = m_pPixelData;
     }
     if (outPitch != NULL) {
-        *outPitch = m_pitch;
+        // Original (0x00403450): MOV EDX,[ECX+0x08] — returns m_pPalette
+        // (offset 0x08), NOT m_pitch (offset 0x34). Callers like
+        // CheckTextureRecreation and TextureLoader use this to get the CLUT
+        // palette pointer, not the row pitch.
+        *outPitch = (DWORD)(ULONG_PTR)m_pPalette;
     }
     m_locked = 1;
     return 1;
@@ -1159,8 +1164,8 @@ int CMarniBits::CopyFrom(CMarniBits* src) {
 //          All masks=0xFF, All widths=8
 // ============================================================================
 int CMarniBits::CreateWork(int width, int height, int bitDepth, DWORD paletteFlags) {
-    // Release existing resources first via vtable[6]
-    ((PFN_CMarniBits_Release)vtable[6])(this);
+    // Release existing resources first
+    Release();
 
     m_width = (DWORD)width;
     m_height = (DWORD)height;
@@ -1299,54 +1304,15 @@ int CMarniBits::SaveBitmapToFile(const char* filename) {
     // so this check must come before the m_isValid guard below.
     bool captured = false;
     if (m_pPixelData == NULL) {
-        CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-        if (pD3D && pD3D->m_isInitialized && pD3D->m_pSwapChain &&
-            pD3D->m_pD3DDevice && pD3D->m_pD3DContext) {
+        void* backbufferRGBA = NULL;
+        DWORD bw = 0, bh = 0;
+        if (Marni_DX()->CaptureBackbufferToRGBA(&backbufferRGBA, &bw, &bh)) {
+            if (backbufferRGBA) {
+                DWORD w = bw;
+                DWORD h = bh;
+                BYTE* rgba = (BYTE*)backbufferRGBA;
 
-            ID3D11Texture2D* pBackBuffer = NULL;
-            HRESULT hr = pD3D->m_pSwapChain->GetBuffer(0, __uuidof(ID3D11Texture2D), (void**)&pBackBuffer);
-            if (SUCCEEDED(hr) && pBackBuffer) {
-                D3D11_TEXTURE2D_DESC bbDesc;
-                pBackBuffer->GetDesc(&bbDesc);
-                DWORD w = bbDesc.Width;
-                DWORD h = bbDesc.Height;
-
-                D3D11_TEXTURE2D_DESC stagingDesc = {};
-                stagingDesc.Width = w;
-                stagingDesc.Height = h;
-                stagingDesc.MipLevels = 1;
-                stagingDesc.ArraySize = 1;
-                stagingDesc.Format = bbDesc.Format;
-                stagingDesc.SampleDesc.Count = 1;
-                stagingDesc.Usage = D3D11_USAGE_STAGING;
-                stagingDesc.CPUAccessFlags = D3D11_CPU_ACCESS_READ;
-
-                ID3D11Texture2D* pStaging = NULL;
-                hr = pD3D->m_pD3DDevice->CreateTexture2D(&stagingDesc, NULL, &pStaging);
-                if (SUCCEEDED(hr) && pStaging) {
-                    pD3D->m_pD3DContext->CopyResource(pStaging, pBackBuffer);
-
-                    D3D11_MAPPED_SUBRESOURCE mapped;
-                    hr = pD3D->m_pD3DContext->Map(pStaging, 0, D3D11_MAP_READ, 0, &mapped);
-                    if (SUCCEEDED(hr)) {
-                        DWORD bufSize = w * h * 4;
-                        BYTE* rgba = (BYTE*)operator_new(bufSize);
-                        if (rgba) {
-                            BYTE* dst = rgba;
-                            BYTE* src = (BYTE*)mapped.pData;
-                            for (DWORD y = 0; y < h; y++) {
-                                memcpy(dst, src, w * 4);
-                                dst += w * 4;
-                                src += mapped.RowPitch;
-                            }
-
-                            // Set up this surface as 32-bit RGBA with the captured pixels.
-                            // Memory is R8G8B8A8 → DWORD is 0xAABBGGRR (little-endian):
-                            //   Red byte[0] → DWORD bits [0:7]   → shift 0
-                            //   Green byte[1] → DWORD bits [8:15]  → shift 8
-                            //   Blue byte[2] → DWORD bits [16:23] → shift 16
-                            //   Alpha byte[3] → DWORD bits [24:31] → shift 24
-                            m_redShift   = 0;    m_pad11 = 0;
+                m_redShift   = 0;    m_pad11 = 0;
                             m_redMask    = 0xFF;
                             m_redWidth   = 8;    m_pad15 = 0;
                             m_greenShift = 8;    m_pad17 = 0;
@@ -1366,17 +1332,11 @@ int CMarniBits::SaveBitmapToFile(const char* filename) {
                             m_pPixelData    = rgba;
                             m_pPalette      = NULL;
                             m_hasPalette    = 0;
-                            m_ownsPalette   = 1;
-                            m_isValid       = 1;
-                            m_dataSource    = 1;
+                m_ownsPalette   = 1;
+                m_isValid       = 1;
+                m_dataSource    = 1;
 
-                            captured = true;
-                        }
-                        pD3D->m_pD3DContext->Unmap(pStaging, 0);
-                    }
-                    pStaging->Release();
-                }
-                pBackBuffer->Release();
+                captured = true;
             }
         }
     }

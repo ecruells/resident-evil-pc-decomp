@@ -19,6 +19,61 @@
 // within this block matches the original's 0x00d91a68 cluster ordering.
 // ============================================================================
 #pragma section(".sched", read, write)
+
+// ============================================================================
+// Game-state wipe section (.gwipe)
+// ----------------------------------------------------------------------------
+// InitializeGame() calls memclr(&g_defaultItemSlot, g_BioCardData), which in
+// the original binary wipes the fixed range 0x00be41e0..0x00be9620 (effect
+// pool, player entity, enemy list, death state, ...). In this decompilation
+// the linker decides where globals live, so any zero-initialized global it
+// happened to place between those two symbols got wiped at game start (this
+// silently killed the task scheduler, g_pMarniDirect3D, and the keyboard
+// keymap in g_pMasterInputState on three separate occasions).
+//
+// Fix: every global whose ORIGINAL address falls inside the wiped range is
+// allocated into the .gwipe section via __declspec(allocate(".gwipe$<4 low
+// hex digits of original address>")). The linker sorts $-suffixed subsections alphabetically, which
+// reassembles the block in original address order:
+//   .gwipe$41e0 = g_defaultItemSlot (start of the memclr)
+//   .gwipe$...  = everything the original wipes
+//   .gwipe$9620 = g_BioCard         (exclusive end of the memclr)
+// No stranger global can land between the sentinels, and every member listed
+// here is guaranteed to be wiped — exactly like the original.
+//
+// When decompiling a NEW global with an original address in
+// [0x00be41e0, 0x00be9620): add a #pragma section line for its tag below and
+// define it with __declspec(allocate(".gwipe$<tag>")) so it joins the block.
+// (MSVC does not allow building the section name by string concatenation, so
+// each subsection is declared explicitly.)
+//
+// Full member table, placement rules for ALL globals, and incident history:
+// docs/MEMORY_LAYOUT.md
+// ============================================================================
+#pragma section(".gwipe$41e0", read, write)
+#pragma section(".gwipe$41e1", read, write)
+#pragma section(".gwipe$41e2", read, write)
+#pragma section(".gwipe$41e4", read, write)
+#pragma section(".gwipe$62e4", read, write)
+#pragma section(".gwipe$6350", read, write)
+#pragma section(".gwipe$6358", read, write)
+#pragma section(".gwipe$6368", read, write)
+#pragma section(".gwipe$6370", read, write)
+#pragma section(".gwipe$6380", read, write)
+#pragma section(".gwipe$6382", read, write)
+#pragma section(".gwipe$6384", read, write)
+#pragma section(".gwipe$6388", read, write)
+#pragma section(".gwipe$63a0", read, write)
+#pragma section(".gwipe$63a4", read, write)
+#pragma section(".gwipe$63a8", read, write)
+#pragma section(".gwipe$63b0", read, write)
+#pragma section(".gwipe$6464", read, write)
+#pragma section(".gwipe$9614", read, write)
+#pragma section(".gwipe$961d", read, write)
+#pragma section(".gwipe$961e", read, write)
+#pragma section(".gwipe$961f", read, write)
+#pragma section(".gwipe$9620", read, write)
+
 __declspec(allocate(".sched"))
 
 // --- Window system ---
@@ -136,10 +191,21 @@ RectDrawDesc g_window_rect = {320, 0, 0, 0, 0, 0, 240, 0};
 
 // --- Marni System objects ---
 // 0x00d227b0
-void* g_pMarniDirect3D = NULL;
+// NOTE: This MUST live in the .sched section. InitializeGame()'s
+// memclr(&g_defaultItemSlot, g_BioCardData) wipes the [.bss] range that the
+// linker otherwise places this global inside, nullifying the CMarniDirect3D
+// pointer mid-game and crashing the graphics readiness check. Isolating it
+// into .sched (alongside the task scheduler state) guarantees the memclr
+// never touches it. See docs/MEMORY_LAYOUT.md.
+__declspec(allocate(".sched")) void* g_pMarniDirect3D = NULL;
 
 // Input state master 0x00ac4030
-MasterInputState g_pMasterInputState = {};
+// NOTE: MUST live in .sched. In the original binary this struct (0x00ac4030) is
+// far below the game-state block (0x00be41e0..0x00be9620) that InitializeGame's
+// memclr(&g_defaultItemSlot, g_BioCardData) wipes. Our linker placed it inside
+// that range, so starting a game zeroed keyMap and killed ALL keyboard input in
+// gameplay (menu button included). See docs/MEMORY_LAYOUT.md.
+__declspec(allocate(".sched")) MasterInputState g_pMasterInputState = {};
 
 // --- Main state flags ---
 // 0x00be41c0
@@ -454,6 +520,10 @@ BOOL g_bMCIVideoEvent = FALSE;
 // --- Misc flags ---
 
 BOOL g_bWindowActive = TRUE;    // DAT_004bcb30 (start active so game loop runs)
+// 0x004bcb2c - window focused flag, written by WM_ACTIVATE, read by the message
+// pump in main(). NOT the same variable as g_isPaused (0x004d46ac), which is the
+// SideWinder pause-button event flag consumed by main_loop (injects START+bit8).
+BOOL g_bWindowFocused = TRUE;
 BOOL g_bQuitFlag = FALSE;       // DAT_004bcb40
 BOOL g_bUseFrameSkip = FALSE; // DAT_004bcb48
 BOOL g_bFrameSkipDetected = TRUE;  // DAT_004d46dc (allow frame timing check)
@@ -550,10 +620,14 @@ int   g_fmvPlayCount = 0;               // 0x004bae34
 // Texture page table
 void* g_TexturePageTable = NULL;
 DWORD g_TexturePageTable_DAT[256] = {};
-ID3D11ShaderResourceView* g_TexturePageSRV[256] = {};
+MarniHandle g_TexturePageSRV[256] = {};
 int   g_TexturePageWidth[256] = {};
 int   g_TexturePageHeight[256] = {};
 int   g_TexturePageBpp[256] = {};
+short g_TexturePageOriginX[256] = {};
+short g_TexturePageOriginY[256] = {};
+short g_TexturePageDepth[256] = {};
+short g_TexturePageClutBase[256] = {};
 
 // Player input data
 int   g_PlayerInputConfig_3c = 0;
@@ -589,11 +663,6 @@ void* DAT_004c10b0[32] = {};   // jump table for player_anim_dispatch_4b1a90 dis
 unsigned char g_TextureBankID = 0;       // 0x00bebcc4
 unsigned char g_TextureDepthByte = 0;    // 0x00bebcc5
 unsigned short g_SavedTextureBankID = 0; // 0x00bebcc6
-
-
-// Model data buffers
-BYTE   g_entityModelBuffer[0xCC00] = {};// 0x00bf11c0
-DWORD  g_entityModelBuffer2[0xB4] = {};// 0x00bfddc0
 
 
 // File path construction buffer
@@ -662,13 +731,39 @@ BOOL g_bFullScreenFlag_68 = FALSE;  // used for cursor hiding logic
 int    g_objectDeleteFlag = 0;                // 0x004d2bfc
 int    g_objectCountArray[32] = {};           // 0x008ffc40
 int    g_objectDeleteCounter = 0;             // 0x00aabd68
-int*   g_objectDeletePtr = NULL;              // 0x004d2bf8
+
+// 0x008ffcc0 - Complex TMD object data area (DAT_008ffcc0).
+// Layout: 0x54-byte header, then 256 entries x 0x84 bytes (D3D handle at
+// entry+0x54), plus a secondary copy of each entry at entry+0x83AC. The last
+// secondary write (entry 255) ends exactly at +0x10800.
+// ComplexTmdObjectSetup / ObjectList_Cleanup used to reach this area via
+// (DWORD*)&g_objectCountArray[32] (one past the end of the count array, which
+// is adjacent in the ORIGINAL layout) — in our build that wrote into whatever
+// globals the linker placed after g_objectCountArray (corrupted
+// g_objectDeletePtr with vertex data → crash in CreateTmdObjectInternal).
+BYTE   g_complexTmdObjectData[0x10800] = {};
+
+// 0x00aabd6c - TMD object slot → animObjPtr table (250 ints, ends at
+// g_renderStateTMD 0x00aac158). In the original binary g_objectDeletePtr is
+// STATICALLY initialized to point here (0x004d2bf8 holds 0x00aabd6c and is
+// only ever read); it was NULL in this decomp, which silently disabled the
+// TMD slot-reuse logic in CreateTmdObjectInternal.
+
+int*   g_objectDeletePtr = g_tmdObjectSlotAnimPtrs;  // 0x004d2bf8 (static init → 0x00aabd6c)
 int    g_objectListCleanupFlag = 0;           // 0x004d2fb4
 int    g_objectListCleanupCount = 0;          // 0x004d2fb0
 DWORD  g_objectListPtrArray[512] = {};        // 0x008fc430 area
-char   g_tmdObjectBuffer[250 * 0x1594] = {};  // 0x00923b50 area (array of CMarniDirect3DTMD, 0x1594 stride)
-DWORD  g_tmdTextureAllocated[23] = {};         // 0x00922a40
-BYTE   g_psxTextureArray[23 * 0x1b60] = {};   // 0x00a75168 - PSXTexture array
+
+// 0x00a75168 - PSXTexture array. Ghidra confirms this spans exactly 32 banks
+// (0xa75168..0xaabd68 = 0x36c00 bytes = 32 * 0x1b60), ending precisely at
+// g_objectDeleteCounter (0x00aabd68) — NOT 23 banks. ObjectCleanupCallback's
+// first-pass loop walks all 32 slots of g_objectCountArray/DAT_008ffc40, and
+// TmdProcessingCallback indexes this array directly by g_TextureBankID (a
+// byte, unmasked) up to bank 31. Declaring only 23 banks here made every
+// access to banks 23-31 write/read past the end of this array, corrupting
+// whatever the linker placed next (observed: g_objectCountArray itself ended
+// up holding garbage counts, crashing ObjectCleanupCallback).
+BYTE   g_psxTextureArray[32 * 0x1b60] = {};   // 0x00a75168 - PSXTexture array
 DWORD  g_textureBankRedirect[23] = {};        // 0x00aae2b0
 
 // Async TMD object creation globals (FUN_00483cc0)
@@ -677,28 +772,51 @@ DWORD  g_asyncTmdDataPtr = 0;                 // 0x00aae330
 DWORD  g_asyncTmdObjectPtr = 0;               // 0x008f88a0
 DWORD  g_asyncTmdResult = 0;                  // 0x008ffc30
 
-// Complex TMD object setup arrays (FUN_00486990)
-DWORD  g_complexTmdObjectArray[256] = {};      // 0x00922b00
-int    g_complexTmdObjectIds[256] = {};        // 0x00923748
-BYTE   g_faceNormalBuffer[250 * 8] = {};       // 0x008fb8b0
-char   g_renderStateTex[0x36c] = {};           // 0x00aad6f0 — PSXTexture + aux data
-char   g_renderStateTMD[0x1594] = {};          // 0x00aac158 — specific CMarniDirect3DTMD instance
+// Face normal buffer
+BYTE         g_faceNormalBuffer[250 * 8] = {};      // 0x008fb8b0
+
+// TMD buffers
+
+int          ARRAY_00922260[2016] = {};           // 0x00922260
+
+DWORD        g_tmdTextureAllocated[48] = {};     // 0x00922a40
+
+int          g_complexTmdObjectArray[256] = {};     // 0x00922b00
+int          INT_ARRAY_00922f00[530] = {};          // 0x00922f00
+int          g_complexTmdObjectIds[256] = {};       // 0x00923748
+
+int          INT_ARRAY_00923b48[2] = {};       // 0x00923b48
+
+BYTE         g_tmdObjectBuffer[1606172] = {};  // 0x00923b50 area
+
+int          g_tmdObjectSlotAnimPtrs[251] = {};     // 0x00aabd6c - TMD slot → animObjPtr table
+
+int          DAT_00aad6ec = 0; // 0x00aad6ec
+
+BYTE         g_renderStateTMD[5524] = {};         // 0x00aac158
+
+
+// Global render-state objects
+char          g_renderStateTex[0x36c];          // 0x00aad6f0
 
 // --- Save/Load game state globals ---
-int           g_healthStatus = 0;              // 0x00be6370
-int           g_playerAngle = 0;               // 0x00be6368
-short         g_playerBkpPosX = 0;             // 0x00be6380
-short         g_playerBkpPosZ = 0;             // 0x00be6382
-int           g_playerBkpHealthStat = 0;       // 0x00be6384
-short         g_playerBkpAngle = 0;            // 0x00be6388
-int           g_playerPosX = 0;                // 0x00be6350
-int           g_playerPosZ = 0;                // 0x00be6358
-int           g_savesCounter = 0;              // 0x004d467c
-unsigned char* g_firstItemSlotPointer = NULL;  // 0x00be63a0
-int           g_totalHeldItems = 0;            // 0x00be63a4
+// NOTE: the 0x00be63xx entries overlay g_playerEntity's range in the original
+// binary; they get separate storage here but must still be wiped on game init,
+// so they carry .gwipe$ tags placing them inside the .gwipe block.
+__declspec(allocate(".gwipe$6370")) int           g_healthStatus = 0;              // 0x00be6370
+__declspec(allocate(".gwipe$6368")) int           g_playerAngle = 0;               // 0x00be6368
+__declspec(allocate(".gwipe$6380")) short         g_playerBkpPosX = 0;             // 0x00be6380
+__declspec(allocate(".gwipe$6382")) short         g_playerBkpPosZ = 0;             // 0x00be6382
+__declspec(allocate(".gwipe$6384")) int           g_playerBkpHealthStat = 0;       // 0x00be6384
+__declspec(allocate(".gwipe$6388")) short         g_playerBkpAngle = 0;            // 0x00be6388
+__declspec(allocate(".gwipe$6350")) int           g_playerPosX = 0;                // 0x00be6350
+__declspec(allocate(".gwipe$6358")) int           g_playerPosZ = 0;                // 0x00be6358
+int           g_savesCounter = 0;              // 0x004d467c (outside wipe range)
+__declspec(allocate(".gwipe$63a0")) unsigned char* g_firstItemSlotPointer = NULL;  // 0x00be63a0
+__declspec(allocate(".gwipe$63a4")) int           g_totalHeldItems = 0;            // 0x00be63a4
 
-DWORD         g_heItemsX2Less1 = 0;            // 0x00be63a8
-unsigned char g_itemSlotIndices[8] = {};        // 0x00be63b0
+__declspec(allocate(".gwipe$63a8")) DWORD         g_heItemsX2Less1 = 0;            // 0x00be63a8
+__declspec(allocate(".gwipe$63b0")) unsigned char g_itemSlotIndices[8] = {};        // 0x00be63b0
 char          g_saveFileName[260] = {};         // 0x004d42d8
 
 
@@ -729,28 +847,23 @@ int end_game_status = 0;
 // ============================================================================
 
 // 0x00be62e4 - Main player entity structure (0x180 bytes)
-PlayerEntity g_playerEntity = {};
+__declspec(allocate(".gwipe$62e4")) PlayerEntity g_playerEntity = {};
 
 // 0x00be6464 - Enemy entity array (30 x 0x18C bytes)
-Entity g_EnemiesList[30] = {};
+__declspec(allocate(".gwipe$6464")) Entity g_EnemiesList[30] = {};
 
-int g_enemy_count = 0;
+// 0x00be41e2 - Enemy count (inside the wiped range: original zeroes it on game init)
+__declspec(allocate(".gwipe$41e2")) int g_enemy_count = 0;
 
 // ============================================================================
 // Effect system globals (billboard/sprite effect pool)
 // ============================================================================
 
 // 0x00be41e4 - Effect pool: 64 slots x 0x84 bytes each (ends at 0x00be62e4)
-Effect g_effectPool[MAX_EFFECTS] = {};
+__declspec(allocate(".gwipe$41e4")) Effect g_effectPool[MAX_EFFECTS] = {};
 
 // 0x00bf07ee - Free effect slot counter (initialized to 64 by InitRoomEffSprite)
 unsigned char g_freeEffectSlots = 0;
-
-// 0x00bf0a54 - Per-type sprite header pointers (populated by InitRoomEffSprite/load_shoot_direction_data)
-DWORD g_effectSpriteInfo[50] = {};
-
-// 0x00bf0b1c - Per-type animation data pointers (populated by InitRoomEffSprite/load_shoot_direction_data)
-DWORD g_effectAnimData[50] = {};
 
 // 0x00bebcd4 - Pointer to current active entity (points to g_playerEntity during gameplay)
 Entity* ENTITY = NULL;
@@ -893,14 +1006,15 @@ unsigned char g_ItemSlotsIndexes[16] = {};
 // 0x00d22734 - Bitmask of held items (1 << count) - 1
 DWORD         g_ItemSlotsBitmask = 0;
 
-// 0x00be41e0 - Default/reset item slot (byte)
-unsigned char g_defaultItemSlot = 0;
+// 0x00be41e0 - Default/reset item slot (byte). FIRST member of the .gwipe
+// block: memclr(&g_defaultItemSlot, g_BioCardData) starts here.
+__declspec(allocate(".gwipe$41e0")) unsigned char g_defaultItemSlot = 0;
 
 // 0x00be41e1 - Zeroed on game init (adjacent byte to g_defaultItemSlot)
-unsigned char DAT_00be41e1 = 0;
+__declspec(allocate(".gwipe$41e1")) unsigned char DAT_00be41e1 = 0;
 
 // 0x00be9614 - Death/timeout state machine byte (game_loop switch)
-unsigned char DAT_00be9614 = 0;
+__declspec(allocate(".gwipe$9614")) unsigned char DAT_00be9614 = 0;
 
 // 0x004bd81d - Item image lookup table (4 bytes per item, byte 0 = image type index)
 // Indexed by itemId * 4. Each entry is 4 bytes. First byte is the image type for LoadItemImage.
@@ -1006,7 +1120,10 @@ const unsigned char g_ItemImageLookupTable[459] = {
 // ORDER AND POSITION ARE CRITICAL - they must match the bio_card.dat layout.
 // All individual bio_card globals are now #define macros to g_BioCard fields.
 // ============================================================================
-BioCardLayout g_BioCard = {};  // 0x00be9620
+// 0x00be9620 - LAST member of .gwipe: exclusive END marker of the game-init
+// memclr (memclr(&g_defaultItemSlot, g_BioCardData) stops here; the bio card
+// itself is NOT wiped).
+__declspec(allocate(".gwipe$9620")) BioCardLayout g_BioCard = {};
 
 // ============================================================================
 // Global Messages Table (0x004bfc58)
@@ -1247,11 +1364,17 @@ unsigned int   STAGE_ID_00ac9cf0 = 0;          // 0x00ac9cf0
 unsigned int   ROOM_ID_00ac9cf4 = 0;           // 0x00ac9cf4
 
 
-// 0x00c0b9c0
-BYTE    g_animationBuffer[37888] = {};
+// 0x00bf0a54 - Per-type sprite header pointers (50 DWORDs = 200 bytes)
+DWORD   g_effectSpriteInfo[50] = {};
 
-// 0x00c133c0
-DWORD   g_animObjectBuffer[0x680] = {};
+// 0x00bf0b1c - Effect animation data (immediately follows g_effectSpriteInfo[50])
+BYTE    g_effectAnimData[1700] = {};
+
+BYTE    g_entityModelBuffer[52224] = {};    // 0x00bf11c0
+BYTE    g_entityModelBuffer2[56320] = {};   // 0x00bfddc0
+
+// 0x00c0b9c0
+BYTE   g_animationBuffer[37888] = {};
 
 // Shoot direction ESP data buffer (loaded from core00.esp)
 // 0x00c14dc0 - ESP effect data
@@ -1422,9 +1545,9 @@ unsigned int   DAT_00ac98e0[4] = {};                    // 0x00ac98e0
 unsigned int   DAT_00ac98e4[4] = {};                    // 0x00ac98e4
 
 // Special room lighting globals (also used by MainLoop.cpp)
-int            g_SpecialR1 = 0;                         // 0x00be961d
-int            g_SpecialG1 = 0;                         // 0x00be961e
-int            g_SpecialB1 = 0;                         // 0x00be961f
+__declspec(allocate(".gwipe$961d")) int            g_SpecialR1 = 0;           // 0x00be961d
+__declspec(allocate(".gwipe$961e")) int            g_SpecialG1 = 0;           // 0x00be961e
+__declspec(allocate(".gwipe$961f")) int            g_SpecialB1 = 0;           // 0x00be961f
 
 // TMD model caching state
 int*           DAT_00bca0d0 = NULL;                     // 0x00bca0d0

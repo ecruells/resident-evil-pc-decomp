@@ -10,6 +10,10 @@
 #include <string.h>
 #include <windows.h>
 
+// Object size must stay 0x348 — g_psxTextureArray slots use 0x36C/0x1b60
+// strides derived from the original layout.
+static_assert(sizeof(PSXTexture) == 0x348, "PSXTexture size mismatch — must stay 0x348 (original layout)");
+
 // VideoDriver_ClearArrayD0 (0x0041fb10)
 // Original: Iterates over embedded CMarniBits sub-objects (0x68 bytes apart)
 // starting at offset 0x00 (the PSXTexture itself as a CMarniBits).
@@ -21,6 +25,22 @@
 // The count at offset 0x340 tracks how many are active.
 void VideoDriver_ClearArrayD0(PSXTexture* tex) {
     BYTE* self = (BYTE*)tex;
+
+    // If the PSXTexture was never constructed (vtable == NULL and allocated
+    // inside a zero-initialized global buffer like g_psxTextureArray), there
+    // are no embedded CMarniBits sub-objects to release.  The vtable field
+    // at offset 0x00 is the exact same field used by the first embedded
+    // CMarniBits and is only ever set by PSXTexture_Constructor (0x0041fee0)
+    // or by a placement-new CMarniBits() call, both of which write
+    // &CMarniBits_vtable.  A NULL vtable means the whole object is still in
+    // its zero-filled startup state and contains no owned resources.
+    CMarniBits* firstSlot = (CMarniBits*)self;
+    if (firstSlot->vtable == NULL) {
+        *(int*)(self + 0x340) = 0;  // m_NumCLUTs = 0
+        *(int*)(self + 0x344) = 0;  // m_IsInitialized = 0
+        return;
+    }
+
     int count = *(int*)(self + 0x340);  // m_NumCLUTs
     if (count != 0) {
         CMarniBits* bits = (CMarniBits*)self;
@@ -82,6 +102,13 @@ PSXTexture::~PSXTexture()
     }
     mainBits->m_pPixelData = NULL;
 
+    // Also release the heap CLUT buffer allocated by Store() (copyData=1).
+    // For copyData=0 the palette pointer aliases the caller's file buffer
+    // and must NOT be freed (m_dataSource == 0 guards that).
+    if (mainBits->m_pPalette && mainBits->m_dataSource == 1) {
+        operator_delete(mainBits->m_pPalette);
+    }
+
     // CRITICAL FIX: Clear ownership flags and dangling pointers on all 8
     // embedded CMarniBits sub-objects BEFORE calling their destructors.
     //
@@ -138,7 +165,19 @@ int PSXTexture::Store(int* imageData, int copyData)
         return 0;
     }
 
+    // If this PSXTexture was allocated in a zero-initialized global buffer
+    // (e.g. g_psxTextureArray) and never constructed, initialize the eight
+    // embedded CMarniBits vtable pointers before any operations.
+    if (((CMarniBits*)this)->vtable == NULL) {
+        for (int i = 0; i < 8; i++) {
+            new ((BYTE*)this + i * 0x68) CMarniBits();
+        }
+        m_NumCLUTs = 0;
+        m_IsInitialized = 0;
+    }
+
     int* clutPtr = NULL;
+    int* clutDataPtr = NULL;   // CLUT actually used: heap copy (copyData=1) or in-place
     int* pixelPtr;
 
     // 0x0041fb80: Check magic number
@@ -154,42 +193,44 @@ int PSXTexture::Store(int* imageData, int copyData)
     DWORD flags = (DWORD)imageData[1];
 
     if (flags & 8) {
-        // Has CLUT palette
-        WORD clutOriginX = (WORD)(imageData[3] >> 16);      // CLUT X origin
-        WORD clutOriginY = (WORD)(imageData[3] & 0xFFFF);   // CLUT Y origin
+        // Has CLUT palette. TIM layout (verified against original 0x0041fb60):
+        //   imageData[3]: low word = CLUT X origin, high word = CLUT Y origin
+        //   imageData[4]: low word = colors per palette, high word = palette rows
+        WORD clutOriginX = (WORD)(imageData[3] & 0xFFFF);   // CLUT X origin
+        WORD clutOriginY = (WORD)(imageData[3] >> 16);      // CLUT Y origin
         clutPtr = imageData + 5;                             // CLUT data starts here
 
-        WORD clutW = (WORD)(imageData[4] >> 16);            // CLUT width (colors)
-        WORD clutH = (WORD)(imageData[4] & 0xFFFF);         // CLUT height (1 for 4/8bpp, variable for 16bpp)
+        WORD clutW = (WORD)(imageData[4] & 0xFFFF);          // colors per palette
+        WORD clutH = (WORD)(imageData[4] >> 16);             // palette rows (1-8)
 
-        if (clutW > 8) {
-            printf("[PSXTexture::Store] Invalid CLUT width: %d\n", clutW);
+        if (clutH > 8) {
+            printf("[PSXTexture::Store] Invalid CLUT height: %d\n", clutH);
             return 0;
         }
 
-        m_NumCLUTs = clutW;
+        m_NumCLUTs = clutH;
 
         if (!copyData) {
             // Use CLUT data in-place (skip past CLUT data to image section)
             pixelPtr = (int*)((BYTE*)clutPtr + clutW * clutH * 2);
+            clutDataPtr = clutPtr;
         } else {
-            // Allocate and copy CLUT data into CLUT-specific field
+            // Original: local_2c = operator_new(clutW * clutH * 2) — the CLUT
+            // copy lives on the HEAP, never inside the object. 0xC0 is the
+            // multi-CLUT descriptor array; storing the palette inline there
+            // gets it corrupted by the descriptor writes below.
             int clutDataSize = clutW * clutH * 2;
             m_pPixelData = NULL;  // will be set to pixel data below
-            if (clutDataSize > (int)sizeof(m_CLUT_Data)) {
-                printf("[PSXTexture::Store] CLUT too large: %d bytes\n", clutDataSize);
+            void* clutBuf = operator_new(clutDataSize);
+            if (clutBuf == NULL) {
+                printf("[PSXTexture::Store] Failed to allocate CLUT memory\n");
                 return 0;
             }
-
-            // Copy CLUT data to m_CLUT_Data (not m_pPixelData)
-            WORD* src = (WORD*)clutPtr;
-            WORD* dst = (WORD*)m_CLUT_Data;
-            for (int i = 0; i < (int)(clutW * clutH); i++) {
-                dst[i] = src[i];
-            }
+            memcpy(clutBuf, clutPtr, clutDataSize);
+            clutDataPtr = (int*)clutBuf;
 
             // Image data follows CLUT
-            pixelPtr = (int*)(src + clutW * clutH);
+            pixelPtr = (int*)((BYTE*)clutPtr + clutDataSize);
         }
     } else {
         // No CLUT: image data follows header directly
@@ -265,19 +306,20 @@ int PSXTexture::Store(int* imageData, int copyData)
     m_RowStride = imgW * 2;
 
     // 0x0041fd90: CLUT info from earlier parse
+    // Original stores: 0x54 = X, 0x58 = Y, 0x5C = width (DWORD), 0x60 = 0
     if (flags & 8) {
-        WORD clutOriginX = (WORD)(imageData[3] >> 16);
-        WORD clutOriginY = (WORD)(imageData[3] & 0xFFFF);
-        WORD clutW = (WORD)(imageData[4] >> 16);
-        WORD clutH = (WORD)(imageData[4] & 0xFFFF);
-        m_CLUT_X = clutOriginX;
-        m_CLUT_W = clutW;
-        m_CLUT_Y = clutOriginY;
-        m_CLUT_H = clutH;
+        m_CLUT_X = (WORD)(imageData[3] & 0xFFFF);
+        m_CLUT_Y = (WORD)(imageData[3] >> 16);
+        m_CLUT_W = (WORD)(imageData[4] & 0xFFFF);
+        m_CLUT_H = (WORD)(imageData[4] >> 16);
+        m_CLUT_W2 = m_CLUT_W;
+        m_CLUT_H2 = 0;
+        m_CLUT_W3 = 0;
+        m_CLUT_H3 = 0;
     }
 
-    // 0x0041fe00: Set pixel address
-    CMarniBits_SetAddress(this, imgData, clutPtr);
+    // 0x0041fe00: Set pixel address (palette = heap CLUT copy or in-place ptr)
+    CMarniBits_SetAddress(this, imgData, clutDataPtr);
 
     // NOTE: m_Flag4C at PSXTexture offset 0x4C overlaps with CMarniBits::m_ownsPalette.
     // Setting this to 1 causes CMarniBits::Release() to believe it owns the pixel/palette
@@ -290,25 +332,28 @@ int PSXTexture::Store(int* imageData, int copyData)
     m_IsLocked = 1;
     m_Flag64 = 0;
 
-    // 0x0041fe50: Multi-CLUT support
+    // 0x0041fe50: Multi-CLUT support — fills the descriptor array at 0xC0
+    // (0x68-byte stride per entry). The palette itself stays in the heap
+    // buffer (clutDataPtr); only descriptors live in the object.
     if (m_NumCLUTs > 1) {
-        WORD* clutEntry = (WORD*)(((BYTE*)this) + 0xC0);
+        DWORD* entry = (DWORD*)((BYTE*)this + 0xC0);
         for (DWORD n = 1; n < m_NumCLUTs; n++) {
-            // Set up each CLUT entry's fields
-            DWORD* entry = (DWORD*)((BYTE*)this + 0xC0 + (n - 1) * sizeof(DWORD) * 7);
             entry[-5] = 0;                                          // Flag
-            CMarniBits_CopyFrom((BYTE*)this + 0x68, this);        // Setup palette (subobject at offset 0x68)
-            entry[-1] = m_CLUT_X + (n << (m_BitDepth & 0x1F));    // CLUT X + offset
-            entry[0]  = m_CLUT_Y;                                  // CLUT Y
-            entry[1]  = m_CLUT_W;                                  // CLUT width
-            entry[2]  = m_CLUT_H;                                  // CLUT height
-            entry[3]  = m_Flag64;                                  // Flag
+            CMarniBits_CopyFrom((BYTE*)this + 0x68, this);          // Setup palette (subobject at offset 0x68)
+            entry[-1] = m_CLUT_X;                                   // CLUT X
+            entry[0]  = m_CLUT_Y;                                   // CLUT Y
+            entry[1]  = m_CLUT_W;                                   // CLUT width
+            entry[2]  = 0;                                          // original reads 0x60 (always 0)
+            entry[3]  = m_Flag64;                                   // Flag
 
-            // Set up pixel data for this CLUT
+            entry[-6] = 0;
             DWORD offset = n << (m_BitDepth & 0x1F);
-            CMarniBits_SetAddress((BYTE*)this + 0x68, (WORD*)((BYTE*)imgData + offset * 2), (WORD*)clutPtr);
+            CMarniBits_SetAddress((BYTE*)this + 0x68, imgData,
+                                  (WORD*)((BYTE*)clutDataPtr + offset * 2));
 
             entry[0] = entry[0] + n;
+            entry[-6] = 1;
+            entry += 0x1A;  // next descriptor (0x68 bytes)
         }
     }
 
@@ -454,6 +499,19 @@ void PSXTexture::DestroyElement(void* element) {
 // ============================================================================
 int PSXTexture::CopyFrom(PSXTexture* src) {
     // 0x0041f9c0
+    // If the destination PSXTexture was never constructed (e.g. it lives in
+    // the zero-initialized g_psxTextureArray global buffer), initialize the
+    // eight embedded CMarniBits vtable pointers now.  The original game
+    // always has valid vtables here because global C++ objects are
+    // constructed by the CRT before main(); our flat BYTE arrays are not.
+    if (((CMarniBits*)this)->vtable == NULL) {
+        for (int i = 0; i < 8; i++) {
+            new ((BYTE*)this + i * 0x68) CMarniBits();
+        }
+        m_NumCLUTs = 0;
+        m_IsInitialized = 0;
+    }
+
     // Clear existing data first
     VideoDriver_ClearArrayD0(this);
 

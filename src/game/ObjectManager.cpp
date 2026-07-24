@@ -12,7 +12,7 @@ void ObjectList_Cleanup(void)
 {
     if (g_objectListCleanupFlag == 1) {
         DWORD* basePtr = g_objectListPtrArray;
-        DWORD* countPtr = (DWORD*)&g_objectCountArray[32];  // points past the end (DAT_008ffcc0)
+        DWORD* countPtr = (DWORD*)g_complexTmdObjectData;   // DAT_008ffcc0 (object data area)
         int i = 0;
         if (0 < g_objectListCleanupCount) {
             do {
@@ -39,28 +39,102 @@ void ObjectList_Cleanup(void)
 }
 
 // ============================================================================
+// VideoDriver_ReleaseResources (0x00421150)
+// Releases the 8 texture handles at this+0x34C via vtable[8] (DeleteTextureHandle),
+// zeroes the array and clears this+0x348. ECX = obj in the original.
+// ============================================================================
+int VideoDriver_ReleaseResources(void* obj, void* context)
+{
+    if (context == NULL) {
+        return 0;
+    }
+    void** ctxVtable = *(void***)context;
+    if (ctxVtable == NULL) {
+        return 0;
+    }
+
+    // Release 8 texture handles stored at obj+0x34C
+    DWORD* handleArray = (DWORD*)((BYTE*)obj + 0x34C);
+    typedef void (*DeleteTextureFn)(void* self, DWORD handle);
+    DeleteTextureFn deleteTex = (DeleteTextureFn)ctxVtable[8];
+    for (int i = 0; i < 8; i++) {
+        deleteTex(context, handleArray[i]);
+    }
+    for (int i = 0; i < 8; i++) {
+        handleArray[i] = 0;
+    }
+    *(DWORD*)((BYTE*)obj + 0x348) = 0;
+    return 1;
+}
+
+// ============================================================================
+// Direct3DTIM_Create (FUN_00421070, 0x00421070)
+// Creates the D3D texture handles for a texture page (up to 8 materials).
+// ECX = pagePtr in the original; param_2 = g_pMarniDirect3D.
+// ============================================================================
+int Direct3DTIM_Create(void* pagePtr, void* context)
+{
+    VideoDriver_ReleaseResources(pagePtr, context);
+
+    if (*(int*)((BYTE*)pagePtr + 0x344) == 0) {
+        // Original: printf(&DAT_004b4684, "MarniSystem Direct3DTIM::Create")
+        *(DWORD*)((BYTE*)pagePtr + 0x348) = 0;
+        return 0;
+    }
+    if (*(DWORD*)((BYTE*)pagePtr + 0x340) >= 9) {
+        // Original: printf(&DAT_004ba1fc, "MarniSystem Direct3DTIM::Create")
+        *(DWORD*)((BYTE*)pagePtr + 0x348) = 0;
+        return 0;
+    }
+
+    DWORD* handlePtr = (DWORD*)((BYTE*)pagePtr + 0x34C);
+    for (int i = 0; i < 8; i++) {
+        handlePtr[i] = 0;
+    }
+
+    if (*(int*)((BYTE*)pagePtr + 0x340) != 0) {
+        void** vtable = *(void***)context;
+        typedef DWORD (*CreateTextureFn)(void*, BYTE*, unsigned int, void*);
+        CreateTextureFn createTex = (CreateTextureFn)vtable[6];
+
+        BYTE* matEntry = (BYTE*)pagePtr;
+        DWORD k = 0;
+        do {
+            DWORD handle = createTex(context, matEntry, 0x29, matEntry + 0x64);
+            handlePtr[k] = handle;
+            if (handle == 0) {
+                // Original: printf(&DAT_004b4664, "MarniSystem Direct3DTIM::Create")
+                *(DWORD*)((BYTE*)pagePtr + 0x348) = 0;
+                return 0;
+            }
+            matEntry += 0x68;
+            k++;
+        } while (k < *(DWORD*)((BYTE*)pagePtr + 0x340));
+    }
+
+    *(DWORD*)((BYTE*)pagePtr + 0x348) = 1;
+    return 1;
+}
+
+// ============================================================================
 // VideoDriver_ClearState348 (0x004211b0)
 // Clears texture state at this+0x348: releases handles then zeros the array
 // ============================================================================
 int __stdcall VideoDriver_ClearState348(void* obj, void* context)
 {
-    // VideoDriver_ReleaseResources (0x00421150)
-    // Release 8 texture handles stored at obj+0x34c
-    DWORD* handleArray = (DWORD*)((DWORD*)obj + 0x34c / 4);
-    void** ctxVtable = *(void***)context;
-    for (int i = 0; i < 8; i++) {
-        ((void(*)(DWORD))ctxVtable[8])(handleArray[i]);
-        handleArray[i] = 0;
+    // Guard: if context is NULL, there is no D3D system to release handles with
+    if (context == NULL) {
+        return 0;
     }
-    *(DWORD*)((DWORD*)obj + 0x348 / 4) = 0;
+
+    // VideoDriver_ReleaseResources (0x00421150): release the 8 handles at
+    // obj+0x34C via vtable[8], zero them, clear obj+0x348
+    if (VideoDriver_ReleaseResources(obj, context) == 0) {
+        return 0;
+    }
 
     // VideoDriver_ClearArrayD0 — call PSXTexture::ClearCLUTEntries on obj
     ((PSXTexture*)obj)->ClearCLUTEntries();
-
-    // Zero 8 DWORDs at obj+0x34c (already done above) and obj+0x348
-    for (int i = 0; i < 8; i++) {
-        handleArray[i] = 0;
-    }
 
     return 1;
 }
@@ -73,19 +147,25 @@ void ObjectCleanupCallback(void)
 {
     g_objectDeleteFlag = 0;
 
-    // First pass: iterate g_objectCountArray and clear associated objects
+    OutputDebugStringA("[ObjectCleanup] start first pass\n");
+
+    // First pass: iterate g_objectCountArray and clear the texture pages of
+    // each bank. The original walks 0x00a75168 (g_psxTextureArray), NOT the
+    // TMD object buffer — using g_tmdObjectBuffer here corrupted TMD slots.
     for (int i = 0; i < 32; i++) {
         if (i == 22) {
             g_objectCountArray[22] = 1;
         } else {
             int count = g_objectCountArray[i];
-            char* basePtr = (char*)&g_tmdObjectBuffer[0] + i * 0x1b60;
+            char* basePtr = (char*)&g_psxTextureArray[0] + i * 0x1b60;
             for (int j = 0; j < count; j++) {
                 VideoDriver_ClearState348(basePtr + j * 0x36c, g_pMarniDirect3D);
             }
             g_objectCountArray[i] = 0;
         }
     }
+
+    OutputDebugStringA("[ObjectCleanup] start second pass\n");
 
     // Second pass: zero memory and cleanup TMD objects
     g_objectDeleteCounter = 0;
@@ -101,7 +181,11 @@ void ObjectCleanupCallback(void)
         tmd->CleanupObjects(g_pMarniDirect3D);
     }
 
+    OutputDebugStringA("[ObjectCleanup] end second pass, calling ObjectList_Cleanup\n");
+
     ObjectList_Cleanup();
+
+    OutputDebugStringA("[ObjectCleanup] done\n");
 }
 
 // ============================================================================

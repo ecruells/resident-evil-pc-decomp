@@ -28,14 +28,14 @@ struct PendingSprite {
     float x, y, w, h;
     float u0, v0, u1, v1;
     DWORD color;
-    ID3D11ShaderResourceView* srv;
+    MarniHandle tex;
     BOOL valid;
     unsigned int depth;   // OT depth sort value (lower = closer = on top)
 };
 static PendingSprite g_pendingSprites[MAX_PENDING_SPRITES];
 static int g_pendingSpriteCount = 0;
 
-ID3D11ShaderResourceView* g_displayImageSRV = NULL;
+MarniHandle g_displayImageSRV = MARNI_NULL_HANDLE;
 
 // ============================================================================
 // AddTintSprite (0x0046e0a0)
@@ -48,14 +48,16 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return 0;
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    if (pD3D == NULL || pD3D->m_pFontSRV == NULL) return 0;
+    if (pD3D == NULL || pD3D->m_FontTexHandle == MARNI_NULL_HANDLE) return 0;
     if (pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return 0;
 
     float gameX = (float)(texture->screenX + g_ScreenOffsetX);
     float gameY = (float)(texture->screenY + g_ScreenOffsetY);
 
-    float scaleX = (float)pD3D->m_width / 320.0f;
-    float scaleY = (float)pD3D->m_height / 240.0f;
+    // Scale game-space to the backbuffer: physical/logical, exactly how the
+    // original Marni layer scaled primitives at draw time (FUN_0042ba60).
+    float scaleX, scaleY;
+    MarniGetRenderScale(&scaleX, &scaleY);
 
     float screenX = gameX * scaleX;
     float screenY = gameY * scaleY;
@@ -101,7 +103,7 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     spr->u1 = u1;
     spr->v1 = v1;
     spr->color = color;
-    spr->srv = pD3D->m_pFontSRV;
+    spr->tex = pD3D->m_FontTexHandle;
     spr->valid = TRUE;
     spr->depth = (unsigned int)brightness * 16 + 0x1C2;  // OT depth: higher=further behind
 
@@ -144,8 +146,9 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     float gameW = (float)rect->w;
     float gameH = (float)rect->h;
 
-    float scaleX = (float)pD3D->m_width / 320.0f;
-    float scaleY = (float)pD3D->m_height / 240.0f;
+    // Scale game-space (320x240) to the real backbuffer (see AddTintSprite).
+    float scaleX, scaleY;
+    MarniGetRenderScale(&scaleX, &scaleY);
 
     float screenX = gameX * scaleX;
     float screenY = gameY * scaleY;
@@ -184,7 +187,7 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
 
     DWORD color = ((unsigned int)a << 24) | ((unsigned int)r << 16) | ((unsigned int)g << 8) | (unsigned int)b;
 
-    ID3D11ShaderResourceView* srv = pD3D->m_pWhiteSRV;
+    MarniHandle srv = MARNI_NULL_HANDLE; // null = white fallback
 
     PendingSprite* spr = &g_pendingSprites[g_pendingSpriteCount];
     spr->x = screenX;
@@ -196,7 +199,7 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     spr->u1 = 1.0f;
     spr->v1 = 1.0f;
     spr->color = color;
-    spr->srv = srv;
+    spr->tex = srv;
     spr->valid = TRUE;
     // Depth: higher value = further back (drawn first).
     // In original OT: flags==0 → blend+450, else → blend*16+500
@@ -211,16 +214,17 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
 // game-space (320x240) and get scaled to actual screen resolution.
 // ============================================================================
 void QueueTexturedSprite(float gameX, float gameY, float gameW, float gameH,
-                         ID3D11ShaderResourceView* srv, unsigned int depth)
+                         MarniHandle tex, unsigned int depth)
 {
-    if (srv == NULL) return;
+    if (tex == MARNI_NULL_HANDLE) return;
     if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return;
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (pD3D == NULL) return;
 
-    float scaleX = (float)pD3D->m_width / 320.0f;
-    float scaleY = (float)pD3D->m_height / 240.0f;
+    // Scale game-space (320x240) to the real backbuffer (see AddTintSprite).
+    float scaleX, scaleY;
+    MarniGetRenderScale(&scaleX, &scaleY);
 
     PendingSprite* spr = &g_pendingSprites[g_pendingSpriteCount];
     spr->x = (gameX + (float)g_ScreenOffsetX) * scaleX;
@@ -232,7 +236,7 @@ void QueueTexturedSprite(float gameX, float gameY, float gameW, float gameH,
     spr->u1 = 1.0f;
     spr->v1 = 1.0f;
     spr->color = 0xFFFFFFFF;
-    spr->srv = srv;
+    spr->tex = tex;
     spr->valid = TRUE;
     spr->depth = depth;
 
@@ -316,7 +320,7 @@ void FrameRateGovernor(void)
                         g_pendingSprites[i].u0, g_pendingSprites[i].v0,
                         g_pendingSprites[i].u1, g_pendingSprites[i].v1,
                         g_pendingSprites[i].color,
-                        g_pendingSprites[i].srv);
+                        g_pendingSprites[i].tex);
                 }
             }
 
@@ -332,7 +336,7 @@ void FrameRateGovernor(void)
                         g_pendingSprites[i].u0, g_pendingSprites[i].v0,
                         g_pendingSprites[i].u1, g_pendingSprites[i].v1,
                         g_pendingSprites[i].color,
-                        g_pendingSprites[i].srv);
+                        g_pendingSprites[i].tex);
                 }
             }
 
@@ -392,25 +396,32 @@ void OT_InsertPrimitive(void* prim, unsigned int depth)
     DWORD* p = (DWORD*)prim;
     if (p[0] != 1) return;
 
-    if (g_displayImageSRV == NULL) return;
+    if (g_displayImageSRV == MARNI_NULL_HANDLE) return;
     if ((g_main_state_flags & 0x40000000) != 0) return;
     if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return;
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+
+    // The display image is a logical-resolution framebuffer (320x240 in game);
+    // the quad spans logical * scale = the full backbuffer (see AddTintSprite).
+    float scaleX, scaleY;
+    MarniGetRenderScale(&scaleX, &scaleY);
+    DWORD lw = (pD3D && pD3D->m_logicalWidth  >= 320) ? pD3D->m_logicalWidth  : 320;
+    DWORD lh = (pD3D && pD3D->m_logicalHeight >= 240) ? pD3D->m_logicalHeight : 240;
 
     for (int i = g_pendingSpriteCount; i > 0; i--) {
         g_pendingSprites[i] = g_pendingSprites[i - 1];
     }
     g_pendingSprites[0].x = 0;
     g_pendingSprites[0].y = 0;
-    g_pendingSprites[0].w = (float)(pD3D ? pD3D->m_width : 640);
-    g_pendingSprites[0].h = (float)(pD3D ? pD3D->m_height : 480);
+    g_pendingSprites[0].w = (float)lw * scaleX;
+    g_pendingSprites[0].h = (float)lh * scaleY;
     g_pendingSprites[0].u0 = 0;
     g_pendingSprites[0].v0 = 0;
     g_pendingSprites[0].u1 = 1;
     g_pendingSprites[0].v1 = 1;
     g_pendingSprites[0].color = 0xFFFFFFFF;
-    g_pendingSprites[0].srv = g_displayImageSRV;
+    g_pendingSprites[0].tex = g_displayImageSRV;
     g_pendingSprites[0].valid = TRUE;
     g_pendingSprites[0].depth = 0xFFF;  // background (far, drawn first)
     g_pendingSpriteCount++;
@@ -441,95 +452,119 @@ void ResetSpriteQueue(void)
 // ============================================================================
 int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount)
 {
-    // 0x0046ea05: Queue overflow check
-    if ((MAX_SPRITE_COMMANDS - 1) < g_SpriteQueueCount) {
-        return 0;
-    }
+    // 0x0046e8d0: queue overflow
+    if ((MAX_SPRITE_COMMANDS - 1) < g_SpriteQueueCount) return 0;
 
-    // 0x0046ea0f: Scale factor from flags bits 24-25
-    // Original: *(int *)(&DAT_004c2d78 + ((texture->flags & 0x3000000) >> 0x16))
-    static const int s_TextureScaleTable[4] = { 4, 2, 1, 1 };
-    int scale = s_TextureScaleTable[(texture->flags >> 24) & 3];
+    // BPP scale = g_dwTexScaleFactors[(flags>>24)&3] = {4,2,1,1}
+    static const int s_TexScale[4] = { 4, 2, 1, 1 };
+    int scale = s_TexScale[(texture->flags >> 24) & 3];
 
-    // 0x0046ec44: Validate SRV exists at slot+0xF
+    // VRAM-space texture position (from depth/tpage code, texU, texV)
+    unsigned int vAdd = 0;
+    unsigned int p    = texture->depth;
+    if (p > 16) { vAdd = 256; p -= 16; }
+    int texUWords = (int)(p * 0x40u + texture->texU / scale);
+    int texVAbs   = (int)(vAdd + texture->texV);
+
+    // Search page descriptors — original scans up to pageCount (max 0x2E)
     int shiftedSlot = slot + 0xF;
-    if (shiftedSlot < 0 || shiftedSlot >= 256) {
-        return 0;
-    }
-    if (g_TexturePageSRV[shiftedSlot] == NULL) {
-        return 0;
-    }
+    if (shiftedSlot < 0 || shiftedSlot >= 256) return 0;
 
-    // 0x0046ec8e: Build sprite command
+    int foundSlot    = -1;
+    int foundOriginX = 0, foundOriginY = 0;
+    int foundDepth   = 0;
+
+    for (int i = 0; i < pageCount; i++) {
+        int cur = shiftedSlot + i;
+        if (cur >= 256) break;
+        if (g_TexturePageSRV[cur] == NULL) continue;
+
+        short oX  = g_TexturePageOriginX[cur];
+        short oY  = g_TexturePageOriginY[cur];
+        short d   = g_TexturePageDepth[cur];
+        int   bpp = g_TexturePageBpp[cur];
+        if (bpp <= 0) bpp = 16;
+        int bw = bpp == 4 ? 4 : bpp == 8 ? 2 : 1;
+
+        // VRAM page corner from pageDepth (tpage code):
+        int pX = (int)(d & 15) * 0x40;
+        int pY = (int)(d / 16) * 0x100;
+
+        int pageW = g_TexturePageWidth[cur]  / bw;
+        int pageH = g_TexturePageHeight[cur];
+        int pageL = oX + pX, pageR = pageL + pageW;
+        int pageT = oY + pY, pageB = pageT + pageH;
+
+        int texR  = texUWords + texture->width / scale;
+        int texB  = texVAbs   + texture->height;
+
+        if (pageL <= texUWords && texR <= pageR &&
+            pageT <= texVAbs   && texB <= pageB) {
+            foundSlot   = cur;
+            foundOriginX = oX;
+            foundOriginY = oY;
+            foundDepth   = d;
+            break;
+        }
+    }
+    if (foundSlot < 0) return 0;
+
+    // CLUT lookup: uVar4 = printClutTint - clutBase;  ==8 → 1
+    int clutIdx = (int)texture->printClutTint - g_TexturePageClutBase[foundSlot];
+    if (clutIdx < 0 || clutIdx > 7) return 0;
+    if (clutIdx == 8) clutIdx = 1;
+    // (Multi-CLUT: page handle = g_TexturePageTable[foundSlot*0xDF + clutIdx]
+    //  DX11: use foundSlot + clutIdx for per-palette SRVs when implemented)
+
+    // UV computation (page-relative PIXEL units):
+    int depthOfs = ((int)texture->depth - foundDepth) * scale * 0x40;
+    int su0 = (int)texture->texU - foundOriginX * scale + depthOfs;
+    int sv0 = (int)texture->texV - foundOriginY;
+    int su1 = su0 + texture->width  - 1;
+    int sv1 = sv0 + texture->height - 1;
+
+    // ---------- Build sprite command ----------
     short sx = texture->screenX + g_ScreenOffsetX;
     short sy = texture->screenY + g_ScreenOffsetY;
-
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
 
-    // 0x0046ecf0: Render flags
-    unsigned int flags;
-    BuildSpriteRenderFlags(texture->flags, &flags);
+    unsigned int flags; BuildSpriteRenderFlags(texture->flags, &flags);
     int variant = GetTextureVariant(texture->flags);
-    if (variant == 0) {
-        cmd->unk1c = (float)flags;
-    } else {
-        cmd->unk1c = (float)(flags | 8);
-    }
+    cmd->unk1c = (float)(variant ? (flags | 8) : flags);
 
-    // 0x0046ed4a: Color
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
     cmd->b = (float)texture->colorMulB * g_ColorScaleFactor;
 
-    // 0x0046ed8e: Blend mode / texture page variant
     if (variant == 0) {
         cmd->texturePage = 0;
     } else {
-        static const int s_VariantBlendTable[5] = { 0, 0x80, 0x80, 0, 0x80 };
-        cmd->texturePage = (int)((float)s_VariantBlendTable[variant] * 0.00390625f);
+        static const int s_VariantBlend[5] = { 0, 0x80, 0x80, 0, 0x80 };
+        cmd->texturePage = (int)((float)s_VariantBlend[variant] * 0.00390625f);
     }
 
-    // 0x0046ede0: Position
-    cmd->x0 = sx - texture->pivotX;
-    cmd->y0 = sy - texture->pivotY;
-    cmd->x1 = (texture->width - texture->pivotX) + sx + -1;
-    cmd->y1 = (texture->height - texture->pivotY) + sy + -1;
-
-    // 0x0046ee30: Depth sort
+    cmd->x0  = sx - texture->pivotX;
+    cmd->y0  = sy - texture->pivotY;
+    cmd->x1  = (texture->width  - texture->pivotX) + sx - 1;
+    cmd->y1  = (texture->height - texture->pivotY) + sy - 1;
     cmd->depthSort = (unsigned int)depth * 0x10 + 500;
 
-    // 0x0046ee48: UV computation
-    // Original: u0 = texU - posX * scale, v0 = texV - posY
-    // All LoadTexturePage calls use posX=0, posY=0/1, so page-relative UVs
-    // are effectively texU/texV. The SRV (from PSXTexture) stores pixels at
-    // texel resolution (m_WidthPixels = imgW * bppMultiplier), so texU/texV
-    // map directly to SRV texel coordinates without additional scaling.
-    cmd->u0 = (unsigned short)texture->texU;
-    cmd->v0 = (unsigned short)texture->texV;
-    cmd->u1 = cmd->u0 + texture->width + -1;
-    cmd->v1 = cmd->v0 + texture->height + -1;
+    cmd->u0 = (unsigned short)(su0 >= 0 ? su0 : 0);
+    cmd->v0 = (unsigned short)(sv0 >= 0 ? sv0 : 0);
+    cmd->u1 = (unsigned short)(su1 >= 0 ? su1 : 0);
+    cmd->v1 = (unsigned short)(sv1 >= 0 ? sv1 : 0);
+    cmd->extraFlags = foundSlot;
 
-    // 0x0046ef20: Store SRV page index (DX11: replaces Marni handle)
-    cmd->extraFlags = shiftedSlot;
-
-    // 0x0046ef2a: Fade inversion
+    // Fade inversion + enqueue
     unsigned short fadeVal = depth;
-    if (g_nFadeInverted != 0) {
-        if (g_MaxFadeValue < (int)(unsigned short)depth) {
-            fadeVal = (unsigned short)g_MaxFadeValue;
-        }
-        fadeVal = (unsigned short)g_MaxFadeValue - fadeVal;
+    if (g_nFadeInverted) {
+        if ((int)fadeVal > g_MaxFadeValue) fadeVal = (unsigned short)g_MaxFadeValue;
+        fadeVal = (unsigned short)(g_MaxFadeValue - fadeVal);
     }
-    if (0xFFF < fadeVal) {
-        fadeVal = 0xFFF;
-    }
+    if (fadeVal > 0xFFF) fadeVal = 0xFFF;
 
-    // 0x0046ef6a: Render disable check and enqueue
-    if ((g_RenderDisableFlags & 0x21) == 0) {
-        g_SpriteQueueCount = g_SpriteQueueCount + 1;
-    }
-
+    if ((g_RenderDisableFlags & 0x21) == 0) g_SpriteQueueCount++;
     return 1;
 }
 
@@ -542,9 +577,9 @@ void display_image(int slot, void* buffer, int width, int height)
     g_DisplayImageWidth = width;
     g_DisplayImageHeight = height;
 
-    if (g_displayImageSRV != NULL) {
-        g_displayImageSRV->Release();
-        g_displayImageSRV = NULL;
+    if (g_displayImageSRV != MARNI_NULL_HANDLE) {
+        Marni_DX()->DestroyTexture(g_displayImageSRV);
+        g_displayImageSRV = MARNI_NULL_HANDLE;
     }
 
     unsigned short* src = (unsigned short*)buffer;
@@ -561,10 +596,8 @@ void display_image(int slot, void* buffer, int width, int height)
         rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
     }
 
-    ID3D11Texture2D* tex = NULL;
-    MarniCreateTexture(width, height, 32, rgba, &tex, &g_displayImageSRV);
+    MarniCreateTexture(width, height, 32, rgba, &g_displayImageSRV);
     free(rgba);
-    if (tex != NULL) tex->Release();
 }
 
 // ============================================================================

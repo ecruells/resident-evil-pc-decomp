@@ -152,7 +152,20 @@ void StartAttractDemo(void) { }
 // (0x00463710) - main_menu now implemented in MainMenu.cpp
 
 // (0x004761b0) - Options/configuration menu (key bindings, display, sound)
-void options_menu(void) { }
+// STUB — but it runs as a task (Task_execute enters via JMP, so there is no
+// return address on the task stack). A task function must never plain-return:
+// it must Task_exit/Task_chain, or the final RET jumps into the zeroed stack
+// (crash at EIP=0). Until the real options_menu is decompiled, restore the
+// game state the same way main_menu's exit path does and end the task.
+void options_menu(void)
+{
+    OutputDebugStringA("[MENU] options_menu STUB: nothing to show, exiting task\n");
+    g_main_state_flags &= 0xFFFF00FF;
+    g_bGameActive = 2;
+    Task_Resume(0);
+    StMask(0, 2);
+    Task_exit();
+}
 
 // (0x004813c0) - Restore room state after menu close
 void FUN_004813c0(void) { }

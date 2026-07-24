@@ -9,6 +9,12 @@
 // CDirect3DObject - Base class for 3D vertex/index buffer management
 // Original vtable: 0x004af090 (CMarniExecuteBuffer) / Direct3DExecuteBuffer_VTable
 // Object size: 0x38 bytes (14 DWORDs)
+//
+// NOTE: these classes are intentionally NOT virtual. The original binaries
+// stored the vtable pointer as a plain field at offset 0x00 and methods were
+// ordinary member functions. Declaring C++ virtuals here would insert a
+// hidden vptr at 0x00 and shift every field by 4 bytes, breaking the raw
+// DWORD-indexed code paths that mirror the original memory layout.
 // ============================================================================
 class CDirect3DObject {
 public:
@@ -36,17 +42,17 @@ public:
 
 public:
     CDirect3DObject();                                   // Base constructor (FUN_00430e80)
-    virtual ~CDirect3DObject();
+    ~CDirect3DObject();
 
     // VTable methods (8 entries at 0x004af090)
-    virtual int Release();                               // [0] 0x00427270 - free buffers
-    virtual int CreateWork(int vtxCount, int listCount, int primType); // [1] 0x00415e90 - allocate buffers
-    virtual int GetVertex(int index, DWORD* outData);    // [2] 0x00415a80 - read vertex
-    virtual int SetVertex(int index, DWORD* data);       // [3] 0x00415b40 - write vertex
-    virtual int GetList(int index, WORD* outIndices);    // [4] 0x00415c10 - read index list
-    virtual int SetList(int index, WORD* indices);       // [5] 0x00415d20 - write index list
-    virtual int Lock(void** outVtx, void** outIdx);      // [6] 0x004159e0 - lock, return pointers
-    virtual int Unlock();                                // [7] 0x00415a50 - unlock
+    int Release();                               // [0] 0x00427270 - free buffers
+    int CreateWork(int vtxCount, int listCount, int primType); // [1] 0x00415e90 - allocate buffers
+    int GetVertex(int index, DWORD* outData);    // [2] 0x00415a80 - read vertex
+    int SetVertex(int index, DWORD* data);       // [3] 0x00415b40 - write vertex
+    int GetList(int index, WORD* outIndices);    // [4] 0x00415c10 - read index list
+    int SetList(int index, WORD* indices);       // [5] 0x00415d20 - write index list
+    int Lock(void** outVtx, void** outIdx);      // [6] 0x004159e0 - lock, return pointers
+    int Unlock();                                // [7] 0x00415a50 - unlock
 };
 
 // ============================================================================
@@ -58,7 +64,7 @@ public:
 class CMarniExecuteBuffer : public CDirect3DObject {
 public:
     CMarniExecuteBuffer();                               // 0x00415f70
-    virtual ~CMarniExecuteBuffer();                      // 0x00415fd0
+    ~CMarniExecuteBuffer();                              // 0x00415fd0
 };
 
 // ============================================================================
@@ -93,17 +99,17 @@ public:
 
 public:
     CMarniViewport2();                                   // 0x004272e0
-    virtual ~CMarniViewport2();                          // 0x00427320
+    ~CMarniViewport2();                                  // 0x00427320
 
-    // Override vtable methods with Viewport2-specific implementations
-    virtual int Release() override;                      // [0] 0x00427270
-    virtual int CreateWork(int vtxCount, int polyCount, int polyType) override; // [1] 0x00427100
-    virtual int GetVertex(int index, DWORD* outData) override;    // [2] 0x00426d60
-    virtual int SetVertex(int index, DWORD* data) override;       // [3] 0x00426df0
-    virtual int GetList(int index, WORD* outIndices) override;    // [4] 0x00426e80
-    virtual int SetList(int index, WORD* indices) override;       // [5] 0x00426f70
-    virtual int Lock(void** outVtx, void** outIdx) override;      // [6] 0x004271e0
-    virtual int Unlock() override;                                 // [7] 0x00427250
+    // Viewport2-specific implementations (called via vtable in the original)
+    int Release();                      // [0] 0x00427270
+    int CreateWork(int vtxCount, int polyCount, int polyType); // [1] 0x00427100
+    int GetVertex(int index, DWORD* outData);    // [2] 0x00426d60
+    int SetVertex(int index, DWORD* data);       // [3] 0x00426df0
+    int GetList(int index, WORD* outIndices);    // [4] 0x00426e80
+    int SetList(int index, WORD* indices);       // [5] 0x00426f70
+    int Lock(void** outVtx, void** outIdx);      // [6] 0x004271e0
+    int Unlock();                                 // [7] 0x00427250
 
     // CopyFrom: copy vertex/index data from source viewport (0x00426600)
     // Handles format conversion (strip↔flat), normal recalculation
@@ -185,6 +191,21 @@ public:
     // Helper to clear the object data arrays
     void ClearObjectData();
 };
+
+// ============================================================================
+// MarniSystem PSXObject::Store (FUN_004450e0, 0x004450e0)
+// Parses a PSX TMD model into a Direct3DTMD object slot: enumerates the
+// primitive "kinds" (grouped by flags/tpage/clut), then for each kind fills
+// one embedded CMarniViewport2 element (stride 0x4C) with vertices/indices.
+//   self        - Direct3DTMD slot (ECX in the original; g_tmdObjectBuffer entry)
+//   tmdHdr      - TMD header pointer (the 0x41-magic patched header)
+//   objIndex    - TMD object index (original always passes 0)
+//   bankOrTpage - selected texture page (0xFFFFFFFF = auto-detect from CLUTs)
+//   texRef      - texture page width used as UV divisor (from texBank + 0x2C)
+// Returns 1 on success, 0 on failure.
+// ============================================================================
+int PSXObject_Store(CMarniDirect3DTMD* self, int* tmdHdr, int objIndex,
+                    int bankOrTpage, int texRef);
 
 // ============================================================================
 // Known debug strings:

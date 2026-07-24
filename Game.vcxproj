@@ -103,6 +103,7 @@
     <ClCompile Include="src\game\SoundTables.cpp" />
     <ClCompile Include="src\WindowProc.cpp" />
     <ClCompile Include="src\marni\MarniSystem.cpp" />
+    <ClCompile Include="src\marni\MarniDX.cpp" />
     <ClCompile Include="src\marni\PSXTexture.cpp" />
     <ClCompile Include="src\marni\MarniBits.cpp" />
     <ClCompile Include="src\marni\MarniSound.cpp" />
@@ -146,6 +147,7 @@
   <ItemGroup>
     <ClInclude Include="src\Globals.h" />
     <ClInclude Include="src\marni\MarniSystem.h" />
+    <ClInclude Include="src\marni\MarniDX.h" />
     <ClInclude Include="src\marni\MarniBits.h" />
     <ClInclude Include="src\marni\Marni3DObject.h" />
     <ClInclude Include="src\marni\MarniInput.h" />

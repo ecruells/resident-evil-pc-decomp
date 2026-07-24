@@ -71,22 +71,20 @@ int RebuildTextureSRV(int slotIndex, int clutIndex)
     }
 
     // Create new SRV first, then swap (avoids NULL SRV during render pass)
-    ID3D11ShaderResourceView* newSRV = NULL;
-    ID3D11Texture2D* tex = NULL;
-    MarniCreateTexture(w, h, 32, rgba, &tex, &newSRV);
-    if (tex) tex->Release();
+    MarniHandle newTex = MARNI_NULL_HANDLE;
+    MarniCreateTexture(w, h, 32, rgba, &newTex);
 
-    if (newSRV != NULL) {
-        if (g_TexturePageSRV[slotIndex]) {
-            g_TexturePageSRV[slotIndex]->Release();
+    if (newTex != MARNI_NULL_HANDLE) {
+        if (g_TexturePageSRV[slotIndex] != MARNI_NULL_HANDLE) {
+            Marni_DX()->DestroyTexture(g_TexturePageSRV[slotIndex]);
         }
-        g_TexturePageSRV[slotIndex] = newSRV;
+        g_TexturePageSRV[slotIndex] = newTex;
     }
 
     delete[] rgba;
     delete[] clutRGBA;
 
-    return (newSRV != NULL) ? 1 : 0;
+    return (newTex != MARNI_NULL_HANDLE) ? 1 : 0;
 }
 
 int GetTextureNumCLUTs(int slotIndex)
@@ -234,7 +232,7 @@ void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffse
                 if (numClutEntries < 16)  numClutEntries = 16;
 
                 clutRGBA = new DWORD[numClutEntries];
-                WORD* clut = (WORD*)psxTex.m_CLUT_Data;
+                WORD* clut = psxTex.m_pCLUTData;   // heap CLUT copy (PSXTexture::Store)
 
                 for (int i = 0; i < numClutEntries; i++) {
                     WORD c = clut[i];
@@ -282,14 +280,14 @@ void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffse
             }
 
             if (useDirect) {
-                MarniCreateTexture(w, h, 32, rgbaOut, &pD3D->m_pFontTexture, &pD3D->m_pFontSRV);
+                MarniCreateTexture(w, h, 32, rgbaOut, &pD3D->m_FontTexHandle);
                 delete[] rgbaOut;
                 delete[] clutRGBA;
             } else {
-                MarniCreateTexture(w, h, bpp, srcData, &pD3D->m_pFontTexture, &pD3D->m_pFontSRV);
+                MarniCreateTexture(w, h, bpp, srcData, &pD3D->m_FontTexHandle);
             }
 
-            if (pD3D->m_pFontSRV) {
+            if (pD3D->m_FontTexHandle != MARNI_NULL_HANDLE) {
                 OutputDebugStringA("[TEX] Font SRV created OK\n");
                 pD3D->m_FontTexWidth = w;
                 pD3D->m_FontTexHeight = h;
@@ -380,15 +378,23 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
 
         if (bpp == 4 || bpp == 8) {
             int numClutEntries = (bpp == 4) ? 16 : 256;
-            WORD* clut = (WORD*)psxTex.m_CLUT_Data;
+            WORD* clut = psxTex.m_pCLUTData;   // heap CLUT copy (PSXTexture::Store)
             DWORD* clutRGBA = new DWORD[numClutEntries];
+            // PS1 CLUT entries are BGR555 (bit 15 = STP semi-transparency flag,
+            // bits 10-14 = R, bits 5-9 = G, bits 0-4 = B). Here clr bits 0-4 are
+            // the BLUE channel and clr bits 10-14 are the RED channel — the local
+            // variable names below reflect their bit positions in the WORD, not
+            // their RGB role, so the output packs bits 10-14 into the red byte
+            // and bits 0-4 into the blue byte. PS1 CLUT index 0 is the
+            // transparent color key, so alpha=0 for index 0 (matches
+            // RebuildTextureSRV).
             for (int c = 0; c < numClutEntries; c++) {
                 WORD clr = clut[c];
-                DWORD a = (c == 0) ? 0x00 : 0xFF;
-                DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
+                DWORD b = ((clr >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
-                DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
-                clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
+                DWORD r = ((clr >> 10) & 0x1F) * 255 / 31;
+                DWORD a = (c == 0) ? 0x00 : 0xFF;
+                clutRGBA[c] = (a << 24) | (r << 16) | (g << 8) | b;
             }
 
             DWORD* rgba = new DWORD[w * h];
@@ -412,16 +418,18 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             }
 
             if (slotIndex >= 0 && slotIndex < 256) {
-                if (g_TexturePageSRV[slotIndex] != NULL) {
-                    g_TexturePageSRV[slotIndex]->Release();
-                    g_TexturePageSRV[slotIndex] = NULL;
+                if (g_TexturePageSRV[slotIndex] != MARNI_NULL_HANDLE) {
+                    Marni_DX()->DestroyTexture(g_TexturePageSRV[slotIndex]);
+                    g_TexturePageSRV[slotIndex] = MARNI_NULL_HANDLE;
                 }
-                ID3D11Texture2D* tex = NULL;
-                MarniCreateTexture(w, h, 32, rgba, &tex, &g_TexturePageSRV[slotIndex]);
-                if (tex) tex->Release();
+                MarniCreateTexture(w, h, 32, rgba, &g_TexturePageSRV[slotIndex]);
                 g_TexturePageWidth[slotIndex] = w;
                 g_TexturePageHeight[slotIndex] = h;
                 g_TexturePageBpp[slotIndex] = bpp;
+                g_TexturePageOriginX[slotIndex] = posX;
+                g_TexturePageOriginY[slotIndex] = posY;
+                g_TexturePageDepth[slotIndex] = texId;
+                g_TexturePageClutBase[slotIndex] = pageOffset + 0x1E0;
 
                 // Cache pixel + CLUT data for CLUT palette cycling in texture viewer
                 if (psxTex.m_NumCLUTs > 1 && psxTex.m_pPixelData != NULL) {
@@ -443,8 +451,8 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                     g_CLUTCache[slotIndex].pixelDataSize = pixelBytes;
 
                     // Copy all CLUT palettes from the raw TIM buffer
-                    // (m_CLUT_Data gets partially overwritten by multi-CLUT metadata
-                    //  in PSXTexture::Store, so read from the original file data)
+                    // (the heap CLUT copy in PSXTexture only holds the parsed
+                    //  copy; reading the file data keeps every palette row)
                     int* hdr = (int*)imageBuffer;
                     WORD* rawCLUT = (WORD*)(hdr + 5);  // CLUT data starts at imageData[5]
                     g_CLUTCache[slotIndex].clutData = new WORD[totalCLUTEntries];
@@ -463,29 +471,32 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             WORD* src = (WORD*)psxTex.m_pPixelData;
             for (int i = 0; i < w * h; i++) {
                 WORD px = src[i];
-                // PS1 ARGB1555: bit 15 = STP, bits 0-14 = RGB555
-                // Black pixels (R=G=B=0) are always transparent on PS1
-                // regardless of STP (semi-transparent black = transparent)
-                DWORD r = ((px >> 0)  & 0x1F);
-                DWORD g = ((px >> 5)  & 0x1F);
-                DWORD b = ((px >> 10) & 0x1F);
-                DWORD a = (r == 0 && g == 0 && b == 0) ? 0x00 : 0xFF;
-                DWORD r8 = r * 255 / 31;
-                DWORD g8 = g * 255 / 31;
-                DWORD b8 = b * 255 / 31;
-                rgba[i] = (a << 24) | (b8 << 16) | (g8 << 8) | r8;
+                // PS1 BGR555 with STP bit (bit 15):
+                //   STP=1 -> semi-transparent (alpha=0x80, blended at half)
+                //   STP=0 -> fully opaque (alpha=0xFF)
+                // No pixel is made fully transparent here — black pixels stay
+                // visible (match the original eed1f83 build, not the broken
+                // "black == transparent" rule that caused the character card
+                // to sprout invisible solid regions).
+                DWORD a = (px & 0x8000) ? 0x80 : 0xFF;
+                DWORD r = ((px >> 0)  & 0x1F) * 255 / 31;
+                DWORD g = ((px >> 5)  & 0x1F) * 255 / 31;
+                DWORD b = ((px >> 10) & 0x1F) * 255 / 31;
+                rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
             }
             if (slotIndex >= 0 && slotIndex < 256) {
-                if (g_TexturePageSRV[slotIndex] != NULL) {
-                    g_TexturePageSRV[slotIndex]->Release();
-                    g_TexturePageSRV[slotIndex] = NULL;
+                if (g_TexturePageSRV[slotIndex] != MARNI_NULL_HANDLE) {
+                    Marni_DX()->DestroyTexture(g_TexturePageSRV[slotIndex]);
+                    g_TexturePageSRV[slotIndex] = MARNI_NULL_HANDLE;
                 }
-                ID3D11Texture2D* tex = NULL;
-                MarniCreateTexture(w, h, 32, rgba, &tex, &g_TexturePageSRV[slotIndex]);
-                if (tex) tex->Release();
+                MarniCreateTexture(w, h, 32, rgba, &g_TexturePageSRV[slotIndex]);
                 g_TexturePageWidth[slotIndex] = w;
                 g_TexturePageHeight[slotIndex] = h;
                 g_TexturePageBpp[slotIndex] = 16;
+                g_TexturePageOriginX[slotIndex] = posX;
+                g_TexturePageOriginY[slotIndex] = posY;
+                g_TexturePageDepth[slotIndex] = texId;
+                g_TexturePageClutBase[slotIndex] = pageOffset + 0x1E0;
             }
             delete[] rgba;
         }
@@ -889,13 +900,11 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
         for (int d = 0; d < vp->numDests; d++) {
             int slot = vp->destSlots[d];
             if (slot >= 0 && slot < 256) {
-                if (g_TexturePageSRV[slot] != NULL) {
-                    g_TexturePageSRV[slot]->Release();
-                    g_TexturePageSRV[slot] = NULL;
+                if (g_TexturePageSRV[slot] != MARNI_NULL_HANDLE) {
+                    Marni_DX()->DestroyTexture(g_TexturePageSRV[slot]);
+                    g_TexturePageSRV[slot] = MARNI_NULL_HANDLE;
                 }
-                ID3D11Texture2D* tex = NULL;
-                MarniCreateTexture(VRAM_PAGE_W, VRAM_PAGE_H, 32, page, &tex, &g_TexturePageSRV[slot]);
-                if (tex) tex->Release();
+                MarniCreateTexture(VRAM_PAGE_W, VRAM_PAGE_H, 32, page, &g_TexturePageSRV[slot]);
                 g_TexturePageWidth[slot] = VRAM_PAGE_W;
                 g_TexturePageHeight[slot] = VRAM_PAGE_H;
                 g_TexturePageBpp[slot] = 16;

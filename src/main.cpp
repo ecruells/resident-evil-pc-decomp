@@ -230,7 +230,10 @@ int PASCAL WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // --- 0x00441d31: Initialize Marni System ---
     InitializeMarniSystem();
     if (g_pMarniDirect3D == NULL) {
+        OutputDebugStringA("[MAIN] g_pMarniDirect3D is NULL after InitMarniSystem, destroying window\n");
         DestroyWindow(g_hWnd);
+    } else {
+        OutputDebugStringA("[MAIN] g_pMarniDirect3D OK after InitMarniSystem\n");
     }
     
     // --- 0x00441d45: Enumerate display info ---
@@ -610,6 +613,7 @@ int RunMessageLoop(void)
         
         // 0x00441e35: Check graphics system is ready
         if (!IsGraphicsSystemReadyForOperation()) {
+            OutputDebugStringA("[MAIN LOOP] IsGraphicsSystemReadyForOperation returned FALSE\n");
             if (!g_displayReturnToTitleScreen_Flag) {
                 CleanupVideoConfigAndSaveAllSettings();
                 DestroyWindow(g_hWnd);
@@ -619,8 +623,10 @@ int RunMessageLoop(void)
         }
         
         // 0x00441e50: Frame timing and game loop execution
+        // 0x00441e9d/0x00441eb1: the original reads DAT_004bcb2c (window focused)
+        // here, not the SideWinder pause flag.
         if (!g_bQuitFlag && g_bWindowActive) {
-            if ((g_hWnd != NULL && g_bWindowActive) || g_isPaused) {
+            if ((g_hWnd != NULL && g_bWindowActive) || g_bWindowFocused) {
                 DWORD currentTime = timeGetTime();
                 
                 // 0x00441e70: Frame rate counter every second
@@ -669,8 +675,8 @@ int RunMessageLoop(void)
                     return (int)msg.wParam;
                 }
             }
-            
-            g_isPaused = FALSE;
+            // (original 0x00441f88 clears DAT_004bcb30 here; g_isPaused is consumed
+            // by main_loop itself, so nothing to clear in this pump)
         }
     }
     

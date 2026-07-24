@@ -23,7 +23,10 @@ public:
     // CMarniBits header (offset 0x00 - 0x0B)
     void*  vtable;                    // 0x00 (4 bytes)
     void*  m_pPixelData;              // 0x04 (4 bytes)
-    DWORD  m_Pitch;                   // 0x08 (4 bytes) — in CMarniBits this is m_pPalette at 0x08
+    union {
+        DWORD  m_Pitch;               // 0x08 — pitch while locked
+        WORD*  m_pCLUTData;           // 0x08 — CMarniBits::m_pPalette: CLUT pointer after Store
+    };
 
     BYTE   pad_0C[4];                 // 0x0C-0x0F — CMarniBits m_locked + part of pixel format gap
 
@@ -71,17 +74,17 @@ public:
     DWORD  m_Flag64;                  // 0x64
 
     // ========================================================================
-    // Slots 1-7: additional CMarniBits sub-objects (0x68 - 0x33F)
+    // Slots 1-7: additional CMarniBits sub-objects + multi-CLUT descriptor
+    // array (0x68 - 0x33F).
     //
-    // Memory layout within this region:
-    //   0x68 - 0xBF:  Slot 1 CMarniBits (0x54 bytes) + CLUT desc (0x14 bytes)
-    //   0xC0 - 0x13F: Multi-CLUT entry array (32 DWORDS = 128 bytes)
-    //                  Also overlaps with slots 2-3 CMarniBits/clut regions
-    //   0x140 - 0x33F: Remaining slots 3-7 (0x200 bytes)
+    // IMPORTANT: the original keeps NO CLUT color data inside the object.
+    // Store() (0x0041fb60) copies the palette to a HEAP buffer and 0xC0 is
+    // the multi-CLUT descriptor array (0x68-byte stride per entry). Storing
+    // the palette inline here gets it stomped by the multi-CLUT descriptor
+    // writes whenever the TIM has more than one CLUT row (e.g. status.tim
+    // with 3 palettes), corrupting the first ~21 palette entries.
     // ========================================================================
-    BYTE   pad_68_BF[0x58];           // 0x68 - 0xBF (88 bytes)
-    DWORD  m_CLUT_Data[512];          // 0xC0 - 0x8BF (2048 bytes) — multi-CLUT entries (8bpp needs up to 1536 bytes)
-    BYTE   pad_140_33F[0x200];        // padding (512 bytes)
+    BYTE   pad_68_33F[0x2D8];         // 0x68 - 0x33F (slots 1-7 + descriptors)
 
     // ========================================================================
     // Trailing fields (0x340 - 0x347)

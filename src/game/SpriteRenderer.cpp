@@ -5,6 +5,7 @@
 #include "../marni/MarniBits.h"
 #include <cstdio>
 #include <algorithm>
+#include <cstdlib>
 
 // ============================================================================
 // Global variables
@@ -78,8 +79,11 @@ void FlushSpriteCommands(void) {
         });
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    float scaleX = pD3D ? (float)pD3D->m_width / 320.0f : 2.0f;
-    float scaleY = pD3D ? (float)pD3D->m_height / 240.0f : 2.0f;
+    (void)pD3D;
+    // Scale PS1-space coords to the backbuffer: physical/logical, exactly how
+    // the original Marni layer scaled primitives at draw time (FUN_0042ba60).
+    float scaleX, scaleY;
+    MarniGetRenderScale(&scaleX, &scaleY);
 
     for (int i = 0; i < g_SpriteQueueCount; i++) {
         TextureDraw* cmd = &g_SpriteCommandBuffer[i];
@@ -107,7 +111,7 @@ void FlushSpriteCommands(void) {
         DWORD color = (ca << 24) | (cr << 16) | (cg << 8) | cb;
 
         int texSlot = cmd->extraFlags;
-        ID3D11ShaderResourceView* srv = NULL;
+        MarniHandle srv = MARNI_NULL_HANDLE;
         // pageW/pageH must come from g_TexturePageWidth/Height, which every
         // SRV-creating path sets. A 0 here means the slot's SRV metadata was
         // lost (or never set); we must NOT fall back to 256, because that
@@ -120,7 +124,7 @@ void FlushSpriteCommands(void) {
             if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
             if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
         }
-        if (srv == NULL) {
+        if (srv == MARNI_NULL_HANDLE) {
             texSlot = cmd->texturePage;
             if (texSlot >= 0 && texSlot < 256) {
                 srv = g_TexturePageSRV[texSlot];
@@ -128,7 +132,7 @@ void FlushSpriteCommands(void) {
                 if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
             }
         }
-        if (srv == NULL) {
+        if (srv == MARNI_NULL_HANDLE) {
             continue;
         }
         if (pageW <= 0.0f || pageH <= 0.0f) {
@@ -136,10 +140,22 @@ void FlushSpriteCommands(void) {
             continue;
         }
 
+        // UV normalization: cmd->u0/v0 are pixel offsets within the SRV,
+        // cmd->u1/v1 are inclusive pixel endpoints. The original DX5
+        // draw code adds +1 to the endpoint before normalizing, converting
+        // from inclusive to exclusive range. D3D11 point sampling with
+        // pixel-center interpolation correctly samples the full range when
+        // endpoint is converted by +1 (no half-texel offset needed).
+        // Mirror flags 0x10(X)/0x20(Y) are emulated by swapping UVs.
         float u0 = (float)cmd->u0 / pageW;
         float v0 = (float)cmd->v0 / pageH;
-        float u1 = (float)cmd->u1 / pageW;
-        float v1 = (float)cmd->v1 / pageH;
+        float u1 = (float)(cmd->u1 + 1) / pageW;
+        float v1 = (float)(cmd->v1 + 1) / pageH;
+
+        // Emulate PS1 texture flip (0x10=X, 0x20=Y)
+        unsigned int renderFlags = (unsigned int)cmd->unk1c;
+        if (renderFlags & 0x10) { float t = u0; u0 = u1; u1 = t; }
+        if (renderFlags & 0x20) { float t = v0; v0 = v1; v1 = t; }
 
         MarniDrawSprite(x, y, w, h, u0, v0, u1, v1, color, srv);
     }

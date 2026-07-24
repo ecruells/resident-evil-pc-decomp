@@ -14,6 +14,7 @@
 // Called by: game_start (0x00480710)
 // ============================================================================
 #include "../Globals.h"
+#include "../marni/MarniInput.h"
 #include <cstdio>
 #include <cstdlib>
 

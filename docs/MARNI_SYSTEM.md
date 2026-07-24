@@ -85,9 +85,16 @@ static int VTable_Present(void* self) {
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
 | 0x00 | void** | `vtable` | VTable pointer (`0x004af230`) |
-| 0x10 | DWORD | `m_width` | Screen width |
-| 0x14 | DWORD | `m_height` | Screen height |
+| 0x04 | DWORD | `m_hWnd` | Window handle (base ctor arg, 0x0044efc0) |
+| 0x08 | DWORD | `m_logicalWidth` | **Logical** render resolution (written by `SetVideoResolution`/0x00497f30) |
+| 0x0C | DWORD | `m_logicalHeight` | **Logical** render resolution (written by `SetVideoResolution`/0x00497f30) |
+| 0x10 | DWORD | `m_width` | **Physical** backbuffer/surface width (set once at construction; updated on display-mode change / WM_SIZE) |
+| 0x14 | DWORD | `m_height` | **Physical** backbuffer/surface height |
 | 0x18 | DWORD | `m_bitDepth` | Color bit depth |
+| 0x2C | DWORD | `m_halfLogicalWidth` | `m_logicalWidth / 2` (set in base ctor 0x0044efc0) |
+| 0x30 | DWORD | `m_halfLogicalHeight` | `m_logicalHeight / 2` (set in base ctor 0x0044efc0) |
+| 0x34 | float | `m_scaleX` | Scale factor (physical/logical, *=2 for 320, *=0.5 for 640 in SetVideoResolution) |
+| 0x38 | float | `m_scaleY` | Scale factor (physical/logical, *=2 for 320, *=0.5 for 640 in SetVideoResolution) |
 | 0x3C | BOOL | `m_isInitialized` | Initialization flag |
 | 0x68 | BOOL | `m_isFullScreen` | Fullscreen mode flag |
 | 0x74 | BOOL | `m_isActive` | Window active flag |
@@ -95,6 +102,23 @@ static int VTable_Present(void* self) {
 | 0x30C | DWORD | `m_deviceType` | Device type (0-6, 5=Software) |
 | 0x314 | DWORD | `m_currentMode` | Current display mode |
 | 0x324 | DWORD | `m_scratch` | Scratch/state field |
+
+### Logical vs Physical Resolution
+
+The original CMarniDirect3D maintains TWO resolution pairs:
+
+| Pair | Offsets | Field Names | Written By | Meaning |
+|------|---------|-------------|------------|---------|
+| **Logical** | 0x08/0x0C | `m_logicalWidth/m_logicalHeight` | `SetVideoResolution` (0x00497f30) | The coordinate space the game draws in (320×240 during gameplay) |
+| **Physical** | 0x10/0x14 | `m_width/m_height` | Constructor / `ChangeDisplayMode` / `WM_SIZE` | The actual backbuffer dimensions (e.g. 640×480 from config.ini) |
+
+At draw time, the original Marni layer built a D3D transform matrix with the ratio `physical/logical` (FUN_0042ba60 in the original). This is why game-space (logical 320×240) correctly fills a 640×480 window: every primitive is scaled ×2 at render time.
+
+**`SetVideoResolution`** (0x00497f30) is the function that toggles the logical resolution for FMV transitions. It **never** touches the physical dims — it only writes `m_logicalWidth/m_logicalHeight` (0x08/0x0C) and adjusts `m_scaleX/m_scaleY` (0x34/0x38) by ×2 for 320×240 or ×0.5 for 640×480. Ports of this function must be careful not to write `m_width/m_height` (0x10/0x14), which are the physical surface dimensions.
+
+The decomp's `MarniGetRenderScale()` helper computes the same `physical/logical` ratio from these fields and is called by `AddTintSprite`, `draw_rect`, `QueueTexturedSprite`, `FlushSpriteCommands`, and `OT_InsertPrimitive` to scale sprite coordinates from game-space to screen-space.
+
+### VTable Calling Convention
 
 ### Modern D3D11 Members (attached at high offsets)
 
@@ -338,12 +362,13 @@ Exports the surface as a 24-bit BMP file. Handles all pixel format conversions i
 ## 3. PSXTexture — PS1 TIM/PIX Texture Loader
 
 **Files:** `src/marni/PSXTexture.h`, `src/marni/PSXTexture.cpp`  
-**Object Size:** `0x348` bytes (840 bytes)  
+**Object Size:** `0x348` bytes (840 bytes) — 8 × 0x68-byte CMarniBits sub-objects  
 **Embedded:** 8 × CMarniBits sub-objects at 0x68-byte intervals
 
 ### Layout
 
-PSXTexture embeds 8 CMarniBits sub-objects using placement-new at construction:
+PSXTexture embeds 8 CMarniBits sub-objects using placement-new at construction.
+The original stores **no CLUT color data inside the object** — `Store()` copies the palette to a heap buffer (`operator_new`), and the 0xC0 region is the multi-CLUT **descriptor** array (not palette storage).
 
 | Offset | Content |
 |--------|---------|
@@ -358,78 +383,57 @@ PSXTexture embeds 8 CMarniBits sub-objects using placement-new at construction:
 | 0x340 | `m_NumCLUTs` (DWORD) — active CLUT count |
 | 0x344 | `m_IsInitialized` (DWORD) — initialized flag |
 
-### Constructor — `0x0041fee0`
+### Critical Layout Constraint — CLUT Must Not Be Inline
 
-```cpp
-PSXTexture::PSXTexture() {
-    // Place-construct 8 CMarniBits sub-objects at 0x68-byte intervals
-    for (int i = 0; i < 8; i++) {
-        new ((BYTE*)this + i * 0x68) CMarniBits();
-    }
-    m_NumCLUTs = 0;       // offset 0x340
-    m_IsInitialized = 0;  // offset 0x344
-}
-```
+An earlier version of the decomp stored an inline `DWORD m_CLUT_Data[512]` at offset **0xC0**, colliding with the multi-CLUT descriptor array. When a TIM has more than one CLUT row (`m_NumCLUTs > 1`, e.g. `status.tim` with its three 256-colour palettes), `Store()`'s multi-CLUT block wrote descriptor metadata directly over the first ~21 palette entries, corrupting them:
 
-### Member Variables (key fields for TIM parsing)
+| Corrupted palette entry | Should be (RGB555) | After corruption | Visual result |
+|-------------------------|-------------------|-------------------|---------------|
+| 0x13 (19, frame edge) | R=14 G=17 B=14 greyish-green | `0x0000` black | Black where greyish-green should be |
+| 0x0C (12) | R=4 G=6 B=4 grey | `0x03E0` solid green | Green splotches |
+| 0x14 (20) / 0x15 (21) | mid-greys | `0x0000` black | Blacks where greys should be |
+
+The inline array also bloated `sizeof(PSXTexture)` to 0xAC8, so `Store()` on `g_psxTextureArray` slots (stride 0x36C) corrupted adjacent texture banks.
+
+**Fix:** `Store()` allocates the CLUT copy on the heap with `operator_new()`, exactly like the original `LoadPSXImage` at 0x0041fb60. The palette pointer lives at `m_pCLUTData` (offset 0x08, aliasing `CMarniBits::m_pPalette`), and the destructor frees it when owned (`copyData=1`). The struct is back to 0x348, enforced by `static_assert`.
+
+### Member Variables
 
 | Offset | Type | Field | Description |
 |--------|------|-------|-------------|
+| 0x00 | void** | `vtable` | CMarniBits vtable |
 | 0x04 | void* | `m_pPixelData` | Pointer to pixel data buffer |
-| 0x08 | DWORD | `m_Pitch` | Row stride |
+| 0x08 | `union {DWORD m_Pitch; WORD* m_pCLUTData;}` | Pitch or heap CLUT pointer (CMarniBits::m_pPalette alias) |
+| 0x0C | DWORD | `m_locked` | CMarniBits lock state |
+| 0x10-0x27 | — | (CMarniBits pixel format descriptor) |
 | 0x2A | BYTE | `m_BitDepth` | Pixel bit depth (4, 8, 16) |
 | 0x2B | BYTE | `m_FormatFlags` | Format flags from TIM header |
-| 0x2C | DWORD | `m_WidthPixels` | Width in texture-specific units |
+| 0x2C | DWORD | `m_WidthPixels` | Width in pixels (image‑specific formula, not always pixel count — depends on bpp) |
 | 0x30 | DWORD | `m_Height` | Height in pixels |
-| 0x34 | DWORD | `m_RowStride` | Bytes per row |
-| 0x40 | DWORD | `m_IsLocked` | Surface lock flag |
-| 0x44 | DWORD | `m_DataSource` | 0=file, 1=generated |
-| 0x48 | DWORD | `m_HasCLUT` | Has color lookup table flag |
-| 0x54-0x63 | WORD[8] | CLUT region | CLUT X, Y, W, H fields |
-| 0x68-0x74 | DWORD[4] | `m_CLUT_Entries` | CLUT entry metadata |
-| 0xC0-0x13C | DWORD[32] | `m_CLUT_Data` | Multi-CLUT color data |
+| 0x34 | DWORD | `m_RowStride` | Bytes per row (imgW × 2) |
+| 0x40 | DWORD | `m_IsValid` (CMarniBits) / lock flag (PSXTexture alias) |
+| 0x44 | DWORD | `m_DataSource` | 0=in‑place, 1=owned copy |
+| 0x48 | DWORD | `m_HasCLUT` | Has colour lookup table |
+| 0x4C | DWORD | `m_Flag4C` | Overlaps CMarniBits::m_ownsPalette; set to 1 by Store |
+| 0x54 | WORD | `m_CLUT_X` | CLUT X origin in VRAM |
+| 0x56 | WORD | `m_CLUT_Y` | CLUT Y origin in VRAM |
+| 0x58 | WORD | `m_CLUT_W` | CLUT width (colours per palette) |
+| 0x5A | WORD | `m_CLUT_H` | CLUT height (palette rows, 1–8 for 8bpp) |
+| 0x5C-0x63 | WORD[4] | `m_CLUT_W2/H2/W3/H3` | Extra CLUT dimension fields (original stores W at 0x5C as DWORD) |
+
+### TIM File Format — CLUT Parse Corrections
+
+The `Store` method at `0x0041fb60` parses the PS1 TIM image format.
+The original field order in the CLUT header (verified against 0x0041fba0) is:
+
+```
+Offset 0x0C: CLUT origin    (low 16 = X, high 16 = Y)
+Offset 0x10: CLUT dimensions (low 16 = colours per palette WIDTH, high 16 = palette row HEIGHT)
+```
+
+Earlier versions of the decomp had these LABEL-swapped (reading bits 16‑31 for X and low bits for Y). Because the product `clutW × clutH` is commutative this only caused subtle problems: `m_NumCLUTs` got `clutH` instead of `clutW` (harmless for 256×1 CLUTs but wrong for multi‑palette TIMs like `status.tim`'s 256×3), and the multi-CLUT descriptor entries read swapped X/Y values. The current code uses the correct field order.
 
 ### Methods
-
-| Address | Name | Description |
-|---------|------|-------------|
-| `0x0041fee0` | Constructor | Place-constructs 8 embedded CMarniBits |
-| `0x0041fb60` | `Store(imageData, copyData)` | Parse PSX TIM/PIX format |
-| `0x0041fa60` | `LoadFromFile(filename)` | Open TIM file, read, call Store |
-| `0x0041fb10` | `ClearCLUTEntries()` | Release all embedded CMarniBits via vtable[6] |
-| `0x00420000` | `ArrayClear(tex)` | Clear + destroy all sub-objects |
-| `0x0041ff60` | `ConstructElement(element)` | Construct single embedded CMarniBits |
-| `0x0041ffb0` | `DestroyElement(element)` | Destroy single embedded CMarniBits |
-
-### TIM File Format
-
-The `Store` method at `0x0041fb60` parses the PS1 TIM image format:
-
-```
-Offset 0x00: Magic number  (must be 0x00000010)
-Offset 0x04: Flags         (bit 3 = has CLUT palette)
-```
-
-**If CLUT present (bit 3 set):**
-```
-Offset 0x08: CLUT data size (bytes)
-Offset 0x0C: CLUT origin    (low 16 = X, high 16 = Y)
-Offset 0x10: CLUT dimensions (low 16 = width, high 16 = height)
-Offset 0x14: CLUT color data
-```
-
-**Image data (after CLUT section):**
-```
-Offset +0x00: Image data size (bytes)
-Offset +0x04: Image origin     (low 16 = X, high 16 = Y)
-Offset +0x08: Width in words   (low 16), Height in pixels (high 16)
-Offset +0x0C: Pixel data
-```
-
-**Bit depth values:**
-- `0x00` = 4 bpp (16-color indexed)
-- `0x01` = 8 bpp (256-color indexed)
-- `0x02` = 16 bpp (direct color, RGB 5:5:5)
 
 ---
 
@@ -675,13 +679,33 @@ IDXGISwapChain::Present()
 
 ```cpp
 void FlushSpriteCommands(void) {
-    // Applies screen-scale transform (320×240 → actual resolution)
+    // Applies screen-scale transform (logical 320×240 → physical backbuffer)
+    // via MarniGetRenderScale() which returns physical/logical ratio
+    // (the same ratio the original Marni layer used in its D3D transform
+    //  matrix at FUN_0042ba60).
     // For each valid sprite command:
     //   1. Scales position/size to D3D11 screen coordinates
     //   2. Looksup texture SRV from g_TexturePageSRV[] by command's texturePage
     //   3. Calls MarniDrawSprite(x, y, w, h, u0, v0, u1, v1, color, srv)
 }
 ```
+
+### MarniGetRenderScale — Game‑Space Scaling
+
+This helper computes the scale from game‑space (logical 320×240) to the real D3D11 backbuffer.
+It is the decomp's equivalent of the original draw‑time ratio `physical/logical`:
+
+```cpp
+void MarniGetRenderScale(float* outScaleX, float* outScaleY) {
+    DWORD bw = 0, bh = 0;    // physical backbuffer size (from MarniDX)
+    DWORD lw = 320, lh = 240; // logical resolution (CMarniDirect3D::m_logicalWidth/Height)
+    // ...
+    *outScaleX = (float)bw / (float)lw;
+    *outScaleY = (float)bh / (float)lh;
+}
+```
+
+Called by `AddTintSprite`, `draw_rect`, `QueueTexturedSprite`, `FlushSpriteCommands`, and `OT_InsertPrimitive`. The scale must always be derived from the **real** D3D11 backbuffer size rather than `CMarniDirect3D::m_width/m_height`, because `SetVideoResolution` (0x00497f30) writes the logical resolution (320×240 during gameplay) — writing the physical fields instead was the root cause of the frame being pinned to the top‑left quadrant of the window.
 
 ### BuildSpriteRenderFlags — `0x0046d960`
 

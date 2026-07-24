@@ -74,7 +74,7 @@ void PrintText8x8(short x, short y, unsigned char color, char shadow)
 {
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (pD3D == NULL) return;
-    if (pD3D->m_pFontSRV == NULL || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return;
+    if (pD3D->m_FontTexHandle == MARNI_NULL_HANDLE || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return;
 
     unsigned char brightness = color >> 4;
     if (brightness == 0) brightness = 2;
@@ -141,7 +141,7 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (pD3D == NULL) return;
 
-    if (pD3D->m_pFontSRV == NULL || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) {
+    if (pD3D->m_FontTexHandle == MARNI_NULL_HANDLE || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) {
         OutputDebugStringA("[TEXT] Font not loaded yet, skipping\n");
         return;
     }
@@ -227,7 +227,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
 {
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (pD3D == NULL) return;
-    if (pD3D->m_pFontSRV == NULL || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return;
+    if (pD3D->m_FontTexHandle == MARNI_NULL_HANDLE || pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return;
     if (data == NULL) return;
 
     unsigned char brightness = color >> 4;

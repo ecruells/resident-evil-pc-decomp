@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <cstdarg>
 
 extern void* operator_new(size_t size);
 extern void  operator_delete(void* ptr);
@@ -49,8 +50,8 @@ int CDirect3DObject::Release()
         return 0;
     }
     if (m_locked != 0) {
-        // Call Unlock via vtable[7] = offset 0x1C in vtable
-        ((int(*)(CDirect3DObject*))vtable[7])(this);
+        // Original called Unlock via vtable[7]; direct call is equivalent
+        Unlock();
     }
     if (m_flag10 != 0 && m_flag18 != 0) {
         free(m_pVertexBuffer);
@@ -380,6 +381,47 @@ int CMarniPolyhedra::CopyFrom(CMarniPolyhedra* src)
 }
 
 // ============================================================================
+// CMarniViewport2 static vtable (original: 0x004af0f8)
+// The embedded elements inside a Direct3DTMD slot live in raw BSS memory
+// (g_tmdObjectBuffer) and are never C++-constructed, so the original stored
+// a real vtable pointer at element+0x00. Raw call sites (CleanupObjects,
+// ~CMarniDirect3DTMD) invoke vtable[0] with the element as a plain stack
+// argument, so these adapters are __stdcall free functions taking `self`
+// as the first parameter.
+// ============================================================================
+static int __stdcall VP2_Release_Adapter(CMarniViewport2* self)                          { return self->CMarniViewport2::Release(); }
+static int __stdcall VP2_CreateWork_Adapter(CMarniViewport2* self, int a, int b, int c)  { return self->CMarniViewport2::CreateWork(a, b, c); }
+static int __stdcall VP2_GetVertex_Adapter(CMarniViewport2* self, int i, DWORD* o)       { return self->CMarniViewport2::GetVertex(i, o); }
+static int __stdcall VP2_SetVertex_Adapter(CMarniViewport2* self, int i, DWORD* d)       { return self->CMarniViewport2::SetVertex(i, d); }
+static int __stdcall VP2_GetList_Adapter(CMarniViewport2* self, int i, WORD* o)          { return self->CMarniViewport2::GetList(i, o); }
+static int __stdcall VP2_SetList_Adapter(CMarniViewport2* self, int i, WORD* d)          { return self->CMarniViewport2::SetList(i, d); }
+static int __stdcall VP2_Lock_Adapter(CMarniViewport2* self, void** a, void** b)         { return self->CMarniViewport2::Lock(a, b); }
+static int __stdcall VP2_Unlock_Adapter(CMarniViewport2* self)                           { return self->CMarniViewport2::Unlock(); }
+
+static void* g_CMarniViewport2VTable[8] = {
+    (void*)VP2_Release_Adapter,     // [0] 0x00427270
+    (void*)VP2_CreateWork_Adapter,  // [1] 0x00427100
+    (void*)VP2_GetVertex_Adapter,   // [2] 0x00426d60
+    (void*)VP2_SetVertex_Adapter,   // [3] 0x00426df0
+    (void*)VP2_GetList_Adapter,     // [4] 0x00426e80
+    (void*)VP2_SetList_Adapter,     // [5] 0x00426f70
+    (void*)VP2_Lock_Adapter,        // [6] 0x004271e0
+    (void*)VP2_Unlock_Adapter       // [7] 0x00427250
+};
+
+// Debug print helper (matches MarniDebugPrint used by the original)
+static void PSXObjDebugPrint(const char* fmt, ...)
+{
+    char buf[512];
+    va_list args;
+    va_start(args, fmt);
+    _vsnprintf(buf, sizeof(buf) - 1, fmt, args);
+    va_end(args);
+    buf[sizeof(buf) - 1] = '\0';
+    OutputDebugStringA(buf);
+}
+
+// ============================================================================
 // CMarniDirect3DTMD
 // ============================================================================
 
@@ -394,9 +436,8 @@ CMarniDirect3DTMD::CMarniDirect3DTMD()
     DWORD* embeddedBase = (DWORD*)this;
     for (int i = 0; i < 16; i++) {
         DWORD* elem = embeddedBase + (i * 19);  // 0x4C / 4 = 19 DWORDs
-        // FUN_004272e0 base init pattern (CMarniViewport2_vtable)
-        // Fields: vtable=0, then fields 1..13 as shown, field 7 = 1
-        elem[0]  = 0;   // vtable
+        // FUN_004272e0 base init pattern (CMarniViewport2_vtable at 0x004af0f8)
+        elem[0]  = (DWORD)g_CMarniViewport2VTable;   // vtable
         elem[1]  = 0;   // m_pVertexBuffer
         elem[2]  = 0;   // m_pIndexBuffer
         elem[3]  = 0;   // m_bHasBuffers
@@ -434,7 +475,7 @@ CMarniDirect3DTMD::~CMarniDirect3DTMD()
         void** eVtable = (void**)elem[0];
         if (eVtable != 0) {
             // Call Release (vtable[0]) on embedded element
-            ((int(*)(void*))eVtable[0])(elem);
+            ((int (__stdcall *)(void*))eVtable[0])(elem);
         }
     }
 }
@@ -711,7 +752,7 @@ int CMarniDirect3DTMD::CleanupObjects(void* param)
         // Call vtable[0] = Release on the embedded element
         void** eVtable = (void**)elem[0];
         if (eVtable != 0) {
-            ((int(*)(void*))eVtable[0])(elem);
+            ((int (__stdcall *)(void*))eVtable[0])(elem);
         }
 
         // Zero extended fields (offsets 0x38, 0x3C, 0x40 within element)
@@ -747,10 +788,9 @@ void CMarniDirect3DTMD::ClearObjectData()
 // 0x004272e0 — constructor
 CMarniViewport2::CMarniViewport2()
 {
-    // Ghidra shows: *param_1 = &CMarniViewport2_vtable; then zero fields [1..13], set [7]=1
-    // CDirect3DObject constructor (0x00430e80) also calls this base init pattern
-    // Directly set fields to match the Ghidra constructor
-    vtable               = 0;
+    // Ghidra shows: *param_1 = &CMarniViewport2_vtable (0x004af0f8);
+    // then zero fields [1..13], set [7]=1
+    vtable               = g_CMarniViewport2VTable;
     m_pVertexBuffer      = 0;
     m_pIndexBuffer       = 0;
     m_bHasBuffers        = 0;
@@ -1469,4 +1509,726 @@ int TriangleDivideMarniPolyhedra(CMarniViewport2* polyArray, int count)
     tempWork.Unlock();
 
     return 1;
+}
+
+// ============================================================================
+// MarniSystem PSXObject — TMD model parser
+// ============================================================================
+// Layout of a Direct3DTMD slot (0x1594 bytes):
+//   +0x000  16 embedded CMarniViewport2 elements, stride 0x4C (19 DWORDs)
+//   +0x4C0  m_objectCount   (param_1[0x130] in Ghidra)
+//   +0x4C4  m_flag4C4       (param_1[0x131])
+//   +0x4C8  m_unknown4C8    (resize threshold, constructor sets 0x400)
+// Embedded element extension fields (beyond CMarniViewport2's 0x44 bytes):
+//   elem[0x0E] (+0x38) = tpage material key lo   ((tpage & 0x3F) << 4)
+//   elem[0x0F] (+0x3C) = tpage material key hi   (tpage >> 6)
+//   elem[0x10] (+0x40) = clut material key lo
+//   elem[0x11] (+0x44) = clut material key hi
+//   elem[0x12] (+0x48) = has-texture flag
+// The material keys at +0x38/+0x3C are matched against texture-page material
+// entries by CreateTmdObjectInternal (FUN_00483910).
+// ============================================================================
+
+// Kind-table entry (5 DWORDs), built by PSXObject_EnumKind (FUN_00444f60):
+//   [0] = primitive count in this kind
+//   [1] = tpage (low 16 bits)
+//   [2] = full flags of the first packet seen
+//   [3] = vertex mode: 1 = triangle (3 verts/poly), 0 = quad (4 verts/poly)
+//   [4] = clut  (low 16 bits)
+
+// 11-float vertex written via CMarniViewport2::SetVertex
+struct PSXObjVtx {
+    float x, y, z;      // [0..2]  position (Y negated on load)
+    float nx, ny, nz;   // [3..5]  normal (fixed-point /4096, NY negated)
+    float r, g, b;      // [6..8]  color
+    float u, v;         // [9..10] texture UV
+};
+
+// Lazy-initialize the 16 embedded elements of a raw BSS slot.
+// The original did this in the Direct3DTMD constructor (0x00415910 ->
+// FUN_00446cb0); our slots live in g_tmdObjectBuffer and are never
+// C++-constructed, so do it on first use.
+static void PSXObject_InitSlotElements(BYTE* slot)
+{
+    for (int i = 0; i < 16; i++) {
+        DWORD* elem = (DWORD*)(slot + i * 0x4C);
+        if (elem[0] == 0) {
+            elem[0]  = (DWORD)g_CMarniViewport2VTable;  // 0x004af0f8
+            elem[1]  = 0;   // m_pVertexBuffer
+            elem[2]  = 0;   // m_pIndexBuffer
+            elem[3]  = 0;   // m_bHasBuffers
+            elem[4]  = 0;   // m_flag10
+            elem[5]  = 0;   // m_locked
+            elem[6]  = 0;   // m_flag18
+            elem[7]  = 1;   // m_unknown1C (base init marker)
+            elem[8]  = 0;   // m_unknown20
+            elem[9]  = 0;   // m_vertexCount
+            elem[10] = 0;   // m_listCount
+            elem[11] = 0;   // m_primitiveType
+            elem[12] = 0;   // m_vertexCapacity
+            elem[13] = 0;   // m_listCapacity
+            elem[14] = 0;   // +0x38
+            elem[15] = 0;   // +0x3C
+            elem[16] = 0;   // +0x40
+            elem[17] = 0;   // +0x44
+            elem[18] = 0;   // +0x48
+        }
+    }
+}
+
+// FUN_004450a0 (0x004450a0) - release all embedded elements, clear ext fields
+static int PSXObject_CleanupElements(BYTE* slot)
+{
+    for (int i = 0; i < 16; i++) {
+        CMarniViewport2* elem = (CMarniViewport2*)(slot + i * 0x4C);
+        elem->Release();    // original: call vtable[0]
+        DWORD* raw = (DWORD*)elem;
+        raw[0x11] = 0;
+        raw[0x10] = 0;
+        raw[0x0F] = 0;
+        raw[0x0E] = 0;
+    }
+    *(DWORD*)(slot + 0x4C0) = 0;
+    *(DWORD*)(slot + 0x4C4) = 0;
+    return 1;
+}
+
+// FUN_00444e10 (0x00444e10) - initialize a new kind-table entry
+static int PSXObject_KindDataSet(int* entry, unsigned int flags, short tpage, short clut)
+{
+    *(short*)(entry + 1) = tpage;
+    entry[2] = (int)flags;
+    flags &= 0x3DFFFFFF;
+    *(short*)(entry + 4) = clut;
+    entry[0] = 1;
+
+    // Triangle kinds (3 vertices per poly) -> entry[3] = 1
+    switch (flags) {
+    case 0x20040506: case 0x20000304:
+    case 0x24000507: case 0x21010304:
+    case 0x25010607:
+    case 0x30040606: case 0x30000406:
+    case 0x34000609: case 0x31010506:
+    case 0x35010809:
+        entry[3] = 1;
+        return 1;
+    // Quad kinds (4 vertices per poly) -> entry[3] = 0
+    case 0x28000405:
+    case 0x29010305: case 0x28040708:
+    case 0x2D010709: case 0x2C000709:
+    case 0x38000508:
+    case 0x39010608: case 0x38040808:
+    case 0x3C00080C: case 0x3D010A0C:
+        entry[3] = 0;
+        return 1;
+    default:
+        PSXObjDebugPrint("MarniSystem PSXObject kinddataset: unknown kind %x\n", flags);
+        return 0;
+    }
+}
+
+// FUN_00444db0 (0x00444db0) - advance packet cursor to next packet of `kind`
+static unsigned int* PSXObject_FindPacket(unsigned int* pkt, int* kind)
+{
+    while ((((*pkt ^ (unsigned int)kind[2]) & 0x3DFFFFFF) != 0) ||
+           (((unsigned int)kind[2] & 0x4000000) != 0 &&
+            (((short)(pkt[1] >> 0x10) != *(short*)(kind + 1)) ||
+             (((unsigned short)(pkt[2] >> 0x10) & 0x1F) != *(unsigned short*)(kind + 4))))) {
+        pkt = (unsigned int*)((int)pkt + ((*pkt & 0xFF00) >> 6) + 4);
+    }
+    return pkt;
+}
+
+// FUN_00444f60 (0x00444f60) - PSXObject::EnumKind
+// Groups the TMD primitive packets into distinct kinds (flags/tpage/clut).
+// Returns the kind count, or 0 on error.
+static int PSXObject_EnumKind(int maxKinds, int* table, unsigned int* pkt, int numPackets)
+{
+    memset(table, 0, maxKinds * 0x14);
+
+    int kindCount = 0;
+    int processed = 0;
+    if (numPackets > 0) {
+        int* newEntry = table;
+        do {
+            int i = 0;
+            if (kindCount > 0) {
+                unsigned int* kp = (unsigned int*)(table + 2);
+                do {
+                    if (*kp == *pkt) {
+                        if ((*pkt & 0x4000000) != 0) {
+                            if ((pkt[2] & 0x1800000) != 0x800000) {
+                                PSXObjDebugPrint("MarniSystem PSXObject::EnumKind: clut range error\n");
+                                return 0;
+                            }
+                            if (((short)(pkt[1] >> 0x10) != (short)kp[-1]) ||
+                                (((unsigned short)(pkt[2] >> 0x10) & 0x1F) != (unsigned short)kp[2])) {
+                                goto noMatch;
+                            }
+                        }
+                        table[i * 5] = table[i * 5] + 1;
+                        break;
+                    }
+                noMatch:
+                    kp = kp + 5;
+                    i = i + 1;
+                } while (i < kindCount);
+            }
+            if (i == kindCount) {
+                kindCount = kindCount + 1;
+                PSXObject_KindDataSet(newEntry, *pkt,
+                                      (short)(pkt[1] >> 0x10),
+                                      (short)((pkt[2] >> 0x10) & 0x1F));
+                newEntry = newEntry + 5;
+            }
+            if (maxKinds < kindCount) {
+                PSXObjDebugPrint("MarniSystem PSXObject::EnumKind: too many kinds\n");
+                return 0;
+            }
+            processed = processed + 1;
+            pkt = (unsigned int*)((int)pkt + ((*pkt & 0xFF00) >> 6) + 4);
+        } while (processed < numPackets);
+    }
+    return kindCount;
+}
+
+// FUN_00444790 (0x00444790) - DivideMarniPolyhedra
+// Splits src's geometry in two: src keeps floor(count/2) polys,
+// dst receives ceil(count/2) polys. Verified against the original asm:
+// the vertex write index advances by 3 per poly even for quads.
+static int DivideMarniPolyhedraElem(CMarniViewport2* src, CMarniViewport2* dst)
+{
+    CMarniViewport2 temp;                                   // 0x004272e0
+    temp.CreateWork(src->m_vertexCount, src->m_listCount, src->m_primitiveType);  // 0x00427100
+    temp.CopyFrom(src);                                     // 0x00426600
+
+    dst->Release();                                         // vtable[0]
+    src->Release();                                         // vtable[0]
+
+    int polyCount = temp.m_listCount;
+    int primType  = temp.m_primitiveType;
+    int half      = polyCount / 2;
+    int second    = half + (polyCount & 1);
+
+    src->CreateWork(primType * half, half, primType);       // vtable[1]
+    if (src->m_bHasBuffers == 0) {
+        PSXObjDebugPrint("DivideMarniPolyhedra: src CreateWork failed\n");
+        return 0;
+    }
+    dst->CreateWork(primType * second, second, primType);   // vtable[1]
+    if (dst->m_bHasBuffers == 0) {
+        PSXObjDebugPrint("DivideMarniPolyhedra: dst CreateWork failed\n");
+        return 0;
+    }
+
+    temp.Lock(0, 0);                                        // 0x004271e0
+    src->Lock(0, 0);                                        // vtable[6]
+
+    DWORD vtxBuf[11];
+    WORD  listBuf[4];
+    int vi = 0;
+    for (int p = 0; p < half; p++) {
+        WORD seq[4] = { (WORD)(primType * p), (WORD)(primType * p + 1),
+                        (WORD)(primType * p + 2), (WORD)(primType * p + 3) };
+        src->SetList(p, seq);                               // vtable[5]
+        temp.GetList(p, listBuf);                           // 0x00426e80
+        if (primType == 3) {
+            temp.GetVertex(listBuf[0], vtxBuf); src->SetVertex(vi,     vtxBuf);
+            temp.GetVertex(listBuf[1], vtxBuf); src->SetVertex(vi + 1, vtxBuf);
+            temp.GetVertex(listBuf[2], vtxBuf); src->SetVertex(vi + 2, vtxBuf);
+        }
+        else if (primType == 4) {
+            temp.GetVertex(listBuf[0], vtxBuf); src->SetVertex(vi,     vtxBuf);
+            temp.GetVertex(listBuf[1], vtxBuf); src->SetVertex(vi + 1, vtxBuf);
+            temp.GetVertex(listBuf[2], vtxBuf); src->SetVertex(vi + 2, vtxBuf);
+            temp.GetVertex(listBuf[3], vtxBuf); src->SetVertex(vi + 3, vtxBuf);
+        }
+        else {
+            PSXObjDebugPrint("DivideMarniPolyhedra: bad primitive type %d\n", primType);
+            return 0;
+        }
+        vi += 3;    // original advances by 3 even for quads (verified in asm)
+    }
+
+    src->Unlock();                                          // vtable[7]
+    dst->Lock(0, 0);                                        // vtable[6]
+
+    vi = 0;
+    for (int p = 0; p < second; p++) {
+        WORD seq[4] = { (WORD)(primType * p), (WORD)(primType * p + 1),
+                        (WORD)(primType * p + 2), (WORD)(primType * p + 3) };
+        dst->SetList(p, seq);                               // vtable[5]
+        temp.GetList(half + p, listBuf);                    // 0x00426e80
+        if (primType == 3) {
+            temp.GetVertex(listBuf[0], vtxBuf); dst->SetVertex(vi,     vtxBuf);
+            temp.GetVertex(listBuf[1], vtxBuf); dst->SetVertex(vi + 1, vtxBuf);
+            temp.GetVertex(listBuf[2], vtxBuf); dst->SetVertex(vi + 2, vtxBuf);
+        }
+        else if (primType == 4) {
+            temp.GetVertex(listBuf[0], vtxBuf); dst->SetVertex(vi,     vtxBuf);
+            temp.GetVertex(listBuf[1], vtxBuf); dst->SetVertex(vi + 1, vtxBuf);
+            temp.GetVertex(listBuf[2], vtxBuf); dst->SetVertex(vi + 2, vtxBuf);
+            temp.GetVertex(listBuf[3], vtxBuf); dst->SetVertex(vi + 3, vtxBuf);
+        }
+        else {
+            PSXObjDebugPrint("DivideMarniPolyhedra: bad primitive type %d\n", primType);
+            return 0;
+        }
+        vi += 3;
+    }
+
+    dst->Unlock();                                          // vtable[7]
+    temp.Unlock();                                          // 0x00427250
+
+    src->m_unknown1C = temp.m_unknown1C;
+    dst->m_unknown1C = temp.m_unknown1C;
+    return 1;
+}
+
+// FUN_00444ca0 (0x00444ca0) - PSXObject::Resize
+// Subdivides any embedded element whose vertex count reached the +0x4C8
+// threshold (constructor value 0x400) into a new element at the end.
+static int PSXObject_Resize(BYTE* slot)
+{
+    if (*(int*)(slot + 0x4C4) == 0) {
+        PSXObjDebugPrint("PSXObject::Resize: not stored\n");
+        return 0;
+    }
+    int i = 0;
+    if (*(int*)(slot + 0x4C0) > 0) {
+        do {
+            BYTE* elem = slot + i * 0x4C;
+            if (*(int*)(slot + 0x4C8) <= *(int*)(slot + 0x24 + i * 0x4C)) {
+                int count = *(int*)(slot + 0x4C0);
+                if (count > 0x10) {
+                    PSXObjDebugPrint("PSXObject::Resize: too many objects\n");
+                    return 0;
+                }
+                BYTE* newElem = slot + count * 0x4C;
+                DivideMarniPolyhedraElem((CMarniViewport2*)elem, (CMarniViewport2*)newElem);
+                *(DWORD*)(newElem + 0x38) = *(DWORD*)(elem + 0x38);
+                *(DWORD*)(newElem + 0x3C) = *(DWORD*)(elem + 0x3C);
+                *(DWORD*)(newElem + 0x40) = *(DWORD*)(elem + 0x40);
+                *(DWORD*)(newElem + 0x44) = *(DWORD*)(elem + 0x44);
+                *(DWORD*)(newElem + 0x48) = *(DWORD*)(elem + 0x48);
+                i = -1;     // restart the scan
+                *(int*)(slot + 0x4C0) = count + 1;
+            }
+            i = i + 1;
+        } while (i < *(int*)(slot + 0x4C0));
+    }
+    return 1;
+}
+
+// TMD vertex/normal readers (8-byte short4 entries)
+static void PSXObjReadVertex(PSXObjVtx* v, int vertBase, unsigned int idx)
+{
+    short* p = (short*)(vertBase + idx * 8);
+    v->x = (float)(int)p[0];
+    v->y = -(float)(int)p[1];
+    v->z = (float)(int)p[2];
+}
+
+// 0x25010607 reads positions without negating Y
+static void PSXObjReadVertexRawY(PSXObjVtx* v, int vertBase, unsigned int idx)
+{
+    short* p = (short*)(vertBase + idx * 8);
+    v->x = (float)(int)p[0];
+    v->y = (float)(int)p[1];
+    v->z = (float)(int)p[2];
+}
+
+static void PSXObjReadNormal(PSXObjVtx* v, int normBase, unsigned int idx)
+{
+    short* p = (short*)(normBase + idx * 8);
+    v->nx = (float)(int)p[0] * 0.00024414063f;
+    v->ny = (float)(int)p[1] * -0.00024414063f;
+    v->nz = (float)(int)p[2] * 0.00024414063f;
+}
+
+// FUN_004450e0 (0x004450e0) - MarniSystem PSXObject::Store
+// Parses a PSX TMD model into the Direct3DTMD slot.
+//   tmdHdr      - patched TMD header (magic 0x41, [1]=1 absolute mode, [2]=1 count)
+//   objIndex    - object index (original passes 0)
+//   bankOrTpage - selected texture page (-1 = auto-detect); original passes the depth
+//   texRef      - UV divisor (texture page width, from texBank + 0x2C)
+int PSXObject_Store(CMarniDirect3DTMD* self, int* tmdHdr, int objIndex,
+                    int bankOrTpage, int texRef)
+{
+    BYTE* slot = (BYTE*)self;
+
+    PSXObject_InitSlotElements(slot);
+    PSXObject_CleanupElements(slot);                        // FUN_004450a0
+
+    if (tmdHdr[0] != 0x41) {
+        PSXObjDebugPrint("a difference of header\nMarniSystem PSXObject::Store\n");
+        return 0;
+    }
+    if (tmdHdr[2] <= objIndex) {
+        PSXObjDebugPrint("the object that you are specified is wrong. %d, %d\n",
+                         tmdHdr[2], objIndex);
+        return 0;
+    }
+
+    int* objEntry = tmdHdr + objIndex * 7 + 3;
+    int primPtr, vertBase, normBase;
+    if ((*(BYTE*)(tmdHdr + 1) & 1) == 0) {
+        // Offset mode: table entries hold header-relative offsets
+        primPtr  = (int)(((unsigned)(tmdHdr[objIndex * 7 + 7] + 0xC) & 0xFFFFFFFC) + (int)tmdHdr);
+        vertBase = (int)(((unsigned)(*objEntry + 0xC) & 0xFFFFFFFC) + (int)tmdHdr);
+        normBase = (int)(((unsigned)(objEntry[2] + 0xC) & 0xFFFFFFFC) + (int)tmdHdr);
+    }
+    else {
+        // Absolute mode: table entries hold direct pointers
+        primPtr  = objEntry[4];
+        vertBase = *objEntry;
+        normBase = objEntry[2];
+    }
+
+    // Enumerate distinct primitive kinds (max 100 entries of 5 DWORDs)
+    int kindTable[100 * 5];
+    int kindCount = PSXObject_EnumKind(100, kindTable, (unsigned int*)primPtr, objEntry[5]);
+    if (kindCount >= 0x11 || kindCount == 0) {
+        PSXObjDebugPrint("MarniSystem PSXObject::Store: kind enumeration failed\n");
+        return 0;
+    }
+
+    // Select the texture page (CLUT) to bind
+    int selectedPage;
+    if (bankOrTpage == -1) {
+        unsigned int maxClut = 0;
+        unsigned int minClut = 4000;
+        if (kindCount > 0) {
+            unsigned short* cp = (unsigned short*)(kindTable + 4);
+            for (int i = kindCount; i != 0; i--) {
+                if ((*(unsigned int*)(cp - 4) & 0x4000000) != 0) {
+                    unsigned int c = *cp;
+                    if (maxClut < c) maxClut = c;
+                    if (c < minClut) minClut = c;
+                }
+                cp = cp + 10;
+            }
+        }
+        if (maxClut == 0 && minClut == 4000) {
+            minClut = 0;
+        }
+        if ((int)(maxClut - minClut) > 1) {
+            PSXObjDebugPrint("MarniSystem PSXObject::Store: clut range %d, %d\n",
+                             maxClut, minClut);
+            return 0;
+        }
+        selectedPage = (int)minClut;
+    }
+    else {
+        selectedPage = bankOrTpage;
+    }
+
+    float texW = (float)texRef;
+    int processed = 0;
+
+    *(DWORD*)(slot + 0x4C0) = (DWORD)kindCount;            // m_objectCount
+
+    if (kindCount > 0) {
+        int* kind = kindTable;
+        CMarniViewport2* elem = (CMarniViewport2*)slot;
+
+        while (true) {
+            int pktCursor = primPtr;
+            int count = *kind;
+            int polyType, vtxTotal;
+            if (kind[3] == 0) {
+                polyType = 4;
+                vtxTotal = count * 4;
+            }
+            else {
+                polyType = 3;
+                vtxTotal = count * 3;
+            }
+
+            // Material keys from the kind's tpage / clut
+            unsigned int tpage = (unsigned short)*(short*)(kind + 1);
+            ((DWORD*)elem)[0x0E] = (tpage & 0x3F) << 4;
+            ((DWORD*)elem)[0x0F] = tpage >> 6;
+            unsigned int clut = (unsigned short)*(short*)(kind + 4);
+            if (clut < 0x10) {
+                ((DWORD*)elem)[0x10] = clut << 6;
+                ((DWORD*)elem)[0x11] = 0;
+            }
+            else {
+                ((DWORD*)elem)[0x10] = (clut - 0x10) * 0x40;
+                ((DWORD*)elem)[0x11] = 0x100;
+            }
+
+            if (!elem->CreateWork(vtxTotal, count, polyType)) {     // vtable[1]
+                PSXObjDebugPrint("MarniSystem PSXObject::Store: CreateWork failed\n");
+                return 0;
+            }
+            if (!elem->Lock(0, 0)) {                                // vtable[6]
+                PSXObjDebugPrint("MarniSystem PSXObject::Store: Lock failed\n");
+                return 0;
+            }
+
+            int primIdx = 0;
+            int vertIdx = 0;    // SetVertex write index
+            int listBase = 0;   // SetList index base
+            if (count > 0) {
+                do {
+                    unsigned int* pkt = PSXObject_FindPacket((unsigned int*)pktCursor, kind);
+                    unsigned int type = (unsigned int)kind[2] & 0x3DFFFFFF;
+
+                    PSXObjVtx v0, v1, v2, v3;
+                    WORD idx[4];
+
+                    switch (type) {
+                    case 0x20000304:    // flat triangle, single normal, untextured
+                        PSXObjReadVertex(&v0, vertBase, pkt[2] >> 0x10);
+                        PSXObjReadVertex(&v1, vertBase, pkt[3] & 0xFFFF);
+                        PSXObjReadVertex(&v2, vertBase, pkt[3] >> 0x10);
+                        PSXObjReadNormal(&v0, normBase, pkt[2] & 0xFFFF);
+                        v1.nx = v1.ny = v1.nz = 0.0f;
+                        v2.nx = v2.ny = v2.nz = 0.0f;
+                        v0.r = v0.g = v0.b = 1.0f;
+                        v1.r = v1.g = v1.b = 1.0f;
+                        v2.r = v2.g = v2.b = 1.0f;
+                        v0.u = v0.v = 0.0f; v1.u = v1.v = 0.0f; v2.u = v2.v = 0.0f;
+                        idx[0] = (WORD)(listBase + 0);
+                        idx[1] = (WORD)(listBase + 1);
+                        idx[2] = (WORD)(listBase + 2);
+                        if (!elem->SetVertex(vertIdx,     (DWORD*)&v0) ||
+                            !elem->SetVertex(vertIdx + 1, (DWORD*)&v1) ||
+                            !elem->SetVertex(vertIdx + 2, (DWORD*)&v2) ||
+                            !elem->SetList(primIdx, idx)) {
+                            goto storeFail;
+                        }
+                        ((DWORD*)elem)[7]    = 0;
+                        ((DWORD*)elem)[0x12] = 0;
+                        break;
+
+                    case 0x24000507: {  // textured flat triangle, single normal
+                        PSXObjReadVertex(&v0, vertBase, pkt[4] >> 0x10);
+                        PSXObjReadVertex(&v1, vertBase, pkt[5] & 0xFFFF);
+                        PSXObjReadVertex(&v2, vertBase, pkt[5] >> 0x10);
+                        PSXObjReadNormal(&v0, normBase, pkt[4] & 0xFFFF);
+                        v1.nx = v1.ny = v1.nz = 0.0f;
+                        v2.nx = v2.ny = v2.nz = 0.0f;
+                        float ubase = (*(unsigned short*)(kind + 4) == (unsigned int)selectedPage) ? 0.0f : 0.5f;
+                        v0.u = (float)(pkt[1] & 0xFF) / texW + ubase;
+                        v0.v = (float)*(BYTE*)((BYTE*)pkt + 5) * 0.00390625f;
+                        v1.u = (float)(pkt[2] & 0xFF) / texW + ubase;
+                        v1.v = (float)*(BYTE*)((BYTE*)pkt + 9) * 0.00390625f;
+                        v2.u = (float)(pkt[3] & 0xFF) / texW + ubase;
+                        v2.v = (float)*(BYTE*)((BYTE*)pkt + 0xD) * 0.00390625f;
+                        if (v0.u == v1.u || v2.u == v1.u || v0.u == v2.u) v1.u += 0.003f;
+                        if (v0.v == v1.v || v2.v == v1.v || v0.v == v2.v) v1.v += 0.003f;
+                        v0.r = v0.g = v0.b = 1.0f;
+                        v1.r = v1.g = v1.b = 1.0f;
+                        v2.r = v2.g = v2.b = 1.0f;
+                        idx[0] = (WORD)(listBase + 0);
+                        idx[1] = (WORD)(listBase + 1);
+                        idx[2] = (WORD)(listBase + 2);
+                        if (!elem->SetVertex(vertIdx,     (DWORD*)&v0) ||
+                            !elem->SetVertex(vertIdx + 1, (DWORD*)&v1) ||
+                            !elem->SetVertex(vertIdx + 2, (DWORD*)&v2) ||
+                            !elem->SetList(primIdx, idx)) {
+                            goto storeFail;
+                        }
+                        ((DWORD*)elem)[7]    = 0;
+                        ((DWORD*)elem)[0x12] = 1;
+                        break;
+                    }
+
+                    case 0x25010607: {  // textured triangle, normal = (0,0,-1), raw Y
+                        PSXObjReadVertexRawY(&v0, vertBase, pkt[5] & 0xFFFF);
+                        PSXObjReadVertexRawY(&v1, vertBase, pkt[5] >> 0x10);
+                        PSXObjReadVertexRawY(&v2, vertBase, pkt[6] & 0xFFFF);
+                        v0.nx = 0.0f; v0.ny = 0.0f; v0.nz = -1.0f;
+                        v1.nx = v1.ny = v1.nz = 0.0f;
+                        v2.nx = v2.ny = v2.nz = 0.0f;
+                        float ubase = (*(unsigned short*)(kind + 4) == (unsigned int)selectedPage) ? 0.0f : 0.5f;
+                        v0.u = (float)(pkt[1] & 0xFF) / texW + ubase;
+                        v0.v = (float)*(BYTE*)((BYTE*)pkt + 5) * 0.00390625f;
+                        v1.u = (float)(pkt[2] & 0xFF) / texW + ubase;
+                        v1.v = (float)*(BYTE*)((BYTE*)pkt + 9) * 0.00390625f;
+                        v2.u = (float)(pkt[3] & 0xFF) / texW + ubase;
+                        v2.v = (float)*(BYTE*)((BYTE*)pkt + 0xD) * 0.00390625f;
+                        if (v0.u == v1.u || v2.u == v1.u || v0.u == v2.u) v1.u += 0.003f;
+                        if (v0.v == v1.v || v2.v == v1.v || v0.v == v2.v) v1.v += 0.003f;
+                        v0.r = v0.g = v0.b = 1.0f;
+                        v1.r = v1.g = v1.b = 1.0f;
+                        v2.r = v2.g = v2.b = 1.0f;
+                        idx[0] = (WORD)(listBase + 0);
+                        idx[1] = (WORD)(listBase + 1);
+                        idx[2] = (WORD)(listBase + 2);
+                        if (!elem->SetVertex(vertIdx,     (DWORD*)&v0) ||
+                            !elem->SetVertex(vertIdx + 1, (DWORD*)&v1) ||
+                            !elem->SetVertex(vertIdx + 2, (DWORD*)&v2) ||
+                            !elem->SetList(primIdx, idx)) {
+                            goto storeFail;
+                        }
+                        ((DWORD*)elem)[7]    = 0;
+                        ((DWORD*)elem)[0x12] = 1;
+                        break;
+                    }
+
+                    case 0x30000406:    // gouraud-normal triangle, flat color, untextured
+                        PSXObjReadVertex(&v0, vertBase, pkt[2] >> 0x10);
+                        PSXObjReadVertex(&v1, vertBase, pkt[3] >> 0x10);
+                        PSXObjReadVertex(&v2, vertBase, pkt[4] >> 0x10);
+                        PSXObjReadNormal(&v0, normBase, pkt[2] & 0xFFFF);
+                        PSXObjReadNormal(&v1, normBase, pkt[3] & 0xFFFF);
+                        PSXObjReadNormal(&v2, normBase, pkt[4] & 0xFFFF);
+                        v0.r = (float)(pkt[1] & 0xFF) * 0.0009765625f;
+                        v0.g = (float)*(BYTE*)((BYTE*)pkt + 5) * 0.0009765625f;
+                        v0.b = (float)((pkt[1] & 0xFF0000) >> 0x10) * 0.0009765625f;
+                        v1.r = v0.r; v1.g = v0.g; v1.b = v0.b;
+                        v2.r = v0.r; v2.g = v0.g; v2.b = v0.b;
+                        v0.u = v0.v = 0.0f; v1.u = v1.v = 0.0f; v2.u = v2.v = 0.0f;
+                        idx[0] = (WORD)(listBase + 0);
+                        idx[1] = (WORD)(listBase + 1);
+                        idx[2] = (WORD)(listBase + 2);
+                        if (!elem->SetVertex(vertIdx,     (DWORD*)&v0) ||
+                            !elem->SetVertex(vertIdx + 1, (DWORD*)&v1) ||
+                            !elem->SetVertex(vertIdx + 2, (DWORD*)&v2) ||
+                            !elem->SetList(primIdx, idx)) {
+                            goto storeFail;
+                        }
+                        ((DWORD*)elem)[7]    = 1;
+                        ((DWORD*)elem)[0x12] = 0;
+                        break;
+
+                    case 0x34000609: {  // textured gouraud triangle
+                        PSXObjReadVertex(&v0, vertBase, pkt[4] >> 0x10);
+                        PSXObjReadVertex(&v1, vertBase, pkt[5] & 0xFFFF);
+                        PSXObjReadVertex(&v2, vertBase, pkt[6] >> 0x10);
+                        PSXObjReadNormal(&v0, normBase, pkt[4] & 0xFFFF);
+                        PSXObjReadNormal(&v1, normBase, pkt[5] & 0xFFFF);
+                        PSXObjReadNormal(&v2, normBase, pkt[6] & 0xFFFF);
+                        float ubase = (*(unsigned short*)(kind + 4) == (unsigned int)selectedPage) ? 0.0f : 0.5f;
+                        v0.u = (float)(pkt[1] & 0xFF) / texW + ubase;
+                        v0.v = (float)*(BYTE*)((BYTE*)pkt + 5) * 0.00390625f;
+                        v1.u = (float)(pkt[2] & 0xFF) / texW + ubase;
+                        v1.v = (float)*(BYTE*)((BYTE*)pkt + 9) * 0.00390625f;
+                        v2.u = (float)(pkt[3] & 0xFF) / texW + ubase;
+                        v2.v = (float)*(BYTE*)((BYTE*)pkt + 0xD) * 0.00390625f;
+                        if (v0.u == v1.u || v2.u == v1.u || v0.u == v2.u) v1.u += 0.0001f;
+                        if (v0.v == v1.v || v2.v == v1.v || v0.v == v2.v) v1.v += 0.0001f;
+                        v0.r = v0.g = v0.b = 1.0f;
+                        v1.r = v1.g = v1.b = 1.0f;
+                        v2.r = v2.g = v2.b = 1.0f;
+                        idx[0] = (WORD)(listBase + 0);
+                        idx[1] = (WORD)(listBase + 1);
+                        idx[2] = (WORD)(listBase + 2);
+                        if (!elem->SetVertex(vertIdx,     (DWORD*)&v0) ||
+                            !elem->SetVertex(vertIdx + 1, (DWORD*)&v1) ||
+                            !elem->SetVertex(vertIdx + 2, (DWORD*)&v2) ||
+                            !elem->SetList(primIdx, idx)) {
+                            goto storeFail;
+                        }
+                        ((DWORD*)elem)[7]    = 1;
+                        ((DWORD*)elem)[0x12] = 1;
+                        break;
+                    }
+
+                    case 0x3C00080C: {  // textured gouraud quad
+                        PSXObjReadVertex(&v0, vertBase, pkt[5] >> 0x10);
+                        PSXObjReadVertex(&v1, vertBase, pkt[6] & 0xFFFF);
+                        PSXObjReadVertex(&v2, vertBase, pkt[7] >> 0x10);
+                        PSXObjReadVertex(&v3, vertBase, pkt[8] >> 0x10);
+                        PSXObjReadNormal(&v0, normBase, pkt[5] & 0xFFFF);
+                        PSXObjReadNormal(&v1, normBase, pkt[6] & 0xFFFF);
+                        PSXObjReadNormal(&v2, normBase, pkt[7] & 0xFFFF);
+                        PSXObjReadNormal(&v3, normBase, pkt[8] & 0xFFFF);
+                        float ubase = (*(unsigned short*)(kind + 4) == (unsigned int)selectedPage) ? 0.0f : 0.5f;
+                        v0.u = (float)(pkt[1] & 0xFF) / texW + ubase;
+                        v0.v = (float)*(BYTE*)((BYTE*)pkt + 5) * 0.00390625f;
+                        v1.u = (float)(pkt[2] & 0xFF) / texW + ubase;
+                        v1.v = (float)*(BYTE*)((BYTE*)pkt + 9) * 0.00390625f;
+                        v2.u = (float)(pkt[3] & 0xFF) / texW + ubase;
+                        v2.v = (float)*(BYTE*)((BYTE*)pkt + 0xD) * 0.00390625f;
+                        v3.u = (float)(pkt[4] & 0xFF) / texW + ubase;
+                        v3.v = (float)*(BYTE*)((BYTE*)pkt + 0x11) * 0.00390625f;
+                        if (v0.u == v1.u || v2.u == v1.u || v0.u == v2.u) v1.u += 0.003f;
+                        if (v0.v == v1.v || v2.v == v1.v || v0.v == v2.v) v1.v += 0.003f;
+                        v0.r = v0.g = v0.b = 1.0f;
+                        v1.r = v1.g = v1.b = 1.0f;
+                        v2.r = v2.g = v2.b = 1.0f;
+                        v3.r = v3.g = v3.b = 1.0f;
+                        idx[0] = (WORD)(primIdx * 4 + 0);
+                        idx[1] = (WORD)(primIdx * 4 + 1);
+                        idx[2] = (WORD)(primIdx * 4 + 3);
+                        idx[3] = (WORD)(primIdx * 4 + 2);
+                        if (!elem->SetVertex(vertIdx,     (DWORD*)&v0) ||
+                            !elem->SetVertex(vertIdx + 1, (DWORD*)&v1) ||
+                            !elem->SetVertex(vertIdx + 2, (DWORD*)&v2) ||
+                            !elem->SetVertex(vertIdx + 3, (DWORD*)&v3) ||
+                            !elem->SetList(primIdx, idx)) {
+                            goto storeFail;
+                        }
+                        ((DWORD*)elem)[7]    = 1;
+                        ((DWORD*)elem)[0x12] = 1;
+                        break;
+                    }
+
+                    default:
+                        PSXObjDebugPrint("MarniSystem PSXObject::Store: unknown kind %x\n",
+                                         kindTable[processed * 5]);
+                        return 0;
+                    }
+
+                    pktCursor = (int)pkt + ((*pkt & 0xFF00) >> 6) + 4;
+                    if (type == 0x3C00080C) {
+                        vertIdx += 4;       // quad: 4 vertices per poly (iStack_7dc)
+                    }
+                    else {
+                        vertIdx  += 3;      // triangle: 3 vertices per poly
+                        listBase += 3;
+                    }
+                    primIdx  += 1;
+                } while (primIdx < *kind);
+            }
+
+            elem->Unlock();                                 // vtable[7]
+            processed = processed + 1;
+            kind = kind + 5;
+            elem = (CMarniViewport2*)((DWORD*)elem + 0x13);
+            if (kindCount <= processed) break;
+        }
+    }
+
+    // Final pass: override the clut material key for kinds whose clut does
+    // not match the selected page
+    if (kindCount > 0) {
+        unsigned short* cp = (unsigned short*)(kindTable + 4);
+        DWORD* e = (DWORD*)(slot + 0x40);                   // elem[0x10]
+        for (int i = kindCount; i != 0; i--) {
+            if (*cp != (unsigned int)selectedPage) {
+                if (selectedPage < 0x10) {
+                    e[0] = (DWORD)(selectedPage << 6);
+                    e[1] = 0;
+                }
+                else {
+                    e[0] = (DWORD)((selectedPage - 0x10) * 0x40);
+                    e[1] = 0x100;
+                }
+            }
+            e  = e + 0x13;
+            cp = cp + 10;
+        }
+    }
+
+    *(DWORD*)(slot + 0x4C4) = 1;                            // m_flag4C4
+    *(DWORD*)(slot + 0x4C0) = (DWORD)kindCount;             // m_objectCount
+
+    if (PSXObject_Resize(slot) != 0) {                      // FUN_00444ca0
+        return 1;
+    }
+
+    PSXObjDebugPrint("MarniSystem PSXObject::Store: resize failed\n");
+    *(DWORD*)(slot + 0x4C4) = 0;
+    return 0;
+
+storeFail:  // LAB_00446c5e
+    PSXObjDebugPrint("MarniSystem PSXObject::Store: vertex write failed\n");
+    *(DWORD*)(slot + 0x4C4) = 0;
+    return 0;
 }

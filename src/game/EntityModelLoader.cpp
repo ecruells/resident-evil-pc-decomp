@@ -8,9 +8,6 @@
 // ============================================================================
 // Extern data declarations (not yet extracted to Globals.h)
 // ============================================================================
-extern BYTE  g_entityModelBuffer[0xCC00];      // 0x00bf11c0
-extern DWORD g_entityModelBuffer2[0xB4];       // 0x00bfddc0
-extern DWORD g_animObjectBuffer[0x680];        // 0x00c133c0
 extern DWORD DAT_004d2bd8;                     // 0x004d2bd8 - special model flag
 extern DWORD DAT_004d2bf4;                     // 0x004d2bf4 - TMD processing flag
 extern DWORD g_tmdAsyncData;                   // 0x008fc424 - TMD async data
@@ -18,9 +15,6 @@ extern DWORD DAT_004c1a2c;                     // 0x004c1a2c
 extern DWORD DAT_00ae9f04;                     // 0x00ae9f04
 extern BYTE  g_textureQueueData[40];           // 0x00d22740
 extern DWORD g_animSlotIndex;                  // 0x008f8c78
-extern DWORD g_tmdTextureAllocated[23];        // 0x00922a40
-extern BYTE  g_psxTextureArray[23 * 0x1b60];  // 0x00a75168 - PSXTexture array
-extern DWORD g_textureBankRedirect[23];        // 0x00aae2b0
 extern DWORD DAT_004d6444;                     // 0x004d6444
 
 // Player/weapon angle globals
@@ -624,7 +618,7 @@ void SetupCharacterData(void)
         g_playerEntity.equippedWeaponId = g_ItemsSlots[(unsigned int)g_equippedItemId].Id;
     }
     LoadEquippedWeaponAnimation(
-        g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animationBuffer, (unsigned int)&g_animObjectBuffer);
+        g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animationBuffer, (unsigned int)&g_animationBuffer);
     g_playerEntity.unk_8e = 0;
     g_playerEntity.jointsStructs[1].rotDeltaX = 0;
     g_playerEntity.jointsStructs[1].rotDeltaY = 0;

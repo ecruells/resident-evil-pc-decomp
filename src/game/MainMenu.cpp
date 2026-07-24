@@ -462,7 +462,7 @@ LAB_00463a53:
 
             if (DAT_00ae9f1e != 0) {
                 LoadEquippedWeaponAnimation(g_playerEntity.equippedWeaponId, 0xE,
-                                            &g_animationBuffer, &g_animObjectBuffer);
+                                            &g_animationBuffer, &g_animationBuffer);
             }
 
             if ((g_main_state_flags & 1) != 0) {

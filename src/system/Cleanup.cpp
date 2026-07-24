@@ -49,6 +49,7 @@ void UpdateGameStatus(void)
 // ============================================================================
 void CleanupVideoConfigAndSaveAllSettings(void)
 {
+    OutputDebugStringA("[CLEANUP] CleanupVideoConfigAndSaveAllSettings called\n");
     // 0x00497ea0: Guard flag prevents double cleanup
     if (g_bHasFinalizedSettings) {
         return;
@@ -68,6 +69,7 @@ void CleanupVideoConfigAndSaveAllSettings(void)
     }
     
     g_pMarniDirect3D = NULL;
+    OutputDebugStringA("[CLEANUP] g_pMarniDirect3D set to NULL\n");
 }
 
 // ============================================================================
@@ -138,30 +140,14 @@ void SaveGameSettingsToRegistry(void)
 void CVideoSystem_Cleanup(void* ptr)
 {
     // 0x0044b940: Destructor for CMarniDirect3D
-    // In modern implementation, releases D3D11 device/context/swapchain
+    // In the modern port, delegates to MarniDX which owns all D3D11 state.
     if (ptr != NULL) {
         CMarniDirect3D* pD3D = (CMarniDirect3D*)ptr;
 
-        // Release all D3D11 resources in reverse order of creation
-        if (pD3D->m_pWhiteSRV)         { pD3D->m_pWhiteSRV->Release(); pD3D->m_pWhiteSRV = NULL; }
-        if (pD3D->m_pWhiteTex)         { pD3D->m_pWhiteTex->Release(); pD3D->m_pWhiteTex = NULL; }
-        if (pD3D->m_pFontSRV)          { pD3D->m_pFontSRV->Release(); pD3D->m_pFontSRV = NULL; }
-        if (pD3D->m_pFontTexture)      { pD3D->m_pFontTexture->Release(); pD3D->m_pFontTexture = NULL; }
-        if (pD3D->m_pSamplerLinear)    { pD3D->m_pSamplerLinear->Release(); pD3D->m_pSamplerLinear = NULL; }
-        if (pD3D->m_pSamplerPoint)     { pD3D->m_pSamplerPoint->Release(); pD3D->m_pSamplerPoint = NULL; }
-        if (pD3D->m_pBlendAlpha)       { pD3D->m_pBlendAlpha->Release(); pD3D->m_pBlendAlpha = NULL; }
-        if (pD3D->m_pSpriteCB)         { pD3D->m_pSpriteCB->Release(); pD3D->m_pSpriteCB = NULL; }
-        if (pD3D->m_pQuadVB)           { pD3D->m_pQuadVB->Release(); pD3D->m_pQuadVB = NULL; }
-        if (pD3D->m_pQuadInputLayout)  { pD3D->m_pQuadInputLayout->Release(); pD3D->m_pQuadInputLayout = NULL; }
-        if (pD3D->m_pQuadPS)           { pD3D->m_pQuadPS->Release(); pD3D->m_pQuadPS = NULL; }
-        if (pD3D->m_pQuadVS)           { pD3D->m_pQuadVS->Release(); pD3D->m_pQuadVS = NULL; }
-        if (pD3D->m_pRasterStateScissor) { pD3D->m_pRasterStateScissor->Release(); pD3D->m_pRasterStateScissor = NULL; }
-        if (pD3D->m_pDepthStencilView) { pD3D->m_pDepthStencilView->Release(); pD3D->m_pDepthStencilView = NULL; }
-        if (pD3D->m_pDepthStencil)     { pD3D->m_pDepthStencil->Release(); pD3D->m_pDepthStencil = NULL; }
-        if (pD3D->m_pRenderTargetView) { pD3D->m_pRenderTargetView->Release(); pD3D->m_pRenderTargetView = NULL; }
-        if (pD3D->m_pSwapChain)        { pD3D->m_pSwapChain->Release(); pD3D->m_pSwapChain = NULL; }
-        if (pD3D->m_pD3DContext)       { pD3D->m_pD3DContext->Release(); pD3D->m_pD3DContext = NULL; }
-        if (pD3D->m_pD3DDevice)        { pD3D->m_pD3DDevice->Release(); pD3D->m_pD3DDevice = NULL; }
+        // Release all D3D11 resources — everything lives in MarniDX now.
+        if (pD3D->m_pDX) {
+            pD3D->m_pDX->Destroy();
+        }
 
         pD3D->m_isInitialized = FALSE;
     }

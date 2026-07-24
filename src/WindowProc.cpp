@@ -96,8 +96,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
     // 0x004411d0: Message dispatch
     switch (msg) {
         // --- WM_ACTIVATE ---
+        // 0x004411e2: The original writes DAT_004bcb2c (window focused flag) here,
+        // NOT g_isPaused (0x004d46ac). g_isPaused is the SideWinder pause-button
+        // event flag: main_loop consumes it and injects a synthetic START+bit8
+        // (0x900) press, which triggers the Option Mode menu combo. Writing it
+        // here made every window focus change open the (stubbed) options menu.
         case WM_ACTIVATE:
-            g_isPaused = FALSE;
+            g_bWindowFocused = FALSE;
             if (LOWORD(wParam) == WA_INACTIVE) {
                 // 0x004411f4: Window deactivated
                 if (!g_bIsSoftwareRendering && g_mciVideoDeviceID == 1) {
@@ -106,7 +111,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
                 PauseSounds();
             } else {
                 // Window activated
-                g_isPaused = TRUE;
+                g_bWindowFocused = TRUE;
                 ResumePausedSounds();
             }
             break;
