@@ -908,6 +908,13 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
                 g_TexturePageWidth[slot] = VRAM_PAGE_W;
                 g_TexturePageHeight[slot] = VRAM_PAGE_H;
                 g_TexturePageBpp[slot] = 16;
+                // Set VRAM page metadata so display_texture can locate this
+                // SRV by depth/UV bounds. Items are rendered at depth=0x1d
+                // with texU=88, texV=slot*32, printClutTint=0x1e4.
+                g_TexturePageDepth[slot] = 0x1d;
+                g_TexturePageClutBase[slot] = 0x1e0;
+                g_TexturePageOriginX[slot] = 0;
+                g_TexturePageOriginY[slot] = 0;
             }
         }
     }
