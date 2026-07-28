@@ -104,12 +104,18 @@ struct PlayerEntity {
     unsigned short unk_ca;              // 0xCA
 
     // ---- Status (0xCC - 0xE3) ----
-    unsigned char  pad_cc[0x0C];        // 0xCC-0xD7
-    unsigned char  unk_d8;              // 0xD8
-    unsigned char  pad_d9[2];           // 0xD9-0xDA
+    // ---- Look-at / head tracking (0xCC - 0xDA) ----
+    // Same layout as Entity; see the Entity declarations below for the
+    // lookAtFlags bit meanings.
+    int            lookAtTargetX;       // 0xCC
+    int            lookAtTargetY;       // 0xD0
+    int            lookAtTargetZ;       // 0xD4
+    unsigned char  lookAtFlags;         // 0xD8
+    unsigned char  lookAtYawStep;       // 0xD9
+    unsigned char  lookAtPitchStep;     // 0xDA
     unsigned char  unk_db;              // 0xDB
     unsigned char  healthStatusFlags;   // 0xDC
-    unsigned char  unk_dd;              // 0xDD
+    unsigned char  lookAtJointIdx;      // 0xDD
     unsigned short unk_de;              // 0xDE
     unsigned short unk_e0;              // 0xE0
     unsigned short attackTimer;         // 0xE2
@@ -219,17 +225,33 @@ struct Entity {
     unsigned short unk_c8;              // 0xC8 - base Z position offset for animation
     // ---- SCD event movement data (0xCA - 0xDB) ----
     unsigned char  pad_ca[2];           // 0xCA-0xCB
-    int            scd_pos_x;           // 0xCC - SCD event target position X
-    int            scd_pos_y;           // 0xD0 - SCD event target position Y
-    int            scd_pos_z;           // 0xD4 - SCD event target position Z
-    unsigned char  scd_behavior_type;   // 0xD8 - SCD event behavior type (0x93 = target entity)
-    unsigned char  scd_step_size;       // 0xD9 - SCD event step/movement size
-    unsigned char  scd_step_flags;      // 0xDA - SCD event step flags
+    // Look-at target the tracking joint aims at. Written by the SCD look-at
+    // opcode (RoomEvents.cpp); when lookAtFlags has 0x80 these are reloaded
+    // from *(scd_target_ptr) + 0x34/0x38/0x3C on every update instead.
+    int            scd_pos_x;           // 0xCC - look-at target X
+    int            scd_pos_y;           // 0xD0 - look-at target Y
+    int            scd_pos_z;           // 0xD4 - look-at target Z
+
+    // 0xD8 is a look-at control bitfield, NOT an SCD "behavior type":
+    //   0x01 enable yaw      0x02 enable pitch
+    //   0x10 enable slewing  0x20 target is already absolute (skip recompute)
+    //   0x80 reload target from *(scd_target_ptr)+0x34/0x38/0x3C
+    // Every value the original writes (0x10, 0x11, 0x13, 0x33, 0x93) carries
+    // 0x10. EntityUpdateLookAtAngles (0x00459eb0) gates on & 0x10 while
+    // EntityApplyLookAtRotation (0x0045a2e0) gates on the whole byte != 0, so
+    // clearing 0x10 freezes the look-at at its current angles rather than
+    // snapping it back.
+    unsigned char  lookAtFlags;         // 0xD8
+    unsigned char  lookAtYawStep;       // 0xD9 - max yaw change per update (SCD default 0xC0)
+    unsigned char  lookAtPitchStep;     // 0xDA - max pitch change per update (SCD default 0x40)
     unsigned char  scd_anim_param;      // 0xDB - SCD event animation parameter
     unsigned char  collisionFlags;      // 0xDC - collision callback flags (bit 3 = wall push)
 
-    // ---- Joint init flag (0xDD) ----
-    unsigned char  jointResetFlag;      // 0xDD
+    // ---- Look-at joint (0xDD) ----
+    // Index (stride 0x7C) of the joint the look-at rotation is applied to.
+    // ResetJointTransforms sets 1 (the player's tracking joint); other entity
+    // types use 2, and the SCD opcode can set it per-entity.
+    unsigned char  lookAtJointIdx;      // 0xDD
 
     // ---- SCD event timing (0xDE - 0xE1) ----
     unsigned char  scd_timer_lo;        // 0xDE - SCD event timer low byte

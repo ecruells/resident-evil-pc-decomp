@@ -9,6 +9,8 @@
 //  get_matrix_t (0x0040a9c0)
 #include "../Globals.h"
 #include <cmath>
+#include <cstdio>
+#include <windows.h>
 
 // ============================================================================
 // GTE trig lookup tables (standard PS1 12-bit angle precision)
@@ -46,24 +48,24 @@ static void InitTrigTables(void)
 }
 
 // ============================================================================
-// GTE sin/cos lookups (0x00440a10 / 0x004409f0)
+// GTE sin/cos lookups (0x004409f0 / 0x00440a10)
 // ============================================================================
-// NOTE ON THE NAMES: these are named after the Ghidra symbols, and in the
-// original those two symbols are attached to the opposite tables.
-// FUN_00440a30 fills 0x004bcacc with sin and 0x004bcad0 with cos, while
-// GteCos (0x004409f0) reads 0x004bcacc and GteSin (0x00440a10) reads
-// 0x004bcad0. Every formula transcribed from the decompiler therefore expects
-// GteSin() == cosine and GteCos() == sine; feeding them the tables their names
-// suggest turns a Y-only rotation into a garbage permutation with m[1][1] = -cos
-// instead of 1, which is what collapsed the entity joint chain.
+// Verified against the original's disassembly:
+//   FUN_00440a30 allocates 0x004bcacc and fills it with fsin, then allocates
+//   0x004bcad0 and fills it with fcos.
+//   0x004409f0 reads [0x004bcacc] -> sine.
+//   0x00440a10 reads [0x004bcad0] -> cosine.
+// (The Ghidra symbols for these two were originally attached the other way
+// round; both the names and every call site below have been corrected, so
+// GteSin() is sine and GteCos() is cosine throughout.)
 int GteSin(int angle)
 {
-    return g_cosTable[angle & 0xFFF];   // 0x00440a10 -> cos table (0x004bcad0)
+    return g_sinTable[angle & 0xFFF];   // 0x004409f0 -> sin table (0x004bcacc)
 }
 
 int GteCos(int angle)
 {
-    return g_sinTable[angle & 0xFFF];   // 0x004409f0 -> sin table (0x004bcacc)
+    return g_cosTable[angle & 0xFFF];   // 0x00440a10 -> cos table (0x004bcad0)
 }
 
 // ============================================================================
@@ -76,68 +78,68 @@ static void GteRotationMatrixCalc(int sx, int sy, int sz, int* result)
 
     int iVar1, iVar2, iVar3, iVar4, iVar5;
 
-    // result[0] = sin(sz) * sin(sy)  (or cos equivalent)
-    iVar1 = GteSin(sz);
-    iVar2 = GteSin(sy);
+    // result[0] = cos(sz) * cos(sy)
+    iVar1 = GteCos(sz);
+    iVar2 = GteCos(sy);
     result[0] = (int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe;
 
-    // result[1] = -sin(sy) * cos(sz)
-    iVar1 = GteSin(sy);
-    iVar2 = GteCos(sz);
+    // result[1] = -cos(sy) * sin(sz)
+    iVar1 = GteCos(sy);
+    iVar2 = GteSin(sz);
     result[1] = -((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[2] = cos(sy)
-    iVar1 = GteCos(sy);
+    // result[2] = sin(sy)
+    iVar1 = GteSin(sy);
     result[2] = iVar1;
 
-    // result[3] = cos(sx)*cos(sy)*sin(sz) + sin(sx)*cos(sz)
-    iVar1 = GteCos(sx);
-    iVar2 = GteCos(sy);
-    iVar3 = GteSin(sz);
-    iVar3 = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) * iVar3;
+    // result[3] = sin(sx)*sin(sy)*cos(sz) + cos(sx)*sin(sz)
     iVar1 = GteSin(sx);
-    iVar2 = GteCos(sz);
+    iVar2 = GteSin(sy);
+    iVar3 = GteCos(sz);
+    iVar3 = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) * iVar3;
+    iVar1 = GteCos(sx);
+    iVar2 = GteSin(sz);
     result[3] = ((int)(iVar3 + (iVar3 >> 0x1f & 0x3fffU)) >> 0xe) +
                 ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[4] = sin(sx)*sin(sz) - cos(sx)*cos(sz)*cos(sy)
-    iVar1 = GteSin(sx);
-    iVar2 = GteSin(sz);
-    iVar3 = GteCos(sx);
-    iVar4 = GteCos(sz);
-    iVar5 = GteCos(sy);
+    // result[4] = cos(sx)*cos(sz) - sin(sx)*sin(sz)*sin(sy)
+    iVar1 = GteCos(sx);
+    iVar2 = GteCos(sz);
+    iVar3 = GteSin(sx);
+    iVar4 = GteSin(sz);
+    iVar5 = GteSin(sy);
     iVar5 = ((int)(iVar3 * iVar4 + (iVar3 * iVar4 >> 0x1f & 0x3fffU)) >> 0xe) * iVar5;
     result[4] = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) -
                 ((int)(iVar5 + (iVar5 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[5] = -(cos(sx)*sin(sy))
-    iVar1 = GteCos(sx);
-    iVar2 = GteSin(sy);
+    // result[5] = -(sin(sx)*cos(sy))
+    iVar1 = GteSin(sx);
+    iVar2 = GteCos(sy);
     result[5] = -((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[6] = cos(sx)*cos(sz) - sin(sx)*cos(sy)*sin(sz)
-    iVar1 = GteCos(sx);
-    iVar2 = GteCos(sz);
-    iVar3 = GteSin(sx);
-    iVar4 = GteCos(sy);
-    iVar5 = GteSin(sz);
+    // result[6] = sin(sx)*sin(sz) - cos(sx)*sin(sy)*cos(sz)
+    iVar1 = GteSin(sx);
+    iVar2 = GteSin(sz);
+    iVar3 = GteCos(sx);
+    iVar4 = GteSin(sy);
+    iVar5 = GteCos(sz);
     iVar5 = ((int)(iVar3 * iVar4 + (iVar3 * iVar4 >> 0x1f & 0x3fffU)) >> 0xe) * iVar5;
     result[6] = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) -
                 ((int)(iVar5 + (iVar5 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[7] = cos(sz)*cos(sy)*sin(sx) + cos(sx)*sin(sz)
-    iVar1 = GteCos(sz);
-    iVar2 = GteCos(sy);
-    iVar3 = GteSin(sx);
+    // result[7] = sin(sz)*sin(sy)*cos(sx) + sin(sx)*cos(sz)
+    iVar1 = GteSin(sz);
+    iVar2 = GteSin(sy);
+    iVar3 = GteCos(sx);
     iVar3 = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) * iVar3;
-    iVar1 = GteCos(sx);
-    iVar2 = GteSin(sz);
+    iVar1 = GteSin(sx);
+    iVar2 = GteCos(sz);
     result[7] = ((int)(iVar3 + (iVar3 >> 0x1f & 0x3fffU)) >> 0xe) +
                 ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[8] = sin(sx)*sin(sy)
-    iVar1 = GteSin(sx);
-    iVar2 = GteSin(sy);
+    // result[8] = cos(sx)*cos(sy)
+    iVar1 = GteCos(sx);
+    iVar2 = GteCos(sy);
     result[8] = (int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe;
 }
 
@@ -271,6 +273,8 @@ static inline int GteFixedMul12(int a, int b)
 // RotMatrixY (0x00409aa0)
 // Rotates matrix m around the Y axis by PS1 12-bit angle r.
 // m = Ry(r) * m
+// The original scales m up by 4, calls GteRotationMatrixYXZ(0, r, 0) and
+// composes, then scales back down by 4; this is the equivalent closed form.
 // ============================================================================
 MATRIX* RotMatrixY(int r, MATRIX* m)
 {
@@ -439,58 +443,58 @@ void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x0044
 {
     int sum23 = param_3 + param_2;
     int dif23 = param_2 - param_3;
-    int s_sum = GteSin(sum23);
-    int s_dif = GteSin(dif23);
-    int c1 = GteCos(param_1);
-    int tmp = ((s_sum - s_dif) / 2) * c1;
-    s_sum = GteSin(sum23);
-    s_dif = GteSin(dif23);
-    param_4[0] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (s_dif + s_sum) / 2;
+    int c_sum = GteCos(sum23);
+    int c_dif = GteCos(dif23);
+    int s1 = GteSin(param_1);
+    int tmp = ((c_sum - c_dif) / 2) * s1;
+    c_sum = GteCos(sum23);
+    c_dif = GteCos(dif23);
+    param_4[0] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (c_dif + c_sum) / 2;
 
-    int cs1p3 = GteCos(param_3 + param_1);
-    int cm1p3 = GteCos(param_1 - param_3);
+    int ss1p3 = GteSin(param_3 + param_1);
+    int sm1p3 = GteSin(param_1 - param_3);
     int sum12 = param_1 + param_2;
     int dif12 = param_2 - param_1;
-    param_4[1] = (cs1p3 - cm1p3) / 2;
-
-    int c_sum12 = GteCos(sum12);
-    int c_dif12 = GteCos(dif12);
-    int c3 = GteCos(param_3);
-    tmp = ((c_sum12 - c_dif12) / 2) * c3;
-    int c_dif23 = GteCos(dif23);
-    int c_sum23b = GteCos(sum23);
-    param_4[2] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (c_sum23b + c_dif23) / 2;
+    param_4[1] = (ss1p3 - sm1p3) / 2;
 
     int s_sum12 = GteSin(sum12);
     int s_dif12 = GteSin(dif12);
     int s3 = GteSin(param_3);
     tmp = ((s_sum12 - s_dif12) / 2) * s3;
-    c_dif23 = GteCos(dif23);
-    c_sum23b = GteCos(sum23);
-    param_4[3] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (c_dif23 - c_sum23b) / 2;
-
-    int sp1p3 = GteSin(param_3 + param_1);
-    int sm1p3 = GteSin(param_1 - param_3);
-    param_4[4] = (sm1p3 + sp1p3) / 2;
-
-    c_sum12 = GteCos(sum12);
-    c_dif12 = GteCos(dif12);
-    s3 = GteSin(param_3);
-    tmp = ((c_sum12 - c_dif12) / 2) * s3;
-    int s_sum23b = GteSin(sum23);
     int s_dif23 = GteSin(dif23);
-    param_4[5] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (s_sum23b - s_dif23) / 2;
+    int s_sum23b = GteSin(sum23);
+    param_4[2] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (s_sum23b + s_dif23) / 2;
 
-    int cm1m2 = GteCos(param_1 - param_2);
-    int cp1p2 = GteCos(sum12);
-    param_4[6] = (cm1m2 - cp1p2) / 2;
+    int c_sum12 = GteCos(sum12);
+    int c_dif12 = GteCos(dif12);
+    int c3 = GteCos(param_3);
+    tmp = ((c_sum12 - c_dif12) / 2) * c3;
+    s_dif23 = GteSin(dif23);
+    s_sum23b = GteSin(sum23);
+    param_4[3] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (s_dif23 - s_sum23b) / 2;
 
-    int c1b = GteCos(param_1);
-    param_4[7] = -c1b;
+    int cp1p3 = GteCos(param_3 + param_1);
+    int cm1p3 = GteCos(param_1 - param_3);
+    param_4[4] = (cm1p3 + cp1p3) / 2;
+
+    s_sum12 = GteSin(sum12);
+    s_dif12 = GteSin(dif12);
+    c3 = GteCos(param_3);
+    tmp = ((s_sum12 - s_dif12) / 2) * c3;
+    int c_sum23b = GteCos(sum23);
+    int c_dif23 = GteCos(dif23);
+    param_4[5] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (c_sum23b - c_dif23) / 2;
 
     int sm1m2 = GteSin(param_1 - param_2);
     int sp1p2 = GteSin(sum12);
-    param_4[8] = (sp1p2 + sm1m2) / 2;
+    param_4[6] = (sm1m2 - sp1p2) / 2;
+
+    int s1b = GteSin(param_1);
+    param_4[7] = -s1b;
+
+    int cm1m2 = GteCos(param_1 - param_2);
+    int cp1p2 = GteCos(sum12);
+    param_4[8] = (cp1p2 + cm1m2) / 2;
 }
 
 // ============================================================================
@@ -595,86 +599,99 @@ void ScaleMatrixCols(MATRIX* m, VECTOR* scale)
 // GteRotationMatrixYXZ (0x00440b70)
 // Compute full rotation matrix from YXZ Euler angles (12-bit fixed).
 // Helper for RotMatrixYXZ.
+//
+// The output is an int[9] (row-major 3x3) at 14-bit amplitude, NOT a MATRIX -
+// the original writes nine consecutive dwords at result+0x00..+0x20. Confirmed
+// two ways: RotMatrixYXZ (0x00409ed0) reads dwords at [esp+4..esp+0x24] and
+// packs them into the nine shorts at m+0..m+0x10, and the matrix multiply at
+// 0x00440e80 indexes the same +0x00/+0x04/+0x08 .. +0x20 rows.
+//
+// With RotMatrixYXZ's argument negation this yields D * Ry(y)Rx(x)Rz(z) * D
+// where D = diag(1,-1,1) - the GTE Y-negation baked into the matrix, matching
+// the Y handling in ApplyMatrix/ApplyMatrixLV.
 // ============================================================================
-void GteRotationMatrixYXZ(int x, int y, int z, MATRIX* m)
+void GteRotationMatrixYXZ(int x, int y, int z, int* result)
 {
     int xMinusY = x - y;
     int xPlusY = x + y;
     int zPlusY = z + y;
     int yMinusZ = y - z;
 
-    int sinXmY = GteSin(xMinusY);
-    int sinXpY = GteSin(xPlusY);
-    int cosZ = GteCos(z);
-    int temp = ((sinXmY - sinXpY) / 2) * cosZ;
-    int sinZpY = GteSin(zPlusY);
-    int sinYmZ = GteSin(yMinusZ);
-    *(int*)&m->m[0][0] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (sinYmZ + sinZpY) / 2;
-
-    sinXmY = GteSin(xMinusY);
-    sinXpY = GteSin(xPlusY);
-    int sinZ = GteSin(z);
-    temp = ((sinXmY - sinXpY) / 2) * sinZ;
-    int cosYmZ = GteCos(yMinusZ);
-    int cosZpY = GteCos(zPlusY);
-    *(int*)&m->m[0][2] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (cosYmZ - cosZpY) / 2;
-
-    int cosXpY = GteCos(xPlusY);
     int cosXmY = GteCos(xMinusY);
-    *(int*)&m->m[1][1] = (cosXpY - cosXmY) / 2;
+    int cosXpY = GteCos(xPlusY);
+    int sinZ = GteSin(z);
+    int temp = ((cosXmY - cosXpY) / 2) * sinZ;
+    int cosZpY = GteCos(zPlusY);
+    int cosYmZ = GteCos(yMinusZ);
+    result[0] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (cosYmZ + cosZpY) / 2;
 
-    int cosZpX = GteCos(z + x);
-    int cosXmZ = GteCos(x - z);
-    *(int*)&m->m[2][0] = (cosZpX - cosXmZ) / 2;
+    cosXmY = GteCos(xMinusY);
+    cosXpY = GteCos(xPlusY);
+    int cosZ = GteCos(z);
+    temp = ((cosXmY - cosXpY) / 2) * cosZ;
+    int sinYmZ = GteSin(yMinusZ);
+    int sinZpY = GteSin(zPlusY);
+    result[1] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (sinYmZ - sinZpY) / 2;
+
+    int sinXpY = GteSin(xPlusY);
+    int sinXmY = GteSin(xMinusY);
+    result[2] = (sinXpY - sinXmY) / 2;
 
     int sinZpX = GteSin(z + x);
     int sinXmZ = GteSin(x - z);
-    *(int*)&m->m[2][2] = (sinXmZ + sinZpX) / 2;
+    result[3] = (sinZpX - sinXmZ) / 2;
 
-    int cosX = GteCos(x);
-    m->t[0] = -cosX;
+    int cosZpX = GteCos(z + x);
+    int cosXmZ = GteCos(x - z);
+    result[4] = (cosXmZ + cosZpX) / 2;
 
-    cosXmY = GteCos(xMinusY);
-    cosXpY = GteCos(xPlusY);
-    cosZ = GteCos(z);
-    temp = ((cosXpY + cosXmY) / 2) * cosZ;
-    cosZpY = GteCos(zPlusY);
-    cosYmZ = GteCos(yMinusZ);
-    m->t[1] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) - (cosZpY + cosYmZ) / 2;
+    int sinX = GteSin(x);
+    result[5] = -sinX;
 
-    cosXmY = GteCos(xMinusY);
-    cosXpY = GteCos(xPlusY);
-    sinZ = GteSin(z);
-    temp = ((cosXpY + cosXmY) / 2) * sinZ;
-    sinYmZ = GteSin(yMinusZ);
-    int sinZpY2 = GteSin(zPlusY);
-    m->t[2] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (sinYmZ - sinZpY2) / 2;
-
-    sinXpY = GteSin(xPlusY);
     sinXmY = GteSin(xMinusY);
-    *(int*)&m->m[1][0] = (sinXmY + sinXpY) / 2;
+    sinXpY = GteSin(xPlusY);
+    sinZ = GteSin(z);
+    temp = ((sinXpY + sinXmY) / 2) * sinZ;
+    sinZpY = GteSin(zPlusY);
+    sinYmZ = GteSin(yMinusZ);
+    result[6] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) - (sinZpY + sinYmZ) / 2;
+
+    sinXmY = GteSin(xMinusY);
+    sinXpY = GteSin(xPlusY);
+    cosZ = GteCos(z);
+    temp = ((sinXpY + sinXmY) / 2) * cosZ;
+    cosYmZ = GteCos(yMinusZ);
+    int cosZpY2 = GteCos(zPlusY);
+    result[7] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (cosYmZ - cosZpY2) / 2;
+
+    cosXpY = GteCos(xPlusY);
+    cosXmY = GteCos(xMinusY);
+    result[8] = (cosXmY + cosXpY) / 2;
 }
 
 // ============================================================================
 // RotMatrixYXZ (0x00409ed0)
 // Compute rotation matrix from SVECTOR using YXZ Euler angle order.
-// Inverts X and Z axes (PS1 convention), then divides results by 4
-// to convert from internal 14-bit to standard 12-bit fixed-point.
+// Inverts X and Z axes (PS1 convention), then divides the nine 14-bit
+// intermediates by 4 to reach the standard 4.12 matrix scale.
+// Only the 3x3 rotation is written; the translation vector is left alone.
 // ============================================================================
-void RotMatrixYXZ(SVECTOR* r, MATRIX* m)
+MATRIX* RotMatrixYXZ(SVECTOR* r, MATRIX* m)
 {
-    MATRIX temp;
-    GteRotationMatrixYXZ(0x1000 - r->x, (int)r->y, 0x1000 - r->z, &temp);
+    int result[9];
+    GteRotationMatrixYXZ(0x1000 - r->x, (int)r->y, 0x1000 - r->z, result);
 
-    m->m[0][0] = (short)((temp.m[0][0] + ((temp.m[0][0] >> 31) & 3)) >> 2);
-    m->m[0][1] = (short)((temp.m[0][1] + ((temp.m[0][1] >> 31) & 3)) >> 2);
-    m->m[0][2] = (short)((temp.m[0][2] + ((temp.m[0][2] >> 31) & 3)) >> 2);
-    m->m[1][0] = (short)((temp.m[1][0] + ((temp.m[1][0] >> 31) & 3)) >> 2);
-    m->m[1][1] = (short)((temp.m[1][1] + ((temp.m[1][1] >> 31) & 3)) >> 2);
-    m->m[1][2] = (short)((temp.m[1][2] + ((temp.m[1][2] >> 31) & 3)) >> 2);
-    m->m[2][0] = (short)((temp.m[2][0] + ((temp.m[2][0] >> 31) & 3)) >> 2);
-    m->m[2][1] = (short)((temp.m[2][1] + ((temp.m[2][1] >> 31) & 3)) >> 2);
-    m->m[2][2] = (short)((temp.m[2][2] + ((temp.m[2][2] >> 31) & 3)) >> 2);
+    m->m[0][0] = (short)((result[0] + ((result[0] >> 31) & 3)) >> 2);
+    m->m[0][1] = (short)((result[1] + ((result[1] >> 31) & 3)) >> 2);
+    m->m[0][2] = (short)((result[2] + ((result[2] >> 31) & 3)) >> 2);
+    m->m[1][0] = (short)((result[3] + ((result[3] >> 31) & 3)) >> 2);
+    m->m[1][1] = (short)((result[4] + ((result[4] >> 31) & 3)) >> 2);
+    m->m[1][2] = (short)((result[5] + ((result[5] >> 31) & 3)) >> 2);
+    m->m[2][0] = (short)((result[6] + ((result[6] >> 31) & 3)) >> 2);
+    m->m[2][1] = (short)((result[7] + ((result[7] >> 31) & 3)) >> 2);
+    m->m[2][2] = (short)((result[8] + ((result[8] >> 31) & 3)) >> 2);
+
+    return m;
 }
 
 // ============================================================================
@@ -779,25 +796,59 @@ void EntityComputeJointWorldMatrices(int ca)
 }
 
 // ============================================================================
-// entity_matrix_update_0045a2e0 (0x0045a2e0)
-// Post-animation matrix update: applies secondary rotation to the last joint.
-// Called after animation update and before rendering.
+// EntityApplyLookAtRotation (0x0045a2e0)
+// Composes the entity's look-at (head/aim tracking) rotation into the world
+// matrix of one designated joint, after EntityComputeJointWorldMatrices has
+// built the hierarchy:
+//
+//     joint->world = joint->world * RotMatrixYXZ(0, yaw, pitch)
+//
+// The two angles are produced by EntityUpdateLookAtAngles (0x00459eb0), which
+// aims that joint at the target stored in entity+0xCC/0xD0/0xD4: it derives a
+// yaw from getAngleTowardsTarget() minus the entity's own facing, and a pitch
+// from atan(dy / sqrt(dx^2 + dz^2)), slews both toward the target by the
+// per-frame step limits at entity+0xD9/0xDA, and clamps them to +/-0x2C8 yaw
+// (~62 deg) and +/-0x138 pitch (~27 deg) - i.e. a look-at cone.
+//
+// Gating: the whole lookAtFlags byte is tested, not a single bit - the slew
+// updater stops when 0x10 is cleared but this keeps re-applying the last
+// angles, which is what freezes a look-at in place instead of snapping back.
 // ============================================================================
-void entity_matrix_update_0045a2e0(void)
+void EntityApplyLookAtRotation(void)
 {
     Entity* ent = ENTITY;
     if (ent == NULL) return;
-    unsigned char* entBytes = (unsigned char*)ent;
 
-    if (entBytes[0x8C] != 0) {
+    if (ent->lookAtFlags != 0) {
         if (ent->jointsStructs == NULL) return;
-        JointStruct* joints = ent->jointsStructs;
-        unsigned char lastJointIdx = ent->jointCount - 1;
-        JointStruct* lastJoint = &joints[lastJointIdx];
+
+        // The original indexes jointsStructs by lookAtJointIdx with no bounds
+        // check, relying on every writer of entity+0xDD to stay inside the
+        // model's joint count. CompMatrix below writes 32 bytes at joint+0x44,
+        // so a stale or uninitialised index silently corrupts the heap and
+        // surfaces much later as a wild pointer somewhere unrelated. If this
+        // ever fires, the real bug is a missing 0xDD write on some entity
+        // setup path, not here.
+        if (ent->lookAtJointIdx >= ent->jointCount) {
+            static int reported = 0;
+            if (reported < 8) {
+                reported++;
+                char buf[160];
+                sprintf_s(buf, sizeof(buf),
+                          "[LOOKAT] out-of-range joint: idx=%u jointCount=%u "
+                          "entity id=%u flags=0x%02X\n",
+                          (unsigned)ent->lookAtJointIdx, (unsigned)ent->jointCount,
+                          (unsigned)ent->id, (unsigned)ent->lookAtFlags);
+                OutputDebugStringA(buf);
+            }
+            return;
+        }
+
+        JointStruct* joint = &ent->jointsStructs[ent->lookAtJointIdx];
 
         g_svecScratch.x = 0;
-        g_svecScratch.y = lastJoint->rotDeltaY;
-        g_svecScratch.z = lastJoint->rotDeltaZ;
+        g_svecScratch.y = joint->rotDeltaX;   // yaw   (joint+0x76)
+        g_svecScratch.z = joint->rotDeltaY;   // pitch (joint+0x78)
 
         // Copy identity matrix to scratch
         MATRIX* src = &g_identityMatrixData;
@@ -810,6 +861,6 @@ void entity_matrix_update_0045a2e0(void)
 
         // Apply YXZ rotation and compose with joint's world matrix
         RotMatrixYXZ(&g_svecScratch, &g_matrixScratch);
-        CompMatrix(&lastJoint->world, &g_matrixScratch, &lastJoint->world);
+        CompMatrix(&joint->world, &g_matrixScratch, &joint->world);
     }
 }

@@ -385,7 +385,7 @@ void ResetJointTransforms(void)
     short* psVar2 = (short*)(ENTITY->animHeader + 8);
     JointStruct* joint = ENTITY->jointsStructs;
 
-    ENTITY->jointResetFlag = 1;
+    ENTITY->lookAtJointIdx = 1;
 
     for (; jointCount != 0; jointCount--) {
         joint->transform = g_identityMatrixData;

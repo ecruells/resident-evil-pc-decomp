@@ -919,7 +919,7 @@ void InitPlayerEntity(void)
     g_playerEntity.scaMatrixData.localMatrix.m[1][0] = 0;
     g_playerEntity.scaMatrixData.localMatrix.m[1][1] = 0x1000;
     g_playerEntity.scaMatrixData.localMatrix.m[1][2] = 0;
-    g_playerEntity.unk_d8 = 0;
+    g_playerEntity.lookAtFlags = 0;   // disable head/aim tracking
     g_playerEntity.scaMatrixData.localMatrix.m[2][0] = 0;
     g_playerEntity.scaMatrixData.localMatrix.m[2][1] = 0;
     g_playerEntity.scaMatrixData.localMatrix.m[2][2] = 0x1000;

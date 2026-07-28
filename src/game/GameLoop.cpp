@@ -202,7 +202,7 @@ LAB_00480e89:
                     if ((pEnt->status_flags & 0x01) != 0) {
                         entCount = entCount - 1;
                         EntityComputeJointWorldMatrices(*(unsigned short*)&pEnt->pad_ca);
-                        entity_matrix_update_0045a2e0();
+                        EntityApplyLookAtRotation();
                         if (g_SpriteQueueCount != 0) {
                             calc_entity_lighting(pEnt);
                         }
@@ -212,7 +212,7 @@ LAB_00480e89:
 
                 // 0x00480f3b-0x00480f6e: Player entity rendering
                 EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
-                entity_matrix_update_0045a2e0();
+                EntityApplyLookAtRotation();
                 if (g_SpriteQueueCount != 0) {
                     calc_entity_lighting((Entity*)&g_playerEntity);
                 }

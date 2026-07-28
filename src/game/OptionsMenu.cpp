@@ -934,7 +934,7 @@ void options_menu_render(void)
     g_playerEntity.attackAnim = 1; // 0xbd
     Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
     EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
-    entity_matrix_update_0045a2e0();
+    EntityApplyLookAtRotation();
     options_render_entity((int)&g_playerEntity);
     options_render_cursor();
 }
@@ -1561,7 +1561,7 @@ doJointMove:
 
 updateRender:
     EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
-    entity_matrix_update_0045a2e0();
+    EntityApplyLookAtRotation();
     options_render_entity((int)&g_playerEntity);
     return 1;
 }
@@ -1958,7 +1958,7 @@ unsigned int options_key_config_input(void)
 
 keyConfigRender:
     EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
-    entity_matrix_update_0045a2e0();
+    EntityApplyLookAtRotation();
     options_render_entity((int)&g_playerEntity);
     return 1;
 }
@@ -2187,7 +2187,7 @@ unsigned int options_joystick_config_input(void)
 
 joyConfigRender:
     EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
-    entity_matrix_update_0045a2e0();
+    EntityApplyLookAtRotation();
     options_render_entity((int)&g_playerEntity);
     return 1;
 }

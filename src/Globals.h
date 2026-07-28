@@ -1186,7 +1186,7 @@ void DrawFadeSpr(void);                               // 0x00456d30
 void update_sounds(void);                             // 0x00474090
 void room_camera_and_lighting_update(void);           // 0x00473ff0
 void    EntityComputeJointWorldMatrices(int ca); // 0x0048c190 - Compute entity joint world matrices
-void entity_matrix_update_0045a2e0(void);             // 0x0045a2e0
+void EntityApplyLookAtRotation(void);                 // 0x0045a2e0
 void calc_entity_lighting(Entity* ent);               // 0x0048c350
 void update_2d_effects(void);                         // 0x0047c0c0
 void DrawRoomSpr(void);                               // 0x00475b80
@@ -1292,8 +1292,8 @@ void empty_0047eb90(int param);
 void load_shoot_direction_data(void);
 
 // --- PS1 GTE trig / matrix ---
-int GteSin(int angle);
-int GteCos(int angle);
+int GteSin(int angle);   // 0x004409f0 - 12-bit angle -> 14-bit sine
+int GteCos(int angle);   // 0x00440a10 - 12-bit angle -> 14-bit cosine
 MATRIX* RotMatrix(SVECTOR* r, MATRIX* m);
 void MatrixSetTranslation(MATRIX* m, int* translation);
 void SetGlobalScaledRotationMatrix(MATRIX* m);
@@ -1352,9 +1352,9 @@ void    ApplyLVAndMul0Matrix(void* m0, void* m1, void* mOut);
 // --- Entity rendering functions ---
 MATRIX* MulMatrix(MATRIX* m0, MATRIX* m1);
 void    ScaleMatrixCols(MATRIX* m, VECTOR* scale);  // 0x0040a2a0
-void    RotMatrixYXZ(SVECTOR* r, MATRIX* m);        // 0x00409ed0
+MATRIX* RotMatrixYXZ(SVECTOR* r, MATRIX* m);        // 0x00409ed0
 void    rotate_entity(MATRIX* parentMtx, void* animData, unsigned char jointIdx); // 0x0048c2a0
-void    GteRotationMatrixYXZ(int x, int y, int z, MATRIX* m); // 0x00440b70
+void    GteRotationMatrixYXZ(int x, int y, int z, int* result); // 0x00440b70 - writes int[9], row-major 3x3 at 14-bit scale
 void    FUN_00483080(void* spriteData, int depthShift);  // 0x00483080 - TMD entity render
 
 // --- GTE state globals ---

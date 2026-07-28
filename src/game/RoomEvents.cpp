@@ -316,12 +316,12 @@ static int scd_event_state1_anim(void)
         {
             unsigned short val = *opcodes;
             g_pScdEventCurrent->scriptPtr = (unsigned char*)(opcodes + 1);
-            ent->scd_behavior_type = (unsigned char)(val >> 8);
+            ent->lookAtFlags = (unsigned char)(val >> 8);
 
-            if ((ent->scd_behavior_type & 0xF) != 0) {
+            if ((ent->lookAtFlags & 0xF) != 0) {
                 g_pScdEventCurrent->scriptPtr += 8;
 
-                if (ent->scd_behavior_type == 0x93) {
+                if (ent->lookAtFlags == 0x93) {
                     // Target mode: set scd_target_ptr based on type
                     unsigned short* params = (unsigned short*)g_pScdEventCurrent->scriptPtr;
                     switch (*(opcodes + 1)) {
@@ -340,7 +340,7 @@ static int scd_event_state1_anim(void)
                     }
                 } else {
                     // Position mode: set scd_pos_x/y/z
-                    if ((ent->scd_behavior_type & 0x20) == 0) {
+                    if ((ent->lookAtFlags & 0x20) == 0) {
                         ent->scd_pos_x = (int)(short)*(opcodes + 1);
                         ent->scd_pos_y = (int)(short)opcodes[2];
                     } else {
@@ -356,13 +356,13 @@ static int scd_event_state1_anim(void)
 
                 // Set step size and flags
                 unsigned char step = g_pScdEventCurrent->scriptPtr[0];
-                ent->scd_step_size = step ? step : 0xC0;
+                ent->lookAtYawStep = step ? step : 0xC0;
 
                 unsigned short stepFlags = opcodes[4];
                 if ((stepFlags & 0xFF00) != 0) {
-                    ent->scd_step_flags = (unsigned char)(stepFlags >> 8);
+                    ent->lookAtPitchStep = (unsigned char)(stepFlags >> 8);
                 } else {
-                    ent->scd_step_flags = 0x40;
+                    ent->lookAtPitchStep = 0x40;
                 }
                 return 1;
             }
@@ -370,7 +370,7 @@ static int scd_event_state1_anim(void)
         break;
 
     case 0x82: // Clear behavior type bit 4
-        ent->scd_behavior_type &= ~0x10;
+        ent->lookAtFlags &= ~0x10;
         g_pScdEventCurrent->scriptPtr++;
         return 1;
 

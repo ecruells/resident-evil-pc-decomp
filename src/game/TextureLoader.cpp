@@ -934,10 +934,14 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
     // Copy raw pixel data from srcData into the locked CMarniBits buffer.
     // The copy writes width*height 16-bit pixels starting at position (x, y)
     // in the destination surface, row by row.
+    // Row stride comes from the source's m_width, NOT m_pitch: the original
+    // divides *(src+0x2C) by bpp at 0x0046d47f and again at 0x0046d4d4 to
+    // advance a row. bpp here is pixels-per-16-bit-word (1/2/4 for 16/8/4 bpp),
+    // so m_width / bpp is the number of 16-bit words in a row - exactly the
+    // unit dstOffset is counted in below.
     BYTE* destPixels = (BYTE*)lockedPixels;
-    int srcPitch = srcBits->m_pitch;       // row stride in bytes
-    int rowStride = srcPitch / bpp;        // row stride in pixels
-    int dstOffset = rowStride * (int)y + (int)x; // starting pixel offset
+    int rowStride = (int)srcBits->m_width / bpp;  // row stride in 16-bit words
+    int dstOffset = rowStride * (int)y + (int)x;  // starting offset in words
     BYTE* srcPtr = (BYTE*)srcData;
 
     for (int row = 0; row < (int)height; row++) {
@@ -952,8 +956,13 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
         dstOffset += rowStride;
     }
 
-    // CalcAddress on source, then Unlock source
-    void* calcAddr = srcBits->CalcAddress(bpp * (int)(short)(WORD)dstSlot, (int)format);
+    // CalcAddress on source, then Unlock source.
+    // 0x0046d4ea..0x0046d4ff: push [esp+0x1c] (y), then imul bpp by [esp+0x20]
+    // (x) and push that - i.e. CalcAddress(bpp * x, y). Those are the same two
+    // stack slots dstOffset is built from above, so whatever the arguments are
+    // really named, they must match the ones used for dstOffset. This read
+    // dstSlot/format instead, which contradicted the dstOffset transcription.
+    void* calcAddr = srcBits->CalcAddress(bpp * (int)x, (int)y);
     srcBits->Unlock();
 
     // SetAddress on destination CMarniBits (first sub-page at destOff)
@@ -969,9 +978,21 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
     dstBits->m_bitDepth = srcBits->m_bitDepth;
     dstBits->m_paletteFormat = srcBits->m_paletteFormat;
 
-    // Set destination surface dimensions
-    dstBits->m_pitch = (int)width * bpp;
+    // Set destination surface dimensions. The original writes all three of
+    // +0x2C/+0x30/+0x34 at 0x0046d564/0x0046d56a/0x0046d586:
+    //   m_width  = width * bpp        (bpp = pixels per 16-bit word, so this is
+    //                                  the width in PIXELS)
+    //   m_height = height
+    //   m_pitch  = srcBits->m_pitch   (inherited - the destination is a window
+    //                                  into the source surface, so it keeps the
+    //                                  source's row stride)
+    // This previously put width*bpp into m_pitch and left m_width holding a
+    // stale value from whatever last used the slot. Everything downstream that
+    // sizes a texture from m_width then read garbage; VTable_CreateTextureHandle
+    // walked off the end of the pixel buffer and faulted.
+    dstBits->m_width  = (int)width * bpp;
     dstBits->m_height = (int)height;
+    dstBits->m_pitch  = srcBits->m_pitch;
     dstBits->m_field38 = srcBits->m_field38;
 
     // Set flags

@@ -290,6 +290,47 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
     const WORD* clut = (const WORD*)bits->m_pPalette;
     if (w <= 0 || h <= 0 || !pixels) return 0;
 
+    // Row stride comes from the descriptor, exactly as CMarniBits::CalcAddress
+    // (0x00403860) computes it: base + m_pitch * y + (x/2 | x | x*2) by depth.
+    // PSXTexture::Store sets m_pitch = imgW*2 and m_width = imgW*4 (4bpp), so a
+    // packed w*bpp/8 stride happens to agree - but only for well-formed TIMs.
+    // Trust m_pitch, falling back to the packed stride when it is unset.
+    const BYTE* base = (const BYTE*)pixels;
+    int pitch = (int)bits->m_pitch;
+    if (pitch <= 0) pitch = (bpp == 4) ? (w / 2) : (bpp == 8) ? w : (w * 2);
+
+    // The dimensions come straight out of the TIM header, and m_pPixelData
+    // aliases the loaded file buffer rather than a sized allocation, so a
+    // truncated or mis-parsed image walks off the end of committed memory.
+    // Ask the OS how much is actually readable and clamp instead of faulting.
+    {
+        int lastByteInRow = (bpp == 4) ? ((w - 1) / 2)
+                          : (bpp == 8) ? (w - 1)
+                                       : ((w - 1) * 2 + 1);
+        SIZE_T need = (SIZE_T)pitch * (h - 1) + lastByteInRow + 1;
+        MEMORY_BASIC_INFORMATION mbi;
+        SIZE_T avail = 0;
+        if (VirtualQuery(base, &mbi, sizeof(mbi)) == sizeof(mbi) &&
+            mbi.State == MEM_COMMIT) {
+            avail = (SIZE_T)((const BYTE*)mbi.BaseAddress + mbi.RegionSize - base);
+        }
+        if (avail < need) {
+            char dbg[224];
+            sprintf_s(dbg, sizeof(dbg),
+                      "[TEXPAGE] TRUNCATED: w=%d h=%d bpp=%d pitch=%d base=%p "
+                      "clut=%p need=%Iu avail=%Iu\n",
+                      w, h, bpp, pitch, (const void*)base, (const void*)clut,
+                      need, avail);
+            OutputDebugStringA(dbg);
+            // Keep only the rows that are fully readable.
+            int safeRows = (avail >= (SIZE_T)lastByteInRow + 1)
+                         ? (int)((avail - lastByteInRow - 1) / (SIZE_T)pitch) + 1
+                         : 0;
+            if (safeRows <= 0) return 0;
+            if (safeRows < h) h = safeRows;
+        }
+    }
+
     // Output is uploaded as DXGI_FORMAT_R8G8B8A8_UNORM, so each DWORD must be
     // 0xAABBGGRR - red in the lowest byte. PS1 15-bit source colour is
     // MBBBBBGGGGGRRRRR, i.e. red in bits 0-4. Packing 0xAARRGGBB here (the
@@ -301,8 +342,8 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
         for (int x = 0; x < w; x++) {
             DWORD color = 0xFF000000; // opaque black default
             if (bpp == 4 && clut) {
-                WORD word = pixels[y * (w / 4) + x / 4];
-                int nib = (word >> ((x & 3) * 4)) & 0xF;
+                BYTE twoPix = base[y * pitch + x / 2];
+                int nib = (x & 1) ? (twoPix >> 4) : (twoPix & 0xF);
                 WORD c = clut[nib];
                 DWORD a = (nib == 0) ? 0x00 : 0xFF;
                 DWORD r = (c & 0x1F) * 255 / 31;
@@ -311,8 +352,7 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
                 color = (a << 24) | (b << 16) | (g << 8) | r;
             }
             else if (bpp == 8 && clut) {
-                WORD word = pixels[y * (w / 2) + x / 2];
-                int idx = (word >> ((x & 1) * 8)) & 0xFF;
+                int idx = base[y * pitch + x];
                 WORD c = clut[idx];
                 DWORD a = (idx == 0) ? 0x00 : 0xFF;
                 DWORD r = (c & 0x1F) * 255 / 31;
@@ -321,7 +361,7 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
                 color = (a << 24) | (b << 16) | (g << 8) | r;
             }
             else if (bpp == 16) {
-                WORD c = pixels[y * w + x];
+                WORD c = *(const WORD*)(base + y * pitch + x * 2);
                 DWORD a = (c == 0) ? 0x00 : 0xFF;
                 DWORD r = (c & 0x1F) * 255 / 31;
                 DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
