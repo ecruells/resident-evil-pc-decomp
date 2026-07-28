@@ -934,6 +934,65 @@ void MarniDX::DrawSprite(float x, float y, float w, float h,
     DrawQuadInternal(p, verts, tex, sampler, blend);
 }
 
+void MarniDX::DrawTriangles(const float* verts, int triCount, MarniHandle tex,
+                            MarniSampler sampler, MarniBlend blend)
+{
+    Impl* p = m_pImpl;
+    if (!p || !p->ready || !verts || triCount <= 0) return;
+    // quadVB capacity: 6 verts * 512 sprites = 3072 verts = 1024 triangles
+    if (triCount > 1024) triCount = 1024;
+    // DrawTriangles shares the quad pipeline: same vertex layout, same ortho
+    // MVP, but an arbitrary triangle count instead of the fixed 2-tri quad.
+    if (!p->context || !p->quadVB || !p->spriteCB || !p->quadVS
+        || !p->quadPS || !p->quadLayout) return;
+
+    D3D11_MAPPED_SUBRESOURCE m = {};
+    if (FAILED(p->context->Map(p->quadVB, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
+        return;
+    memcpy(m.pData, verts, sizeof(QuadVertex) * 3 * (size_t)triCount);
+    p->context->Unmap(p->quadVB, 0);
+
+    SpriteConstantBuffer cb;
+    BuildOrthoMatrix(&cb.mvp[0][0], 0.0f, (float)p->width,
+                                   (float)p->height, 0.0f);
+    D3D11_MAPPED_SUBRESOURCE cm = {};
+    if (SUCCEEDED(p->context->Map(p->spriteCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &cm))) {
+        memcpy(cm.pData, &cb, sizeof(cb));
+        p->context->Unmap(p->spriteCB, 0);
+    }
+
+    UINT stride = sizeof(QuadVertex), offset = 0;
+    p->context->IASetVertexBuffers(0, 1, &p->quadVB, &stride, &offset);
+    p->context->IASetInputLayout(p->quadLayout);
+    p->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    p->context->VSSetShader(p->quadVS, nullptr, 0);
+    p->context->VSSetConstantBuffers(0, 1, &p->spriteCB);
+    p->context->PSSetShader(p->quadPS, nullptr, 0);
+
+    ID3D11ShaderResourceView* srv = nullptr;
+    if ((int)tex > 0 && (int)tex < MARNI_MAX_TEXTURES)
+        srv = p->slots[tex].srv;
+    if (!srv) srv = p->whiteSRV;
+    if (!srv) return;
+    p->context->PSSetShaderResources(0, 1, &srv);
+
+    ID3D11SamplerState* s = (sampler == MARNI_SAMPLER_POINT) ? p->sampPoint : p->sampLinear;
+    if (!s) s = p->sampLinear;
+    p->context->PSSetSamplers(0, 1, &s);
+
+    ID3D11BlendState* bs = p->blendAlpha;
+    if (blend == MARNI_BLEND_ADD)       bs = p->blendAdd;
+    else if (blend == MARNI_BLEND_DISABLE) bs = p->blendDisabled;
+    if (!bs) bs = p->blendAlpha;
+    float bf[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    p->context->OMSetBlendState(bs, bf, 0xFFFFFFFFu);
+
+    if (p->depthDisabled)
+        p->context->OMSetDepthStencilState(p->depthDisabled, 0);
+
+    p->context->Draw((UINT)(triCount * 3), 0);
+}
+
 void MarniDX::DrawRect(int x, int y, int w, int h, DWORD color)
 {
     Impl* p = m_pImpl;

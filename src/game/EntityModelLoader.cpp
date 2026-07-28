@@ -8,6 +8,8 @@
 // ============================================================================
 // Extern data declarations (not yet extracted to Globals.h)
 // ============================================================================
+extern BYTE  g_entityModelBuffer[0xCC00];      // 0x00bf11c0
+extern DWORD g_animObjectBuffer[0x680];        // 0x00c133c0
 extern DWORD DAT_004d2bd8;                     // 0x004d2bd8 - special model flag
 extern DWORD DAT_004d2bf4;                     // 0x004d2bf4 - TMD processing flag
 extern DWORD g_tmdAsyncData;                   // 0x008fc424 - TMD async data
@@ -15,6 +17,7 @@ extern DWORD DAT_004c1a2c;                     // 0x004c1a2c
 extern DWORD DAT_00ae9f04;                     // 0x00ae9f04
 extern BYTE  g_textureQueueData[40];           // 0x00d22740
 extern DWORD g_animSlotIndex;                  // 0x008f8c78
+extern DWORD g_textureBankRedirect[23];        // 0x00aae2b0
 extern DWORD DAT_004d6444;                     // 0x004d6444
 
 // Player/weapon angle globals
@@ -40,119 +43,116 @@ int __stdcall VideoDriver_ClearState348(void* obj, void* context);
 
 // ============================================================================
 // EMD model path table (0x004c1320)
-// 0x35 entries per character block, each entry is 0x11 (17) bytes
-// Block 0: Chris (characterId & 1 == 0), Block 1: Jill/Rebecca (characterId & 1 == 1)
+// 1802 bytes total
+// 106 entries per character/enemy block, each entry is 17 bytes
 // Indexed by: base + ((characterId & 1) * 0x35 + entity_id) * 0x11
 // ============================================================================
-static const char g_emdPathTable[][0x35][17] = {
-    {   // Chris block (characterId & 1 == 0)
-        "enemy/char10.emd",
-        "enemy/char11.emd",
-        "enemy/char12.emd",
-        "enemy/char13.emd",
-        "enemy/em1000.emd",
-        "enemy/em1001.emd",
-        "enemy/em1002.emd",
-        "enemy/em1003.emd",
-        "enemy/em1004.emd",
-        "enemy/em1005.emd",
-        "enemy/em1006.emd",
-        "enemy/em1007.emd",
-        "enemy/em1008.emd",
-        "enemy/em1009.emd",
-        "enemy/em100a.emd",
-        "enemy/em100b.emd",
-        "enemy/em100c.emd",
-        "enemy/em100d.emd",
-        "enemy/em100e.emd",
-        "enemy/em100f.emd",
-        "enemy/em1010.emd",
-        "enemy/em1011.emd",
-        "enemy/em1012.emd",
-        "enemy/em1013.emd",
-        "enemy/em1014.emd",
-        "enemy/em1015.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em100a.emd",
-        "enemy/em1020.emd",
-        "enemy/em1021.emd",
-        "enemy/em1022.emd",
-        "enemy/em1023.emd",
-        "enemy/em1024.emd",
-        "enemy/em1025.emd",
-        "enemy/em1026.emd",
-        "enemy/em1027.emd",
-        "enemy/em1028.emd",
-        "enemy/em1029.emd",
-        "enemy/em102a.emd",
-        "enemy/em102b.emd",
-        "enemy/em102c.emd",
-        "enemy/em102d.emd",
-        "enemy/em102e.emd",
-        "enemy/em1030.emd",
-        "enemy/em1032.emd",
-    },
-    {   // Jill/Rebecca block (characterId & 1 == 1)
-        "enemy/char10.emd",
-        "enemy/char11.emd",
-        "enemy/char12.emd",
-        "enemy/char13.emd",
-        "enemy/em1100.emd",
-        "enemy/em1101.emd",
-        "enemy/em1102.emd",
-        "enemy/em1103.emd",
-        "enemy/em1104.emd",
-        "enemy/em1105.emd",
-        "enemy/em1106.emd",
-        "enemy/em1107.emd",
-        "enemy/em1108.emd",
-        "enemy/em1109.emd",
-        "enemy/em110a.emd",
-        "enemy/em110b.emd",
-        "enemy/em110c.emd",
-        "enemy/em110d.emd",
-        "enemy/em110e.emd",
-        "enemy/em110f.emd",
-        "enemy/em1110.emd",
-        "enemy/em1111.emd",
-        "enemy/em1112.emd",
-        "enemy/em1113.emd",
-        "enemy/em1114.emd",
-        "enemy/em1115.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em110a.emd",
-        "enemy/em1020.emd",
-        "enemy/em1021.emd",
-        "enemy/em1022.emd",
-        "enemy/em1023.emd",
-        "enemy/em1024.emd",
-        "enemy/em1025.emd",
-        "enemy/em1026.emd",
-        "enemy/em1027.emd",
-        "enemy/em1028.emd",
-        "enemy/em1029.emd",
-        "enemy/em102a.emd",
-        "enemy/em102b.emd",
-        "enemy/em102c.emd",
-        "enemy/em102d.emd",
-        "enemy/em102e.emd",
-        "enemy/em1031.emd",
-        "enemy/em1033.emd",
-    }
+static const char g_emdPathTable[106][17] = {
+    "enemy/char10.emd", // chris
+    "enemy/char11.emd", // jill
+    "enemy/char12.emd", // barry
+    "enemy/char13.emd", // rebecca
+    "enemy/em1000.emd", // zombie (white coat)
+    "enemy/em1001.emd", // naked zombie
+    "enemy/em1002.emd", // cerberus
+    "enemy/em1003.emd", // Web spinner (big spider)
+    "enemy/em1004.emd", // Black Tiger (giant spider)
+    "enemy/em1005.emd", // crow
+    "enemy/em1006.emd", // hunter
+    "enemy/em1007.emd", // wasp
+    "enemy/em1008.emd", // Plant 42
+    "enemy/em1009.emd", // chimera
+    "enemy/em100a.emd", // adder (regular size snake enemy)
+    "enemy/em100b.emd", // neptune (zombie shark)
+    "enemy/em100c.emd", // Tyrant
+    "enemy/em100d.emd", // Yawn (Giant snake)
+    "enemy/em100e.emd", // Plant 42 roots
+    "enemy/em100f.emd", // Monster plant
+    "enemy/em1010.emd", // Tyrant 2
+    "enemy/em1011.emd", // Zombie (green coat)
+    "enemy/em1012.emd", // Yawn (second encounter)
+    "enemy/em1013.emd", // Spider web
+    "enemy/em1014.emd", // Chris's right arm (used for computer keyboard typing)
+    "enemy/em1015.emd", // Chris's left arm (used for computer keyboard typing)
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em100a.emd",
+    "enemy/em1020.emd", // chris (regular model)
+    "enemy/em1021.emd", // jill (regular model)
+    "enemy/em1022.emd", // barry (regular model)
+    "enemy/em1023.emd", // rebecca (regular model)
+    "enemy/em1024.emd", // wesker (regular model)
+    "enemy/em1025.emd", // Kenneth's corpse
+    "enemy/em1026.emd", // Forest's corpse
+    "enemy/em1027.emd", // Richard
+    "enemy/em1028.emd", // Enrico
+    "enemy/em1029.emd", // Forest's corpse
+    "enemy/em102a.emd", // Barry's corpse
+    "enemy/em102b.emd", // barry (regular model)
+    "enemy/em102c.emd", // Rebecca (regular model)
+    "enemy/em102d.emd", // Barry (regular model)
+    "enemy/em102e.emd", // Wesker (regular model)
+    "enemy/em1030.emd", // Chris (alternative outfit 1)
+    "enemy/em1032.emd", // Chris (alternative outfit 2)
+    // Jill offset
+    "enemy/char10.emd",
+    "enemy/char11.emd",
+    "enemy/char12.emd",
+    "enemy/char13.emd",
+    "enemy/em1100.emd", // zombie (white coat)
+    "enemy/em1101.emd",
+    "enemy/em1102.emd",
+    "enemy/em1103.emd",
+    "enemy/em1104.emd",
+    "enemy/em1105.emd",
+    "enemy/em1106.emd",
+    "enemy/em1107.emd",
+    "enemy/em1108.emd",
+    "enemy/em1109.emd",
+    "enemy/em110a.emd",
+    "enemy/em110b.emd",
+    "enemy/em110c.emd",
+    "enemy/em110d.emd",
+    "enemy/em110e.emd",
+    "enemy/em110f.emd",
+    "enemy/em1110.emd",
+    "enemy/em1111.emd",
+    "enemy/em1112.emd",
+    "enemy/em1113.emd",
+    "enemy/em1114.emd",
+    "enemy/em1115.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em110a.emd",
+    "enemy/em1020.emd",
+    "enemy/em1021.emd",
+    "enemy/em1022.emd",
+    "enemy/em1023.emd",
+    "enemy/em1024.emd",
+    "enemy/em1025.emd",
+    "enemy/em1026.emd",
+    "enemy/em1027.emd",
+    "enemy/em1028.emd",
+    "enemy/em1029.emd",
+    "enemy/em102a.emd",
+    "enemy/em102b.emd",
+    "enemy/em102c.emd",
+    "enemy/em102d.emd",
+    "enemy/em102e.emd",
+    "enemy/em1031.emd", // Jill (alternative outfit 1)
+    "enemy/em1033.emd", // Jill (alternative outfit 2)
 };
 
 // ============================================================================
@@ -445,7 +445,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
 
     sprintf(FILE_PATH, "%s%s",
             ".\\usa\\",
-            g_emdPathTable[g_playerEntity.id & 1][entity_id]);
+            g_emdPathTable[(g_playerEntity.id & 1) * 53 + entity_id]);
     SetSpriteBufferFlag();
 
     unsigned int fileSize = LoadFile(FILE_PATH, g_loadDataDestPointer, 32);
@@ -618,7 +618,7 @@ void SetupCharacterData(void)
         g_playerEntity.equippedWeaponId = g_ItemsSlots[(unsigned int)g_equippedItemId].Id;
     }
     LoadEquippedWeaponAnimation(
-        g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animationBuffer, (unsigned int)&g_animationBuffer);
+        g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animationBuffer, (unsigned int)&g_animObjectBuffer);
     g_playerEntity.unk_8e = 0;
     g_playerEntity.jointsStructs[1].rotDeltaX = 0;
     g_playerEntity.jointsStructs[1].rotDeltaY = 0;

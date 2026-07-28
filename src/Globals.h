@@ -399,7 +399,7 @@ extern unsigned char g_PlayerMaxHealth;                // 0x00be6459
 #define g_playerEntityPointer  g_playerEntity
 
 // Entity matrices / SCA collision data
-extern DWORD         g_RoomCameraData;                 // 0x004bca88
+extern MATRIX        g_RoomCameraData;                 // 0x004bca88 - Room camera matrix
 extern DWORD         g_RoomCameraDataCopy;             // 0x00d1fdd4
 extern DWORD         g_deadMoveValue;                  // 0x00d1fdd0
 extern DWORD         g_lightMatrixPtr;                 // 0x00d1fdcc
@@ -932,6 +932,7 @@ extern void*         DAT_004c10b0[];
 // Animation data constants
 extern DWORD         DAT_00606060;
 extern DWORD         DAT_00ffff50;
+extern DWORD         DAT_00808080;
 
 // Scratch globals used by animation functions
 extern VECTOR        g_playerPosScratch;               // 0x00be11b0
@@ -939,6 +940,7 @@ extern SVECTOR       g_svecScratch;                    // 0x00be11a8 (gSVector i
 extern MATRIX        g_matrixScratch;                  // 0x00be11c0 (MATRIX_00be11c0 in Ghidra)
 extern unsigned int  g_deathAnimationFlag;             // 0x00be0dd8
 extern unsigned int  g_animFrameIdSave;                // 0x00be0dfc - temp save for animation_frame_id
+extern int           g_entityJointPosX;                // 0x00be0e18 - joint position X during render (DAT_00be0e18)
 extern int           g_playerDisplacement;             // 0x00be0de0 - joint displacement for animation
 extern void*         g_tempVar;                        // 0x00be0df8 - temp pointer for joint processing
 extern void*         g_playerAnimFunctions[52];        // 0x00bebbd8
@@ -978,7 +980,8 @@ extern BYTE         g_entityModelBuffer[52224];      // 0x00bf11c0
 extern BYTE         g_entityModelBuffer2[56320];    // 0x00bfddc0
 
 // 0x00c0b9c0
-extern BYTE         g_animationBuffer[37888];        
+extern BYTE         g_animationBuffer[37888];        // 0x00c0b9c0
+extern DWORD        g_animObjectBuffer[0x680];       // 0x00c133c0 - weapon anim object buffer
 
 // 0x00c14dc0 - Shoot direction data buffer
 extern BYTE          g_shootDirEspBuffer[73728];
@@ -1006,6 +1009,15 @@ extern int           g_debugTaskFrame;
 // ============================================================================
 // SECTION 19: Function declarations
 // ============================================================================
+
+// --- Entity update tables (per-enemy-type dispatch) ---
+extern void* enemies_update_functions_tbl[32];   // 0x004d3c90 - enemy type update function table
+extern void* zombie_states_table[16];            // 0x004bb2c8 - zombie state dispatch table
+
+// --- Enemy (zombie) functions ---
+void zombie_update(void);                        // 0x004338c0
+void zombie_init(void);                          // 0x00433440
+void zombie_state_check(void);                   // 0x00433ae0
 
 // --- Game loop / states ---
 int  main_loop(void);
@@ -1152,7 +1164,13 @@ void check_and_display_interactive_screen(void);      // 0x0042a030
 void empty_00412380(void);                            // 0x00412380 - unknown init/cleanup
 void TexturePage_ClearAll(void);                      // 0x0046c360
 void SetupJointStructures(void* buf);                 // 0x0048b9e0
-void LoadEquippedWeaponAnimation(int weaponId, int slot, void* animBuf, void* objBuf); // 0x00462620
+// 0x00462620 - implemented in EntityModelLoader.cpp. The parameter types must
+// match that definition exactly: an extra (int,int,void*,void*) declaration used
+// to exist here, which silently overloaded the real function and routed the menu
+// call sites to an empty stub (the options menu never loaded its weapon/animation
+// set as a result).
+void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
+                                unsigned int anim_buffer, unsigned int param_4);
 void FUN_0048c020(int param);                         // 0x0048c020 - entity weapon setup
 void FUN_004844b0(void);                              // 0x004844b0 - menu cleanup sub
 void FUN_00470a40(void);                              // 0x00470a40 - texture cleanup
@@ -1167,7 +1185,7 @@ void update_player_position(PlayerEntity* ent, int a);// 0x0041c060
 void DrawFadeSpr(void);                               // 0x00456d30
 void update_sounds(void);                             // 0x00474090
 void room_camera_and_lighting_update(void);           // 0x00473ff0
-void some_camera_transform_fun_0048c190(int ca);      // 0x0048c190
+void    EntityComputeJointWorldMatrices(int ca); // 0x0048c190 - Compute entity joint world matrices
 void entity_matrix_update_0045a2e0(void);             // 0x0045a2e0
 void calc_entity_lighting(Entity* ent);               // 0x0048c350
 void update_2d_effects(void);                         // 0x0047c0c0
@@ -1330,3 +1348,18 @@ VECTOR* ApplyMatrixLV(MATRIX* m, VECTOR* v0, VECTOR* v1);
 MATRIX* CompMatrix(MATRIX* m0, MATRIX* m1, MATRIX* m2);
 void    ApplyLVAndMulMatrix(MATRIX* m0, MATRIX* m1);
 void    ApplyLVAndMul0Matrix(void* m0, void* m1, void* mOut);
+
+// --- Entity rendering functions ---
+MATRIX* MulMatrix(MATRIX* m0, MATRIX* m1);
+void    ScaleMatrixCols(MATRIX* m, VECTOR* scale);  // 0x0040a2a0
+void    RotMatrixYXZ(SVECTOR* r, MATRIX* m);        // 0x00409ed0
+void    rotate_entity(MATRIX* parentMtx, void* animData, unsigned char jointIdx); // 0x0048c2a0
+void    GteRotationMatrixYXZ(int x, int y, int z, MATRIX* m); // 0x00440b70
+void    FUN_00483080(void* spriteData, int depthShift);  // 0x00483080 - TMD entity render
+
+// --- GTE state globals ---
+extern MATRIX        g_gteRotTransMatrix;              // 0x008f88e8 - GTE rotation+translation matrix buffer
+                                                     // (t[2] at offset 0x1C = depth value for rendering)
+extern DWORD         g_d3dLightData[36];               // 0x00aae748 - D3D light data (3 lights x 12 DWORDs)
+extern DWORD         g_d3dLightFlags;                  // 0x00aae770 - D3D light dirty flags
+extern DWORD         g_d3dAmbientColor;                // 0x00aae774 - D3D packed ambient color

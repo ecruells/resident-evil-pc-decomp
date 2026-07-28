@@ -201,7 +201,7 @@ LAB_00480e89:
                 while (entCount != 0) {
                     if ((pEnt->status_flags & 0x01) != 0) {
                         entCount = entCount - 1;
-                        some_camera_transform_fun_0048c190(*(unsigned short*)&pEnt->pad_ca);
+                        EntityComputeJointWorldMatrices(*(unsigned short*)&pEnt->pad_ca);
                         entity_matrix_update_0045a2e0();
                         if (g_SpriteQueueCount != 0) {
                             calc_entity_lighting(pEnt);
@@ -211,7 +211,7 @@ LAB_00480e89:
                 }
 
                 // 0x00480f3b-0x00480f6e: Player entity rendering
-                some_camera_transform_fun_0048c190(g_playerEntity.unk_ca);
+                EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
                 entity_matrix_update_0045a2e0();
                 if (g_SpriteQueueCount != 0) {
                     calc_entity_lighting((Entity*)&g_playerEntity);

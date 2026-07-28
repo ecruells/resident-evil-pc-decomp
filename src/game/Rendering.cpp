@@ -4,6 +4,7 @@
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "SpriteRenderer.h"
+#include "TmdRenderer.h"
 #include <cstdlib>
 #include <time.h>
 
@@ -48,8 +49,28 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return 0;
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
-    if (pD3D == NULL || pD3D->m_FontTexHandle == MARNI_NULL_HANDLE) return 0;
-    if (pD3D->m_FontTexWidth <= 0 || pD3D->m_FontTexHeight <= 0) return 0;
+    if (pD3D == NULL) return 0;
+
+    // Determine which font texture to use based on depth/tpage code.
+    // depth == 0x15 (default) → fontus.tim (m_FontTexHandle, bank 0x1E)
+    // depth == 1 (font03t)    → font03t.tim (texture page slot 2)
+    // depth == 0              → fontus.tim (standard text rendering)
+    MarniHandle texHandle = pD3D->m_FontTexHandle;
+    int texW = pD3D->m_FontTexWidth;
+    int texH = pD3D->m_FontTexHeight;
+
+    if (texture->depth == 1) {
+        // Font03t.tim is loaded at texture page slot 2 (slot+0xF = 17)
+        int srvIdx = 2 + 0xF;
+        if (srvIdx >= 0 && srvIdx < 256 && g_TexturePageSRV[srvIdx] != MARNI_NULL_HANDLE) {
+            texHandle = g_TexturePageSRV[srvIdx];
+            texW = g_TexturePageWidth[srvIdx];
+            texH = g_TexturePageHeight[srvIdx];
+        }
+    }
+
+    if (texHandle == MARNI_NULL_HANDLE) return 0;
+    if (texW <= 0 || texH <= 0) return 0;
 
     float gameX = (float)(texture->screenX + g_ScreenOffsetX);
     float gameY = (float)(texture->screenY + g_ScreenOffsetY);
@@ -64,12 +85,12 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     float charW = (float)texture->width * scaleX;
     float charH = (float)texture->height * scaleY;
 
-    float texW = (float)pD3D->m_FontTexWidth;
-    float texH = (float)pD3D->m_FontTexHeight;
-    float u0 = (float)texture->texU / texW;
-    float v0 = (float)texture->texV / texH;
-    float u1 = (float)(texture->texU + texture->width) / texW;
-    float v1 = (float)(texture->texV + texture->height) / texH;
+    float texW_f = (float)texW;
+    float texH_f = (float)texH;
+    float u0 = (float)texture->texU / texW_f;
+    float v0 = (float)texture->texV / texH_f;
+    float u1 = (float)(texture->texU + texture->width) / texW_f;
+    float v1 = (float)(texture->texV + texture->height) / texH_f;
 
     // Calculate RGB from tint values — cast to unsigned int first to avoid overflow
     unsigned int r = ((unsigned int)(texture->colorMulR & 0xFF)) * 2; if (r > 255) r = 255;
@@ -103,7 +124,7 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     spr->u1 = u1;
     spr->v1 = v1;
     spr->color = color;
-    spr->tex = pD3D->m_FontTexHandle;
+    spr->tex = texHandle;
     spr->valid = TRUE;
     spr->depth = (unsigned int)brightness * 16 + 0x1C2;  // OT depth: higher=further behind
 
@@ -290,9 +311,12 @@ void FrameRateGovernor(void)
     g_frameTimeAccumulator += 100;
 
     if (g_frameTimeAccumulator < g_frameTargetTime) {
+        // Dropped frame: discard everything queued for it, the 3D queue
+        // included, otherwise objects pile up until the next presented frame.
         g_LastFrameTime_ms = 0;
         g_pendingSpriteCount = 0;
         SpriteQueue_Reset();
+        TmdQueue_Reset();
     } else {
         if (g_ScreenAccessReady && g_RenderAccessReady) {
             MarniClear();
@@ -323,6 +347,9 @@ void FrameRateGovernor(void)
                         g_pendingSprites[i].tex);
                 }
             }
+
+            // Render queued 3D TMD objects (entities, options-menu character)
+            FlushTmdObjects();
 
             // Render command buffer sprites (game objects, title text, etc.)
             FlushSpriteCommands();
@@ -434,6 +461,7 @@ void ResetSpriteQueue(void)
 {
     g_pendingSpriteCount = 0;
     SpriteQueue_Reset();
+    TmdQueue_Reset();
 }
 
 // ============================================================================

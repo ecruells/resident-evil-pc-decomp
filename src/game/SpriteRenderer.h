@@ -42,6 +42,8 @@ extern int   g_RenderBufferIndex;
 extern int   g_RenderDisableFlags;
 extern int   g_SubpixelOffsetX;
 extern int   g_SubpixelOffsetY;
+extern int   g_displayImageOriginX;
+extern int   g_displayImageOriginY;
 extern int   g_MaxFadeValue;
 extern int   g_DepthSortOverride;
 extern float g_ColorScaleFactor;

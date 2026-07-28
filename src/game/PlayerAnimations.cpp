@@ -10,12 +10,12 @@
 // 0x00437a80
 void player_anim_attack_recoil(void) {
     char cVar1;
-    switch ((unsigned int)g_playerEntity.anim_87) {
+    switch ((unsigned int)g_playerEntity.action_state) {
     case 0:
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.unk_8c = 0;
-        g_playerEntity.anim_87 = 1;
+        g_playerEntity.action_state = 1;
         g_playerEntity.scaMatrixData.localMatrix.t[0] = (int)*(unsigned short*)((char*)ENTITY + 0xC6);
         g_playerEntity.scaMatrixData.localMatrix.t[2] = (int)*(unsigned short*)((char*)ENTITY + 0xC8);
         Play3DSnd(3, 0, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
@@ -24,7 +24,7 @@ void player_anim_attack_recoil(void) {
         entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
         cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
         if (cVar1 != 0) {
-            g_playerEntity.anim_87 = 2;
+            g_playerEntity.action_state = 2;
             g_playerEntity.unk_bf = 0;
             g_playerEntity.attackAnim++;
             return;
@@ -36,17 +36,17 @@ void player_anim_attack_recoil(void) {
         return;
     case 3:
         g_playerEntity.attackAnim++;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
-        g_playerEntity.anim_87 = 4;
+        g_playerEntity.action_state = 4;
     case 4:
         entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
         cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
         if (cVar1 != 0) {
             g_playerEntity.animationId = 1;
             g_playerEntity.animFrameId = 0;
-            g_playerEntity.anim_86 = 0;
-            g_playerEntity.anim_87 = 0;
+            g_playerEntity.action_behavior = 0;
+            g_playerEntity.action_state = 0;
             g_playerEntity.flags &= 0xfd;
             if ((g_playerEntity.attackAnim == 2) || (g_playerEntity.attackAnim == 8)) {
                 g_playerEntity.directionAngle += 0x800;
@@ -61,18 +61,18 @@ void player_anim_attack_recoil(void) {
 // 0x0049abb0
 void player_anim_simple_recovery(void) {
     char cVar1;
-    if (g_playerEntity.anim_87 > 1) return;
-    if (g_playerEntity.anim_87 == 0) {
-        g_playerEntity.anim_87 = 1;
-        g_playerEntity.unk_c2 = 0;
-        g_playerEntity.unk_be = 0;
+    if (g_playerEntity.action_state > 1) return;
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.action_state = 1;
+        g_playerEntity.move_speed_current = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.unk_8c = 0;
         g_playerEntity.attackAnim = 2;
         Play3DSnd(3, 2, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
         return;
     }
-    if (g_playerEntity.unk_be == 0xf) {
+    if (g_playerEntity.animation_frame_id == 0xf) {
         PlayEntitySnd(2);
     }
     if (g_playerEntity.health >= 0) {
@@ -81,48 +81,48 @@ void player_anim_simple_recovery(void) {
     cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x200);
     if (cVar1 != 0) {
         g_playerEntity.directionAngle += 0x800;
-        g_playerEntity.anim_87++;
+        g_playerEntity.action_state++;
     }
 }
 // 0x00430130
 void player_anim_multi_attack(void) {
     char cVar1;
-    switch ((unsigned int)g_playerEntity.anim_87) {
+    switch ((unsigned int)g_playerEntity.action_state) {
     case 0:
-        g_playerEntity.anim_87 = 1;
+        g_playerEntity.action_state = 1;
         g_playerEntity.unk_8c = 3;
-        g_playerEntity.unk_c2 = 0;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.move_speed_current = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = 0;
     case 1:
         cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
-        g_playerEntity.anim_87 += cVar1;
+        g_playerEntity.action_state += cVar1;
         break;
     case 2:
         g_playerEntity.attackAnim = 1;
-        g_playerEntity.anim_87 = 3;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.action_state = 3;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
     case 3:
         Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
         break;
     case 4:
         g_playerEntity.attackAnim = 2;
-        g_playerEntity.anim_87 = 5;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.action_state = 5;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
     case 5:
         cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
         if (cVar1 != 0) {
             g_playerEntity.animationId = 1;
             g_playerEntity.animFrameId = 0;
-            g_playerEntity.anim_86 = 0;
-            g_playerEntity.anim_87 = 0;
+            g_playerEntity.action_behavior = 0;
+            g_playerEntity.action_state = 0;
             g_playerEntity.isBeingAttackedFlag = 0;
         }
     }
-    if ((int)(unsigned int)g_playerEntity.unk_be <= (int)((unsigned int)(g_playerEntity.id & 1) * -4 + 10)) {
+    if ((int)(unsigned int)g_playerEntity.animation_frame_id <= (int)((unsigned int)(g_playerEntity.id & 1) * -4 + 10)) {
         EntityUpdateWeaponJoint(0);
         return;
     }
@@ -132,10 +132,10 @@ void player_anim_multi_attack(void) {
 void player_anim_dispatch_4c2ac8(void) {
     JointStruct* pJVar1;
     char cVar2;
-    switch (g_playerEntity.anim_87) {
+    switch (g_playerEntity.action_state) {
     case 0:
-        g_playerEntity.anim_87 = 1;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = g_playerEntity.isBeingAttackedFlag - 1;
         g_playerEntity.unk_bc = 0xb4;
@@ -173,7 +173,7 @@ void player_anim_dispatch_4c2ac8(void) {
             PlayEntitySnd(2);
         }
         cVar2 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
-        g_playerEntity.anim_87 += cVar2;
+        g_playerEntity.action_state += cVar2;
         EntityUpdateWeaponJoint(0);
         break;
     case 2: {
@@ -194,7 +194,7 @@ void player_anim_dispatch_4c2ac8(void) {
         ENTITY->pushVelocity.z = ENTITY->pushVelocity.z + g_svecScratch.z;
         BillboardSetColor(&ENTITY->pushVelocity, 1, 2, DAT_00ffff50);
         BillboardAdjSize(&ENTITY->pushVelocity, 0xffffff38, 0xffffff38);
-        g_playerEntity.anim_87 = 3;
+        g_playerEntity.action_state = 3;
         g_playerEntity.isBeingAttackedFlag = 0x80;
         return;
     }
@@ -219,14 +219,14 @@ void player_anim_dispatch_4c2ac8(void) {
 // 0x0048f060
 void player_anim_crawling(void) {
     char cVar1;
-    if (g_playerEntity.anim_87 == 0) {
-        g_playerEntity.anim_87 = 1;
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.action_state = 1;
         g_playerEntity.unk_8c = 3;
-        g_playerEntity.unk_c2 = 0;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.move_speed_current = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = 0;
-    } else if (g_playerEntity.anim_87 != 1) {
+    } else if (g_playerEntity.action_state != 1) {
         return;
     }
     entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
@@ -235,13 +235,13 @@ void player_anim_crawling(void) {
         g_playerEntity.isBeingAttackedFlag = 0;
         g_playerEntity.animationId = 1;
         g_playerEntity.animFrameId = 0;
-        g_playerEntity.anim_86 = 0;
-        g_playerEntity.anim_87 = 0;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
     }
 }
-void player_anim_set_attacked_flag(void) {    // 0x00469400 - dispatch via DAT_004c2ac8[anim_86]
+void player_anim_set_attacked_flag(void) {    // 0x00469400 - dispatch via DAT_004c2ac8[action_behavior]
     extern void* DAT_004c2ac8[];
-    void (*func)(void) = (void(*)(void))DAT_004c2ac8[g_playerEntity.anim_86];
+    void (*func)(void) = (void(*)(void))DAT_004c2ac8[g_playerEntity.action_behavior];
     if (func) func();
 }
 // 0x00468e10 — Limb physics with bouncing (7 states)
@@ -252,11 +252,11 @@ void player_anim_dispatch_4ba360(void) {
     short sVar8;
 
     pJVar5 = g_playerEntity.jointsStructs;
-    switch (g_playerEntity.anim_87) {
+    switch (g_playerEntity.action_state) {
     case 0:
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
-        g_playerEntity.anim_87 = 1;
+        g_playerEntity.action_state = 1;
         g_playerEntity.attackAnim = 2;
         g_playerEntity.unk_8c = 3;
         pJVar5[0].velX = 0;
@@ -321,10 +321,10 @@ void player_anim_dispatch_4ba360(void) {
     case 2:
         pJVar5 = g_playerEntity.jointsStructs;
         pJVar5[0].velX = (short)0x8002;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = 0;
-        g_playerEntity.anim_87 = 3;
+        g_playerEntity.action_state = 3;
         g_playerEntity.unk_8c = 0xf;
         {
             int* deadData = (int*)g_deadMoveValue;
@@ -341,9 +341,9 @@ void player_anim_dispatch_4ba360(void) {
         Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x100);
         break;
     case 4:
-        g_playerEntity.anim_87 = 5;
+        g_playerEntity.action_state = 5;
         g_playerEntity.unk_8c = 3;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         // fall through
     case 5:
@@ -351,7 +351,7 @@ void player_anim_dispatch_4ba360(void) {
         if (cVar6 != 0) {
             g_playerEntity.unk_bf = 0;
             g_playerEntity.attackAnim = 0;
-            g_playerEntity.anim_87 = 6;
+            g_playerEntity.action_state = 6;
             g_playerEntity.unk_8c = 3;
         }
         break;
@@ -381,7 +381,7 @@ void player_anim_dispatch_4ba360(void) {
             pJVar5[0].velY = sVar8;
             pJVar5[0].velY = (short)((int)((int)sVar8 + ((int)sVar8 >> 31 & 7U)) >> 3);
             pJVar5[0].velX--;
-            g_playerEntity.anim_87 = 4;
+            g_playerEntity.action_state = 4;
             {
                 int* deadData = (int*)g_deadMoveValue;
                 g_playerPosScratch.x = deadData[5];
@@ -392,7 +392,7 @@ void player_anim_dispatch_4ba360(void) {
             Effect_CreateBillboard(0, 3, 0, &pJVar5[0].world, &g_playerPosScratch, 0);
         }
         if ((((unsigned char)pJVar5[0].velX) & 7) != 2) {
-            g_playerEntity.unk_c2 = 30;
+            g_playerEntity.move_speed_current = 30;
             Add_speedXZ(0x800);
         }
         sVar8 = pJVar5[0].rotation.z;
@@ -452,64 +452,64 @@ void player_anim_dispatch_4ba360(void) {
 void player_anim_dispatch_4c10b0(void) {
     char cVar1;
     short sVar2;
-    switch (g_playerEntity.anim_87) {
+    switch (g_playerEntity.action_state) {
     case 0:
-        g_playerEntity.anim_87 = 1;
+        g_playerEntity.action_state = 1;
         g_playerEntity.attackAnim = 2;
         g_playerEntity.unk_8c = 3;
-        g_playerEntity.unk_c2 = 200;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.move_speed_current = 200;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         // fall through
     case 1:
-        if (g_playerEntity.unk_be < 0x24) {
+        if (g_playerEntity.animation_frame_id < 0x24) {
             entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
         } else {
             Add_speedXZ(0);
         }
         cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
         if (cVar1 != 0) {
-            g_playerEntity.anim_87 = 2;
+            g_playerEntity.action_state = 2;
             return;
         }
         break;
     case 2:
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.isBeingAttackedFlag = 2;
-        g_playerEntity.anim_87 = 3;
+        g_playerEntity.action_state = 3;
         g_playerEntity.attackAnim = 3;
         g_playerEntity.unk_8c = 3;
         // fall through
     case 3:
-        if ((1 < g_playerEntity.isBeingAttackedFlag) && (3 < g_playerEntity.unk_be)) {
+        if ((1 < g_playerEntity.isBeingAttackedFlag) && (3 < g_playerEntity.animation_frame_id)) {
             Play3DSnd(3, 2, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
             PlayEntitySnd(2);
             g_playerEntity.isBeingAttackedFlag = 1;
         }
-        if ((g_playerEntity.health < 0) && (10 < g_playerEntity.unk_be)) {
+        if ((g_playerEntity.health < 0) && (10 < g_playerEntity.animation_frame_id)) {
             PlayEntitySnd(2);
-            g_playerEntity.anim_87 = 8;
+            g_playerEntity.action_state = 8;
             return;
         }
         sVar2 = GetPlayerInputMasked();
         g_playerEntity.attackDirection = g_playerEntity.attackDirection + (unsigned short)(sVar2 != 0) * (unsigned short)-3;
         if ((g_playerEntity.attackDirection < 0) &&
             ((cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400)), cVar1 != 0)) {
-            g_playerEntity.anim_87 = 4;
+            g_playerEntity.action_state = 4;
             return;
         }
         cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
         if (cVar1 != 0) {
-            g_playerEntity.anim_87 = 4;
+            g_playerEntity.action_state = 4;
             return;
         }
         break;
     case 4:
         g_playerEntity.unk_8c = 3;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
-        g_playerEntity.anim_87 = 5;
+        g_playerEntity.action_state = 5;
         g_playerEntity.attackAnim = 5;
         // fall through
     case 5:
@@ -517,40 +517,40 @@ void player_anim_dispatch_4c10b0(void) {
         g_playerEntity.attackDirection = g_playerEntity.attackDirection + (unsigned short)(sVar2 != 0) * (unsigned short)-3;
         if ((g_playerEntity.attackDirection < 0) &&
             ((cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400)), cVar1 != 0)) {
-            g_playerEntity.anim_87 = 6;
+            g_playerEntity.action_state = 6;
             return;
         }
         cVar1 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
         if (cVar1 != 0) {
-            g_playerEntity.anim_87 = 6;
+            g_playerEntity.action_state = 6;
             return;
         }
         break;
     case 6:
-        g_playerEntity.anim_87 = 7;
+        g_playerEntity.action_state = 7;
         g_playerEntity.attackAnim = 4;
         g_playerEntity.unk_8c = 3;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         // fall through
     case 7:
         cVar1 = Joint_move(1, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
         if (cVar1 != 0) {
             if (-1 < g_playerEntity.health) {
-                g_playerEntity.anim_86 = 0;
-                g_playerEntity.anim_87 = 0;
+                g_playerEntity.action_behavior = 0;
+                g_playerEntity.action_state = 0;
                 g_playerEntity.isBeingAttackedFlag = 0;
                 g_playerEntity.animationId = 1;
                 g_playerEntity.animFrameId = 0;
                 return;
             }
-            g_playerEntity.anim_87 = 8;
+            g_playerEntity.action_state = 8;
             return;
         }
         break;
     case 8:
         Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
-        g_playerEntity.anim_87 = 9;
+        g_playerEntity.action_state = 9;
         g_playerEntity.attackDirection = 0x5a;
         BillboardSetColor(&g_playerEntity.pushVelocity, 1, 2, DAT_00ffff50);
         BillboardSetSize(&g_playerEntity.pushVelocity, 0, 0);
@@ -560,18 +560,18 @@ void player_anim_dispatch_4c10b0(void) {
         sVar2 = g_playerEntity.attackDirection;
         g_playerEntity.attackDirection = g_playerEntity.attackDirection - 1;
         if (sVar2 == 0) {
-            g_playerEntity.anim_87 = 10;
+            g_playerEntity.action_state = 10;
         }
         break;
     }
 }
 // 0x004401c0
 void player_anim_poison_death(void) {
-    if (g_playerEntity.anim_87 == 0) {
-        g_playerEntity.anim_87 = 1;
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.action_state = 1;
         g_playerEntity.attackAnim = 0;
-        g_playerEntity.unk_c2 = 0;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.move_speed_current = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.unk_8c = 3;
         g_playerEntity.isBeingAttackedFlag = 1;
@@ -581,58 +581,58 @@ void player_anim_poison_death(void) {
 }
 // 0x00440230
 void player_anim_death_billboard(void) {
-    if (g_playerEntity.anim_87 == 0) {
-        g_playerEntity.anim_87 = 1;
-        g_playerEntity.unk_be = 0;
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.action_state = 1;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = 3;
         g_playerEntity.isBeingAttackedFlag = 1;
         g_playerEntity.unk_8c = 0;
-    } else if (g_playerEntity.anim_87 == 1) {
+    } else if (g_playerEntity.action_state == 1) {
         Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
-        if (g_playerEntity.unk_be == 14) {
-            g_playerEntity.unk_be = 13;
+        if (g_playerEntity.animation_frame_id == 14) {
+            g_playerEntity.animation_frame_id = 13;
         }
-    } else if (g_playerEntity.anim_87 == 2) {
+    } else if (g_playerEntity.action_state == 2) {
         g_playerEntity.unk_03 |= 0x80;
         // TODO: Apply RotMatrix / ApplyLVAndMul0Matrix transforms using g_EnemiesList[0] joint matrices
     }
 }
-void player_anim_limb_physics(void) {         // 0x00424fb0 - dispatch via DAT_004ba360[anim_86]
+void player_anim_limb_physics(void) {         // 0x00424fb0 - dispatch via DAT_004ba360[action_behavior]
     extern void* DAT_004ba360[];
-    void (*func)(void) = (void(*)(void))DAT_004ba360[g_playerEntity.anim_86];
+    void (*func)(void) = (void(*)(void))DAT_004ba360[g_playerEntity.action_behavior];
     if (func) func();
 }
 // 0x00424de0
 void player_anim_enemy_interact(void) {
-    if (g_playerEntity.anim_87 == 0) {
-        g_playerEntity.anim_87 = 1;
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.action_state = 1;
         g_playerEntity.attackAnim = 2;
         g_playerEntity.isBeingAttackedFlag = 0x80;
         g_playerEntity.flags |= 6;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.unk_8c = 0;
-    } else if (g_playerEntity.anim_87 == 1) {
-        if (g_playerEntity.unk_be == 8) {
+    } else if (g_playerEntity.action_state == 1) {
+        if (g_playerEntity.animation_frame_id == 8) {
             Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
             // TODO: Billboard effects on joints at frame 8/9 and >95
         }
         entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
         char cVar2 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
-        g_playerEntity.anim_87 += cVar2;
-    } else if (g_playerEntity.anim_87 == 2) {
+        g_playerEntity.action_state += cVar2;
+    } else if (g_playerEntity.action_state == 2) {
         g_playerEntity.health = -1;
     }
 }
-void player_anim_death_alt(void) {            // 0x004088f0 - dispatch via DAT_004b1a90[anim_86]
+void player_anim_death_alt(void) {            // 0x004088f0 - dispatch via DAT_004b1a90[action_behavior]
     extern void* DAT_004b1a90[];
-    void (*func)(void) = (void(*)(void))DAT_004b1a90[g_playerEntity.anim_86];
+    void (*func)(void) = (void(*)(void))DAT_004b1a90[g_playerEntity.action_behavior];
     if (func) func();
 }
-void player_anim_dispatch_4b1a90(void) {      // 0x0045c460 - dispatch via DAT_004c10b0[anim_87]
+void player_anim_dispatch_4b1a90(void) {      // 0x0045c460 - dispatch via DAT_004c10b0[action_state]
     extern void* DAT_004c10b0[];
-    void (*func)(void) = (void(*)(void))DAT_004c10b0[g_playerEntity.anim_87];
+    void (*func)(void) = (void(*)(void))DAT_004c10b0[g_playerEntity.action_state];
     if (func) func();
 }
 
@@ -1121,12 +1121,12 @@ MATRIX* MulMatrixInPlace(MATRIX* m0, MATRIX* m1)
 // ============================================================================
 // Add_speedXZ (0x0048a590)
 // Adds movement speed to entity transform in the entity's facing direction
-// plus an angular offset. Moves the entity by its unk_c2 speed value.
+// plus an angular offset. Moves the entity by its move_speed_current speed value.
 // ============================================================================
 void Add_speedXZ(int angleOffset)
 {
     // Set speed vector from entity's base speed value
-    g_svecScratch.x = ENTITY->unk_c2;
+    g_svecScratch.x = ENTITY->move_speed_current;
     g_svecScratch.y = 0;
     g_svecScratch.z = 0;
 

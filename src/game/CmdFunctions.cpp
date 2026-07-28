@@ -740,11 +740,11 @@ int cmd_em_set(void)
     unsigned char enemySlot = g_ScdOpcodes[0x12] & 0xf;
     ENTITY = &g_EnemiesList[enemySlot];
     g_EnemiesList[enemySlot].scaMatrixData.localMatrix.t[1] = (int)scd_read_s16(0xe);
-    g_EnemiesList[enemySlot].pad_15d[4] = g_ScdOpcodes[0x12] & 0xf;
-    g_EnemiesList[enemySlot].pad_15d[4] |= (char)g_ScdOpcodes[0x15] << 4;
+    g_EnemiesList[enemySlot].pad_164[0] = g_ScdOpcodes[0x12] & 0xf;
+    g_EnemiesList[enemySlot].pad_164[0] |= (char)g_ScdOpcodes[0x15] << 4;
 
     if ((char)g_ScdOpcodes[4] != 0) {
-        ENTITY->pad_15d[4] |= 0x80;
+        ENTITY->pad_164[0] |= 0x80;
     }
 
     bool shouldInit = true;
@@ -772,13 +772,13 @@ int cmd_em_set(void)
         ENTITY->action_behavior = 0;
         ENTITY->action_state = 0;
         ENTITY->id = g_ScdOpcodes[1];
-        ENTITY->pad_15d[7] = g_ScdOpcodes[3];
+        ENTITY->pad_167 = g_ScdOpcodes[3];
         ENTITY->position.pad = scd_read_s16(6);
         *((unsigned short*)&ENTITY->angle + 1) = scd_read_u16(10);
-        ENTITY->field_0x8a = 0;
+        ENTITY->hit_state = 0;
         *(unsigned short*)&ENTITY->pad_ca[0] = 0;
         ENTITY->collisionFlags = 0;
-        ENTITY->pad_bc = 0;
+        ENTITY->death_timer = 0;
         ENTITY->Sca_info = (unsigned int)g_scaDataTable;
         ENTITY->pSca_hit_data = g_scaPoolPtr;
         g_enemy_count++;
@@ -1234,7 +1234,7 @@ int cmd_enemy_0x28(void)
         ent->action_behavior = 0;
         ent->action_state = 0;
         ent->health = param1;
-        ent->field_0x8a = g_ScdOpcodes[6];
+        ent->hit_state = g_ScdOpcodes[6];
         g_ScdOpcodes += 8;
         return 1;
     case 2:
@@ -1345,9 +1345,9 @@ int cmd_player_anim_0x2b(void)
 
     unsigned short adj = (unsigned short)(val + 0x200) & 0xff00;
     g_playerEntity.attackAnim = (unsigned char)animParam;
-    g_playerEntity.anim_86 = (unsigned char)adj;
-    g_playerEntity.anim_87 = (unsigned char)(adj >> 8);
-    g_playerEntity.unk_be = (unsigned char)(animParam >> 8);
+    g_playerEntity.action_behavior = (unsigned char)adj;
+    g_playerEntity.action_state = (unsigned char)(adj >> 8);
+    g_playerEntity.animation_frame_id = (unsigned char)(animParam >> 8);
     g_playerEntity.unk_bf = 0;
     g_playerEntity.unk_8c = 0;
     g_playerEntity.animationId = 8;
@@ -1475,11 +1475,11 @@ int cmd_damage_set(void)
         return 1;
     case 1:
         g_playerEntity.isBeingAttackedFlag = (unsigned char)*params;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackDirection = 100;
         g_ScdOpcodes += 4;
-        g_playerEntity.unk_c2 = 0;
+        g_playerEntity.move_speed_current = 0;
         g_playerEntity.attackAnim = 0;
         *(unsigned int*)&g_playerEntity.animationId = 0x01000001;
         g_playerEntity.unk_8c = 3;
@@ -1494,8 +1494,8 @@ int cmd_damage_set(void)
         return 1;
     }
     case 4:
-        g_playerEntity.anim_86 = 1;
-        g_playerEntity.anim_87 = 6;
+        g_playerEntity.action_behavior = 1;
+        g_playerEntity.action_state = 6;
         g_ScdOpcodes += 2;
         return 1;
     case 5:
@@ -1509,10 +1509,10 @@ int cmd_damage_set(void)
     case 7:
         g_playerEntity.animationId = 1;
         g_playerEntity.animFrameId = 0;
-        g_playerEntity.anim_86 = 0;
-        g_playerEntity.anim_87 = 2;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 2;
         g_playerEntity.isBeingAttackedFlag = 0;
-        g_playerEntity.unk_be = 0;
+        g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = 0;
         g_playerEntity.unk_8c = 3;

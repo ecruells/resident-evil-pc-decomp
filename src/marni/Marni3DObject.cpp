@@ -618,9 +618,16 @@ int CMarniDirect3DTMD::Create(void* d3dContext, void* materialContext, void* par
 
 // ============================================================================
 // CMarniDirect3DTMD::Transform - 0x00415520
-// Applies transform to all TMD objects and optionally copies output data
+// Queues all TMD objects for rendering with the given OT depth and stores
+// the per-object transform matrix.
+// Original signature/behavior (from 0x00415520):
+//   Transform(ctx, depth, matrix, doubleBuffer)
+//     for each object: vtable[10](objData, depth)      // OT_InsertPrimitive
+//     if (matrix): copy 16 floats from matrix into objData + 8
+// The matrix stored in objData+8 is what the OT renderer later uses to
+// transform the object's vertices.
 // ============================================================================
-int CMarniDirect3DTMD::Transform(void* d3dContext, void* renderData, void* outData, int doubleBuffer)
+int CMarniDirect3DTMD::Transform(void* d3dContext, void* depth, void* matrix, int doubleBuffer)
 {
     // 0x00415520
     void** d3dVtable = *(void***)d3dContext;
@@ -639,61 +646,33 @@ int CMarniDirect3DTMD::Transform(void* d3dContext, void* renderData, void* outDa
 
     DWORD objCount = m_objectCount;
 
-    // vtable[10] = SetTexture / TransformObject on d3dContext
-    typedef void (*TransformFn)(void*, void*);
-    TransformFn transformObj = (TransformFn)d3dVtable[10];
+    // vtable[10] = OT insert (original CMarniDirect3D::SetTexture, 0x00448300)
+    typedef int (*OTInsertFn)(void*, void*, unsigned int);
+    OTInsertFn otInsert = (OTInsertFn)d3dVtable[10];
 
-    // Select data source: doubleBuffer==0 uses m_objectDataCopy, else m_objectData
-    // Ghidra: uVar2 = (param_5 == 0) - 1 & 0x10
-    // If param_5==0: (0==0)=1 -> 1-1=0 -> 0&0x10=0 -> uses m_objectDataCopy
-    // If param_5!=0: (1==0)=0 -> 0-1=0xFFFFFFFF -> 0xFFFFFFFF&0x10=0x10
-    // Wait - re-reading: the Ghidra says param_5==0 selects m_objectData + 0x10*0x84
-    // Actually:
-    //   uVar2 = (param_5 == 0) - 1 & 0x10;
-    //   iVar4 = param_1 + 0x4d0 + uVar2 * 0x84;
-    //
-    // If param_5==0: (0==0)=1, 1-1=0, 0&0x10=0, so uVar2=0 -> uses m_objectData
-    // But wait this is wrong. Let me re-read more carefully.
-    //
-    // Actually the original: "uVar2 = (param_5 == 0) - 1 & 0x10;"
-    // In C operator precedence: == has higher precedence than subtraction
-    // So: uVar2 = ((param_5 == 0) - 1) & 0x10
-    // If param_5==0: (1 - 1) = 0, 0 & 0x10 = 0
-    // If param_5!=0: (0 - 1) = 0xFFFFFFFF, 0xFFFFFFFF & 0x10 = 0x10
-    //
-    // So when doubleBuffer (param_5) is 0: uVar2 = 0, data source = m_objectData
-    // When doubleBuffer is non-zero: uVar2 = 0x10, data source = m_objectData + 0x10*0x84
-    // But that doesn't match m_objectDataCopy offset...
-    //
-    // Actually, looking at user spec: doubleBuffer decides which buffer to transform.
-    // m_objectDataCopy is at offset 0xD10 = m_objectData + 0x840 = m_objectData + 16*0x84.
-    // But 0x10 * 0x84 = 0x10 * 132 = 0x840. So when doubleBuffer!=0, uVar2=0x10:
-    //   iVar4 = param_1 + 0x4d0 + 0x10 * 0x84 = param_1 + 0x4d0 + 0x840 = param_1 + 0xD10
-    // That IS m_objectDataCopy! So when doubleBuffer != 0, it uses m_objectDataCopy.
-    // When doubleBuffer == 0, uVar2=0, uses m_objectData.
-    // So the meaning is reversed from what the parameter name suggests.
-
-    int shift = (doubleBuffer == 0) ? 0 : 16;  // 0 or 16 objects offset (16 * 0x84 = 0x840)
+    // uVar2 = ((doubleBuffer == 0) - 1) & 0x10  (entries, 0x84 bytes each)
+    // doubleBuffer==0 -> m_objectData, != 0 -> m_objectDataCopy
+    int shift = (doubleBuffer == 0) ? 0 : 16;  // 16 * 0x84 = 0x840
 
     if (objCount != 0) {
         BYTE* dataPtr = m_objectData + shift * 0x84;
         for (DWORD i = 0; i < objCount; i++) {
-            transformObj(dataPtr, renderData);
+            otInsert(d3dContext, dataPtr, (unsigned int)(size_t)depth);
             dataPtr += 0x84;
         }
     }
 
-    // If outData provided, copy transform results (16 DWORDs per object) from data source
-    if (outData != 0 && objCount != 0) {
-        // Starting from offset 0x08 within the data (skip first 2 DWORDs)
-        DWORD* src = (DWORD*)(m_objectData + 0x08 + shift * 0x84);
-        DWORD* dst = (DWORD*)outData;
+    // Store the transform matrix into each object at +0x08 (16 floats).
+    // NOTE: the original copies FROM the caller's matrix INTO objData+8;
+    // an earlier revision of this code copied in the wrong direction.
+    if (matrix != 0 && objCount != 0) {
+        DWORD* dst = (DWORD*)(m_objectData + 0x08 + shift * 0x84);
+        DWORD* src = (DWORD*)matrix;
         for (DWORD i = 0; i < objCount; i++) {
             for (int k = 0; k < 16; k++) {
                 dst[k] = src[k];
             }
-            dst += 16;
-            src += 0x21;  // 33 DWORDs stride
+            dst += 0x21;  // 33 DWORDs stride (0x84 bytes)
         }
     }
 
@@ -1550,6 +1529,15 @@ struct PSXObjVtx {
 // C++-constructed, so do it on first use.
 static void PSXObject_InitSlotElements(BYTE* slot)
 {
+    // The constructor also seeds the trailer, and m_unknown4C8 (0x4C8) is the
+    // vertex-count threshold PSXObject_Resize subdivides an element at. Left at
+    // zero it matches every element, so Resize kept splitting until the object
+    // count passed 16 and Store failed with "too many objects" - after having
+    // written a 17th element straight over this trailer.
+    if (*(DWORD*)(slot + 0x4C8) == 0) {
+        *(DWORD*)(slot + 0x4C8) = 0x400;
+    }
+
     for (int i = 0; i < 16; i++) {
         DWORD* elem = (DWORD*)(slot + i * 0x4C);
         if (elem[0] == 0) {
@@ -1800,6 +1788,10 @@ static int PSXObject_Resize(BYTE* slot)
             BYTE* elem = slot + i * 0x4C;
             if (*(int*)(slot + 0x4C8) <= *(int*)(slot + 0x24 + i * 0x4C)) {
                 int count = *(int*)(slot + 0x4C0);
+                // Faithful to the original: it allows count == 16 here, which
+                // then places the new element at slot+0x4C0 - on top of this
+                // trailer. Unreachable while the threshold above is 0x400,
+                // since no single kind carries 1024 vertices.
                 if (count > 0x10) {
                     PSXObjDebugPrint("PSXObject::Resize: too many objects\n");
                     return 0;
@@ -2097,8 +2089,15 @@ int PSXObject_Store(CMarniDirect3DTMD* self, int* tmdHdr, int objIndex,
                         break;
 
                     case 0x34000609: {  // textured gouraud triangle
+                        // Gouraud packets pack (vertexIndex << 16) | normalIndex
+                        // per dword, so every vertex index comes from the HIGH
+                        // half. Reading v1 from the low half used its normal
+                        // index as a vertex index, displacing one corner of
+                        // every triangle in the model: the winding came out
+                        // random (so no cull orientation could work) and the
+                        // shading with it.
                         PSXObjReadVertex(&v0, vertBase, pkt[4] >> 0x10);
-                        PSXObjReadVertex(&v1, vertBase, pkt[5] & 0xFFFF);
+                        PSXObjReadVertex(&v1, vertBase, pkt[5] >> 0x10);
                         PSXObjReadVertex(&v2, vertBase, pkt[6] >> 0x10);
                         PSXObjReadNormal(&v0, normBase, pkt[4] & 0xFFFF);
                         PSXObjReadNormal(&v1, normBase, pkt[5] & 0xFFFF);
@@ -2130,8 +2129,10 @@ int PSXObject_Store(CMarniDirect3DTMD* self, int* tmdHdr, int objIndex,
                     }
 
                     case 0x3C00080C: {  // textured gouraud quad
+                        // Same as 0x34000609: all four vertex indices are in the
+                        // high halves, alongside their normal index.
                         PSXObjReadVertex(&v0, vertBase, pkt[5] >> 0x10);
-                        PSXObjReadVertex(&v1, vertBase, pkt[6] & 0xFFFF);
+                        PSXObjReadVertex(&v1, vertBase, pkt[6] >> 0x10);
                         PSXObjReadVertex(&v2, vertBase, pkt[7] >> 0x10);
                         PSXObjReadVertex(&v3, vertBase, pkt[8] >> 0x10);
                         PSXObjReadNormal(&v0, normBase, pkt[5] & 0xFFFF);

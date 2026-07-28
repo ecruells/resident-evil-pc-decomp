@@ -20,10 +20,27 @@ static bool g_trigTablesInitialized = false;
 static void InitTrigTables(void)
 {
     if (g_trigTablesInitialized) return;
+
+    // FUN_00440a30: both tables hold 4096 entries at 14-bit amplitude
+    // (fsin/fcos * 16384.0, angle step 2*pi/4096 = 0.0015339807880859375),
+    // saturated to +/-0x3FFF so a value never reads back as -1.0 exactly.
+    //
+    // The amplitude matters: GteRotationMatrixCalc combines two table lookups
+    // with >> 14 and RotMatrix shifts the result down by 2 more to reach the
+    // 4.12 matrix scale. Filling the tables at 4096 instead made every
+    // rotation matrix 4-16x too small, and since each joint composes with its
+    // parent the error compounded - deep joints ended up with an all-zero
+    // rotation, collapsing every vertex of the model onto a single point.
     for (int i = 0; i < 4096; i++) {
-        double angle = (double)i * 6.283185307179586 / 4096.0;
-        g_cosTable[i] = (short)(cos(angle) * 4096.0 + 0.5);
-        g_sinTable[i] = (short)(sin(angle) * 4096.0 + 0.5);
+        double angle = (double)i * 0.0015339807880859375;
+        int s = (int)(sin(angle) * 16384.0);
+        int c = (int)(cos(angle) * 16384.0);
+        if (s ==  0x4000) s =  0x3FFF;
+        if (s == -0x4000) s = -0x3FFF;
+        if (c ==  0x4000) c =  0x3FFF;
+        if (c == -0x4000) c = -0x3FFF;
+        g_sinTable[i] = (short)s;
+        g_cosTable[i] = (short)c;
     }
     g_trigTablesInitialized = true;
 }
@@ -31,14 +48,22 @@ static void InitTrigTables(void)
 // ============================================================================
 // GTE sin/cos lookups (0x00440a10 / 0x004409f0)
 // ============================================================================
+// NOTE ON THE NAMES: these are named after the Ghidra symbols, and in the
+// original those two symbols are attached to the opposite tables.
+// FUN_00440a30 fills 0x004bcacc with sin and 0x004bcad0 with cos, while
+// GteCos (0x004409f0) reads 0x004bcacc and GteSin (0x00440a10) reads
+// 0x004bcad0. Every formula transcribed from the decompiler therefore expects
+// GteSin() == cosine and GteCos() == sine; feeding them the tables their names
+// suggest turns a Y-only rotation into a garbage permutation with m[1][1] = -cos
+// instead of 1, which is what collapsed the entity joint chain.
 int GteSin(int angle)
 {
-    return g_sinTable[angle & 0xFFF];
+    return g_cosTable[angle & 0xFFF];   // 0x00440a10 -> cos table (0x004bcad0)
 }
 
 int GteCos(int angle)
 {
-    return g_cosTable[angle & 0xFFF];
+    return g_sinTable[angle & 0xFFF];   // 0x004409f0 -> sin table (0x004bcacc)
 }
 
 // ============================================================================
@@ -65,53 +90,53 @@ static void GteRotationMatrixCalc(int sx, int sy, int sz, int* result)
     iVar1 = GteCos(sy);
     result[2] = iVar1;
 
-    // result[3] = sin(sx) * cos(sy) * sin(sz) + cos(sx) * cos(sz)  (adjusted)
-    iVar1 = GteSin(sx);
+    // result[3] = cos(sx)*cos(sy)*sin(sz) + sin(sx)*cos(sz)
+    iVar1 = GteCos(sx);
     iVar2 = GteCos(sy);
     iVar3 = GteSin(sz);
     iVar3 = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) * iVar3;
-    iVar1 = GteCos(sx);
+    iVar1 = GteSin(sx);
     iVar2 = GteCos(sz);
     result[3] = ((int)(iVar3 + (iVar3 >> 0x1f & 0x3fffU)) >> 0xe) +
                 ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[4] = cos(sx) * cos(sz) - sin(sx) * cos(sy) * sin(sz)
+    // result[4] = sin(sx)*sin(sz) - cos(sx)*cos(sz)*cos(sy)
+    iVar1 = GteSin(sx);
+    iVar2 = GteSin(sz);
+    iVar3 = GteCos(sx);
+    iVar4 = GteCos(sz);
+    iVar5 = GteCos(sy);
+    iVar5 = ((int)(iVar3 * iVar4 + (iVar3 * iVar4 >> 0x1f & 0x3fffU)) >> 0xe) * iVar5;
+    result[4] = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) -
+                ((int)(iVar5 + (iVar5 >> 0x1f & 0x3fffU)) >> 0xe);
+
+    // result[5] = -(cos(sx)*sin(sy))
+    iVar1 = GteCos(sx);
+    iVar2 = GteSin(sy);
+    result[5] = -((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
+
+    // result[6] = cos(sx)*cos(sz) - sin(sx)*cos(sy)*sin(sz)
     iVar1 = GteCos(sx);
     iVar2 = GteCos(sz);
     iVar3 = GteSin(sx);
     iVar4 = GteCos(sy);
     iVar5 = GteSin(sz);
     iVar5 = ((int)(iVar3 * iVar4 + (iVar3 * iVar4 >> 0x1f & 0x3fffU)) >> 0xe) * iVar5;
-    result[4] = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) -
-                ((int)(iVar5 + (iVar5 >> 0x1f & 0x3fffU)) >> 0xe);
-
-    // result[5] = -sin(sx) * sin(sy)
-    iVar1 = GteSin(sx);
-    iVar2 = GteSin(sy);
-    result[5] = -((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
-
-    // result[6] = cos(sx) * cos(sz) - sin(sx) * cos(sz) * sin(sy)
-    iVar1 = GteSin(sx);
-    iVar2 = GteCos(sz);
-    iVar3 = GteCos(sx);
-    iVar4 = GteSin(sy);
-    iVar5 = GteCos(sz);
-    iVar5 = ((int)(iVar3 * iVar4 + (iVar3 * iVar4 >> 0x1f & 0x3fffU)) >> 0xe) * iVar5;
     result[6] = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) -
                 ((int)(iVar5 + (iVar5 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[7] = sin(sx) * cos(sz) + cos(sx) * sin(sy) * sin(sz)
-    iVar1 = GteSin(sz);
+    // result[7] = cos(sz)*cos(sy)*sin(sx) + cos(sx)*sin(sz)
+    iVar1 = GteCos(sz);
     iVar2 = GteCos(sy);
-    iVar3 = GteCos(sx);
+    iVar3 = GteSin(sx);
     iVar3 = ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe) * iVar3;
-    iVar1 = GteSin(sx);
-    iVar2 = GteCos(sz);
+    iVar1 = GteCos(sx);
+    iVar2 = GteSin(sz);
     result[7] = ((int)(iVar3 + (iVar3 >> 0x1f & 0x3fffU)) >> 0xe) +
                 ((int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe);
 
-    // result[8] = cos(sx) * sin(sy)
-    iVar1 = GteCos(sx);
+    // result[8] = sin(sx)*sin(sy)
+    iVar1 = GteSin(sx);
     iVar2 = GteSin(sy);
     result[8] = (int)(iVar1 * iVar2 + (iVar1 * iVar2 >> 0x1f & 0x3fffU)) >> 0xe;
 }
@@ -472,7 +497,19 @@ void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x0044
 // MatrixToCamera (0x0040a680)
 // Computes a camera view matrix from position/orientation data and stores
 // it in g_RoomCameraData (0x004bca88). Used during room/camera transitions.
-// Input: pointer to camera from/to position data (6 ints = from_xyz, to_xyz)
+// Input: pointer to camera from/to position data (ints: from_xyz, to_xyz,
+// roll, ...) — also called with a MATRIX* by options_menu.
+//
+// Rotation formulas (recovered from the original's FPU code):
+//   dx = to_x-from_x, dy = to_y-from_y, dz = to_z-from_z
+//   len = sqrt(dx²+dy²+dz²), h = sqrt(dx²+dz²)
+//   m[0] = ( dz/h,          0,        -dx/len )
+//   m[1] = ( dx*dy/len²,    h/len,     dy*dz/(h*len) )
+//   m[2] = ( dx/len,       -dy/len,    dz/len )
+// (The mixed len² / h*len denominators and the negated m[2].y are quirks of
+// the original Capcom code, verified by instruction-level tracing.)
+// Translation: t = R * (-from), then (when roll != 0) a roll rotation is
+// composed on top via EulerToRotationMatrix(0,0,roll).
 // ============================================================================
 int MatrixToCamera(MATRIX* m) // 0x0040a680
 {
@@ -485,63 +522,294 @@ int MatrixToCamera(MATRIX* m) // 0x0040a680
     int fromX = camData[0];
     int fromY = camData[1];
     int fromZ = camData[2];
-    int toX   = camData[3];
-    int toY   = camData[4];
-    int toZ   = camData[5];
-    int roll  = camData[6];
 
-    int dx = toX - fromX;
-    int dy = -(toY - fromY); // PS1 Y negation
-    int dz = toZ - fromZ;
+    double dx = (double)(camData[3] - fromX);
+    double dy = (double)(camData[4] - fromY);
+    double dz = (double)(camData[5] - fromZ);
 
-    int dist = (int)sqrt((double)(dx * dx + dy * dy + dz * dz));
-
-    int pitchAngle;
-    if (dist != 0) {
-        pitchAngle = (int)(asin((double)dy / (double)dist) * (4096.0 / 3.14159265));
-    } else {
-        pitchAngle = 0;
-    }
-
-    int yawAngle;
-    if (dx != 0 || dz != 0) {
-        yawAngle = (int)(atan2((double)dx, (double)dz) * (4096.0 / 3.14159265));
-    } else {
-        yawAngle = 0;
-    }
-
-    int rotResult[9];
-    FUN_004403c0(0, 0, pitchAngle, rotResult);
+    double len = sqrt(dx * dx + dy * dy + dz * dz);
+    if (len < 1.0) len = 1.0;
+    double h = sqrt(dx * dx + dz * dz);
+    if (h < 1.0) h = 1.0;   // original divides by h; clamp to avoid NaN
 
     MATRIX* camMatrix = (MATRIX*)&g_RoomCameraData;
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            camMatrix->m[i][j] = (short)rotResult[i * 3 + j];
-        }
-    }
-    camMatrix->t[0] = -fromX;
-    camMatrix->t[1] = fromY;
-    camMatrix->t[2] = -fromZ;
+    camMatrix->m[0][0] = (short)(int)( dz / h * 4096.0);
+    camMatrix->m[0][1] = 0;
+    camMatrix->m[0][2] = (short)(int)(-dx / len * 4096.0);
+    camMatrix->m[1][0] = (short)(int)( dx * dy / (len * len) * 4096.0);
+    camMatrix->m[1][1] = (short)(int)( h / len * 4096.0);
+    camMatrix->m[1][2] = (short)(int)( dy * dz / (h * len) * 4096.0);
+    camMatrix->m[2][0] = (short)(int)( dx / len * 4096.0);
+    camMatrix->m[2][1] = (short)(int)(-dy / len * 4096.0);
+    camMatrix->m[2][2] = (short)(int)( dz / len * 4096.0);
 
-    MATRIX yawMatrix;
-    int yawResult[9];
-    FUN_004403c0(0, yawAngle, 0, yawResult);
-    for (int i = 0; i < 3; i++) {
-        for (int j = 0; j < 3; j++) {
-            yawMatrix.m[i][j] = (short)yawResult[i * 3 + j];
-        }
-    }
-    yawMatrix.t[0] = 0;
-    yawMatrix.t[1] = 0;
-    yawMatrix.t[2] = 0;
-
-    MulMatrix0(&yawMatrix, camMatrix, camMatrix);
-
-    VECTOR translation;
-    translation.x = -fromX;
-    translation.y = fromY;
-    translation.z = -fromZ;
-    ApplyMatrixLV(camMatrix, &translation, (VECTOR*)camMatrix->t);
+    // Translation: rotated camera position (-from)
+    VECTOR camPos;
+    camPos.x = -fromX;
+    camPos.y = -fromY;
+    camPos.z = -fromZ;
+    ApplyMatrixLV(camMatrix, &camPos, (VECTOR*)camMatrix->t);
 
     return 0;
+}
+
+// ============================================================================
+// MulMatrix (0x0040a150)
+// In-place matrix multiplication: m0 = m0 * m1
+// ============================================================================
+MATRIX* MulMatrix(MATRIX* m0, MATRIX* m1)
+{
+    MulMatrix0(m0, m1, m0);
+    return m0;
+}
+
+// ============================================================================
+// ScaleMatrixCols (0x0040a2a0)
+// Scale each column of a 3x3 rotation matrix by the corresponding component
+// of a VECTOR. Fixed-point: multiply then shift right by 12 (divide by 4096).
+// ============================================================================
+void ScaleMatrixCols(MATRIX* m, VECTOR* scale)
+{
+    short* p = &m->m[0][0];
+    int sx = scale->x;
+    int sy = scale->y;
+    int sz = scale->z;
+
+    // Column 0: m[0][0], m[1][0], m[2][0] scaled by sx
+    p[0] = (short)((p[0] * sx + ((p[0] * sx >> 31) & 0xFFF)) >> 12);
+    p[3] = (short)((p[3] * sx + ((p[3] * sx >> 31) & 0xFFF)) >> 12);
+    p[6] = (short)((p[6] * sx + ((p[6] * sx >> 31) & 0xFFF)) >> 12);
+
+    // Column 1: m[0][1], m[1][1], m[2][1] scaled by sy
+    p[1] = (short)((p[1] * sy + ((p[1] * sy >> 31) & 0xFFF)) >> 12);
+    p[4] = (short)((p[4] * sy + ((p[4] * sy >> 31) & 0xFFF)) >> 12);
+    p[7] = (short)((p[7] * sy + ((p[7] * sy >> 31) & 0xFFF)) >> 12);
+
+    // Column 2: m[0][2], m[1][2], m[2][2] scaled by sz
+    p[2] = (short)((p[2] * sz + ((p[2] * sz >> 31) & 0xFFF)) >> 12);
+    p[5] = (short)((p[5] * sz + ((p[5] * sz >> 31) & 0xFFF)) >> 12);
+    p[8] = (short)((p[8] * sz + ((p[8] * sz >> 31) & 0xFFF)) >> 12);
+}
+
+// ============================================================================
+// GteRotationMatrixYXZ (0x00440b70)
+// Compute full rotation matrix from YXZ Euler angles (12-bit fixed).
+// Helper for RotMatrixYXZ.
+// ============================================================================
+void GteRotationMatrixYXZ(int x, int y, int z, MATRIX* m)
+{
+    int xMinusY = x - y;
+    int xPlusY = x + y;
+    int zPlusY = z + y;
+    int yMinusZ = y - z;
+
+    int sinXmY = GteSin(xMinusY);
+    int sinXpY = GteSin(xPlusY);
+    int cosZ = GteCos(z);
+    int temp = ((sinXmY - sinXpY) / 2) * cosZ;
+    int sinZpY = GteSin(zPlusY);
+    int sinYmZ = GteSin(yMinusZ);
+    *(int*)&m->m[0][0] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (sinYmZ + sinZpY) / 2;
+
+    sinXmY = GteSin(xMinusY);
+    sinXpY = GteSin(xPlusY);
+    int sinZ = GteSin(z);
+    temp = ((sinXmY - sinXpY) / 2) * sinZ;
+    int cosYmZ = GteCos(yMinusZ);
+    int cosZpY = GteCos(zPlusY);
+    *(int*)&m->m[0][2] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (cosYmZ - cosZpY) / 2;
+
+    int cosXpY = GteCos(xPlusY);
+    int cosXmY = GteCos(xMinusY);
+    *(int*)&m->m[1][1] = (cosXpY - cosXmY) / 2;
+
+    int cosZpX = GteCos(z + x);
+    int cosXmZ = GteCos(x - z);
+    *(int*)&m->m[2][0] = (cosZpX - cosXmZ) / 2;
+
+    int sinZpX = GteSin(z + x);
+    int sinXmZ = GteSin(x - z);
+    *(int*)&m->m[2][2] = (sinXmZ + sinZpX) / 2;
+
+    int cosX = GteCos(x);
+    m->t[0] = -cosX;
+
+    cosXmY = GteCos(xMinusY);
+    cosXpY = GteCos(xPlusY);
+    cosZ = GteCos(z);
+    temp = ((cosXpY + cosXmY) / 2) * cosZ;
+    cosZpY = GteCos(zPlusY);
+    cosYmZ = GteCos(yMinusZ);
+    m->t[1] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) - (cosZpY + cosYmZ) / 2;
+
+    cosXmY = GteCos(xMinusY);
+    cosXpY = GteCos(xPlusY);
+    sinZ = GteSin(z);
+    temp = ((cosXpY + cosXmY) / 2) * sinZ;
+    sinYmZ = GteSin(yMinusZ);
+    int sinZpY2 = GteSin(zPlusY);
+    m->t[2] = ((temp + ((temp >> 31) & 0x3FFF)) >> 14) + (sinYmZ - sinZpY2) / 2;
+
+    sinXpY = GteSin(xPlusY);
+    sinXmY = GteSin(xMinusY);
+    *(int*)&m->m[1][0] = (sinXmY + sinXpY) / 2;
+}
+
+// ============================================================================
+// RotMatrixYXZ (0x00409ed0)
+// Compute rotation matrix from SVECTOR using YXZ Euler angle order.
+// Inverts X and Z axes (PS1 convention), then divides results by 4
+// to convert from internal 14-bit to standard 12-bit fixed-point.
+// ============================================================================
+void RotMatrixYXZ(SVECTOR* r, MATRIX* m)
+{
+    MATRIX temp;
+    GteRotationMatrixYXZ(0x1000 - r->x, (int)r->y, 0x1000 - r->z, &temp);
+
+    m->m[0][0] = (short)((temp.m[0][0] + ((temp.m[0][0] >> 31) & 3)) >> 2);
+    m->m[0][1] = (short)((temp.m[0][1] + ((temp.m[0][1] >> 31) & 3)) >> 2);
+    m->m[0][2] = (short)((temp.m[0][2] + ((temp.m[0][2] >> 31) & 3)) >> 2);
+    m->m[1][0] = (short)((temp.m[1][0] + ((temp.m[1][0] >> 31) & 3)) >> 2);
+    m->m[1][1] = (short)((temp.m[1][1] + ((temp.m[1][1] >> 31) & 3)) >> 2);
+    m->m[1][2] = (short)((temp.m[1][2] + ((temp.m[1][2] >> 31) & 3)) >> 2);
+    m->m[2][0] = (short)((temp.m[2][0] + ((temp.m[2][0] >> 31) & 3)) >> 2);
+    m->m[2][1] = (short)((temp.m[2][1] + ((temp.m[2][1] >> 31) & 3)) >> 2);
+    m->m[2][2] = (short)((temp.m[2][2] + ((temp.m[2][2] >> 31) & 3)) >> 2);
+}
+
+// ============================================================================
+// rotate_entity (0x0048c2a0)
+// Recursively compute world-space matrices for entity joint hierarchy.
+// For each child joint of the given index, applies the parent's world matrix
+// to the child's local transform, then recurses into the child's children.
+// ============================================================================
+void rotate_entity(MATRIX* parentMtx, void* animData, unsigned char jointIdx)
+{
+    Entity* ent = ENTITY;
+    if (ent == NULL || ent->jointsStructs == NULL) return;
+    JointStruct* joints = ent->jointsStructs;
+    JointStruct* joint = &joints[jointIdx];
+
+    unsigned char* animBase = (unsigned char*)animData;
+    unsigned short childListOffset = *(unsigned short*)(animBase + 2 + jointIdx * 4);
+    unsigned char* childList = animBase + childListOffset;
+
+    // Apply parent transform to joint's local transform → joint's world matrix
+    if ((joint->flags & 8) != 0 && (joint->flags & 0x40) == 0) {
+        ApplyLVAndMul0Matrix(parentMtx, &joint->transform, &joint->world);
+        unsigned char f = joint->flags;
+        joint->flags = (f & 0xF5) | 0x50;
+        joint->field_02 = 0;
+    }
+    if ((joint->flags & 2) != 0) {
+        ApplyLVAndMul0Matrix(parentMtx, &joint->transform, &joint->world);
+    }
+
+    // Recurse into children
+    char childCount = *(char*)(animBase + jointIdx * 4);
+    for (char i = childCount; i != 0; i--) {
+        unsigned char childIdx = *childList;
+        childList++;
+        rotate_entity(&joint->world, animData, childIdx);
+    }
+}
+
+// ============================================================================
+// EntityComputeJointWorldMatrices (0x0048c190)
+// Sets up the entity's camera-relative transform and recursively computes
+// all joint world matrices. Called before entity rendering.
+// ca: optional scale factor applied to the entity's local matrix (0 = no scale)
+// ============================================================================
+void EntityComputeJointWorldMatrices(int ca)
+{
+    Entity* ent = ENTITY;
+    if (ent == NULL) return;
+    unsigned char* entBytes = (unsigned char*)ent;
+
+    // Skip if entity type is 0x13/0x18 with sub-type 1
+    // Original: *(char*)(_ENTITY + 1) and *(char*)(_ENTITY + 2)
+    if (((entBytes[1] != 0x0D) && (entBytes[1] != 0x12)) || (entBytes[2] != 1)) {
+        if (ent->jointsStructs == NULL || ent->animHeader == 0) return;
+        JointStruct* joints = ent->jointsStructs;
+
+        // Parse animation header to get joint hierarchy
+        unsigned short* animPtr = (unsigned short*)ent->animHeader;
+        unsigned short baseOffset = *animPtr;
+        unsigned char* animBase = (unsigned char*)animPtr + (baseOffset & 0xFFFFFFFC);
+        unsigned short rootChildOffset = *(unsigned short*)(animBase + 2);
+        unsigned char* rootChildList = animBase + rootChildOffset;
+
+        // Build entity rotation matrix from direction angles
+        // The rotation SVECTOR is at entity+0x72: {position.pad, directionAngle, speed.x}
+        if ((entBytes[3] & 0x80) == 0) {
+            SVECTOR* rotVec = (SVECTOR*)((unsigned char*)ent + 0x72);
+            RotMatrix(rotVec, &ent->scaMatrixData.localMatrix);
+        }
+
+        // Apply optional scale
+        if (ca != 0) {
+            g_playerPosScratch.x = ca;
+            g_playerPosScratch.y = ca;
+            g_playerPosScratch.z = ca;
+            ScaleMatrixCols(&ent->scaMatrixData.localMatrix, &g_playerPosScratch);
+        }
+
+        // Process root joint (index 0): apply entity transform to first joint
+        JointStruct* rootJoint = &joints[0];
+        if ((rootJoint->flags & 8) != 0 && (rootJoint->flags & 0x40) == 0) {
+            ApplyLVAndMul0Matrix(&ent->scaMatrixData.localMatrix,
+                                 &rootJoint->transform, &rootJoint->world);
+            unsigned char f = rootJoint->flags;
+            rootJoint->flags = (f & 0xF5) | 0x50;
+            rootJoint->field_02 = 0;
+        }
+        if ((rootJoint->flags & 2) != 0) {
+            ApplyLVAndMul0Matrix(&ent->scaMatrixData.localMatrix,
+                                 &rootJoint->transform, &rootJoint->world);
+        }
+
+        // Recursively process children of root joint
+        char rootChildCount = *(char*)animBase;
+        for (char i = rootChildCount; i != 0; i--) {
+            unsigned char childIdx = *rootChildList;
+            rootChildList++;
+            rotate_entity(&rootJoint->world, animBase, childIdx);
+        }
+    }
+}
+
+// ============================================================================
+// entity_matrix_update_0045a2e0 (0x0045a2e0)
+// Post-animation matrix update: applies secondary rotation to the last joint.
+// Called after animation update and before rendering.
+// ============================================================================
+void entity_matrix_update_0045a2e0(void)
+{
+    Entity* ent = ENTITY;
+    if (ent == NULL) return;
+    unsigned char* entBytes = (unsigned char*)ent;
+
+    if (entBytes[0x8C] != 0) {
+        if (ent->jointsStructs == NULL) return;
+        JointStruct* joints = ent->jointsStructs;
+        unsigned char lastJointIdx = ent->jointCount - 1;
+        JointStruct* lastJoint = &joints[lastJointIdx];
+
+        g_svecScratch.x = 0;
+        g_svecScratch.y = lastJoint->rotDeltaY;
+        g_svecScratch.z = lastJoint->rotDeltaZ;
+
+        // Copy identity matrix to scratch
+        MATRIX* src = &g_identityMatrixData;
+        MATRIX* dst = &g_matrixScratch;
+        for (int i = 8; i != 0; i--) {
+            *(unsigned int*)dst->m[0] = *(unsigned int*)src->m[0];
+            src = (MATRIX*)(src->m[0] + 2);
+            dst = (MATRIX*)(dst->m[0] + 2);
+        }
+
+        // Apply YXZ rotation and compose with joint's world matrix
+        RotMatrixYXZ(&g_svecScratch, &g_matrixScratch);
+        CompMatrix(&lastJoint->world, &g_matrixScratch, &lastJoint->world);
+    }
 }

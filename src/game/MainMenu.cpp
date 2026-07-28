@@ -115,7 +115,7 @@ static char           DAT_008e1cb0[128];  // 0x008e1cb0
 // Forward declarations for menu sub-functions
 static void menu_exit_cleanup(void);              // 0x00463da0
 static void menu_restore_game_state(void);        // 0x00463e10
-static void menu_update_equipped_weapon(void);    // 0x00463ec0
+void menu_update_equipped_weapon(void);    // 0x00463ec0
 static void menu_draw_inventory(void);            // 0x00463f20
 static void menu_load_item_model(void);           // 0x00464770
 static void menu_update_fading_rect(void);        // 0x00429cb0
@@ -423,7 +423,7 @@ LAB_00463a53:
             }
 
             g_playerEntity.unk_8c = 0;
-            g_playerEntity.unk_be = 0;
+            g_playerEntity.animation_frame_id = 0;
             g_playerEntity.unk_bf = 0;
             g_playerEntity.isBeingAttackedFlag = 0;
 
@@ -431,14 +431,14 @@ LAB_00463a53:
                 g_playerEntity.attackAnim = 0;
                 g_playerEntity.animationId = 1;
                 g_playerEntity.animFrameId = 0;
-                g_playerEntity.anim_86 = 0;
-                g_playerEntity.anim_87 = 0;
+                g_playerEntity.action_behavior = 0;
+                g_playerEntity.action_state = 0;
                 // Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
             } else {
                 g_playerEntity.animationId = 8;
                 g_playerEntity.animFrameId = 0;
-                g_playerEntity.anim_86 = 1;
-                g_playerEntity.anim_87 = 0;
+                g_playerEntity.action_behavior = 1;
+                g_playerEntity.action_state = 0;
                 g_playerEntity.attackAnim = 0x37;
                 // Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
             }
@@ -461,8 +461,10 @@ LAB_00463a53:
             }
 
             if (DAT_00ae9f1e != 0) {
+                // 0x00463c8d: (weaponId, 0xE, g_animationBuffer, g_animObjectBuffer)
                 LoadEquippedWeaponAnimation(g_playerEntity.equippedWeaponId, 0xE,
-                                            &g_animationBuffer, &g_animationBuffer);
+                                            (unsigned int)g_animationBuffer,
+                                            (unsigned int)g_animObjectBuffer);
             }
 
             if ((g_main_state_flags & 1) != 0) {
@@ -543,7 +545,7 @@ static void menu_restore_game_state(void)
 }
 
 // (0x00463ec0) - Update equipped weapon based on menu selection
-static void menu_update_equipped_weapon(void)
+void menu_update_equipped_weapon(void)
 {
     if (g_EquippedItemId == 0) {
         if (g_playerEntity.equippedWeaponId != 0) {

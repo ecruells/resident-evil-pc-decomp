@@ -47,7 +47,7 @@ static void InitSoundAndFadeState(void)
 // InitInputKeyBindings (0x00497c20)
 // Copies key binding configuration data to the master input state's keyMap
 // ---------------------------------------------------------------------------
-static void InitInputKeyBindings(void)
+void InitInputKeyBindings(void)
 {
     for (int i = 0; i < 32; i++) {
         g_pMasterInputState.keyMap[i] = g_keyBindingData[i];

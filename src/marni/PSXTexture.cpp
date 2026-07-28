@@ -264,7 +264,10 @@ int PSXTexture::Store(int* imageData, int copyData)
         imgData = (int*)pixelBuf;
     }
 
-    // 0x0041fce0: Set up texture descriptor fields
+    // 0x0041fce0: Set up texture descriptor fields.
+    // Offsets, from the original store order: 0x10=0, 0x12=0x1F, 0x1C=10,
+    // 0x14=5, 0x16=5, 0x18=0x1F, 0x1A=5, 0x1E=0x1F, 0x20=5,
+    // 0x22=0, 0x24=0, 0x26=0.
     m_clipX = 0;
     m_clipY = 0x1F;
     m_dispW = 10;
@@ -272,8 +275,11 @@ int PSXTexture::Store(int* imageData, int copyData)
     m_clipH = 5;
     m_dispX = 0x1F;
     m_dispY = 5;
-    m_rectX = 0x1F;
-    m_rectY = 5;
+    m_dispH = 0x1F;
+    m_rectX = 5;
+    m_rectY = 0;
+    m_rectW = 0;
+    m_rectH = 0;
     m_RowStride = imgW * 2;
 
     // 0x0041fd30: Set bit depth based on flags
@@ -305,18 +311,18 @@ int PSXTexture::Store(int* imageData, int copyData)
     m_Height = imgH;
     m_RowStride = imgW * 2;
 
-    // 0x0041fd90: CLUT info from earlier parse
-    // Original stores: 0x54 = X, 0x58 = Y, 0x5C = width (DWORD), 0x60 = 0
+    // 0x0041fd90: CLUT descriptor - five DWORDs at 0x54..0x67.
+    // 0x54 = CLUT VRAM X, 0x58 = CLUT VRAM Y (both full DWORDs: these are the
+    // keys CreateTmdObjectInternal matches a TMD object's material against),
+    // 0x5C/0x60 = the image section dword split in halves.
+    // The original writes all four unconditionally; X/Y are only meaningful
+    // when the TIM actually carries a CLUT, so keep them guarded.
     if (flags & 8) {
-        m_CLUT_X = (WORD)(imageData[3] & 0xFFFF);
-        m_CLUT_Y = (WORD)(imageData[3] >> 16);
-        m_CLUT_W = (WORD)(imageData[4] & 0xFFFF);
-        m_CLUT_H = (WORD)(imageData[4] >> 16);
-        m_CLUT_W2 = m_CLUT_W;
-        m_CLUT_H2 = 0;
-        m_CLUT_W3 = 0;
-        m_CLUT_H3 = 0;
+        m_CLUT_X = (DWORD)(imageData[3] & 0xFFFF);
+        m_CLUT_Y = (DWORD)((unsigned int)imageData[3] >> 16);
     }
+    m_ImgFlagsLo = (DWORD)(imgFlags & 0xFFFF);
+    m_ImgFlagsHi = (DWORD)(imgFlags >> 16);
 
     // 0x0041fe00: Set pixel address (palette = heap CLUT copy or in-place ptr)
     CMarniBits_SetAddress(this, imgData, clutDataPtr);
@@ -340,11 +346,13 @@ int PSXTexture::Store(int* imageData, int copyData)
         for (DWORD n = 1; n < m_NumCLUTs; n++) {
             entry[-5] = 0;                                          // Flag
             CMarniBits_CopyFrom((BYTE*)this + 0x68, this);          // Setup palette (subobject at offset 0x68)
-            entry[-1] = m_CLUT_X;                                   // CLUT X
-            entry[0]  = m_CLUT_Y;                                   // CLUT Y
-            entry[1]  = m_CLUT_W;                                   // CLUT width
-            entry[2]  = 0;                                          // original reads 0x60 (always 0)
-            entry[3]  = m_Flag64;                                   // Flag
+            // Mirror the base descriptor (0x54..0x64) into this slot's own
+            // descriptor at +0x54 (0xBC for slot 1, +0x68 per slot).
+            entry[-1] = m_CLUT_X;                                   // +0x54: CLUT X
+            entry[0]  = m_CLUT_Y;                                   // +0x58: CLUT Y
+            entry[1]  = m_ImgFlagsLo;                               // +0x5C
+            entry[2]  = m_ImgFlagsHi;                               // +0x60
+            entry[3]  = m_Flag64;                                   // +0x64
 
             entry[-6] = 0;
             DWORD offset = n << (m_BitDepth & 0x1F);
@@ -531,10 +539,10 @@ int PSXTexture::CopyFrom(PSXTexture* src) {
             // Copy CLUT descriptor fields (+0x54 through +0x64)
             DWORD* dstFields = (DWORD*)(pDstClut + 0x54);
             DWORD* srcFields = (DWORD*)(pSrcClut + 0x54);
-            dstFields[0] = srcFields[0];  // +0x54: CLUT_X/Y
-            dstFields[1] = srcFields[1];  // +0x58: CLUT_W/H
-            dstFields[2] = srcFields[2];  // +0x5C: CLUT_W2/H2
-            dstFields[3] = srcFields[3];  // +0x60: CLUT_W3/H3
+            dstFields[0] = srcFields[0];  // +0x54: CLUT VRAM X
+            dstFields[1] = srcFields[1];  // +0x58: CLUT VRAM Y
+            dstFields[2] = srcFields[2];  // +0x5C: image flags low
+            dstFields[3] = srcFields[3];  // +0x60: image flags high
             dstFields[4] = srcFields[4];  // +0x64: m_Flag64
 
             // Verify the destination's pixel data pointer is valid

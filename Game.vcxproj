@@ -117,11 +117,13 @@
     <ClCompile Include="src\game\GameState.cpp" />
     <ClCompile Include="src\game\GameLoop.cpp" />
     <ClCompile Include="src\game\MainMenu.cpp" />
+    <ClCompile Include="src\game\OptionsMenu.cpp" />
     <ClCompile Include="src\game\MenuData.cpp" />
     <ClCompile Include="src\game\TaskScheduler.cpp" />
     <ClCompile Include="src\game\PlayerAnimations.cpp" />
     <ClCompile Include="src\game\ObjectManager.cpp" />
     <ClCompile Include="src\game\TmdAnimation.cpp" />
+    <ClCompile Include="src\game\TmdRenderer.cpp" />
     <ClCompile Include="src\game\EntityModelLoader.cpp" />
     <ClCompile Include="src\game\RoomInit.cpp" />
     <ClCompile Include="src\game\RoomStubs.cpp" />
@@ -129,6 +131,8 @@
     <ClCompile Include="src\game\RoomEvents.cpp" />
     <ClCompile Include="src\game\CmdFunctions.cpp" />
     <ClCompile Include="src\game\EngineStubs.cpp" />
+    <ClCompile Include="src\game\enemies\Zombie.cpp" />
+    <ClCompile Include="src\game\WeaponDamage.cpp" />
     <ClCompile Include="src\game\Rendering.cpp" />
     <ClCompile Include="src\game\PrintText.cpp" />
     <ClCompile Include="src\game\TextureLoader.cpp" />
@@ -153,6 +157,8 @@
     <ClInclude Include="src\marni\MarniInput.h" />
     <ClInclude Include="src\marni\MarniSound.h" />
     <ClInclude Include="src\game\SpriteRenderer.h" />
+    <ClInclude Include="src\game\TmdRenderer.h" />
+    <ClInclude Include="src\game\enemies\Zombie.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

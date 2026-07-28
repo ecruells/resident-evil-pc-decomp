@@ -62,16 +62,21 @@ public:
     DWORD  m_Flag4C;                  // 0x4C
     DWORD  m_Flag50;                  // 0x50
 
-    // CLUT descriptor (offset 0x54 - 0x67)
-    WORD   m_CLUT_X;                  // 0x54
-    WORD   m_CLUT_Y;                  // 0x56
-    WORD   m_CLUT_W;                  // 0x58
-    WORD   m_CLUT_H;                  // 0x5A
-    WORD   m_CLUT_W2;                 // 0x5C
-    WORD   m_CLUT_H2;                 // 0x5E
-    WORD   m_CLUT_W3;                 // 0x60
-    WORD   m_CLUT_H3;                 // 0x62
+    // CLUT descriptor (offset 0x54 - 0x67): five DWORDs, exactly as
+    // PSXTexture::Store (0x0041fb60) writes them. These are NOT 16-bit fields:
+    // CreateTmdObjectInternal (0x00483910) matches a TMD object against a
+    // texture page by comparing the full DWORDs at +0x54 and +0x58 with the
+    // object's CLUT material keys. Declaring X/Y as packed WORDs made +0x54
+    // read back as (Y << 16) | X, so no model ever matched its texture page and
+    // no TMD render object was ever created.
+    DWORD  m_CLUT_X;                  // 0x54 - CLUT VRAM X origin
+    DWORD  m_CLUT_Y;                  // 0x58 - CLUT VRAM Y origin
+    DWORD  m_ImgFlagsLo;              // 0x5C - image section dword, low half
+    DWORD  m_ImgFlagsHi;              // 0x60 - image section dword, high half
     DWORD  m_Flag64;                  // 0x64
+    // The palette dimensions are locals in the original Store and are not kept
+    // in the object; callers that need them derive the entry count from
+    // m_BitDepth and m_NumCLUTs.
 
     // ========================================================================
     // Slots 1-7: additional CMarniBits sub-objects + multi-CLUT descriptor

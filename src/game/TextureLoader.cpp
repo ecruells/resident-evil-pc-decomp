@@ -223,10 +223,12 @@ void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffse
             int useDirect = 0;
 
             if (bpp == 4 || bpp == 8) {
-                // Build CLUT RGBA palette using actual CLUT entry count
-                int numClutEntries;
-                if (bpp == 4) numClutEntries = (psxTex.m_CLUT_W > 0) ? (int)(psxTex.m_CLUT_W * psxTex.m_CLUT_H) : 16;
-                else           numClutEntries = (psxTex.m_CLUT_W > 0) ? (int)(psxTex.m_CLUT_W * psxTex.m_CLUT_H) : 256;
+                // Build CLUT RGBA palette. The palette dimensions are locals in
+                // PSXTexture::Store and are not kept in the object, so derive
+                // the entry count: colours per row (by bit depth) x CLUT rows.
+                int rows = (int)psxTex.m_NumCLUTs;
+                if (rows < 1) rows = 1;
+                int numClutEntries = ((bpp == 4) ? 16 : 256) * rows;
 
                 if (numClutEntries > 256) numClutEntries = 256;
                 if (numClutEntries < 16)  numClutEntries = 16;
@@ -240,12 +242,14 @@ void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffse
                         // Index 0 = transparent
                         clutRGBA[i] = 0x00000000;
                     } else {
-                        // Convert RGB555 to RGBA (bit 15 = alpha flag in some TIM variants)
+                        // PS1 15-bit colour: bits 4-0 red, 9-5 green, 14-10 blue
+                        // (bit 15 = STP mask). Was reading red and blue swapped.
                         DWORD a = (c & 0x8000) ? 0xFF : 0xFF; // Always opaque for non-zero indices
-                        DWORD r = ((c >> 10) & 0x1F) * 255 / 31;
-                        DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
-                        DWORD b = (c & 0x1F) * 255 / 31;
-                        clutRGBA[i] = (a << 24) | (r << 16) | (g << 8) | b;
+                        DWORD r = ((c >> 0)  & 0x1F) * 255 / 31;
+                        DWORD g = ((c >> 5)  & 0x1F) * 255 / 31;
+                        DWORD b = ((c >> 10) & 0x1F) * 255 / 31;
+                        // R8G8B8A8_UNORM wants R in the lowest byte
+                        clutRGBA[i] = (a << 24) | (b << 16) | (g << 8) | r;
                     }
                 }
 
@@ -380,21 +384,22 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             int numClutEntries = (bpp == 4) ? 16 : 256;
             WORD* clut = psxTex.m_pCLUTData;   // heap CLUT copy (PSXTexture::Store)
             DWORD* clutRGBA = new DWORD[numClutEntries];
-            // PS1 CLUT entries are BGR555 (bit 15 = STP semi-transparency flag,
-            // bits 10-14 = R, bits 5-9 = G, bits 0-4 = B). Here clr bits 0-4 are
-            // the BLUE channel and clr bits 10-14 are the RED channel — the local
-            // variable names below reflect their bit positions in the WORD, not
-            // their RGB role, so the output packs bits 10-14 into the red byte
-            // and bits 0-4 into the blue byte. PS1 CLUT index 0 is the
-            // transparent color key, so alpha=0 for index 0 (matches
+            // PS1 15-bit colour is MBBBBBGGGGGRRRRR: bit 15 = STP mask,
+            // bits 14-10 = blue, bits 9-5 = green, bits 4-0 = RED. This site
+            // used to read red from bits 10-14 and blue from bits 0-4, which
+            // swapped the two channels for every CLUT-based model texture -
+            // reddish surfaces came out blue. Every other conversion in the
+            // tree already uses this layout. PS1 CLUT index 0 is the
+            // transparent colour key, so alpha=0 for index 0 (matches
             // RebuildTextureSRV).
             for (int c = 0; c < numClutEntries; c++) {
                 WORD clr = clut[c];
-                DWORD b = ((clr >> 0)  & 0x1F) * 255 / 31;
+                DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
-                DWORD r = ((clr >> 10) & 0x1F) * 255 / 31;
+                DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
                 DWORD a = (c == 0) ? 0x00 : 0xFF;
-                clutRGBA[c] = (a << 24) | (r << 16) | (g << 8) | b;
+                // R8G8B8A8_UNORM wants R in the lowest byte
+                clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
             }
 
             DWORD* rgba = new DWORD[w * h];

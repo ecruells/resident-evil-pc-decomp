@@ -246,8 +246,8 @@ static void scd_event_state2_movement(void)
         g_pScdEventCurrent->scriptPtr += 3;
         return;
 
-    case 0x09: // Set field_0x8a
-        ent->field_0x8a = g_pScdEventCurrent->scriptPtr[1];
+    case 0x09: // Set hit_state
+        ent->hit_state = g_pScdEventCurrent->scriptPtr[1];
         g_pScdEventCurrent->scriptPtr += 2;
         return;
 
@@ -447,7 +447,7 @@ static int scd_event_state1_anim(void)
         ent->ignore_player_flag = 0;
         ent->action_behavior = 0;
         ent->action_state = 0;
-        ent->field_0x8a = 0;
+        ent->hit_state = 0;
         g_pScdEventCurrent->scriptPtr++;
         return 1;
 
@@ -482,7 +482,7 @@ static int scd_event_state1_anim(void)
             ent->animation_frame_id = (unsigned char)(val >> 8);
             ent->timing_control = 0;
             ent->blend_counter = 7;
-            ent->unk_c2 = 0;
+            ent->move_speed_current = 0;
             if ((ent->scd_entity_flags & 0x20) != 0) {
                 ent->blend_counter = 0;
             }
@@ -508,7 +508,7 @@ static int scd_event_state1_anim(void)
             ent->animation_frame_id = (unsigned char)(val >> 8);
             ent->timing_control = 0;
             ent->blend_counter = 7;
-            ent->unk_c2 = 0;
+            ent->move_speed_current = 0;
             if ((ent->scd_entity_flags & 0x20) != 0) {
                 ent->blend_counter = 0;
                 return 1;

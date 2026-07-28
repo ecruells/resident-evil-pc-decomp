@@ -157,6 +157,15 @@ public:
     // Draw a solid-color rectangle. Was MarniDrawRect.
     void DrawRect(int x, int y, int w, int h, DWORD color);
 
+    // Draw a batch of textured triangles with per-vertex tint.
+    // verts: triCount*3 vertices, each 8 floats in QuadVertex layout:
+    //   { x, y (screen px, Y-down), u, v, r, g, b, a (0..1) }.
+    // Used by the TMD 3D path (FlushTmdObjects) after CPU-side transform.
+    // tex==MARNI_NULL_HANDLE -> white. Max 1024 triangles per call.
+    void DrawTriangles(const float* verts, int triCount, MarniHandle tex,
+                       MarniSampler sampler = MARNI_SAMPLER_POINT,
+                       MarniBlend  blend   = MARNI_BLEND_ALPHA);
+
     // ----------------------------------------------------------------------
     // Backbuffer readback (used by CMarniBits::SaveBitmapToFile, the original
     // +0x2064 framebuffer-proxy path). Allocates a contiguous RGBA8 buffer via

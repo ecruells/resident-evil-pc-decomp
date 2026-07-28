@@ -72,8 +72,8 @@ struct PlayerEntity {
     // ---- State (0x84 - 0x8F) ----
     unsigned char  animationId;         // 0x84
     unsigned char  animFrameId;         // 0x85
-    unsigned char  anim_86;             // 0x86
-    unsigned char  anim_87;             // 0x87
+    unsigned char  action_behavior;      // 0x86 - animation behavior index (0=idle, 200=death timer)
+    unsigned char  action_state;         // 0x87 - animation sub-state counter
     short          health;              // 0x88
     unsigned char  isBeingAttackedFlag; // 0x8A
     unsigned char  unk_8b;              // 0x8B
@@ -93,11 +93,11 @@ struct PlayerEntity {
     unsigned int   unk_b8;              // 0xB8
     unsigned char  unk_bc;              // 0xBC
     unsigned char  attackAnim;          // 0xBD
-    unsigned char  unk_be;              // 0xBE
+    unsigned char  animation_frame_id;  // 0xBE
     unsigned char  unk_bf;              // 0xBF
     unsigned char  unk_c0;              // 0xC0
     unsigned char  unk_c1;              // 0xC1
-    unsigned short unk_c2;              // 0xC2
+    unsigned short move_speed_current;  // 0xC2 - current translation speed during animation/behavior
     unsigned short attackDirection;     // 0xC4
     unsigned short unk_c6;              // 0xC6
     unsigned short unk_c8;              // 0xC8
@@ -180,9 +180,9 @@ struct Entity {
     unsigned char  action_behavior;     // 0x86
     unsigned char  action_state;        // 0x87
     short          health;              // 0x88
-    unsigned char  field_0x8a;          // 0x8A
+    unsigned char  hit_state;           // 0x8A - damage hit state (low 3 bits = type/dir, bits 3-6 = reaction phase)
     unsigned char  pad_8b;              // 0x8B
-    unsigned char  blend_counter;       // 0x8C
+    unsigned char  blend_counter;       // 0x8C - animation blend counter (decrements in player anims, set to bitmask in zombie)
     unsigned char  jointCount;          // 0x8D
     unsigned char  pad_8e[2];           // 0x8E-0x8F
 
@@ -199,7 +199,7 @@ struct Entity {
     // ---- SCD event data (0xB0 - 0xBC) ----
     unsigned char  pad_b0[8];           // 0xB0-0xB7
     unsigned int   scd_target_ptr;      // 0xB8 - SCD event target pointer (entity/item/desk)
-    unsigned char  pad_bc;              // 0xBC
+    unsigned char  death_timer;          // 0xBC - countdown after death until entity removal (70 = 2.3s)
 
     // ---- Animation fields (0xBD - 0xBF) ----
     unsigned char  animationId;         // 0xBD
@@ -208,7 +208,7 @@ struct Entity {
 
     // ---- Empty gap (0xC0 - 0xC3) ----
     unsigned char  pad_c0[2];           // 0xC0-0xC1
-    unsigned short unk_c2;              // 0xC2 - movement speed value (used by Add_speedXZ)
+    unsigned short move_speed_current;  // 0xC2 - current translation speed during animation/behavior
 
     // ---- Tick counter (0xC4) ----
     unsigned char  action_ticks_counter;// 0xC4
@@ -249,8 +249,10 @@ struct Entity {
     unsigned char  pad_ec[0x70];        // 0xEC-0x15B
 
     // ---- Data buffer + player tracking (0x15C - 0x16B) ----
-    unsigned char  some_data_buffer_0x15c; // 0x15C
-    unsigned char  pad_15d[9];          // 0x15D-0x165
+    unsigned int   sca_data_ptr;         // 0x15C - pointer to entity's allocation in SCA data pool (dword)
+    unsigned char  pad_160[3];           // 0x160-0x162
+    unsigned char  death_event_id;       // 0x163 - room event index to trigger when entity is killed
+    unsigned char  pad_164[2];           // 0x164-0x165
     unsigned char  player_pos_x;        // 0x166
     unsigned char  pad_167;             // 0x167
     unsigned char  player_pos_z;        // 0x168
@@ -260,31 +262,31 @@ struct Entity {
     unsigned char  attacking_direction; // 0x16C
     unsigned char  dir_control_flags;   // 0x16D
     unsigned char  texBank;             // 0x16E
-    unsigned char  pad_16f;             // 0x16F
+    unsigned char  seq_counter;         // 0x16F - action sequence counter/timer (decrements as idle delay, increments as attack phase step)
     unsigned char  angle_turn_delta;    // 0x170
-    unsigned char  pad_171;             // 0x171
+    unsigned char  move_timer;          // 0x171 - effect countdown (footsteps/blood), decrements each frame
     unsigned char  is_moving;           // 0x172
-    unsigned char  pad_173;             // 0x173
+    unsigned char  move_max_steps;      // 0x173 - max steps/phase count for current movement sequence
 
     // ---- Extended combat state (0x174 - 0x18B) ----
     unsigned char  splatter_flag;       // 0x174
-    unsigned char  pad_175[2];          // 0x175-0x176
-    unsigned char  attacking_timer;     // 0x177
-    unsigned char  pad_178[2];          // 0x178-0x179
-    unsigned char  movement_distance;   // 0x17A
-    unsigned char  pad_17b;             // 0x17B
-    unsigned char  flags_0x17c;         // 0x17C
-    unsigned char  behavior_type_0x17d; // 0x17D
-    unsigned char  flags_0x17e;         // 0x17E
-    unsigned char  pad_17f[2];          // 0x17F-0x180
-    unsigned char  turn_speed;          // 0x181
+    unsigned char  bob_speed;            // 0x175 - signed rotation speed for bobbing/weaving (8 / -8)
+    unsigned short reaction_timer;       // 0x176 - 16-bit countdown timer for hit reaction / damage recovery
+    int             subpixel_pos_x;     // 0x178 - 16.16 fixed-point X position accumulator
+    unsigned char   action_speed;       // 0x17C - signed approach/retreat speed (×16); also hit counter in damaged state
+    unsigned char   hit_threshold;      // 0x17D - max hits before falldown (compared to action_speed hit counter)
+    unsigned char  behavior_step;       // 0x17E - sub-phase counter within current behavior sequence (0-9)
+    unsigned char  action_counter;      // 0x17F - generic per-behavior flag/counter (0/1 boolean, or 10-15 phase values)
+    unsigned char  move_speed;           // 0x180 - default move/chase speed (45 for zombies, 20 for pushback)
+    unsigned char  turn_speed;           // 0x181
     unsigned char  internal_timer;      // 0x182
     unsigned char  pad_183;             // 0x183
     unsigned char  state_mirror;        // 0x184
     unsigned char  ignore_player_flag_mirror; // 0x185
     unsigned char  action_behavior_mirror;    // 0x186
     unsigned char  attack_behavior_mirror;    // 0x187
-    unsigned char  pad_188[4];          // 0x188-0x18B
+    unsigned char  stagger_timer;       // 0x188 - poise countdown; decrements while taking hits, falldown when zero
+    unsigned char  pad_189[3];          // 0x189-0x18B
 };
 #pragma pack(pop)
 static_assert(sizeof(Entity) == 0x18C, "Entity size mismatch");

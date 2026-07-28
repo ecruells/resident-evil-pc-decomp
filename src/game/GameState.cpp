@@ -454,6 +454,7 @@ void logos_state(void)
 
     Task_sleep(1);
 
+    // Task_chain((void*)game_start);
     Task_chain((void*)title_state);
 }
 
@@ -891,17 +892,17 @@ void InitPlayerEntity(void)
 {
     g_playerEntity.unk_bc = 0;
     g_playerEntity.attackAnim = 0;
-    g_playerEntity.unk_be = 0;
+    g_playerEntity.animation_frame_id = 0;
     g_playerEntity.unk_bf = 0;
     g_playerEntity.unk_c0 = 0;
     g_playerEntity.flags = 1;
-    g_playerEntity.unk_c2 = 0;
+    g_playerEntity.move_speed_current = 0;
     g_playerEntity.unk_03 = 1;
     g_playerEntity.speed.y = 0;
     g_playerEntity.animationId = 0;
     g_playerEntity.animFrameId = 0;
-    g_playerEntity.anim_86 = 0;
-    g_playerEntity.anim_87 = 0;
+    g_playerEntity.action_behavior = 0;
+    g_playerEntity.action_state = 0;
     g_playerEntity.speed.z = 0;
     g_playerEntity.unk_c1 = 0;
     g_playerEntity.speed.pad = 0;

@@ -65,7 +65,7 @@ The game entry point is `main` at `0x00441350`.
 | [7] | `0x0044af90` | `CreateObjectHandle` | `uint(void* self, void* objDesc, byte flags)` | Create 3D object handle for rendering |
 | [8] | `0x0044b220` | `DeleteTextureHandle` | `int(void* self, int handle)` | Delete texture handle by index |
 | [9] | `0x0044b1c0` | `DeleteObjectHandle` | `int(void* self, int handle)` | Delete 3D object handle by index |
-| [10] | `0x00448300` | `SetTexture` | `int(void* self, void* texData, uint param)` | Bind texture / submit sprite command |
+| [10] | `0x00448300` | `SetTexture` | `int(void* self, void* texData, uint param)` | TMD draw-queue insert (original: `OT_InsertPrimitive(objData, depth)`; port: `TmdQueueObject`) |
 | [11] | `0x00448380` | `ResetTextures` | `int(void* self)` | Reset texture state |
 
 ### VTable Calling Convention
@@ -494,16 +494,102 @@ Manages up to 16 3D mesh objects with per-object transform matrices and texture/
 |--------|---------|-------------|
 | `Constructor` | 0x00415910 | Zeros object data arrays + handle array |
 | `Create(ctx,mats)` | 0x00415650 | Creates per-object D3D handles, sets up matrices/textures from material context |
-| `Transform(ctx,data,out,db)` | 0x00415520 | Transforms and renders all objects; supports double-buffering for flicker-free rendering |
+| `Transform(ctx,depth,matrix,db)` | 0x00415520 | Queues all objects via vtable[10] with the OT depth, then stores the 16-float model→view matrix into each objData+8 |
 | `Destroy(ctx)` | 0x00415880 | Releases all D3D object handles |
 | `CleanupObjects(param)` | 0x004158e0 | Destroy + additional resource cleanup |
 
 ### Per-Object Data (stride 0x84 bytes)
 | Offset | Type | Field |
 |--------|------|-------|
-| 0x00 | float[3] | Scale (x, y, z) |
-| 0x0C | DWORD | D3D object handle |
-| 0x10 | DWORD | Texture/material ID |
+| 0x00 | DWORD | Primitive type (4 = TMD mesh object) |
+| 0x08 | float[16] | Model→view transform (written by `Transform` from the FUN_00483080 matrix) |
+| 0x54 | DWORD | D3D object handle (opaque token in the DX11 port) |
+| 0x58 | DWORD | Texture handle (MarniHandle from vtable[6] CreateTextureHandle) |
+
+### DX11 render path (this port)
+
+The original walked the ordering table at present time and drew each queued
+object through D3D5 execute buffers, with a **depth buffer** resolving the
+triangles inside a single object. The port replaces the OT with a flat per-frame
+queue in `src/game/TmdRenderer.cpp` and substitutes a per-triangle depth sort
+for that depth buffer.
+
+Full chain for one entity joint:
+
+| Step | Function | File | What it does |
+|------|----------|------|--------------|
+| 1 | `calc_entity_lighting` (0x0048c350) / `options_render_entity` (0x004775b0) | EngineStubs.cpp / OptionsMenu.cpp | Per joint: composes the camera matrix with `joint->world` (`ApplyLVAndMul0Matrix`), pushes it through `SetLightMatrix` + `SetRotAndTransMatrix`, then calls `FUN_00483250` with the joint's `anim_object` |
+| 2 | `FUN_00483250` (0x00483250) | EngineStubs.cpp | Thin forwarder: `FUN_00483080(animObject, depthShift)` |
+| 3 | `FUN_00483080` (0x00483080) | EngineStubs.cpp | Bails if `g_gteRotTransMatrix.t[2] < 0` (behind camera) or `data[1] == 0` (no textured prims). Calls `AsyncCreateTmdObject` → builds the model→view float matrix from `g_gteRotTransMatrix` → `FUN_00486190` folds the view in → `Transform` |
+| 4 | `CreateTmdObjectInternal` (0x00483910) | TmdAnimation.cpp | Finds/reuses a `CMarniDirect3DTMD` slot, calls `PSXObject_Store` to parse the TMD into the slot's embedded `CMarniViewport2` elements, then matches each parsed object against a texture page and calls `Create` |
+| 5 | `CMarniDirect3DTMD::Transform` (0x00415520) | Marni3DObject.cpp | Inserts every object into the queue via `vtable[10]`, **then** writes the 16-float matrix to `objData+0x08` |
+| 6 | `TmdQueueObject` | TmdRenderer.cpp | Records `(slot, objData, objIndex, depth)` only — never a copy of the render state |
+| 7 | `FlushTmdObjects` | TmdRenderer.cpp | Transforms/projects/lights every vertex, collects triangles, depth-sorts them, submits via `MarniDX::DrawTriangles` |
+
+#### Projection
+
+`FUN_00483080` stores the GTE depth (`g_gteRotTransMatrix.t[2]`, **positive** in
+front of the camera) as the matrix Z translation, and `FUN_00486190` only rotates
+it, so the flush projects with:
+
+```
+sx = cx + vx * f / vz
+sy = cy - vy * f / vz          // vy is negated by SetRotAndTransMatrix
+```
+
+with `cx,cy = g_SubpixelOffset{X,Y} * renderScale` and `f = g_sceneRenderParam *
+renderScale`. Vertices with `vz <= 1` are dropped.
+
+#### Depth resolution and culling
+
+Triangles from **all** queued objects are gathered into one per-frame pool with
+their mean view-space Z, sorted far-to-near, then submitted with adjacent
+same-texture runs merged. There is **no backface culling**: the PS1 GPU draws
+both sides and the depth sort makes the nearer face win, which removes any
+dependence on the TMD winding convention. Only zero-area triangles are dropped.
+
+> Re-enabling backface culling would roughly halve the submitted triangle count
+> (~609 → ~305 for the player model). It is safe now that the vertex indices are
+> read correctly, but it is not required for correctness.
+
+#### Lighting
+
+`g_d3dLightData` holds 3 lights × 12 DWORDs; `[3..5]` is the direction written by
+`SetLightMatrix`, `[6..8]` the colour written by `FUN_0040ac80`. `SetLightMatrix`
+sets `pLight[0] = 2` (`D3DLIGHT_DIRECTIONAL`) and stores the normalised light
+**position**, so the field is a D3D `dvDirection` and the diffuse term is
+`dot(N, -direction)` — the negation matters. Ambient comes from
+`g_d3dAmbientColor`, which `setBackColor` fills as `value * 255 / 4096` (the
+options menu's `setBackColor(409,409,409)` is only ~10% grey, so unlit faces are
+genuinely near-black).
+
+#### Textures
+
+TMD material textures are real D3D11 textures created by
+`VTable_CreateTextureHandle` (PSX VRAM 4/8/16bpp + 15-bit CLUT → RGBA8) and reach
+the object via `CreateTmdObjectInternal` → `objData+0x58`.
+
+### Pipeline invariants (each of these was a real bug)
+
+Things that must hold for a model to render correctly. All were violated at some
+point in this port and each produced a distinct, misleading symptom:
+
+| Invariant | Symptom when broken |
+|-----------|--------------------|
+| `PSXTexture`'s CLUT descriptor at `+0x54..+0x67` is **five DWORDs** (`0x54` = CLUT VRAM X, `0x58` = Y). `CreateTmdObjectInternal` matches those DWORDs against each object's key at `elem+0x38/+0x3C` | No key ever matches → `AsyncCreateTmdObject` returns 0 → nothing 3D renders anywhere |
+| A raw BSS `CMarniDirect3DTMD` slot must have `m_unknown4C8` (`slot+0x4C8`) seeded to `0x400` — the constructor's subdivide threshold | `PSXObject_Resize` splits every element until the object count passes 16, `Store` fails with "too many objects", and a 17th element is written over the slot trailer |
+| The queue may store only the objData **pointer**; the matrix must be read at flush time | `Transform` writes the matrix *after* queueing, so a snapshot yields the previous frame's transform — or an all-zero matrix on first use, collapsing every vertex to one point |
+| Gouraud primitives (`0x30000406`, `0x34000609`, `0x3C00080C`) pack `(vertexIndex << 16) \| normalIndex` per dword: every vertex index comes from the **high** half. Flat primitives (`0x20000304`, `0x24000507`) genuinely use the low half for v1 | One corner of every triangle is displaced → winding random relative to the normals, so no cull orientation works and shading is patchy with black faces |
+| `FUN_00483080` must store the GTE rotation in the original's column order (`m[0][0..2]` → `M[0], M[4], M[8]`) | Transposed (inverse) rotation; model mis-oriented |
+| `FUN_00486190` builds the view from `from = (0,0,-fov)`, `to = (offsetX, offsetY, 0)` so the direction has **positive** Z | Negating Z adds a 180° yaw. It cancels out only while the subpixel offset is exactly screen centre, so the main menu breaks and the options menu does not |
+| `Display_SetParams` (0x00470750) writes `0x004c335c/0x004c3360`, **not** the subpixel offset (`0x004d2bd0/0x004d2bd4`) | `ResetScreenAndRebuildSprites` calls it with (0,0) every frame, so the projection centre is permanently 0 and everything is projected around the top-left corner |
+| Trig tables are **14-bit** (`sin/cos * 16384`, saturated to ±0x3FFF) and the accessors are named after inverted symbols: `GteSin` (0x00440a10) returns **cosine**, `GteCos` (0x004409f0) returns **sine** | Rotation matrices come out 4–16× too small and compound through the joint hierarchy, so deep joints end up with an all-zero rotation |
+| `DXGI_FORMAT_R8G8B8A8_UNORM` needs red in the **lowest** byte: pack `(a<<24)\|(b<<16)\|(g<<8)\|r` | Red and blue swapped — reddish surfaces render blue |
+
+Note that several conversion sites in the tree read "red" from bits 10-14 *and*
+pack it high (`MarniDX::ConvertToRGBA8`, `MarniBits`); those two errors cancel,
+so the variable names are misleading but the output is correct. Check both the
+bit source and the byte position before changing one.
 
 ---
 

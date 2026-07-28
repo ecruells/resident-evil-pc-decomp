@@ -14,8 +14,10 @@ TextureDraw g_SpriteCommandBuffer[MAX_SPRITE_COMMANDS];
 OTEntry g_OT[MAX_OT_ENTRIES];
 int g_RenderBufferIndex      = 0;
 int g_RenderDisableFlags     = 0;
-int g_SubpixelOffsetX        = 0;
-int g_SubpixelOffsetY        = 0;
+int g_SubpixelOffsetX        = 0;   // 0x004d2bd0
+int g_SubpixelOffsetY        = 0;   // 0x004d2bd4
+int g_displayImageOriginX    = 0;   // 0x004c335c - display image origin (FUN_00470a90)
+int g_displayImageOriginY    = 0;   // 0x004c3360
 int g_MaxFadeValue           = 4095;
 int g_DepthSortOverride      = 0;
 float g_ColorScaleFactor     = 2.0f / 255.0f;
@@ -443,9 +445,18 @@ void TexturePage_LoadImage(void* imageData, short param2, short param3) {
     ProcessTextureImage(imageData, param2, param3, 0);
 }
 
+// Display_SetParams (0x00470750)
+// Sets the display-image origin read by FUN_00470a90 when it rebuilds the
+// background sprites: 0x004c335c / 0x004c3360.
+//
+// These are NOT the subpixel offset (0x004d2bd0 / 0x004d2bd4). Writing the
+// subpixel offset here zeroed the projection centre every frame, because
+// ResetScreenAndRebuildSprites (0x00401020) calls this with (0,0) and runs once
+// per frame from the main loop - so every 3D object was projected around the
+// top-left corner of the screen instead of the screen centre.
 void Display_SetParams(int param1, int param2) {
-    g_SubpixelOffsetX = param1;
-    g_SubpixelOffsetY = param2;
+    g_displayImageOriginX = param1;
+    g_displayImageOriginY = param2;
 }
 
 // ============================================================================

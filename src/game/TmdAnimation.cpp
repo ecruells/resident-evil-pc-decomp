@@ -357,6 +357,12 @@ slotFound:
     BYTE* pagePtr = &g_psxTextureArray[bankID * 0x1b60];
     int pageCount = g_objectCountArray[bankID];     // DAT_008ffc40[bankID]
 
+    // The match below compares each parsed object's CLUT material key
+    // (elem+0x38/+0x3C, VRAM X/Y decoded from the primitive's CLUT word) against
+    // the page's CLUT descriptor (page+0x54/+0x58). Both sides derive from the
+    // same TIM, so they only line up if PSXTexture stores that descriptor as
+    // DWORDs - see the note in PSXTexture.h.
+
     for (int page = 0; page < pageCount; page++) {
         int matCount = *(int*)(pagePtr + 0x340);
         if (matCount != 0) {

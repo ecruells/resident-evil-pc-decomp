@@ -306,8 +306,8 @@ void room_set(void)
             LoadHeldItemsImages();
             g_playerEntity.animationId = 0;
             g_playerEntity.animFrameId = 0;
-            g_playerEntity.anim_86 = 0;
-            g_playerEntity.anim_87 = 0;
+            g_playerEntity.action_behavior = 0;
+            g_playerEntity.action_state = 0;
             SetupCharacterData();
             LoadSoundBank(g_playerEntity.equippedWeaponId, g_loadDataDestPointer);
         }

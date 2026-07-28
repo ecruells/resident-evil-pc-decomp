@@ -654,10 +654,10 @@ void* g_playerAnimFunctions[52] = {};     // 0x00bebbd8
 
 // Player animation jump tables (populated from binary data)
 // TODO: Extract actual table contents from binary
-void* DAT_004c2ac8[32] = {};   // jump table for player_anim_set_attacked_flag dispatch (anim_86)
-void* DAT_004ba360[32] = {};   // jump table for player_anim_limb_physics dispatch (anim_86)
-void* DAT_004b1a90[32] = {};   // jump table for player_anim_death_alt dispatch (anim_86)
-void* DAT_004c10b0[32] = {};   // jump table for player_anim_dispatch_4b1a90 dispatch (anim_87)
+void* DAT_004c2ac8[32] = {};   // jump table for player_anim_set_attacked_flag dispatch (action_behavior)
+void* DAT_004ba360[32] = {};   // jump table for player_anim_limb_physics dispatch (action_behavior)
+void* DAT_004b1a90[32] = {};   // jump table for player_anim_death_alt dispatch (action_behavior)
+void* DAT_004c10b0[32] = {};   // jump table for player_anim_dispatch_4b1a90 dispatch (action_state)
 
 // Texture/room state
 unsigned char g_TextureBankID = 0;       // 0x00bebcc4
@@ -877,8 +877,8 @@ DWORD         g_AttractModeIdleTimer = 0;
 // 0x00d213b0 - Zeroed on new game init (InitializeGame non-continue path, +0x1E0 in entity data struct)
 DWORD         g_gameSessionInitFlag = 0;
 
-// 0x004bca88 - Room camera data (original address)
-DWORD         g_RoomCameraData = 0;
+// 0x004bca88 - Room camera matrix (32 bytes)
+MATRIX        g_RoomCameraData = {};
 
 // 0x00d1fdd4 - Camera data copy pointer (holds → 0x4bca88)
 DWORD         g_RoomCameraDataCopy = 0;
@@ -904,11 +904,27 @@ SVECTOR       g_svecScratch = {};
 // 0x00be11c0 - Scratch MATRIX for matrix operations
 MATRIX        g_matrixScratch = {};
 
+// 0x008f88e8 - GTE rotation+translation matrix buffer (set by SetRotAndTransMatrix)
+// t[2] at offset 0x1C is the depth value (DAT_008f8904 in Ghidra)
+MATRIX        g_gteRotTransMatrix = {};
+
+// 0x00aae748 - D3D light data buffer (3 lights × 12 DWORDs each)
+DWORD         g_d3dLightData[36] = {};
+
+// 0x00aae770 - D3D light dirty flags
+DWORD         g_d3dLightFlags = 0;
+
+// 0x00aae774 - D3D packed ambient color (R<<16 | G<<8 | B)
+DWORD         g_d3dAmbientColor = 0;
+
 // 0x00be0dd8 - Death animation state flag
 unsigned int  g_deathAnimationFlag = 0;
 
 // 0x00be0dfc - Temp save for ENTITY->animation_frame_id during animation extraction
 unsigned int  g_animFrameIdSave = 0;
+
+// 0x00be0e18 - Entity joint position X (set per-joint before TMD render)
+int           g_entityJointPosX = 0;
 
 // 0x00be0de0 - Joint displacement value for animation color tinting
 int           g_playerDisplacement = 0;
@@ -1345,6 +1361,9 @@ DWORD DAT_00606060 = 0;
 // 0x00ffff50 — velocity decay reference data (referenced by BillboardSetColor)
 DWORD DAT_00ffff50 = 0;
 
+// 0x00808080 — color/intensity reference data (referenced by zombie_init for push velocity setup)
+DWORD DAT_00808080 = 0;
+
 // Effect sprite texture management state (FUN_0047bc80 / InitRoomEffSprite)
 unsigned char  DAT_00bf0a38 = 0;               // 0x00bf0a38
 short          DAT_00bf0a3c = 0;               // 0x00bf0a3c
@@ -1375,6 +1394,9 @@ BYTE    g_entityModelBuffer2[56320] = {};   // 0x00bfddc0
 
 // 0x00c0b9c0
 BYTE   g_animationBuffer[37888] = {};
+
+// 0x00c133c0 - weapon animation object buffer (LoadEquippedWeaponAnimation param_4)
+DWORD  g_animObjectBuffer[0x680] = {};
 
 // Shoot direction ESP data buffer (loaded from core00.esp)
 // 0x00c14dc0 - ESP effect data

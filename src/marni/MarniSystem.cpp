@@ -14,6 +14,7 @@
 #include "MarniBits.h"
 #include "MarniDX.h"
 #include "Globals.h"
+#include "../game/TmdRenderer.h"
 #include <cstdio>
 #include <cstring>
 #include <new>
@@ -271,29 +272,95 @@ static int VTable_HandleWindowMessage(void* self, HWND hwnd, UINT msg,
 }
 
 // [6] CreateTextureHandle — 0x0044c900
+// Converts a CMarniBits surface (PSX VRAM-format pixel data + RGB555 CLUT)
+// into a D3D11 texture and returns its MarniHandle (>= 1), exactly how the
+// original returned a texture slot index. Writes 1 to outHandle on success.
 static int VTable_CreateTextureHandle(void* self, void* texDesc,
-                                      unsigned int flags, void* outHandle)
+                                       unsigned int flags, void* outHandle)
 {
-    // The modern port handles texture creation through MarniCreateTexture
-    // and ProcessTextureImage in TextureLoader.cpp. This vtable entry
-    // existed in the original for legacy D3D5 internal tables.
+    (void)flags;
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)self;
+    CMarniBits* bits = (CMarniBits*)texDesc;
+    if (!pD3D || !pD3D->m_pDX || !bits) return 0;
+
+    int w = (int)bits->m_width;
+    int h = (int)bits->m_height;
+    int bpp = (int)bits->m_bitDepth;
+    const WORD* pixels = (const WORD*)bits->m_pPixelData;
+    const WORD* clut = (const WORD*)bits->m_pPalette;
+    if (w <= 0 || h <= 0 || !pixels) return 0;
+
+    // Output is uploaded as DXGI_FORMAT_R8G8B8A8_UNORM, so each DWORD must be
+    // 0xAABBGGRR - red in the lowest byte. PS1 15-bit source colour is
+    // MBBBBBGGGGGRRRRR, i.e. red in bits 0-4. Packing 0xAARRGGBB here (the
+    // Win32 ARGB habit) swapped red and blue on every model texture.
+    DWORD* rgba = (DWORD*)operator_new((size_t)w * h * sizeof(DWORD));
+    if (!rgba) return 0;
+
+    for (int y = 0; y < h; y++) {
+        for (int x = 0; x < w; x++) {
+            DWORD color = 0xFF000000; // opaque black default
+            if (bpp == 4 && clut) {
+                WORD word = pixels[y * (w / 4) + x / 4];
+                int nib = (word >> ((x & 3) * 4)) & 0xF;
+                WORD c = clut[nib];
+                DWORD a = (nib == 0) ? 0x00 : 0xFF;
+                DWORD r = (c & 0x1F) * 255 / 31;
+                DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
+                DWORD b = ((c >> 10) & 0x1F) * 255 / 31;
+                color = (a << 24) | (b << 16) | (g << 8) | r;
+            }
+            else if (bpp == 8 && clut) {
+                WORD word = pixels[y * (w / 2) + x / 2];
+                int idx = (word >> ((x & 1) * 8)) & 0xFF;
+                WORD c = clut[idx];
+                DWORD a = (idx == 0) ? 0x00 : 0xFF;
+                DWORD r = (c & 0x1F) * 255 / 31;
+                DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
+                DWORD b = ((c >> 10) & 0x1F) * 255 / 31;
+                color = (a << 24) | (b << 16) | (g << 8) | r;
+            }
+            else if (bpp == 16) {
+                WORD c = pixels[y * w + x];
+                DWORD a = (c == 0) ? 0x00 : 0xFF;
+                DWORD r = (c & 0x1F) * 255 / 31;
+                DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
+                DWORD b = ((c >> 10) & 0x1F) * 255 / 31;
+                color = (a << 24) | (b << 16) | (g << 8) | r;
+            }
+            rgba[y * w + x] = color;
+        }
+    }
+
+    MarniHandle tex = pD3D->m_pDX->CreateTexture(w, h, 32, rgba, NULL, NULL);
+    operator_delete(rgba);
+
+    if (tex == MARNI_NULL_HANDLE) return 0;
     if (outHandle) *(unsigned int*)outHandle = 1;
-    (void)self; (void)texDesc; (void)flags;
-    return 1;
+    return (int)tex;
 }
 
 // [7] CreateObjectHandle — 0x0044af90
+// The DX5 original built an execute buffer per 3D object and returned a slot
+// index. The DX11 port draws straight from the CMarniViewport2 vertex/index
+// buffers, so the handle is only an opaque "created ok" token — return a
+// unique non-zero id.
 static unsigned int VTable_CreateObjectHandle(void* self, void* objDesc,
-                                              unsigned char flags)
+                                               unsigned char flags)
 {
     (void)self; (void)objDesc; (void)flags;
-    return 1;
+    static unsigned int s_nextObjectHandle = 1;
+    unsigned int h = s_nextObjectHandle++;
+    if (s_nextObjectHandle == 0) s_nextObjectHandle = 1;
+    return h;
 }
 
 // [8] DeleteTextureHandle — 0x0044b220
 static int VTable_DeleteTextureHandle(void* self, int handle)
 {
-    (void)self; (void)handle;
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)self;
+    if (!pD3D || !pD3D->m_pDX) return 1;
+    if (handle > 0) pD3D->m_pDX->DestroyTexture((MarniHandle)handle);
     return 1;
 }
 
@@ -305,9 +372,14 @@ static int VTable_DeleteObjectHandle(void* self, int handle)
 }
 
 // [10] SetTexture — 0x00448300
+// Despite the legacy name, in the original this is the TMD draw-queue entry
+// point: CMarniDirect3DTMD::Transform calls it per object as
+// vtable[10](objData, depth) and it inserted the object into the ordering
+// table. The DX11 port queues it into the per-frame TMD draw list.
 static int VTable_SetTexture(void* self, void* texData, unsigned int param)
 {
-    (void)self; (void)texData; (void)param;
+    (void)self;
+    TmdQueueObject(texData, (int)param);
     return 1;
 }
 
