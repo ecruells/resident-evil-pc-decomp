@@ -476,14 +476,34 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             WORD* src = (WORD*)psxTex.m_pPixelData;
             for (int i = 0; i < w * h; i++) {
                 WORD px = src[i];
-                // PS1 BGR555 with STP bit (bit 15):
-                //   STP=1 -> semi-transparent (alpha=0x80, blended at half)
-                //   STP=0 -> fully opaque (alpha=0xFF)
-                // No pixel is made fully transparent here — black pixels stay
-                // visible (match the original eed1f83 build, not the broken
-                // "black == transparent" rule that caused the character card
-                // to sprout invisible solid regions).
-                DWORD a = (px & 0x8000) ? 0x80 : 0xFF;
+                // PS1 BGR555 with STP bit (bit 15). This is a TEXTURE PAGE, and
+                // the original keyed those on black: CMarniBits::BltFast's
+                // colorkey flag (bit 0) skips a source pixel when
+                // (color & 0xFFFFFF) == 0 — i.e. black, with the top bit
+                // ignored, so both 0x0000 and 0x8000 are cut out. Mirror that
+                // exactly:
+                //   0x0000 / 0x8000  -> fully transparent (cut-out)
+                //   STP set + colour -> semi-transparent (PS1 half blend)
+                //   otherwise        -> opaque
+                //
+                // In the 16bpp pages that reach here the cut-outs are stored as
+                // 0x8000 (STP set, colour black): Select_b.tim's round card
+                // corners and cursor-arrow surrounds, Optkey03.tim's widget
+                // surrounds. None of them contains a 0x0000 texel or an STP
+                // texel with a non-zero colour. Black artwork is stored as a
+                // near-black colour instead, so keying here does not punch
+                // holes in the card's legitimate dark regions — bar a handful
+                // of isolated pure-black texels in dithered art (18 in
+                // Select_b, 169 in Optkey03's Japanese help text) which the
+                // retail PC build dropped out the same way.
+                //
+                // Do NOT copy this rule into display_image: a background is
+                // blitted without the colorkey flag and its black is real
+                // artwork. See the note there.
+                DWORD a;
+                if ((px & 0x7FFF) == 0)  a = 0x00;
+                else if (px & 0x8000)    a = 0x80;
+                else                     a = 0xFF;
                 DWORD r = ((px >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((px >> 5)  & 0x1F) * 255 / 31;
                 DWORD b = ((px >> 10) & 0x1F) * 255 / 31;
@@ -587,10 +607,21 @@ void LoadShadowMaskTexture(void* imageBuffer, int slotBase)
 // Parameters:
 //   viewportSlot   - slot index (scaled internally by 0x40)
 //   texturePageId  - texture page handle stored at DAT_008ed06c[slot]
-//   vertexData     - array of 24 ints: 4 vertices × 6 values each
-//                    Each vertex: {x, y, z, u, v, color_flag}
-//                    Plus 4 texture dims: {w, h, w2, h2}
-//                    Plus 2 flags
+//   vertexData     - array of 24 ints, read COLUMN-MAJOR at stride 4: element [i]
+//                    is vertex i's x, [i+4] its y, [i+8] its z, [i+12] its raw u
+//                    and [i+16] its raw v. UVs are normalised by the texture page
+//                    dimensions at DAT_008ed4fc/DAT_008ed500[texturePageId].
+//                    [20],[21],[22] are a single normal shared by all four
+//                    vertices; [23] is unread.
+//
+// Each vertex handed to CMarniViewport2::SetVertex is 11 floats (0x2C bytes):
+//   {x, y, z, nx, ny, nz, 1.0f, 1.0f, 1.0f, u, v}
+// and the index list is the quad 0, 1, 3, 2.
+//
+// NOTE: the object handle this produces (g_VideoDriverArray_068[slot], via
+// FUN_0046c230) is what AddFadePoly requires to be non-zero; it returns 0 early
+// otherwise. While the viewport calls below are stubbed, ground shadows cannot
+// draw no matter what the fade-sprite queue contains. See docs/SCD_WORK_PLAN.md.
 //
 // Sub-functions (Marni viewport API, stubbed until full implementation):
 //   FUN_0046c280(handle)              - release old execute buffer

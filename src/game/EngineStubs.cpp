@@ -176,14 +176,13 @@ void update_entities(void)
     } while (em_counter < (int)(unsigned int)g_enemy_count);
 }
 
-// (0x00494d90) - Update player animation state machine
-void update_player_anim(void) { }
+// update_player_anim (0x00494d90) and update_player_position (0x0041c060) are
+// implemented in PlayerAnimations.cpp, together with the player state dispatch
+// table from 0x004d4550. Both used to be empty stubs here, which is why the
+// player never animated and no character model appeared.
 
-// (0x0041c060) - Update player position from speed/angle
-void update_player_position(PlayerEntity* ent, int a) { }
-
-// (0x00456d30) - Draw screen fade sprite overlay
-void DrawFadeSpr(void) { }
+// DrawFadeSpr (0x00456d30) and entity_add_fade_sprite (0x00456810) are
+// implemented in FadeSprite.cpp, together with the queue they operate on.
 
 // (0x00474090) - Update sound system state per-frame
 void update_sounds(void) { }
@@ -199,7 +198,7 @@ void room_camera_and_lighting_update(void) { }
 
 // (0x00481660) - Update entity lighting from RDT point lights
 // Recomputes the 3 D3D lights based on the entity's distance to each RDT
-// light. Lights with zero2 == 0 are point lights with radial falloff
+// light. Lights with lightType == 0 are point lights with radial falloff
 // (direction = light->entity, color attenuated by distance); the others are
 // used as-is (directional).
 void update_entity_lighting(VECTOR* entityPos)
@@ -208,7 +207,7 @@ void update_entity_lighting(VECTOR* entityPos)
 
     for (int i = 0; i < 3; i++) {
         RDT_Light* light = &g_RdtPointer->lights[i];
-        if (light->zero2 == 0) {
+        if (light->lightType == 0) {
             struct { int x, y, z; unsigned char r, g, b; } pointLight;
             pointLight.x = entityPos->x - light->pos_x;
             pointLight.y = entityPos->y - light->pos_y;
@@ -343,8 +342,9 @@ void StartAttractDemo(void) { }
 
 // (0x004761b0) - options_menu now implemented in OptionsMenu.cpp
 
-// (0x004813c0) - Restore room state after menu close
-void FUN_004813c0(void) { }
+// 0x004813c0 is now implemented as room_transition_load in GameState.cpp. The old
+// stub described it as "restore room state after menu close", which was wrong - it
+// reads g_pendingDoorRecord seven times and is the room/stage transition loader.
 
 // (0x0047b980) - Set screen fade transition parameters
 void set_fading(int type, int counter) { }
@@ -448,7 +448,7 @@ void FUN_0040ac80(int idx, void* lightData)
     double y = (double)p[1];
     double z = (double)p[2];
 
-    // FUN_0040a5c0: normalize to 12-bit fixed point
+    // Same normalize-to-4096 as VectorNormal (0x0040a5c0, GteMatrix.cpp), inlined
     double len = sqrt(x * x + y * y + z * z);
     if (len < 1.0) len = 1.0;
     int nx = (int)(x / len * 4096.0);
@@ -803,18 +803,10 @@ void SetRotAndTransMatrix(MATRIX* m) {
     g_gteRotTransMatrix.t[1] = -g_gteRotTransMatrix.t[1];
 }
 
-// (0x00462d90) - Check if entity position is within a camera switch zone
-// Returns 1 if position is inside the quadrilateral defined by the zone,
-// or if zoneData is NULL (no zones = always visible).
-int is_entity_in_switch_zone(VECTOR* pos, void* zoneData)
-{
-    // If no zone data, treat as always visible (e.g. options menu has no RDT zones)
-    if (zoneData == NULL) return 1;
-
-    // Original checks a single quadrilateral zone
-    // For now return 1 to allow rendering (proper zone iteration TBD)
-    return 1;
-}
+// is_entity_in_switch_zone (0x00462d90) is implemented in Room.cpp.
+// The placeholder that used to live here unconditionally returned 1, which made
+// every entity test as "inside every zone" — check_camera_switch would then have
+// latched onto the first zone of the group instead of the one the player is in.
 
 // (0x00497de0) - Keyboard scancode read (async)
 unsigned char FUN_00497de0(void) { return 0; }

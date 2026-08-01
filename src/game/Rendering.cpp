@@ -348,6 +348,11 @@ void FrameRateGovernor(void)
                 }
             }
 
+            // Debug-only collision boundary overlay ([Debug] ShowCollision, F5).
+            // Between the background and the 3D so characters occlude the
+            // outlines and it reads as geometry lying on the floor.
+            CollisionDebug_Draw();
+
             // Render queued 3D TMD objects (entities, options-menu character)
             FlushTmdObjects();
 
@@ -615,13 +620,25 @@ void display_image(int slot, void* buffer, int width, int height)
     unsigned int* rgba = (unsigned int*)malloc(pixelCount * 4);
     if (rgba == NULL) return;
 
+    // The display image is the base layer: AddBackgroundQuad only accepts it at
+    // depth 0xFFF and inserts it at the head of the pending list, so nothing is
+    // ever drawn behind it. The original blitted it into the framebuffer WITHOUT
+    // CMarniBits::BltFast's colorkey flag (flags bit 0), unlike the texture-page
+    // blits — a background has nothing to key against.
+    //
+    // Every pixel is therefore opaque. Black must NOT be keyed out here: unlike
+    // the sprite pages, pure black in a background is real artwork. TYPE00.TIM
+    // (the save-screen typewriter) is 43% pure black, OPT11/JOPT06 store the
+    // option panel's dark fill as black, and room backgrounds are full of black
+    // shadow. Keying those transparent let VTable_Clear's clear colour — which
+    // is (0, 0, 0.05), not pure black, and is overridable via g_debugClearR/G/B —
+    // bleed through every dark area of every background as a blue lift.
     for (int i = 0; i < pixelCount; i++) {
         unsigned short px = src[i];
         unsigned char r = ((px >> 0)  & 0x1F) * 255 / 31;
         unsigned char g = ((px >> 5)  & 0x1F) * 255 / 31;
         unsigned char b = ((px >> 10) & 0x1F) * 255 / 31;
-        unsigned char a = (((px >> 0) & 0x1F) == 0 && ((px >> 5) & 0x1F) == 0 && ((px >> 10) & 0x1F) == 0) ? 0x00 : 0xFF;
-        rgba[i] = (a << 24) | (b << 16) | (g << 8) | r;
+        rgba[i] = (0xFFu << 24) | (b << 16) | (g << 8) | r;
     }
 
     MarniCreateTexture(width, height, 32, rgba, &g_displayImageSRV);

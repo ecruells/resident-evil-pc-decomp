@@ -354,12 +354,43 @@ extern int           g_spriteAnimB;                    // 0x00be41d3
 extern short         g_spriteAnimIntensity;            // 0x00be41d4
 
 // game_loop state machine globals (0x00480b30)
+// 0x00be9615 - raised by door_try_enter when a key item is consumed; read and
+// cleared by check_event_item_usage (0x0041c490), which is not ported yet.
+extern unsigned char g_eventItemUsedFlag;              // 0x00be9615
+// 0x00bebcbc - the door record door_try_enter hands to the room-change code. No
+// port code reads it yet, so the room load after the blackout is still missing.
+extern int           g_pendingDoorRecord;              // 0x00bebcbc
+
+// Door-record fields latched by room_transition_load (0x004813c0). Named for the
+// record offset they come from where the use is clear, address-suffixed where it is
+// not. These are new globals in the port - the addresses are the original's but the
+// symbols are NOT .gwipe-placed there yet.
+extern unsigned char g_nextRoomDoorType;                // 0x00be0bc8  record+0x08
+extern unsigned char g_nextRoomSfxId;                   // 0x00be0bc1  record+0x09
+extern unsigned char g_nextRoom_be05b7;                 // 0x00be05b7  record+0x0A
+extern unsigned char g_nextRoomCameraId;                // 0x00be0dd4  record[0x0B]&0x3F
+extern unsigned char g_nextRoomDest;                    // 0x00be0bc0  record+0x0D
+extern int           g_roomTransitionBusy;              // 0x004d2290
 extern int           g_openMenuFlag;                   // 0x00d22760 - menu state machine (0=none,1=open,2=init,3=close)
 extern unsigned short g_short_message_flags;           // 0x00bebcc2 - backup of g_message_flags when menu opens
 extern int           g_int_008f8898;                   // 0x008f8898 - saved light state for room transitions
 extern int           DAT_004d2294;                     // 0x004d2294 - countdown frame counter (0-29)
 extern int           DAT_004d2288;                     // 0x004d2288 - death delay countdown
-extern int           DAT_004d46a4;                     // 0x004d46a4 - camera/lighting update enable flag
+// Two render feature gates in .data at 0x004d46a4 / 0x004d46a8. Both are
+// statically initialized to 1 in the original and are NEVER WRITTEN anywhere in
+// the binary — 0x004d46a4 has exactly one xref and 0x004d46a8 exactly two, all
+// reads, all inside game_loop. They are build-time "this subsystem is compiled
+// in" constants, not runtime state.
+//
+// Do not initialize these to 0 and do not alias them onto port-side variables.
+// g_dwEntityRenderEnabled gates BOTH calc_entity_lighting calls in game_loop —
+// the enemy loop and the player — so a zero here silently removes every
+// character model from the screen while the room still renders normally. It was
+// previously read through the port's own g_SpriteQueueCount (which happens to
+// live at the same address in the Ghidra labels but is a per-frame sprite
+// counter reset to 0 by SpriteRenderer), which is exactly that failure.
+extern int           g_dwCameraLightingEnabled;         // 0x004d46a4 - gates room_camera_and_lighting_update
+extern int           g_dwEntityRenderEnabled;           // 0x004d46a8 - gates calc_entity_lighting (all entities)
 extern int           g_displayDebugSaveMenu;           // 0x004d4680 - debug save menu trigger
 extern int           g_debugSaveMenuFlag;              // 0x004d4684 - debug save menu state flag
 extern int           DAT_004d228c;                     // 0x004d228c - menu processing active flag
@@ -393,6 +424,10 @@ extern PlayerEntity  g_playerEntity;                   // 0x00be62e4 - main play
 extern Entity        g_EnemiesList[30];                // 0x00be6464 - enemy entity array (30 x 0x18C bytes) [.gwipe]
 extern int           g_enemy_count;                    // 0x00be41e2 - number of active enemies [.gwipe]
 extern Entity*       ENTITY;                           // 0x00bebcd4 - current entity pointer
+// 0x00bebcd8 - cursor into g_savedEnemyStates, left pointing at the matched slot
+// by restore_saved_enemy_state.
+extern SavedEnemyState* g_pSavedEnemyState;
+extern SavedEnemyState  g_savedEnemyStates[16];         // 0x00be92cc [.gwipe$92cc]
 extern unsigned char g_PlayerMaxHealth;                // 0x00be6459
 
 // Player entity pointer alias (used by decompiler-generated names)
@@ -463,6 +498,9 @@ extern const unsigned char g_ItemImageLookupTable[459];// 0x004bd81d
 
 // Active character item slots pointer (points to g_ItemsSlots or g_RebeccaItemSlots)
 extern void*         g_ItemSlotsPointer;               // 0x00d22768
+// 0x00d226f0 - set by get_item_slot to the matched 2-byte inventory slot, or to
+// &g_defaultItemSlot when the item is not held.
+extern unsigned char* g_pCurrentItemSlot;
 
 // Item inventory state (originals overlay g_playerEntity's range → [.gwipe])
 extern unsigned char* g_firstItemSlotPointer;          // 0x00be63a0 [.gwipe]
@@ -526,6 +564,14 @@ extern unsigned char* g_EvtScripts;                    // 0x00d213b4 - event scr
 extern unsigned char* g_RoomScdOpcodes;                // 0x00d213b8 - room SCD opcodes pointer
 extern void*          script_command_funcs_table[256]; // 0x004c1110 - SCD command dispatch table
 
+// Room action dispatch table for SCD opcodes 0x24 / 0x2D.
+// 18 handlers (0x00-0x11) + 2 trailing NULL slots in the original.
+#define ROOM_CHECK_ACTION_COUNT 20
+extern void*          room_check_actions[ROOM_CHECK_ACTION_COUNT]; // 0x004b9340
+
+// Animation remap pairs for SCD event state-1 opcode 0x89. See GameState.cpp.
+extern const unsigned char g_ScdAnimRemap[32];          // 0x004bec80
+
 // SCD flag bank 9 (misc flags)
 extern unsigned int  DAT_00d213a0[2];                  // 0x00d213a0
 
@@ -539,8 +585,8 @@ extern unsigned short DAT_00d2276c;                    // 0x00d2276c
 extern unsigned int   DAT_00d22770;                    // 0x00d22770
 
 // Screen effect parameter storage
-extern unsigned int  DAT_00ac98e0[4];                  // 0x00ac98e0
-extern unsigned int  DAT_00ac98e4[4];                  // 0x00ac98e4
+extern SndPanVol     g_SndPanVol[3];                   // 0x00ac98e0 (bound 0x00ac98f8)
+extern int           DAT_00ac98f8;                     // 0x00ac98f8 - zeroed by BuildSndFadeTbl
 
 // Misc globals used by SCD command functions
 extern BOOL          g_bFullScreenFlag_68;
@@ -561,13 +607,16 @@ extern int           g_bgCacheMode;                    // 0x004d46b4
 extern char          g_hexCharTable[17];               // 0x004c2060 "0123456789abcdef"
 
 // Path template for room background PAK files (mutated at runtime)
-extern char          g_bgPathTemplate[28];             // 0x004c2078 ".\usa\stageS\rcSRRC.pak"
+extern char          g_bgPathTemplate[40];             // 0x004c2078 <GAME_DATA_ROOT>stageS\rcSRRC.pak
 
 // Camera hex char (stored after path template, set by load_room_bg)
 extern char          DAT_004c2090;                     // 0x004c2090
 
 // Per-camera offset into g_bgCacheBuffer (index 0 unused, 1..N = cameras)
-extern int           g_bgCameraOffsets[16];            // 0x00aea08c (base at +4)
+// 0x00aea08c. load_room_bg writes slot i+1 for image i; load_room_bg_image reads
+// it from 0x00aea090 (== &g_bgCameraOffsets[1]), so index with camera id + 1.
+// 17 entries, not 16: the writer reaches slot cameras_count.
+extern int           g_bgCameraOffsets[17];            // 0x00aea08c - slot 0 unused
 
 // Per-camera mask offset into g_bgMaskDataBuffer
 extern int           g_bgMaskOffsets[16];              // 0x00ae9e80
@@ -576,7 +625,7 @@ extern int           g_bgMaskOffsets[16];              // 0x00ae9e80
 extern BYTE          g_bgMaskDataBuffer[0x20000];      // 0x00ac9e80
 
 // Path template for mask PAK files (mutated at runtime)
-extern char          g_maskPathTemplate[28];           // 0x004c3bc8 "./usa/objspr/osp0SRRC.pak"
+extern char          g_maskPathTemplate[40];           // 0x004c3bc8 <GAME_DATA_ROOT>objspr\osp0SRRC.pak
 
 // --- PAK LZW decompression state (unpack_pakfile_) ---
 extern unsigned int  g_pakDecompInputPos;              // 0x00d2b0a4
@@ -586,10 +635,25 @@ extern unsigned int  g_pakDecompCodeSize;              // 0x00d2b0a8
 extern unsigned int  g_pakDecompNextCode;              // 0x00d227c8
 extern unsigned int  g_pakDecompMaxCode;               // 0x00d2b0a0
 
-// LZW dictionary (12 bytes per entry: 4 unused + 4 prefix + 4 char)
-// Max ~35000 entries from 0x00d2b0b0 to 0x00d91a60
-extern int           g_pakDictPrefix[8192];            // 0x00d2b0b4 (offset +4 per 12-byte entry)
-extern char          g_pakDictChar[8192];              // 0x00d2b0b8 (offset +8 per 12-byte entry)
+// LZW dictionary — ONE array of 12-byte records based at 0x00d2b0b0.
+// This used to be modeled as two separate arrays (g_pakDictPrefix at 0x00d2b0b4
+// and g_pakDictChar at 0x00d2b0b8, strides 4 and 1). Those are the +4 and +8
+// FIELDS of a single 12-byte record, not independent arrays, so every walk of
+// the dictionary read the wrong addresses and ran off the end.
+struct PakDictEntry {
+    int  unused;    // +0  0x00d2b0b0 - set to -1 by pak_decomp_reset, never read
+    int  prefix;    // +4  0x00d2b0b4 - previous code in the LZW chain
+    char ch;        // +8  0x00d2b0b8 - character emitted by this code
+    char pad[3];    // +9
+};
+static_assert(sizeof(PakDictEntry) == 12, "PakDictEntry size mismatch");
+
+// pak_decomp_reset walks entries from 0x00d2b0b0 while the pointer is below
+// g_pakDecompBitMask (0x00d91a64), which is 34981 records. Only codes up to
+// 0x1FFF are reachable, so the tail is never used — but the count is what the
+// original clears, so it is reproduced here.
+#define PAK_DICT_ENTRIES 34981
+extern PakDictEntry  g_pakDict[PAK_DICT_ENTRIES];      // 0x00d2b0b0
 
 // LZW string output buffer (for building decoded strings)
 extern char          g_pakStringBuf[512];              // 0x00d227d0
@@ -692,8 +756,19 @@ extern int           g_BgmSoundBank;
 extern int           g_SfxBanks[64];
 extern int           g_RoomSfxBanks[64];
 extern int           g_CharacterSfxBanks[64];
-extern int           g_emSndBanks[64];
-extern int           g_SndBank[64];
+// g_emSndBanks (0x00ac99f0) - 48 records of 2 ints (handle, slot/flags), so 96
+// ints, NOT 64. PlayEntitySnd indexes g_emSndBanks[soundType * 2] for soundType
+// up to 0x2f, i.e. element 94; an int[64] could not even hold the records the
+// loader is supposed to fill. Record count confirmed from the original's loop
+// bound in Room_LoadEnemySoundBanks: piVar7 walks from 0x00ac99f0 in 8-byte steps
+// while piVar7 <= 0xac9b6f, which is records 0 through 47.
+extern int           g_emSndBanks[96];
+// 0x00ac99d0 - the three BGM channels. 8-byte records (see SndBankSlot); the
+// original's loops all stop at 0x00ac99e8, i.e. exactly 3 entries. Previously
+// declared as int[64], which both overstated the count and could not express the
+// slot/paused byte fields - five separate globals were declared for addresses
+// that fall inside this array (g_snd_slot_00ac99d5 etc.) and so never aliased it.
+extern SndBankSlot   g_SndBank[3];
 extern int           g_SfxVolume;
 extern char          g_BgmPaused;
 extern int           g_SndRampDirection;
@@ -704,14 +779,38 @@ extern int           g_EnemySndVolume;                 // 0x00ac98d0 - enemy sou
 extern unsigned int  g_SoundSystemFlags;               // 0x004b3998 - sound system flags (bit 3 = alt path)
 extern char          g_SoundAltPathPrefix[256];        // 0x00d91bd0 - alternate sound path prefix
 
-// Sound callback function pointers (set by Room_SetupCollisionCallbacks)
-typedef void (*SoundCallbackRect)(short*, int*, short*);
-typedef unsigned int (*SoundCallbackCircle)(unsigned short*, int*);
-typedef void (*SoundCallbackFlag)(void);
-extern SoundCallbackRect   g_SoundCallbackRect;        // 0x00ac9c04
-extern SoundCallbackRect   g_SoundCallbackRect2;       // 0x00ac9c14
-extern SoundCallbackCircle g_SoundCallbackCircle;      // 0x00ac9c0c
-extern SoundCallbackFlag   g_SoundCallbackFlag;        // 0x00ac9c10
+// 0x00ac9c00 - room boundary shape handlers, indexed by (RDT_Boundary::type &
+// 0xff) and installed by Room_SetupCollisionCallbacks. The original declares
+// these as four separate function pointers at 0x00ac9c04/0c/10/14 because slots
+// 0 and 2 are never written; check_room_collision indexes the whole block as
+// one table, so the table is what it is modelled as here.
+//
+// All handlers are called with the same three arguments (record, entity
+// position, entity rollback position); the circle and soft-zone handlers ignore
+// the ones they do not need.
+typedef void (*CollisionShapeHandler)(short* bounds, int* pos, short* prevPos);
+extern CollisionShapeHandler g_CollisionShapeHandlers[6];
+
+extern int g_collPushDepthZHi;                         // 0x00be0dec - push scratch
+extern int g_collPushDepthZLo;                         // 0x00be0df0 - push scratch
+
+// --- Debug-only collision overlay (CollisionDebug.cpp, not in the original) ---
+// [Debug] ShowCollision=1 in config.ini draws the room's RDT boundary records
+// over the background, projected through the same path the character model uses.
+extern BOOL g_bShowCollisionDebug;
+extern int  g_iCollisionDebugY;   // [Debug] CollisionY - world Y of the overlay plane
+void CollisionDebug_Draw(void);
+
+// --- Room boundary collision (RoomCollision.cpp) ---
+void          Room_SetupCollisionCallbacks(void);                      // 0x0047d140
+unsigned int  ChkOutsideCell(VECTOR* position, SVECTOR* offset,
+                             int cellX, int cellZ);                    // 0x0047d270
+unsigned char check_room_collision(VECTOR* position, short radius);    // 0x0047d310
+short         room_collision_check_0047da50(VECTOR* position,
+                                            VECTOR* offset);           // 0x0047da50
+// Line-of-sight query: does ENTITY -> ENTITY+delta cross a sight-blocking
+// boundary record in quadrant `cell`? 1 = blocked.
+unsigned int  room_check_sight_blocked(VECTOR* delta, unsigned char cell); // 0x0047db90
 
 // Per-room enemy sound name table (indexed by stageId * 29 + roomId)
 // Each entry points to an array of 4 sound name strings (or NULL)
@@ -720,23 +819,30 @@ extern void*         g_SoundManager;
 extern class DirectSound* g_pDirectSound;
 extern DWORD         g_CachedWaveOutVolume;
 extern int           g_WaitForMusicTimer;
-extern unsigned char g_BGM_STATE;
+// 0x00d226a0 - BGM channel state. 32 bits in the original: opcodes 0x4B / 0x4A
+// save and restore the live channel mask through the high byte (SHL/SHR dword),
+// and the channel bit is 1 << (channel + 3), which exceeds 8 bits for channel 5+.
+// Reset value is 0xFF (MOV dword ptr [0x00d226a0],0xff), not 0xFFFFFFFF, so the
+// existing `!= 0xFF` comparisons stay correct. Several reads in SoundSystem.cpp
+// truncate with (unsigned char) - that matches the original's mixed byte/dword
+// accesses and must be preserved.
+extern unsigned int  g_BGM_STATE;
 extern HWND          g_MainWindowHandle;
 extern int           g_setVolResult;
 extern int           g_CurBank;
-extern unsigned char g_snd_slot_00ac99d5;
 extern int           g_SoundPanVol;
 extern int           g_SndPanSet_result;
 extern char*         g_wavName;
 extern int           g_sndload_bank_index;
 extern short         g_CurSlot;
-extern int           g_SndFadeStepTbl[64];
+extern int           g_SndFadeStepTbl[64];  // 0x00ac9930 - parallel to g_SndBank (3 used)
 
 // Additional sound globals
-extern int           g_snd_bank_00ac99d8;
-extern unsigned char g_snd_slot_00ac99dd;
-extern int           g_snd_bank_00ac99e0;
-extern unsigned char g_snd_slot_00ac99e5;
+// The former g_snd_bank_00ac99d8 / g_snd_slot_00ac99dd / g_snd_bank_00ac99e0 /
+// g_snd_slot_00ac99e5 / g_snd_slot_00ac99d5 were separate C globals for addresses
+// that live INSIDE the g_SndBank record array. They are now
+// g_SndBank[1].handle, g_SndBank[1].slot, g_SndBank[2].handle, g_SndBank[2].slot
+// and g_SndBank[0].slot respectively.
 extern int           g_bgmDefaultVolume;
 extern unsigned char g_prevBgmState;
 extern unsigned char g_targetBgmState;
@@ -757,7 +863,10 @@ extern MATRIX        MATRIX_00d22680;                  // 0x00d22680
 
 // Sound system BGM state
 extern unsigned char DAT_00bf07ef;                     // 0x00bf07ef
-extern int           DAT_00bf07f0;                     // 0x00bf07f0
+// 0x00bf07f0 is g_targetBgmState (declared below). A duplicate `int
+// DAT_00bf07f0 = -1` used to live here for the same address: separate storage,
+// never written, so the `!= -1` guards in opcodes 0x4A / 0x4B were always false
+// and both commands were silent no-ops.
 
 // Room BGM state table (separate from g_roomBgmState which is per-stage)
 extern unsigned char g_abRoomBgmState[224];            // 0x00ac98e8
@@ -1011,8 +1120,10 @@ extern int           g_debugTaskFrame;
 // ============================================================================
 
 // --- Entity update tables (per-enemy-type dispatch) ---
-extern void* enemies_update_functions_tbl[32];   // 0x004d3c90 - enemy type update function table
-extern void* zombie_states_table[16];            // 0x004bb2c8 - zombie state dispatch table
+extern void* enemies_update_functions_tbl[48];   // 0x004d3c90 - entity type update function table (ids 22-47 = character_npc_update)
+// 22 entries, not 16 - zombie_behavior_tbl is a second view of the same block
+// based 10 in. See entities/Zombie.h, which owns this declaration.
+extern void* zombie_states_table[22];            // 0x004bb2c8
 
 // --- Enemy (zombie) functions ---
 void zombie_update(void);                        // 0x004338c0
@@ -1182,6 +1293,9 @@ void empty_40ae40(int param);                         // 0x0040ae40
 void update_entities(void);                           // 0x0048f0f0
 void update_player_anim(void);                        // 0x00494d90
 void update_player_position(PlayerEntity* ent, int a);// 0x0041c060
+int  check_door(unsigned char* entry);              // 0x0041b6d0 room_check_actions[5]
+int  no_room_action(unsigned char* entry);          // 0x0041c050 room_check_actions[0]
+int  door_try_enter(unsigned char* entry);           // 0x0041b400 room_check_actions[1]
 void DrawFadeSpr(void);                               // 0x00456d30
 void update_sounds(void);                             // 0x00474090
 void room_camera_and_lighting_update(void);           // 0x00473ff0
@@ -1197,7 +1311,7 @@ void StartAttractDemo(void);                          // 0x004818b0
 void check_menus_state(void);                         // 0x004815f0
 void main_menu(void);                                 // 0x00463710 - in-game menu (status/inventory/map)
 void options_menu(void);                              // 0x004761b0 - options/configuration menu
-void FUN_004813c0(void);                              // 0x004813c0 - room load/restore for menu
+void room_transition_load(void);                      // 0x004813c0 - room/stage transition loader
 void set_fading(int type, int counter);               // 0x0047b980
 int  cmd_0x4c(void);                                  // 0x00460b80 - stop sound banks
 void display_die_screen(void);                        // 0x004... - death screen display
@@ -1302,6 +1416,8 @@ int  MatrixToCamera(MATRIX* m);
 int  SquareRoot0(int val);
 int  GetAngleQuadrantValue(int slope);
 unsigned short CalculateAngleBetweenPointsXZ(int pos1_x, int pos1_z, int pos2_x, int pos2_z);
+void vectorMul3(VECTOR* v0, VECTOR* v1, VECTOR* v2);   // 0x0040a550 - v2 = v0 x v1
+int  VectorNormal(VECTOR* v0, VECTOR* v1);             // 0x0040a5c0 - scale to 4096, returns len^2
 
 // --- PS1 sprite primitive helpers ---
 void GteSpriteHeaderInit(SVECTOR* header);
@@ -1332,12 +1448,13 @@ unsigned char Effect_CreateBillboard(unsigned char type, unsigned char depthGrou
 void  JointApplyColorTint(JointStruct* joint, int param2, int param3, void* data);
 void  JointSetColorTint(int modelObjPtr, unsigned int packedColor);
 MATRIX* RotMatrixY(int angle, MATRIX* m);
-void  ApplyMatrix(MATRIX* m, SVECTOR* src, SVECTOR* dst);
+void  ApplyMatrix(MATRIX* m, SVECTOR* src, VECTOR* dst);   // 0x00409cd0 - dst is 3 INTs
 void  ApplyMatrixSV(MATRIX* m, SVECTOR* src, SVECTOR* dst);
 void  fp_lerp(SVECTOR* current, SVECTOR* target, int weightCurrent, int weightTarget, SVECTOR* out);
 void  BillboardSetColor(void* quad, int unused1, int unused2, unsigned int color);
 void  BillboardAdjSize(void* quad, short halfW, short halfH);
 void  BillboardSetSize(void* quad, short halfW, short halfH);
+void  BillboardSetRect(void* quad, short right, short left, short front, short back); // 0x004567d0
 short GetPlayerInputMasked(void);
 void  EntityUpdateWeaponJoint(int weaponIdx);
 MATRIX* MulMatrixInPlace(MATRIX* m0, MATRIX* m1);

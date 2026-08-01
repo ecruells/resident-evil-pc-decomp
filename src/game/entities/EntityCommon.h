@@ -1,0 +1,140 @@
+#pragma once
+#include "../../Globals.h"
+
+// ============================================================================
+// EntityCommon.h - Declarations shared by every entity type
+//
+// The functions here are the entity-generic half of what used to live in
+// Zombie.cpp: angle/line-of-sight helpers, SCA collision, the wander/pathfind
+// state machines and the joint effect helpers. Every monster update function
+// (ids 0-21) and the shared human-character driver (ids 22-47) calls into
+// them, and so does the player code in PlayerAnimations.cpp - none of it is
+// zombie-specific. Zombie.h now covers only the zombie state machine.
+//
+// The definitions are in EntityCommon.cpp.
+// ============================================================================
+
+// PS1 angle encoding: full circle = 0x1000 (4096), 180 deg = 0x800 (2048)
+#define ANGLE_FULL_CIRCLE       0x1000
+#define ANGLE_HALF_CIRCLE       0x0800
+#define ANGLE_SEMI_TOLERANCE    0x0801  // 180 deg + 1, boundary in turn_toward_target
+
+// Status flags (entity->status_flags bits) - shared by every entity type
+#define ENTITY_STATUS_ACTIVE         0x01  // bit 0: entity is active/visible
+#define ENTITY_STATUS_DEAD           0x08  // bit 3: entity is dead
+#define ENTITY_STATUS_PLAYER_ABOVE   0x20  // bit 5: player above (vertical) / in visual range (distance)
+#define ENTITY_STATUS_PLAYER_BELOW   0x80  // bit 7: player below (vertical) / in alert range (distance)
+#define ENTITY_STATUS_ALIGNED        0x40  // bit 6: entity is aligned with player
+
+// ============================================================================
+// Entity type IDs used by enemies_update_functions_tbl.
+// These are the entity->id values set by cmd_omodel_set / cmd_em_set in SCD
+// scripts. Ids 0-21 are the monsters; 22-47 are all handled by the shared
+// human-character driver in CharacterNpc.cpp.
+// ============================================================================
+enum EnemyType {
+    ENEMY_ZOMBIE           = 0,   // zombie_update
+    ENEMY_ZOMBIE_NAKED     = 1,   // zombie_update (naked variant)
+    ENEMY_CERBERUS         = 2,   // 0x00497fb0 - dog
+    ENEMY_CROW             = 3,   // 0x00478310 - crow
+    ENEMY_SPIDER           = 4,   // 0x0044f300 - spider
+    ENEMY_5                = 5,   // 0x0042e520
+    ENEMY_HUNTER           = 6,   // hunter_update
+    ENEMY_BEE              = 7,   // 0x0048daf0 - bee
+    ENEMY_WEB_SPINNER      = 8,   // 0x00464d10 - web spinner (big spider)
+    ENEMY_9                = 9,   // 0x00438a70
+    ENEMY_ADDER            = 10,  // adder_update - snake
+    ENEMY_NEPTUNE          = 11,  // neptune_update - shark
+    ENEMY_TYRANT           = 12,  // tyrant_update
+    ENEMY_YAWN             = 13,  // yawn_update - giant snake
+    ENEMY_PLANT42_ROOTS    = 14,  // plant42_roots_update
+    ENEMY_MONSTER_PLANT    = 15,  // monster_plant_update
+    ENEMY_TYRANT_2         = 16,  // tyrant_update (variant)
+    ENEMY_17               = 17,  // zombie_update (variant)
+    ENEMY_YAWN_2           = 18,  // yawn_update (variant)
+    ENEMY_CHIMERA          = 19,  // 0x00443640 - chimera
+    ENEMY_20               = 20,  // 0x00427330
+    ENEMY_BLACK_TIGER      = 21,  // 0x0040b760 - black tiger (giant spider)
+    ENEMY_GENERIC          = 22,  // 0x0046acf0 - shared human character driver
+    ENEMY_COUNT            = 32
+};
+
+// ============================================================================
+// enemies_update_functions_tbl @ 0x004d3c90 - entity type dispatch table
+// Indexed by entity->id. 48 entries: 0-21 monsters, 22-47 the shared human
+// character driver. See the definition in EntityCommon.cpp for why 32 was wrong.
+// ============================================================================
+extern void* enemies_update_functions_tbl[48];
+
+// ---- Per-type update functions referenced by the dispatch table ----
+void zombie_update(void);          // 0x004338c0 - Zombie.cpp
+void character_npc_update(void);   // 0x0046acf0 - CharacterNpc.cpp
+
+// ============================================================================
+// Angle / line-of-sight helpers
+// ============================================================================
+extern unsigned short getAngleTowardsTarget(int px, int pz);                 // 0x00460450
+extern int  turn_toward_target(VECTOR* target_pos, short angle_step);        // 0x00489960
+extern void entity_rotate_toward_target(VECTOR* pos, unsigned short angleStep); // 0x004899b0
+extern unsigned char check_line_of_sight(VECTOR* targetPos);                // 0x0048a4b0
+extern unsigned int entity_check_angular_los(short fovHalfAngle, VECTOR* targetPos); // 0x00489c60
+extern unsigned char checkAngularViewAndDistance(short fovHalfAngle, short maxDistance, VECTOR* targetPos); // 0x00489cf0
+
+// Sets status_flags bit 0x20 / 0x80 when the player is inside `range`
+extern void entity_check_visual_range(unsigned int range);  // 0x0043bfa0
+extern void entity_check_alert_range(unsigned int range);   // 0x0043bfe0
+
+// ============================================================================
+// Movement / pathfinding state machines
+// ============================================================================
+extern unsigned int entity_pathfind_update(void);                            // 0x0048ad10
+extern unsigned int entity_update_wander_turn(unsigned int movement_dist,
+                                              unsigned char* control_flags,
+                                              unsigned char* turn_counter,
+                                              unsigned short angle_step,
+                                              unsigned char turn_limit);     // 0x00489800
+
+// ============================================================================
+// SCA collision
+// ============================================================================
+extern void SetEntityScaHitData(Entity* ent);                                // 0x0041b2c0
+extern unsigned int ResolveEntityScaCollision(Entity* a, Entity* b);         // 0x0041b0a0
+extern unsigned int HandleEnemyPlayerCollisions(void);                       // 0x00489e10
+// 0x0047d6f0 - two-point boundary push for a prone body: rotates each offset
+// by the entity yaw, pushes at both, rolls position AND angle back on failure.
+// Returns 0 = clear, 1 = pushed clear, 0x80 = still stuck (rolled back).
+// STILL A STUB - see EntityCommon.cpp.
+extern unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB);
+// check_room_collision (0x0047d310), ChkOutsideCell (0x0047d270) and
+// room_check_sight_blocked (0x0047db90) live in RoomCollision.cpp and are
+// declared in Globals.h. Do NOT re-declare them here: this header used to carry
+// a `ChkOutsideCell(SVECTOR*, ...)` stub whose first parameter type differed from
+// the real `VECTOR*` one, so it linked as a separate overload and every
+// line-of-sight call in this file bound to the do-nothing version.
+
+// ============================================================================
+// Joint / effect helpers
+// ============================================================================
+extern void blood_splatter_physics(int jointData, short gravityStep);         // 0x00437d20
+extern void snap_player_to_grab_position(void* player);                       // 0x00489ee0
+extern void entity_apply_anim_vertex(void* entity, unsigned int animHeader, unsigned int animBase);
+extern void joint_setup_attack_effect(int joint, unsigned char effectType,
+                                      unsigned short timer, unsigned short frameMatch); // 0x0048a070
+extern void joint_enable_special_effect(int joint, unsigned char a, int b, unsigned char c);
+extern void FUN_004565f0(SVECTOR* pos, SVECTOR* quad, int halfW, int halfH);  // 0x004565f0 - shadow quad builder
+extern void entity_add_fade_sprite(VECTOR* pos, short* velocity, short yOffset, short angle); // 0x00456810 - FadeSprite.cpp
+
+// ============================================================================
+// Remaining engine dependencies (still stubs pending decompilation)
+// ============================================================================
+extern void FUN_0040a380(VECTOR* v0, VECTOR* v1);
+extern void FUN_0045f970(int px, int pz, int* a, int* b);
+extern unsigned char FUN_0048ae00(int joint, VECTOR* pos, int radius, int playerPtr);
+extern unsigned int is_facing_toward_entity(void* player);
+extern char reduce_attack_time_by_btn_press(void);
+extern void set_next_entity_data_buffer(int count);                           // 0x00488f90
+extern unsigned char FUN_0048bd00(void* light, unsigned char param2, int param3); // 0x0048bd00 - lighting check
+extern void FUN_0048bda0(void);                                               // 0x0048bda0 - lighting response
+extern void FUN_0048c0d0(void);                                               // 0x0048c0d0 - pre-flip setup
+extern void FlipSprite(int light, MATRIX* out, unsigned char param3, int param4); // 0x00460610
+extern void Matrix_MulMatrix(MATRIX* a, MATRIX* b);                           // 0x0040a2e0

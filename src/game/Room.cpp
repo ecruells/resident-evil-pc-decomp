@@ -4,6 +4,7 @@
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
 #include <cstdio>
+#include "../system/AssetPath.h"
 
 extern void SetSpriteBufferFlag(void);
 
@@ -38,6 +39,152 @@ void cut_set(void) // 0x004628c0
         Room_ApplySpriteFlags();
     }
     printf("cut set  end\n");
+}
+
+// ============================================================================
+// is_entity_in_switch_zone (0x00462d90)
+// Point-in-quadrilateral test: is `position` inside `zone`?
+//
+// Four cross-product edge tests, pivoting on corner 0 for the first two edges
+// and on corner 2 for the last two. Only the X and Z components of `position`
+// are used (the room's floor plane); Y is ignored.
+//
+// FAITHFULNESS NOTE: the original zero-extends every zone coordinate to 32 bits
+// (XOR reg,reg / MOV reg16,[zone+n]), so the shorts behave as UNSIGNED 16-bit
+// values. For the zone-relative differences this is harmless — both operands
+// shift by the same 0x10000, so x1-x0 is unchanged — but `position->x - x0`
+// mixes a full signed int with a zero-extended coordinate, so a zone corner at
+// a negative coordinate does NOT behave as negative here. That is the original's
+// behaviour and is reproduced deliberately; do not "fix" it to a signed read.
+// ============================================================================
+int is_entity_in_switch_zone(VECTOR* position, void* zoneData) // 0x00462d90
+{
+    CAM_SWITCH_ZONE* zone = (CAM_SWITCH_ZONE*)zoneData;
+
+    // Port-only guard: the original has no NULL check, but the port calls this
+    // from the options-menu entity preview, where there is no RDT zone table.
+    if (zone == NULL) return 1;
+
+    // 0x00462d9a-0x00462da2: pivot on corner 0, zero-extended
+    int x0 = (int)(unsigned short)zone->x0;
+    int y0 = (int)(unsigned short)zone->y0;
+
+    // 0x00462db1-0x00462dbe: position relative to corner 0
+    int dx = position->x - x0;
+    int dz = position->z - y0;
+
+    // 0x00462db3-0x00462de6: the other corners, relative to corner 0
+    int x1r = (int)(unsigned short)zone->x1 - x0;
+    int y1r = (int)(unsigned short)zone->y1 - y0;
+    int x3r = (int)(unsigned short)zone->x3 - x0;
+    int y3r = (int)(unsigned short)zone->y3 - y0;
+
+    // 0x00462e08: edge 0->1
+    if (x1r * dz > y1r * dx) return 0;
+
+    // 0x00462e32: edge 0->3
+    if (x3r * dz < y3r * dx) return 0;
+
+    // 0x00462e38-0x00462e59: re-pivot every term on corner 2
+    int x2 = (int)(unsigned short)zone->x2;
+    int y2 = (int)(unsigned short)zone->y2;
+
+    int dx2 = position->x - x2;
+    int dz2 = position->z - y2;
+
+    int x1p = (int)(unsigned short)zone->x1 - x2;
+    int y1p = (int)(unsigned short)zone->y1 - y2;
+    int x3p = (int)(unsigned short)zone->x3 - x2;
+    int y3p = (int)(unsigned short)zone->y3 - y2;
+
+    // 0x00462e6e: edge 2->1
+    if (x1p * dz2 < y1p * dx2) return 0;
+
+    // 0x00462e7a: edge 2->3
+    if (x3p * dz2 > y3p * dx2) return 0;
+
+    // 0x00462e7e
+    return 1;
+}
+
+// ============================================================================
+// display_room_camera_bg (0x00462d50)
+// Point g_CurrentRdtDataTypePtr at the switch-zone group belonging to the
+// current camera, then hand off to cut_set() to actually put the room on
+// screen (sprites, camera transform, background image).
+//
+// The walk has no bound: the RDT is expected to contain a group for every
+// camera id that g_roomCameraId can hold. A bad g_roomCameraId runs off the
+// end of the table, which is the original's behaviour.
+// ============================================================================
+void display_room_camera_bg(void) // 0x00462d50
+{
+    // 0x00462d5d: start at the head of the switch-zone table
+    CAM_SWITCH_ZONE* zone = (CAM_SWITCH_ZONE*)g_RdtPointer->cam_switch_zones;
+    g_CurrentRdtDataTypePtr = zone;
+
+    // 0x00462d66-0x00462d81: advance to the group whose camFrom is this camera
+    while ((unsigned short)zone->camFrom != (unsigned short)g_roomCameraId) {
+        zone++;
+        g_CurrentRdtDataTypePtr = zone;
+    }
+
+    // 0x00462d83
+    cut_set();
+}
+
+// ============================================================================
+// check_camera_switch (0x00462cc0)
+// Test the player against each switch zone of the current camera's group. On a
+// hit, switch g_roomCameraId to that zone's camTo and redisplay.
+//
+// param_1 != 0 forces a cut_set() even when no zone matched — that is how the
+// initial room display happens: room_set() calls check_camera_switch(1) after
+// loading everything, and the "no zone matched" path is what actually puts the
+// starting camera on screen.
+//
+// The original returns EAX (0 on the paths that do work, and whatever was in
+// EAX on entry when camera changes are disabled). No caller reads it, so this
+// is declared void.
+// ============================================================================
+void check_camera_switch(int param_1) // 0x00462cc0
+{
+    // 0x00462cc1-0x00462cc7: first candidate zone is the one AFTER the group
+    // header that g_CurrentRdtDataTypePtr points at
+    CAM_SWITCH_ZONE* zone = (CAM_SWITCH_ZONE*)g_CurrentRdtDataTypePtr + 1;
+
+    // 0x00462cca: camera changes disabled during cutscenes
+    if ((g_main_state_flags & 0x100000) != 0) {
+        return;
+    }
+
+    // 0x00462cdb-0x00462d02: walk this camera's zones
+    while ((unsigned short)zone->camFrom == (unsigned short)g_roomCameraId) {
+        if (is_entity_in_switch_zone(
+                (VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t, zone) != 0)
+        {
+            // 0x00462d1b: enter the new camera
+            g_roomCameraId = (unsigned char)zone->camTo;
+
+            if ((g_main_state_flags & 4) != 0) {
+                // 0x00462d24: defer the redisplay to game_loop (bit 0x20)
+                g_main_state_flags |= 0x20;
+                StMask(0, 5);
+                return;
+            }
+
+            // 0x00462d3b: redisplay immediately
+            StMask(0, 4);
+            display_room_camera_bg();
+            return;
+        }
+        zone++;
+    }
+
+    // 0x00462d04: no zone matched
+    if (param_1 != 0) {
+        cut_set();
+    }
 }
 
 // ============================================================================
@@ -211,13 +358,13 @@ void load_room_masks(int param_1) // 0x00475a90
     int* spriteGroupPtr = (int*)cameras[param_1].mask_pointer;
 
     if (*spriteGroupPtr != 0) {
-        g_maskPathTemplate[0x11] = (char)(g_stageId + 0x30);
+        g_maskPathTemplate[GAME_DATA_PATH_IDX(0x11)] = (char)(g_stageId + 0x30);
         if (g_stageId > 4) {
-            g_maskPathTemplate[0x11] = (char)(g_stageId + 0x2b);
+            g_maskPathTemplate[GAME_DATA_PATH_IDX(0x11)] = (char)(g_stageId + 0x2b);
         }
-        g_maskPathTemplate[0x12] = (char)(g_roomId / 10 + 0x30);
-        g_maskPathTemplate[0x14] = (char)(param_1 + '0');
-        g_maskPathTemplate[0x13] = (char)(g_roomId % 10 + 0x30);
+        g_maskPathTemplate[GAME_DATA_PATH_IDX(0x12)] = (char)(g_roomId / 10 + 0x30);
+        g_maskPathTemplate[GAME_DATA_PATH_IDX(0x14)] = (char)(param_1 + '0');
+        g_maskPathTemplate[GAME_DATA_PATH_IDX(0x13)] = (char)(g_roomId % 10 + 0x30);
 
         void* pakData;
         if ((g_stageId == 2) && (g_roomId == 0x11)) {
@@ -245,13 +392,13 @@ void load_room_bg(void) // 0x00462b00
         if (g_RdtPointer->cameras_count != 0) {
             do {
                 DAT_004c2090 = g_hexCharTable[cameraIdx];
-                g_bgPathTemplate[15] = g_hexCharTable[g_stageId + 1];
-                g_bgPathTemplate[16] = g_hexCharTable[g_roomId >> 4];
-                g_bgPathTemplate[17] = g_hexCharTable[g_roomId & 0xf];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)] = g_hexCharTable[g_stageId + 1];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x10)] = g_hexCharTable[g_roomId >> 4];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x11)] = g_hexCharTable[g_roomId & 0xf];
                 if (g_stageId > 4) {
-                    g_bgPathTemplate[15] = g_bgPathTemplate[17] - 5;
+                    g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)] = g_bgPathTemplate[GAME_DATA_PATH_IDX(0x11)] - 5;
                 }
-                g_bgPathTemplate[11] = g_bgPathTemplate[15];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0b)] = g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)];
 
                 SetSpriteBufferFlag();
                 LoadFile(g_bgPathTemplate, g_bgPakLoadBuffer, 2);
@@ -276,17 +423,24 @@ void load_room_bg(void) // 0x00462b00
         int camCounter = 0;
         if (g_RdtPointer->cameras_count != 0) {
             do {
-                g_bgPathTemplate[18] = g_hexCharTable[camCounter];
-                g_bgPathTemplate[15] = g_hexCharTable[g_stageId + 1];
-                g_bgPathTemplate[16] = g_hexCharTable[g_roomId >> 4];
-                g_bgPathTemplate[17] = g_hexCharTable[g_roomId & 0xf];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x12)] = g_hexCharTable[camCounter];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)] = g_hexCharTable[g_stageId + 1];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x10)] = g_hexCharTable[g_roomId >> 4];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x11)] = g_hexCharTable[g_roomId & 0xf];
                 if (g_stageId > 4) {
-                    g_bgPathTemplate[15] = g_bgPathTemplate[15] - 5;
+                    g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)] = g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)] - 5;
                 }
                 camCounter++;
-                g_bgPathTemplate[11] = g_bgPathTemplate[15];
+                g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0b)] = g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)];
 
                 SetSpriteBufferFlag();
+                // 0x00462b?? : *(int *)(iVar3 * 4 + 0xaea08c) = iVar2, with the
+                // camera counter ALREADY incremented - so the offset of image i
+                // lands in slot i+1 of the array based at 0x00aea08c. That is not
+                // a bug in the original, because load_room_bg_image reads the
+                // table from a base 4 bytes HIGHER (0x00aea090), which cancels
+                // the shift exactly. See the matching note there: the port shares
+                // one array for both, so the reader has to add the 1 back.
                 g_bgCameraOffsets[camCounter] = totalSize;
                 int fileSize = (int)LoadFile(g_bgPathTemplate, &g_bgCacheBuffer[totalSize], 2);
                 totalSize += fileSize;
@@ -309,15 +463,22 @@ void load_room_bg_image(void) // 0x004629c0
 
     void* pakData;
     if (g_stageId == 2 && g_roomId == 0x11) {
-        g_bgPathTemplate[16] = g_hexCharTable[1];
-        g_bgPathTemplate[17] = g_hexCharTable[1];
-        g_bgPathTemplate[18] = g_hexCharTable[g_roomCameraId];
-        g_bgPathTemplate[15] = g_hexCharTable[3];
-        g_bgPathTemplate[11] = g_bgPathTemplate[15];
+        g_bgPathTemplate[GAME_DATA_PATH_IDX(0x10)] = g_hexCharTable[1];
+        g_bgPathTemplate[GAME_DATA_PATH_IDX(0x11)] = g_hexCharTable[1];
+        g_bgPathTemplate[GAME_DATA_PATH_IDX(0x12)] = g_hexCharTable[g_roomCameraId];
+        g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)] = g_hexCharTable[3];
+        g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0b)] = g_bgPathTemplate[GAME_DATA_PATH_IDX(0x0f)];
         LoadFile(g_bgPathTemplate, g_bgPakLoadBuffer, 2);
         pakData = g_bgPakLoadBuffer;
     } else {
-        pakData = &g_bgCacheBuffer[g_bgCameraOffsets[g_roomCameraId]];
+        // 0x00462a5?: g_bgCacheBuffer + (&DAT_00aea090)[g_roomCameraId]. The
+        // original reads this table from 0x00aea090 while load_room_bg WRITES it
+        // from 0x00aea08c with a post-incremented index - two bases 4 bytes apart
+        // that cancel out. The port keeps one array, so the +1 has to be explicit
+        // here. Without it every camera showed the PREVIOUS camera's background
+        // (camera 6 rendered image 5) and camera 0 only looked correct because
+        // slot 0 is never written and happens to be 0.
+        pakData = &g_bgCacheBuffer[g_bgCameraOffsets[g_roomCameraId + 1]];
     }
 
     unpack_pakfile_(pakData, g_TimImageBuffer);
@@ -360,13 +521,13 @@ void load_room_bg_masks(void) // 0x004759d0
             if (*maskPointer == 0) {
                 fileSize = 0;
             } else {
-                g_maskPathTemplate[0x11] = (char)(g_stageId + 0x30);
+                g_maskPathTemplate[GAME_DATA_PATH_IDX(0x11)] = (char)(g_stageId + 0x30);
                 if (g_stageId > 4) {
-                    g_maskPathTemplate[0x11] = (char)(g_stageId + 0x2b);
+                    g_maskPathTemplate[GAME_DATA_PATH_IDX(0x11)] = (char)(g_stageId + 0x2b);
                 }
-                g_maskPathTemplate[0x12] = (char)(g_roomId / 10 + 0x30);
-                g_maskPathTemplate[0x13] = (char)(g_roomId % 10 + 0x30);
-                g_maskPathTemplate[0x14] = (char)(camCounter + '0');
+                g_maskPathTemplate[GAME_DATA_PATH_IDX(0x12)] = (char)(g_roomId / 10 + 0x30);
+                g_maskPathTemplate[GAME_DATA_PATH_IDX(0x13)] = (char)(g_roomId % 10 + 0x30);
+                g_maskPathTemplate[GAME_DATA_PATH_IDX(0x14)] = (char)(camCounter + '0');
 
                 fileSize = (int)LoadFile(g_maskPathTemplate, &g_bgMaskDataBuffer[totalSize], 0x20);
             }

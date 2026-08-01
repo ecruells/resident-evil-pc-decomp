@@ -10,13 +10,13 @@
 extern int g_scaled_down_dist;  // holds weapon_id - 1 during hit detection
 
 // ---- Forward declarations ----
-extern unsigned int room_collision_check_0047db90(VECTOR* vec, unsigned int boundaryIndex);
+// room_check_sight_blocked (0x0047db90) comes from Globals.h.
 
 // ============================================================================
 // check_weapon_line_of_sight @ 0x0048a530
 // Multi-layer room obstruction check for weapon hits. Computes the vector
 // from the player to the hit position, then checks 4 room partition layers
-// (indices 3→0) via room_collision_check_0047db90. Returns 0 only if
+// (indices 3 down to 0) via room_check_sight_blocked. Returns 0 only if
 // all layers are clear — the shot has an unobstructed path.
 // ============================================================================
 static unsigned char check_weapon_line_of_sight(VECTOR* hitPos)
@@ -28,7 +28,7 @@ static unsigned char check_weapon_line_of_sight(VECTOR* hitPos)
     dir.z = hitPos->z - (int)g_playerEntityPointer.scaMatrixData.localMatrix.t[2];
 
     for (unsigned char layer = 3; layer != 0xFF; layer--) {
-        blocked |= (unsigned char)room_collision_check_0047db90(&dir, layer);
+        blocked |= (unsigned char)room_check_sight_blocked(&dir, layer);
     }
     return blocked;
 }
@@ -341,5 +341,45 @@ unsigned char weapon_hit_state_tbl_easy[30] = {};
 unsigned char weapon_hit_state_tbl_normal[30] = {};
 short weapon_damage_tbl_normal[30] = {};
 
+// ============================================================================
+// MovePlayerXZ (0x0041b350)
+// Rotate `offset` by a yaw angle about Y and write it to `out`.
+//
+// This was an empty stub with no address recorded, and it is the single reason
+// door and item action zones never fired on approach: update_player_position
+// builds its 600-unit reach probe by calling this with the SAME buffer as both
+// input and output, so with the stub in place the probe came back unrotated as
+// (600, 0, 0). Chris then had to be walked far enough that a due-east probe
+// happened to land in the zone. The real address was found from the call site at
+// 0x0041c087, not from any comment.
+//
+// The original builds a rotation SVECTOR with only .y set (.x and .z zeroed),
+// hands it to RotMatrix, then routes the result through the g_playerPosScratch
+// VECTOR before narrowing to shorts:
+//
+//   0041b358: MOV word ptr [ESP+0x2],CX      ; local.y = angle
+//   0041b373: CALL 0x00409df0                ; RotMatrix(&local, &g_matrixScratch)
+//   0041b38a: CALL 0x00409cd0                ; ApplyMatrix(&g_matrixScratch, offset, 0x00be11b0)
+//   0041b396: MOV EDX,dword ptr [0x00be11b0] ; out->x = (short)result.x  (etc)
+//
+// Using g_playerPosScratch as the intermediate is faithful and safe: the caller
+// overwrites it with the final probe immediately afterwards. The angle is read as
+// a 16-bit value in the original (`MOV CX, word ptr [ESP+4]`) even though callers
+// push a dword, so it is truncated here.
+// ============================================================================
+void MovePlayerXZ(int angle, SVECTOR* offset, SVECTOR* out)
+{
+    SVECTOR rot;
+    rot.x = 0;
+    rot.y = (short)angle;
+    rot.z = 0;
+
+    RotMatrix(&rot, &g_matrixScratch);
+    ApplyMatrix(&g_matrixScratch, offset, &g_playerPosScratch);
+
+    out->x = (short)g_playerPosScratch.x;
+    out->y = (short)g_playerPosScratch.y;
+    out->z = (short)g_playerPosScratch.z;
+}
+
 // ---- Stub functions ----
-void MovePlayerXZ(int angle, SVECTOR* offset, SVECTOR* out) { }

@@ -45,7 +45,16 @@ static BOOL LoadIniConfiguration(void)
     g_dwScreenWidth = GetPrivateProfileIntA("Display", "Width", 640, foundPath);
     g_dwScreenHeight = GetPrivateProfileIntA("Display", "Height", 480, foundPath);
     g_dwBitDepth = GetPrivateProfileIntA("Display", "BitDepth", 32, foundPath);
-    
+
+    // Debug-only: draw the room's RDT collision boundaries over the background.
+    g_bShowCollisionDebug =
+        (GetPrivateProfileIntA("Debug", "ShowCollision", 0, foundPath) != 0);
+    // World Y of the plane the overlay is drawn on. 0 is the room floor; nudge it
+    // for a room whose walkable level is not at y = 0. Note -Y is up.
+    g_iCollisionDebugY =
+        GetPrivateProfileIntA("Debug", "CollisionY", 0, foundPath);
+
+
     // Clamp to reasonable values
     if (g_dwScreenWidth < 320) g_dwScreenWidth = 640;
     if (g_dwScreenHeight < 240) g_dwScreenHeight = 480;

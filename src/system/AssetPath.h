@@ -1,29 +1,37 @@
-// AssetPath.h - Asset path resolution for development and retail builds
+// AssetPath.h - Compile-time asset root
 //
-// In the original game, all asset paths are relative starting with ".\usa\".
-// In this decomp project, assets are stored under "assets\USA\".
-// The path resolver maps original paths to their correct location based on build config.
+// The original hardcodes GAME_DATA_ROOT in front of every asset path. This project keeps
+// the same tree under ".\assets\USA\" for development, so the only thing that
+// differs is the root.
+//
+// That substitution is done at COMPILE TIME, with GAME_DATA_ROOT standing in for
+// the original's GAME_DATA_ROOT literal. An earlier revision instead rewrote paths at
+// runtime (ResolveAssetPath, which scanned for a "\usa\" component and spliced in
+// "\assets\USA\"). That was worse in two ways:
+//
+//   1. It was a behavioural divergence with no counterpart in the original - a
+//      string transform sitting between the game and the filesystem.
+//   2. It was not idempotent, and nothing stopped it running twice. Once the sound
+//      loaders resolved a path and handed the result to CreateSound, which resolved
+//      again, ".\assets\USA\voice\V001_00.wav" matched its own "\USA\" component
+//      and became ".\assets\assets\USA\voice\V001_00.wav".
+//
+// A macro cannot double-apply, and it keeps the path literals in the decompiled
+// code reading the way the original's do.
 #pragma once
+#include <stddef.h>
 
 #ifdef _DEBUG
-// Debug: assets are under ".\assets\USA\"
-#define USE_ASSET_PATH_REMAP 1
+#define GAME_DATA_ROOT      ".\\assets\\USA\\"
 #else
-// Release: assets follow original layout ".\usa\"
-#define USE_ASSET_PATH_REMAP 0
+#define GAME_DATA_ROOT      ".\\usa\\"
 #endif
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+// Length of the root, excluding the terminator.
+#define GAME_DATA_ROOT_LEN  (sizeof(GAME_DATA_ROOT) - 1)
 
-// ResolveAssetPath - Map an original game path to the actual file location
-//   originalPath: e.g. ".\usa\data\fontus.tim" or "./usa/data/fontus.tim"
-//   outPath:      resolved path buffer
-//   outSize:      size of outPath buffer
-// Returns: outPath on success, NULL on error
-const char* ResolveAssetPath(const char* originalPath, char* outPath, size_t outSize);
-
-#ifdef __cplusplus
-}
-#endif
+// Byte offset of a character in a path built as GAME_DATA_ROOT followed by the
+// original's template body. Needed only by paths that are fixed-layout templates
+// patched by character index (g_bgPathTemplate). `originalIndex` is the index the
+// original used, which is relative to its own 6-character GAME_DATA_ROOT root.
+#define GAME_DATA_PATH_IDX(originalIndex) (GAME_DATA_ROOT_LEN + (originalIndex) - 6)

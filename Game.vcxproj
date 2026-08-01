@@ -125,17 +125,22 @@
     <ClCompile Include="src\game\TmdAnimation.cpp" />
     <ClCompile Include="src\game\TmdRenderer.cpp" />
     <ClCompile Include="src\game\EntityModelLoader.cpp" />
+    <ClCompile Include="src\game\CollisionDebug.cpp" />
+    <ClCompile Include="src\game\RoomCollision.cpp" />
     <ClCompile Include="src\game\RoomInit.cpp" />
     <ClCompile Include="src\game\RoomStubs.cpp" />
     <ClCompile Include="src\game\Room.cpp" />
     <ClCompile Include="src\game\RoomEvents.cpp" />
     <ClCompile Include="src\game\CmdFunctions.cpp" />
     <ClCompile Include="src\game\EngineStubs.cpp" />
-    <ClCompile Include="src\game\enemies\Zombie.cpp" />
+    <ClCompile Include="src\game\entities\EntityCommon.cpp" />
+    <ClCompile Include="src\game\entities\CharacterNpc.cpp" />
+    <ClCompile Include="src\game\entities\Zombie.cpp" />
     <ClCompile Include="src\game\WeaponDamage.cpp" />
     <ClCompile Include="src\game\Rendering.cpp" />
     <ClCompile Include="src\game\PrintText.cpp" />
     <ClCompile Include="src\game\TextureLoader.cpp" />
+    <ClCompile Include="src\game\FadeSprite.cpp" />
     <ClCompile Include="src\game\SpriteRenderer.cpp" />
     <ClCompile Include="src\marni\Marni3DObject.cpp" />
     <ClCompile Include="src\game\InputSystem.cpp" />
@@ -146,7 +151,6 @@
     <ClCompile Include="src\game\SaveLoadScreen.cpp" />
     <ClCompile Include="src\game\GteMatrix.cpp" />
     <ClCompile Include="src\video\VideoPlayback.cpp" />
-    <ClCompile Include="src\system\AssetPath.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="src\Globals.h" />
@@ -158,7 +162,8 @@
     <ClInclude Include="src\marni\MarniSound.h" />
     <ClInclude Include="src\game\SpriteRenderer.h" />
     <ClInclude Include="src\game\TmdRenderer.h" />
-    <ClInclude Include="src\game\enemies\Zombie.h" />
+    <ClInclude Include="src\game\entities\EntityCommon.h" />
+    <ClInclude Include="src\game\entities\Zombie.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

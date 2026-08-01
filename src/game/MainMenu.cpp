@@ -531,12 +531,18 @@ static void menu_restore_game_state(void)
     CenterScreenOrigin();
     menu_update_fading_rect();
     FUN_00462940();
+    // 0x00463e4a: FUN_0040ac80(i, g_RdtPointer->lights + i). The RDT light array
+    // is at +0x0C with a 0x14 stride (Ghidra RDT: LIGHT[3] at offset 12,
+    // sizeof(LIGHT) == 20). An earlier revision used base +0x30 and stride 0x2C
+    // - the camera record's stride - so restoring the room after a menu close
+    // reloaded the D3D lights from the middle of the light array and past its end.
     for (unsigned char i = 3; i > 0; i--) {
-        FUN_0040ac80((int)(i - 1), (char*)g_RdtPointer + 0x30 + (i - 1) * 0x2C);
+        FUN_0040ac80((int)(i - 1), &g_RdtPointer->lights[i - 1]);
     }
-    setBackColor((unsigned char)g_RdtPointer->ambient_light_r,
-                 (unsigned char)g_RdtPointer->ambient_light_g,
-                 (unsigned char)g_RdtPointer->ambient_light_b);
+    // ambient_light is three shorts; do not narrow to a byte (see cmd_light_set)
+    setBackColor((unsigned short)g_RdtPointer->ambient_light_r,
+                 (unsigned short)g_RdtPointer->ambient_light_g,
+                 (unsigned short)g_RdtPointer->ambient_light_b);
     empty_40ae40(0);
     g_main_state_flags &= 0xFFFF00FF;
     g_bGameActive = 2;

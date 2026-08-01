@@ -1,11 +1,13 @@
 // GameState.cpp - Game state task functions (logos, title, asset loading)
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "../DebugPrint.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/MarniSound.h"
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include <cstdio>
+#include "../system/AssetPath.h"
 
 extern void FUN_00470a30(void);
 extern void Object_DeleteAll(int a);
@@ -24,7 +26,7 @@ extern void vram_clr(int x, int y, int w, int h);
 // ---------------------------------------------------------------------------
 static void LoadAllItemsTexture(void)
 {
-    LoadFile(".\\usa\\data\\item_all.pix", g_ItemsImageBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\item_all.pix", g_ItemsImageBuffer, 0x20);
 }
 
 // ============================================================================
@@ -40,41 +42,41 @@ void load_global_assets(void)
     LoadAllItemsTexture();
 
     // Load main Fonts textures
-    LoadFile(".\\usa\\data\\fontus.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\fontus.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 30;
     ProcessTextureImage(g_DataBuffer, 30, 0, 0);
 
     // Load numeric panel and puzzles font textures
-    LoadFile(".\\usa\\data\\Font03t.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\Font03t.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 1;
     ProcessTextureImage(g_DataBuffer, 1, 0, 2);
 
     // Load Options menu textures (24bits)
-    LoadFile(".\\usa\\data\\Optkey03.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\Optkey03.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 2;
     LoadTexturePage(g_DataBuffer, 2, 0, 0xB, 0, 0, 0, 0);
 
     // Load Main menu textures (8bits)
-    LoadFile(".\\usa\\data\\status.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\status.tim", g_DataBuffer, 0x20);
     g_TextureBankID = 0x41C;
     LoadTexturePage(g_DataBuffer, 0x1C, 4, 0, 0, 0, 0, 1);
 
     SetupTexturePageHandles(0, 1);
 
     // Loan Main menu characters faces texture (8bits)
-    LoadFile(".\\usa\\data\\statface.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\statface.tim", g_DataBuffer, 0x20);
     LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 9, 0, 0, 0, 0);
 
     // Load Inventory slot background texture (8bits)
-    LoadFile(".\\usa\\data\\blue.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\blue.tim", g_DataBuffer, 0x20);
     LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 10, 0, 0, 0, 0);
 
     // Load unused weapons texture (Uzi and machinegun) (8bits)
-    LoadFile(".\\usa\\data\\staitem.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\staitem.tim", g_DataBuffer, 0x20);
     LoadTexturePage(g_DataBuffer, 0, 0, 0x1E, 0, 0, 0, 0);
 
     // Load character shadow texture (8bits)
-    LoadFile(".\\usa\\data\\kage.tim", g_DataBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\kage.tim", g_DataBuffer, 0x20);
     LoadShadowMaskTexture(g_DataBuffer, 0);
 
     int rectConfig[24] = {
@@ -454,7 +456,7 @@ void logos_state(void)
 
     Task_sleep(1);
 
-    // Task_chain((void*)game_start);
+    // Task_chain((void*)game_start); // debug only, to go directly to game
     Task_chain((void*)title_state);
 }
 
@@ -956,9 +958,9 @@ void InitializeGame(void)
     g_SpecialRoomLightDelta = 0;
     g_fading_counter = 0;
 
-    //Task_execute(1, (void*)display_game_loading_message);
+    Task_execute(1, (void*)display_game_loading_message);
 
-    LoadFile(".\\usa\\data\\bio_card.dat", g_loadDataDestPointer, 32);
+    LoadFile(GAME_DATA_ROOT "data\\bio_card.dat", g_loadDataDestPointer, 32);
 
     if ((g_main_state_flags & 0x10000000) == 0) {
         g_gameSessionInitFlag = 0;
@@ -1020,6 +1022,11 @@ void InitializeGame(void)
     DAT_00be9614 = 0;
 
     LoadHeldItemsImages();
+
+    // 0x00480a0d: DAT_00d91bc0 = &g_RoomItemEventTable. Redundant in practice —
+    // room_set -> room_item_event_table_reset sets the same head pointer — but
+    // present in the original.
+    g_RoomItemEventHead = g_RoomItemEventTable;
 
     g_playerEntity.pSca_hit_data = (DWORD)g_entityDataBlock;
 
@@ -1154,8 +1161,6 @@ void load_shoot_direction_data(void) { }
 // (0x0045a6d0) - Play title screen selection SFX
 void title_select_sfx(void) { }
 
-// (0x00462e90) - Check if player moved to different camera zone
-void check_camera_switch(int param) { }
 
 // (0x00477d90) - Load RDT file for current room
 // Loads the Room Definition Table for the current stage/room, resolves internal
@@ -1172,7 +1177,7 @@ void LoadRoomRdt(void)
 
     // 0x00477da4-0x00477e02: Build RDT file path
     // Format: ./usa/stageX/roomXYYZ.rdt where X=stage, YY=room, Z=flag
-    sprintf(FILE_PATH, ".\\usa\\stage%c\\room%c%c%c%c.rdt",
+    sprintf(FILE_PATH, GAME_DATA_ROOT "stage%c\\room%c%c%c%c.rdt",
             hexDigits[g_stageId + 1],
             hexDigits[g_stageId + 1],
             hexDigits[g_roomId >> 4],
@@ -1237,27 +1242,21 @@ void LoadRoomRdt(void)
         evtPtr++;
     }
 
-    // 0x00477f49-0x00477f64: Set back color from ambient light
+    // 0x00477f49-0x00477f64: Set back color from ambient light.
+    //
+    // ambient_light is a COLOR of three SHORTS (Ghidra: COLOR at RDT+6, size 6)
+    // and setBackColor takes 12-bit PS1 channels, scaling by 255/4096. Casting to
+    // unsigned char first was an 8x underexposure of the ambient term on every
+    // room: the mansion hall's 1775 became 239, so the GTE background colour came
+    // out 14 instead of 110 and every character model rendered near-black.
     setBackColor(
-        (unsigned char)g_RdtPointer->ambient_light_r,
-        (unsigned char)g_RdtPointer->ambient_light_g,
-        (unsigned char)g_RdtPointer->ambient_light_b);
+        (unsigned short)g_RdtPointer->ambient_light_r,
+        (unsigned short)g_RdtPointer->ambient_light_g,
+        (unsigned short)g_RdtPointer->ambient_light_b);
 
     // 0x00477f6e: empty_40ae40(0)
     empty_40ae40(0);
 }
-
-// (0x00462990) - Display room camera background image
-void display_room_camera_bg(void) { }
-
-// (0x00487590) - SCD: Create a script event entry
-void ScdEventEntry_Create(unsigned int slot, int scriptIndex) { }
-
-// (0x0046a250) - SCD: Room action dispatch
-void cmd_room_action(void) { }
-
-// (0x0047f870) - Play 3D sound with voice effect
-void play_sound_and_voice_effect(int type, int id) { }
 
 // (0x0040ada0) - Set background clear color
 void setBackColor(unsigned short r, unsigned short g, unsigned short b) {
@@ -1278,29 +1277,198 @@ void empty_40ae40(int param) { }
 // (0x00473b10) - Texture bank setup variant
 void FUN_00473b10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6) { }
 
-// (0x00473d10) - Texture bank setup variant 2
-void FUN_00473d10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6) { }
+// ============================================================================
+// FUN_00473d10 (0x00473d10) - Retarget a texture-queue entry with explicit bytes
+// Same scan as FUN_00473d60 (match the id byte at +0 against p6, arm via +1), but
+// stores p1/p2/p3 into bytes +3/+4/+5 instead of clearing them, and p4/p5 into the
+// words at +6/+8. SCD opcode 0x34 variant 1.
+// Every source is a byte in cmd_0x34, so the low byte of the wider parameters is
+// what the original actually stores - the declared widths differ from Ghidra's
+// inferred ones but the stored values are identical.
+// ============================================================================
+void FUN_00473d10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6)
+{
+    unsigned char* e = g_textureQueueData;
+    for (unsigned char i = 0; i < 4; i++) {
+        if ((char)e[0] == p6) {
+            e[3] = p1;
+            e[4] = (unsigned char)p2;
+            e[5] = (unsigned char)p3;
+            *(unsigned short*)(e + 6) = p4;
+            *(unsigned short*)(e + 8) = p5;
+            e[1] = 1;
+            return;
+        }
+        e += 10;
+    }
+}
 
-// (0x00473d60) - Entity animation trigger
-void FUN_00473d60(char p1, unsigned char p2, unsigned char p3) { }
+// ============================================================================
+// FUN_00473d60 (0x00473d60) - Retarget an existing texture-queue entry
+// Scans the 4 entries of g_textureQueueData (10 bytes each, 0x00d22740) for one
+// whose id byte matches p1; on a match, clears bytes +3..+5, stores the two
+// 16-bit parameters at +6 and +8, and arms the entry by setting +1 to 1.
+// No match = no-op. SCD opcode 0x34 variant 2.
+// ============================================================================
+void FUN_00473d60(char p1, unsigned char p2, unsigned char p3)
+{
+    unsigned char* e = g_textureQueueData;
+    for (unsigned char i = 0; i < 4; i++) {
+        if ((char)e[0] == p1) {
+            e[3] = 0;
+            e[4] = 0;
+            e[5] = 0;
+            *(unsigned short*)(e + 6) = p2;
+            *(unsigned short*)(e + 8) = p3;
+            e[1] = 1;
+            return;
+        }
+        e += 10;
+    }
+}
 
-// (0x00473e40) - Texture page operation
-void FUN_00473e40(int param) { }
+// ============================================================================
+// FUN_00473e40 (0x00473e40) - Force semi-transparency on a TMD's textured prims
+// Resolves the TMD's animation pointers if needed, then walks each primitive
+// group (7 dwords per group, count at +8; prim list pointer at group+0x10, prim
+// count at group+0x14). Any primitive whose command dword has bit 0x04000000 set
+// also gets 0x02000000 set. Primitive stride is ((cmd >> 8) & 0xFF) + 1 dwords.
+// The original returns *param_1; every caller ignores it. SCD opcode 0x1F.
+// ============================================================================
+extern void ResolveAnimPointers(unsigned char* data);   // TmdAnimation.cpp
 
-// (0x00473ea0) - SCA matrix setup
-void FUN_00473ea0(int param1, void* param2, ScaMatrixData* param3) { }
+void FUN_00473e40(int param)
+{
+    unsigned int* p = (unsigned int*)param;
+    if (p[1] == 0) {
+        ResolveAnimPointers((unsigned char*)(p + 1));
+    }
+    unsigned int* group = p + 3;
+    for (int groups = (int)p[2]; groups != 0; groups--) {
+        unsigned int* prim = (unsigned int*)group[4];
+        for (int prims = (int)group[5]; prims != 0; prims--) {
+            unsigned int cmd = *prim;
+            if ((cmd & 0x04000000) != 0) {
+                *prim = cmd | 0x02000000;
+            }
+            prim += ((cmd >> 8) & 0xFF) + 1;
+        }
+        group += 7;
+    }
+}
 
-// (0x00473f10) - Flag set operation
-void FUN_00473f10(int* baseAddr, unsigned int bitIndex) { }
+// ============================================================================
+// FUN_00473ea0 (0x00473ea0) - Bind a TMD to an object's animation slot
+// Resolves the TMD's animation pointers if needed, links the object's anim slot
+// to the TMD's slot table, stores the SCA matrix pointer at param2+4, zeroes
+// param2+0, and allocates the animation object from the load arena.
+// SCD opcodes 0x18 and 0x1F.
+// ============================================================================
+void FUN_00473ea0(int param1, void* param2, ScaMatrixData* param3)
+{
+    extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
+    extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
 
-// (0x0047cf80) - Sprite/billboard effect creation
-void FUN_0047cf80(int param1, unsigned int param2, unsigned int param3, unsigned int param4, MATRIX* param5) { }
+    if (*(int*)(param1 + 4) == 0) {
+        ResolveAnimPointers((unsigned char*)(param1 + 4));
+    }
+    SetAnimSlot((AnimSlot*)(param1 + 0xc), (int)param2, 0);
+    ((unsigned int*)param2)[1] = (unsigned int)param3;
+    *((unsigned int*)param2) = 0;
+    g_loadDataDestPointer = CreateAnimObject((int)param2, (unsigned int*)g_loadDataDestPointer);
+}
 
-// (0x004804a0) - Sound fade control
-void FUN_004804a0(short param1, unsigned int param2, short param3, unsigned int param4) { }
+// ============================================================================
+// FUN_00473f10 (0x00473f10) - Clear a bit flag
+// Exact counterpart of Flg_ck (0x00473f40): same byte-offset idiom
+// ((bitIndex & 0xFFFFFFE7) >> 3, i.e. (bitIndex >> 5) * 4) and the same MSB-first
+// bit order within the dword.
+// ============================================================================
+void FUN_00473f10(int* baseAddr, unsigned int bitIndex)
+{
+    unsigned int byteOffset = (bitIndex & 0xFFFFFFE7u) >> 3;
+    unsigned int bitMask    = 0x80000000u >> (bitIndex & 0x1F);
+    unsigned int* flagWord  = (unsigned int*)((unsigned char*)baseAddr + byteOffset);
+    *flagWord &= ~bitMask;
+}
 
-// (0x004805d0) - Sound parameter control
-void FUN_004805d0(short param1, unsigned int param2, unsigned int param3, unsigned int param4) { }
+// ============================================================================
+// FUN_0047cf80 (0x0047cf80) - Free every effect slot matching selected criteria
+// param1 is a criteria MASK; each set bit enables one comparison, and a slot is
+// freed only when every enabled comparison matches (the original builds an
+// accumulator and tests `accumulator == mask`, so bits above 3 make it unmatchable):
+//   bit 0 -> effect->effectType     == (u8)param2   (+0x26)
+//   bit 1 -> effect->depthGroup     == (u8)param3   (+0x27)
+//   bit 2 -> effect->animHeader[2]  == (u8)param4   (+0x06, unnamed field)
+//   bit 3 -> effect->spriteInfo     == (int)param5  (+0x64)
+// Freeing = bump g_freeEffectSlots and zero updateId then animId (animId 0 marks
+// the slot free), the same two bytes SCD opcode 0x48 clears.
+//
+// The original walks the 64 slots backwards (index 63 down to 0), pointing at
+// effect+0x26 and stepping by -0x84; reproduced here as an index loop.
+// Callers: SCD opcode 0x3E (mask 9 = type + spriteInfo) and 0x42 (mask 3 = type +
+// depthGroup).
+// ============================================================================
+void FUN_0047cf80(int param1, unsigned int param2, unsigned int param3, unsigned int param4, MATRIX* param5)
+{
+    unsigned char mask = (unsigned char)param1;
+
+    for (int i = 63; i >= 0; i--) {
+        Effect* e = &g_effectPool[i];
+        unsigned char matched = 0;
+
+        if ((mask & 1) != 0 && e->effectType == (unsigned char)param2) {
+            matched = 1;
+        }
+        if ((mask & 2) != 0 && e->depthGroup == (unsigned char)param3) {
+            matched |= 2;
+        }
+        if ((mask & 4) != 0 && e->animHeader[2] == (unsigned char)param4) {
+            matched |= 4;
+        }
+        if ((mask & 8) != 0 && e->spriteInfo == (int)param5) {
+            matched |= 8;
+        }
+
+        if (matched == mask) {
+            g_freeEffectSlots++;
+            e->updateId = 0;
+            e->animId   = 0;
+        }
+    }
+}
+
+// ============================================================================
+// FUN_004804a0 (0x004804a0) - Start a volume ramp on one BGM channel
+// param1 is unused by the original. param2 is the channel index and IS bounds
+// checked (`param_2 < 3`, signed) before touching g_SndBank. SCD opcode 0x43.
+// NOTE: the original divides by param4 with no zero check, so a script passing
+// 0 there would fault. Reproduced faithfully.
+// ============================================================================
+void FUN_004804a0(short param1, unsigned int param2, short param3, unsigned int param4)
+{
+    (void)param1;
+    if ((short)param2 < 3 && g_SndBank[param2].handle != 0) {
+        g_SndRampBankIndex   = (short)param2;
+        g_SndRampDirection   = (short)((int)param3 / (int)param4) * 0x4E;
+        g_SndRampFramesLeft  = (int)param4 * 2;
+    }
+}
+
+// ============================================================================
+// FUN_004805d0 (0x004805d0) - snd_set_channel_pan_volume
+// Applies a pan/volume pair to one BGM channel. param1 is unused by the original.
+// param2 is the channel index (indexed as [EAX*0x8 + g_SndBank], i.e. a record
+// index into SndBankSlot[3]). SCD opcode 0x2F.
+// ============================================================================
+void FUN_004805d0(short param1, unsigned int param2, unsigned int param3, unsigned int param4)
+{
+    (void)param1;   // pushed by callers, never read by the original
+    int handle = g_SndBank[param2].handle;
+    if (handle != 0) {
+        set_volume(handle, CalcPanVolume((int)(short)param3, (int)(short)param4));
+    }
+}
 
 // (0x00484d90) - Entity animation setup
 void FUN_00484d90(int param1, unsigned char param2, unsigned char param3) { }
@@ -1308,38 +1476,485 @@ void FUN_00484d90(int param1, unsigned char param2, unsigned char param3) { }
 // (0x00484e40) - Entity animation setup variant
 void FUN_00484e40(int param1, unsigned char param2, unsigned char param3) { }
 
-// (0x004870d0) - Entity/sound operation
-void FUN_004870d0(int param) { }
+// ============================================================================
+// FUN_004870d0 (0x004870d0) - Set flag bit 1 on 32 consecutive 0x84-byte records
+// param is a pointer whose +0x20 field holds the base of a record array; each
+// record is 0x84 bytes and the flag dword sits at +0x4CC relative to that base.
+// The original increments the offset BEFORE using it, so the first record touched
+// is base+0x4CC+0x84 and the last is base+0x4CC+0x1080 (32 iterations).
+// Called from SCD opcode 0x18 when the item type is 0x1E.
+// Field names are left as raw offsets: the pointed-to type is not yet modeled.
+// ============================================================================
+void FUN_004870d0(int param)
+{
+    int base = *(int*)(param + 0x20);
+    int offset = 0;
+    do {
+        offset += 0x84;
+        unsigned int* flags = (unsigned int*)(base + 0x4CC + offset);
+        *flags |= 2;
+    } while (offset < 0x1080);
+}
 
-// (0x0048a190) - Entity effect setup
-void FUN_0048a190(void* param1, int param2, int param3, int param4) { }
+// ============================================================================
+// FUN_0048a190 / JointApplyColorTint (0x0048a190)
+// Marks a joint dirty (bit 0x80 of its first byte), publishes its vertex count
+// doubled into g_playerDisplacement, and applies a colour tint to its model
+// object. When g_main_state_flags bit 0 is set the same is repeated on the
+// mirrored weapon-joint copy, reached by adding
+// (ENTITY->weaponJointsPtr - ENTITY->jointsStructs) to the joint pointer.
+//
+// NOTE: JointSetColorTint (0x00485ac0) reads only TWO arguments - verified by
+// disassembly: it takes arg2 from [ESP+8] at entry and arg1 from [ESP+0x20], and
+// never references arg3/arg4. The original pushes four and cleans 0x10, so
+// param3/param4 are DEAD. The colour actually applied is param2, so SCD opcode
+// 0x4D tints with 0x30 (r=0x30,g=0,b=0), not with the 0x00606060 it also pushes.
+// ============================================================================
+void FUN_0048a190(void* param1, int param2, int param3, int param4)
+{
+    (void)param3;   // pushed by the original, never read by JointSetColorTint
+    (void)param4;
 
-// (0x0048bfe0) - Joint animation processing
-void FUN_0048bfe0(void) { }
+    unsigned char* joint = (unsigned char*)param1;
+    *joint |= 0x80;
+    g_playerDisplacement = *(int*)(*(int*)(joint + 0x14) + 0x14) * 2;
+    JointSetColorTint(*(int*)(joint + 0x18), (unsigned int)param2);
 
-// (0x0048c020) - Entity weapon setup
-void FUN_0048c020(int param) { }
+    if ((g_main_state_flags & 1) != 0) {
+        joint += (*(int*)((unsigned char*)ENTITY + 0xac) -
+                  *(int*)((unsigned char*)ENTITY + 0x98));
+        g_tempVar = joint;
+        *joint |= 0x80;
+        g_playerDisplacement = *(int*)(*(int*)(joint + 0x14) + 0x14) * 2;
+        JointSetColorTint(*(int*)(joint + 0x18), (unsigned int)param2);
+    }
+}
 
-// (0x0048f330) - Get entity animation state
-int FUN_0048f330(unsigned char param) { return 0; }
+// ============================================================================
+// FUN_0048bfe0 (0x0048bfe0) - Allocate two work buffers for the current entity
+// Carves 0x7A00 and 0x1A00 bytes off the load arena and stores the two pointers
+// at entity +0xB0 and +0xB4. Both offsets fall inside the unnamed padding of
+// Entity/PlayerEntity (pad_b0 / pad_a4), so they are written by offset rather
+// than invented field names. Called from SCD opcode 0x0F.
+// ============================================================================
+void FUN_0048bfe0(void)
+{
+    unsigned char* ent = (unsigned char*)ENTITY;
+    *(void**)(ent + 0xB0) = g_loadDataDestPointer;
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + 0x7A00;
+    *(void**)(ent + 0xB4) = g_loadDataDestPointer;
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + 0x1A00;
+}
 
-// (0x0047ee20) - Get item slot index
-int get_item_slot(unsigned char itemId) { return -1; }
+// ============================================================================
+// FUN_0048c020 (0x0048c020) - Clone one joint's animation into the weapon-joint copy
+// param is a joint index (SCD opcode 0x0F passes 0x0E). Copies the source joint's
+// animation slot table into the first buffer allocated by FUN_0048bfe0
+// (entity +0xB0), points the destination joint at that buffer and at the second
+// buffer (+0xB4), relinks the slot, fixes up the relocated animation-data pointer
+// by the buffer delta, reverses the frame order, and builds the anim object.
+//
+//   source joint      = ENTITY->jointsStructs   (+0x98) + index * 0x7C
+//   destination joint = ENTITY->weaponJointsPtr (+0xAC) + index * 0x7C
+//
+// The copy length is *animSlot - animSlot: the slot table stores its own end
+// pointer in the first dword.
+// ============================================================================
+void FUN_0048c020(int param)
+{
+    extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
+    extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
+    extern void reverse_anim_frame_data(int animFieldAddr);
 
-// (0x0047cf80) - Create billboard effect sprite
-unsigned char Effect_CreateBillboard(unsigned char type, unsigned char param, unsigned short flags, MATRIX* spriteInfo, int* pos, char mode) { return 0; }
+    unsigned char* ent = (unsigned char*)ENTITY;
+    int dst = *(int*)(ent + 0xac) + (unsigned int)(unsigned char)param * 0x7c;
+    int src = *(int*)(ent + 0x98) + (unsigned int)(unsigned char)param * 0x7c;
 
-// (0x0047b410) - Build sound fade table
-void BuildSndFadeTbl(char fadeType, int maxVol) { }
+    int* animSlot = *(int**)(src + 0x14);
+    void* buf0 = *(void**)(ent + 0xb0);
+    void* buf1 = *(void**)(ent + 0xb4);
+    memcpy(buf0, animSlot, (size_t)(*animSlot - (int)animSlot));
 
-// (0x0040c560) - Camera/viewport operation
-void FUN_0040c560(int param) { }
+    int slotPtr = dst + 0xc;
+    *(void**)(dst + 0x14) = buf0;
+    *(void**)(dst + 0x18) = buf1;
+    SetAnimSlot((AnimSlot*)buf0, slotPtr, 0);
+
+    int* fixup = (int*)(*(int*)(dst + 0x14) + 0x10);
+    *fixup += *(int*)(dst + 0x14) - *(int*)(src + 0x14);
+
+    reverse_anim_frame_data(slotPtr);
+    CreateAnimObject(slotPtr, (unsigned int*)buf1);
+}
+
+// ============================================================================
+// FUN_0048f330 (0x0048f330) - restore_saved_enemy_state
+// Scans the 16 slots of g_savedEnemyStates for an occupied entry matching the
+// current room and the given enemy type. On a hit, copies the saved flags,
+// position and angle into ENTITY, consumes the slot (valid = 0) and returns 1.
+// Returns 0 when nothing matches.
+//
+// SCD opcode 0x1B (cmd_em_set) uses the return value to decide whether to skip
+// its own spawn initialisation - a hit means "this enemy already has state, keep
+// it where it was" rather than respawning at the script's coordinates.
+//
+// posY is applied only when the saved behaviorFlags have any of 0x70 set; the
+// original tests ENTITY->behavior_flags, which it has just written from the slot.
+// ============================================================================
+int FUN_0048f330(unsigned char param)
+{
+    g_pSavedEnemyState = g_savedEnemyStates;
+    int i = 0;
+    while (g_pSavedEnemyState->valid == 0 ||
+           g_pSavedEnemyState->roomId != g_roomId ||
+           g_pSavedEnemyState->enemyType != param) {
+        i++;
+        g_pSavedEnemyState++;
+        if (i > 0xF) {
+            return 0;
+        }
+    }
+
+    ENTITY->status_flags   = g_pSavedEnemyState->statusFlags;
+    ENTITY->behavior_flags = g_pSavedEnemyState->behaviorFlags;
+    ENTITY->scaMatrixData.localMatrix.t[0] = (int)g_pSavedEnemyState->posX;
+    if ((ENTITY->behavior_flags & 0x70) != 0) {
+        ENTITY->scaMatrixData.localMatrix.t[1] = (int)g_pSavedEnemyState->posY;
+    }
+    ENTITY->scaMatrixData.localMatrix.t[2] = (int)g_pSavedEnemyState->posZ;
+    *(unsigned short*)&ENTITY->angle = g_pSavedEnemyState->angle;
+    g_pSavedEnemyState->valid = 0;
+    return 1;
+}
+
+// ============================================================================
+// get_item_slot (0x004516a0)
+// Linear search of the player's inventory for itemId. On a hit, points
+// g_pCurrentItemSlot (0x00d226f0) at the matched 2-byte slot and returns its
+// index; on a miss, points it at g_defaultItemSlot and returns -1.
+// (The address previously commented here, 0x0047ee20, is inside LoadSoundBank.)
+// ============================================================================
+int get_item_slot(unsigned char itemId)
+{
+    unsigned char* slot = (unsigned char*)g_ItemSlotsPointer;
+    if (g_TotalHeldItems != 0) {
+        unsigned int i = 0;
+        do {
+            if (*slot == itemId) {
+                g_pCurrentItemSlot = (unsigned char*)g_ItemSlotsPointer + i * 2;
+                return (int)i;
+            }
+            i++;
+            slot += 2;
+        } while (i < (unsigned int)g_TotalHeldItems);
+    }
+    g_pCurrentItemSlot = &g_defaultItemSlot;
+    return -1;
+}
+
+// ============================================================================
+// BuildSndFadeTbl (0x0047ff90)
+// For each of the 3 BGM channels, computes how many g_SndDistSteps-sized volume
+// steps it takes to drive that channel from its current volume down to inaudible
+// (-10000), and stores the count in g_SndFadeStepTbl (clamped at 0).
+// Parameter 1 is the distance-step count (scaled by 0x4E), parameter 2 the fade
+// type - the previous stub had these names inverted. SCD opcode 0x27 passes
+// (op >> 8, 0x7F).
+// NOTE: divides by g_SndDistSteps with no zero check, exactly as the original.
+// ============================================================================
+void BuildSndFadeTbl(char distSteps, int fadeType)
+{
+    DAT_00ac98f8   = 0;
+    g_SndDistSteps = distSteps * 0x4E;
+    g_SndFadeType  = (unsigned char)fadeType;
+
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle == 0) {
+            g_SndFadeStepTbl[i] = 0;
+        } else {
+            g_SndFadeStepTbl[i] = (-10000 - getSndVol(g_SndBank[i].handle)) / g_SndDistSteps;
+        }
+        if (g_SndFadeStepTbl[i] < 0) {
+            g_SndFadeStepTbl[i] = 0;
+        }
+    }
+}
+
+// ============================================================================
+// FUN_0040c560 (0x0040c560) - Store the low bit of the parameter into DAT_004d6444
+// SCD opcode 0x4F writes this flag; opcode 0x50 (cmd_0x51) returns it as its
+// condition result, so a script can set a flag with 0x4F and branch on it later.
+// ============================================================================
+void FUN_0040c560(int param)
+{
+    DAT_004d6444 = (unsigned char)param & 1;
+}
 
 // Global stubs
 unsigned long g_gameTimerSnapshot = 0;            // 0x00be9844
 unsigned char g_equippedItemId = 0;               // 0x00be9849
-extern const unsigned char DAT_004bec80[] = { 0 };  // 0x004bec80
-void* room_check_actions[] = { nullptr };          // 0x004c1420
+// ============================================================================
+// g_ScdAnimRemap (0x004bec80)
+// Animation remap table for SCD event state-1 opcode 0x89 (set animation frame).
+// 16 (actionStateBase, animationId) pairs indexed by the entity's incoming
+// animationId; the handler writes action_state = pair[0] + 1 and
+// animationId = pair[1]. Only applied for entity ids < 0x20 and animationId
+// <= 0x0F - the handler forces action_state = 3 above that, which is why the
+// table is 32 bytes with pairs 10-15 left zero in the original.
+//
+//   anim: 0     1     2     3     4     5     6     7     8     9
+//   pair: (0,0) (0,1) (0,2) (0,3) (0,4) (1,0) (1,1) (1,2) (1,3) (1,4)
+// ============================================================================
+extern const unsigned char g_ScdAnimRemap[32] = {
+    0, 0,   0, 1,   0, 2,   0, 3,   0, 4,
+    1, 0,   1, 1,   1, 2,   1, 3,   1, 4,
+    0, 0,   0, 0,   0, 0,   0, 0,   0, 0,   0, 0,
+};
+
+
+// ============================================================================
+// room_transition_load (0x004813c0) — the room/stage transition loader
+//
+// Previously stubbed in EngineStubs.cpp as "restore room state after menu close".
+// That was wrong: it reads g_pendingDoorRecord seven times and is what actually
+// carries the player through a door. door_try_enter stores the destination record
+// and blacks the screen; this loads the room behind it.
+//
+// The branch flags Ghidra reports as `unaff_retaddr & 0x80/0x40` are NOT a
+// parameter. The disassembly at 0x00481430 is:
+//     MOV AL,[EAX] ; AND AL,0xC0 ; MOV byte ptr [ESP+0xb],AL
+// with EAX = &record[0x0B]. So they are the top two bits of the record's own byte
+// +0x0B: 0x80 = do not reload the room (camera-only transition), 0x40 = suppress
+// the door sound. The low six bits are the entry camera.
+//
+// Destination encoding in record+0x0D: values < 0x20 are a room in the current
+// stage; >= 0x20 also changes stage, as (dest >> 5) - 1, with +5 applied once
+// g_PlayerFlags bit 0 is set (the second-visit stage variants).
+// ============================================================================
+extern unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
+
+// Not yet transcribed. Reporting rather than silent so a missing one is visible in
+// the log instead of just producing a subtly wrong room.
+static void room_trans_report(const char* what)
+{
+    static const char* last = nullptr;
+    if (what != last) { last = what; dbg_printf("[roomtrans] missing %s\n", what); }
+}
+static void object_delete_00442170(int a) { (void)a; room_trans_report("0x00442170 object_delete"); }
+static void FUN_00412300(void)            { room_trans_report("0x00412300"); }
+static void BuildEnemySnap(void)          { room_trans_report("0x0048f150 BuildEnemySnap"); }
+static void FUN_0041d070(void)            { room_trans_report("0x0041d070"); }
+static void FUN_00442180(void)            { room_trans_report("0x00442180"); }
+
+void room_transition_load(void)
+{
+    unsigned char* record = (unsigned char*)g_pendingDoorRecord;
+    if (record == nullptr) {
+        dbg_printf("[roomtrans] g_pendingDoorRecord is NULL - nothing to load\n");
+        return;
+    }
+
+    g_roomTransitionBusy   = 1;
+    g_AttractModeIdleTimer = 1;
+
+    object_delete_00442170(0);
+    SetScreenOffset(160, 120);
+
+    // 0x004813ef: latch the record's fields.
+    g_nextRoomDoorType = record[0x08];
+    g_nextRoomSfxId    = record[0x09];
+    g_nextRoom_be05b7  = record[0x0A];
+    g_nextRoomCameraId = (unsigned char)(record[0x0B] & 0x3f);
+    g_nextRoomDest     = record[0x0D];
+    unsigned char flags = (unsigned char)(record[0x0B] & 0xc0);
+
+    // 0x00481438: reset the three positional sound channels to centre/default.
+    for (int i = 0; i < 3; i++) {
+        g_SndPanVol[i].volume = 0x5f;
+        g_SndPanVol[i].pan    = 0x5f;
+    }
+
+    load_room_sfx(g_nextRoomSfxId);
+    FUN_00412300();
+
+    // The original does:
+    //     Task_execute(1, FUN_00444770);   // spawns the door-animation task
+    //     Task_sleep(1);                   // yields so it can run
+    //
+    // Still NOT spawned: 0x00444770 is `FUN_004443c0(); FUN_00444540();
+    // FUN_00444500(); Task_exit();` - the 3D door-opening animation, its own
+    // subsystem (image buffers at 0x00ac592c/0x00acd710, a relocated model table at
+    // 0x00aafce0, ResolveAnimPointers, and a renderer that calls draw_rect). Tasks
+    // here run on switched stacks, so a stub that plainly returns unwinds off the
+    // task stack and jumps to address 0.
+    //
+    // CORRECTION to the note that used to sit here: 0x00444770 does NOT load the
+    // destination room. `room_set()` / `init_room()` below do, and the original
+    // updates g_roomId from the door record immediately before calling them. The old
+    // gate omitted that update, which is the only reason room_set re-ran the
+    // outgoing room and crashed in cmd_item_model_set -> Effect_CreateBillboard.
+    // The animation task and the room load are independent; the load is enabled now.
+    //
+    // Safe to leave unspawned: FUN_004443c0 is what sets g_main_state_flags bit
+    // 0x4000000, and the wait loop below polls that bit. With no task, the bit is
+    // never set and the wait falls through immediately - an instant cut instead of a
+    // door animation.
+    room_trans_report("0x00444770 door animation task (not transcribed - instant cut)");
+    Task_sleep(1);
+
+    // 0x0048148c: place the player at the destination's entry point.
+    //
+    // X and Z are ZERO-extended into the 32-bit matrix translation, Y is SIGN-extended.
+    // That asymmetry is explicit in the original and is not a decompiler artifact:
+    //
+    //   0048148f: XOR EAX,EAX / MOV AX,[rec+0x0E] / MOV [0x00be6318],EAX   <- zero-ext
+    //   004814a8: MOVSX EAX, word ptr [rec+0x10]  / MOV [0x00be631c],EAX   <- sign-ext
+    //   004814b3: XOR EAX,EAX / MOV AX,[rec+0x12] / MOV [0x00be6320],EAX   <- zero-ext
+    //
+    // It makes sense: X/Z are room coordinates that legitimately exceed 0x7FFF, while
+    // Y is a height that goes negative. The port sign-extended all three, so any
+    // entry point with X or Z >= 0x8000 landed ~65536 units away. The position
+    // SVECTOR stores are plain 16-bit copies, so only the matrix writes differ.
+    unsigned short ux = *(unsigned short*)(record + 0x0E);
+    short          sy = *(short*)(record + 0x10);
+    unsigned short uz = *(unsigned short*)(record + 0x12);
+    g_playerEntity.scaMatrixData.localMatrix.t[0] = (int)(unsigned int)ux;
+    g_playerEntity.scaMatrixData.localMatrix.t[1] = (int)sy;
+    g_playerEntity.scaMatrixData.localMatrix.t[2] = (int)(unsigned int)uz;
+    g_playerEntity.directionAngle = *(short*)(record + 0x14);
+    g_playerEntity.unk_8e     = (unsigned short)sy;
+    g_playerEntity.animationId = 0;
+    g_playerEntity.position.x = (short)ux;
+    g_playerEntity.position.y = sy;
+    g_playerEntity.position.z = (short)uz;
+
+    // DIAGNOSTIC - remove once placement is confirmed. Prints the raw entry point the
+    // door record specifies, so "the model is placed further from the door than it
+    // should be" can be attributed to the data or to how we apply it.
+    dbg_printf("[roomtrans] entry point from rec: x=%u y=%d z=%u ang=%d (raw %04X %04X %04X)\n",
+               (unsigned int)ux, (int)sy, (unsigned int)uz,
+               (int)g_playerEntity.directionAngle,
+               (unsigned int)ux, (unsigned int)(unsigned short)sy, (unsigned int)uz);
+
+    // 0x004814f9: load the destination room.
+    //
+    // Bit 0x80 of record+0x0B means "camera-only transition" - stay in this room and
+    // just re-aim the camera, which is why the else branch below is only a
+    // check_camera_switch.
+    //
+    // The order here is load-bearing and was what the old gate lost:
+    //   1. BuildEnemySnap saves the outgoing room's enemy state
+    //   2. g_AttractMode_RoomCameraId remembers which room we came from
+    //   3. the SCA pool rewinds to its base, freeing the outgoing room's hit data
+    //   4. g_roomId becomes the DESTINATION before room_set/init_room reads it
+    //
+    // Destination encoding in record+0x0D: < 0x20 is a room in the current stage;
+    // >= 0x20 also changes stage, as (dest >> 5) - 1, with +5 once g_PlayerFlags
+    // bit 0 is set (the second-visit stage variants). A stage change needs the
+    // heavier init_room, which re-points the stage data and BGM tables first.
+    if ((flags & 0x80) == 0) {
+        BuildEnemySnap();
+        g_AttractMode_RoomCameraId = g_roomId;
+        g_scaPoolPtr = g_scaPoolBase;
+        g_roomId = (unsigned char)(g_nextRoomDest & 0x1f);
+
+        if (g_nextRoomDest < 0x20) {
+            dbg_printf("[roomtrans] loading same-stage room %u (stage %u)\n",
+                       (unsigned int)g_roomId, (unsigned int)g_stageId);
+            room_set();
+        } else {
+            g_stageId = (unsigned char)((g_nextRoomDest >> 5) - 1);
+            if ((Flg_ck((int)&g_PlayerFlags, 0) != 0) && (g_stageId < 2)) {
+                g_stageId = (unsigned char)(g_stageId + 5);
+            }
+            dbg_printf("[roomtrans] loading stage %u room %u (stage change)\n",
+                       (unsigned int)g_stageId, (unsigned int)g_roomId);
+            init_room();
+        }
+    }
+
+    g_AttractModeIdleTimer = 1;
+    // Waits for the door-animation task to clear bit 0x4000000. That task is not
+    // spawned yet, so nothing sets the bit and this falls straight through.
+    while ((g_main_state_flags & 0x4000000) != 0) {
+        Task_sleep(1);
+    }
+
+    // 0x0048156c: put the newly loaded room on screen. The camera-only branch has no
+    // new data to build, so it re-runs the zone test instead.
+    if ((flags & 0x80) == 0) {
+        Room_SetupCamera();
+        load_room_bg_image();
+        Room_ApplySpriteFlags();
+    } else {
+        check_camera_switch(1);
+    }
+
+    // DIAGNOSTIC - remove once the transition is confirmed. Proves which room's data
+    // is actually live after the load, which is the thing the old gate hid.
+    dbg_printf("[roomtrans] loaded: stage=%u room=%u cam=%u rdt=%p entryCam=%u msf=%08X\n",
+               (unsigned int)g_stageId, (unsigned int)g_roomId,
+               (unsigned int)g_roomCameraId, (void*)g_RdtPointer,
+               (unsigned int)g_nextRoomCameraId, (unsigned int)g_main_state_flags);
+
+    update_room_bgm();
+    if ((flags & 0x40) == 0) {
+        play_sfx(0, 1, 0);
+    }
+    FUN_0041d070();
+    FUN_00442180();
+
+    g_AttractModeIdleTimer = 0;
+    g_roomTransitionBusy   = 0;
+}
+
+// ============================================================================
+// room_check_actions (0x004b9340)
+// Dispatch table for SCD command opcode 0x24 (cmd_room_action) and 0x2D
+// (cmd_got_item). 18 real entries (0x00-0x11) followed by two NULL slots in the
+// original. Each handler takes a pointer to a 12-byte g_RoomItemEventTable entry.
+//
+// Sized correctly here so cmd_room_action's bounds check works; the handler
+// bodies are still to be decompiled. Deliberately left nullptr rather than
+// filled with empty placeholders - a placeholder with the real name would
+// silently overload the real implementation once it lands (see the
+// ScdEventEntry_Create / cmd_room_action incident above).
+//
+// Original entries, in table order:
+//   0x00 0041c050  no_room_action          0x01 0041b400  use_mansion_key
+//   0x02 0041b630  display_msg_0041b630    0x03 0041b650  include_key
+//   0x04 0041b6a0  set_key_flag            0x05 0041b6d0  check_door
+//   0x06 0041b790  FUN_0041b790            0x07 0041b850  FUN_0041b850
+//   0x08 0041b990  open_itembox            0x09 0041b9e0  FUN_0041b9e0
+//   0x0A 0041ba00  FUN_0041ba00            0x0B 0041ba10  FUN_0041ba10
+//   0x0C 0041baa0  FUN_0041baa0            0x0D 0041bae0  FUN_0041bae0
+//   0x0E 0041bb10  check_desk              0x0F 0041be70  (not yet analyzed)
+//   0x10 0041bed0  (not yet analyzed)      0x11 0041bf90  (not yet analyzed)
+// ============================================================================
+// Entries land here as they are transcribed. The remaining slots stay nullptr on
+// purpose: cmd_room_action and update_player_position both null-check, so a missing
+// handler is an inert no-op with a diagnostic rather than a jump through garbage.
+//
+// [1] door_try_enter is the one the dining-room door needs (its event entry has
+// act=1). Ghidra called it `use_mansion_key`, which is misleading - that is only one
+// of the messages it can emit (0xc3). What it actually does is:
+//   - reject the door for the wrong character (lock bit 0x40 + player id&3 == 3)
+//   - run the room transition when the door is open, or already unlocked per
+//     Flg_ck(g_LocksFlags, lockBits & 0x3f)
+//   - otherwise look up the required item at record+0x16 and either consume it and
+//     Flg_on the lock, or emit "locked" / "locked from the other side"
+// The transition itself is an instant blackout - full-screen black draw_rect,
+// Task_sleep(1), StMask(0,0) - not a fade.
+// Blocked on g_eventItemUsedFlag, which the port does not declare yet.
+void* room_check_actions[ROOM_CHECK_ACTION_COUNT] = {
+    /* 0x00 */ (void*)no_room_action,   // 0x0041c050 - returns 0, does nothing
+    /* 0x01 */ (void*)door_try_enter,   // 0x0041b400
+    /* 0x02 */ nullptr,                 // 0x0041b630 display_msg
+    /* 0x03 */ nullptr,                 // 0x0041b650 include_key
+    /* 0x04 */ nullptr,                 // 0x0041b6a0 set_key_flag
+    /* 0x05 */ (void*)check_door,       // 0x0041b6d0
+    /* rest */ nullptr,
+};
 
 // (0x00451700) - Room event item pickup action
 void room_event_item_pickup(void) { }

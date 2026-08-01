@@ -1,6 +1,7 @@
 // RoomEvents.cpp - SCD room event system (decompiled from Ghidra)
 // Implements room_events_check and all direct dependencies.
 #include "../Globals.h"
+#include "../DebugPrint.h"
 #include <cstring>
 
 // Forward declaration
@@ -23,8 +24,11 @@ static void ScdEventEntry_Init(ScdEventEntry* entry, int scriptIndex)
 // ============================================================================
 // ScdEventEntry_Create (0x0041d650)
 // Creates a new SCD event entry. If slot > 7, finds the first free slot.
+// Externally visible: SCD command opcode 0x14 (cmd_0x14) calls this. It must
+// NOT be static - an empty placeholder in GameState.cpp used to satisfy that
+// call instead, so opcode 0x14 silently created no event.
 // ============================================================================
-static void ScdEventEntry_Create(unsigned int slot, int scriptIndex)
+void ScdEventEntry_Create(unsigned int slot, int scriptIndex)
 {
     if (slot > 7) {
         slot = 0;
@@ -94,13 +98,36 @@ static void scd_event_cmd_init(void)
 // initialization script. Each block starts with a size word. Opcodes are
 // dispatched through the script_command_funcs_table.
 // ============================================================================
-static unsigned int DAT_00bf0808[8]; // SCD call stack storage
+// g_ScdBranchStack (0x00bf0808) - resume-address stack for cmd_if / cmd_else /
+// cmd_end_if. 16 dwords in the original: the region runs from 0x00bf0808 up to
+// g_pScdEventCurrent at 0x00bf0848 with no other global in between. An earlier
+// revision declared only 8, so a script nesting more than 8 conditionals deep
+// would have written past the end.
+// The original's table has no padding and no bound: opcodes above 0x50 run whatever
+// bytes follow it. The port declares 256 entries with 0x51-0xFF nullptr, so a bad
+// opcode faults at address 0 instead. Report which opcode and where, because a NULL
+// call here means the SCD stream itself is wrong (stale pointer, unloaded room, or a
+// desynced instruction pointer) - the opcode is a symptom, not the cause.
+static int scd_dispatch(const char* site)
+{
+    typedef int (*ScdCmdFunc)(void);
+    unsigned char op = *g_ScdOpcodes;
+    void* fn = script_command_funcs_table[op];
+    if (fn == nullptr) {
+        dbg_printf("[scd] NULL command 0x%02X at %s (g_ScdOpcodes=%p) - aborting stream\n",
+                   (unsigned int)op, site, (void*)g_ScdOpcodes);
+        return 0;
+    }
+    return ((ScdCmdFunc)fn)();
+}
+
+static unsigned int g_ScdBranchStack[16];
 
 void run_command_functions(unsigned short* scd_opcodes)
 {
     typedef int (*ScdCmdFunc)(void);
 
-    g_CmdOpcodesPointer = DAT_00bf0808;
+    g_CmdOpcodesPointer = g_ScdBranchStack;
     g_ScriptContinueFlag = 0;
     unsigned short blockSize = *scd_opcodes;
 
@@ -110,7 +137,7 @@ void run_command_functions(unsigned short* scd_opcodes)
         while (true) {
             int cmdResult;
             do {
-                cmdResult = ((ScdCmdFunc*)script_command_funcs_table)[*g_ScdOpcodes]();
+                cmdResult = scd_dispatch("run_command_functions");
             } while (cmdResult != 0);
 
             if (g_ScriptContinueFlag == 0) break;
@@ -152,7 +179,7 @@ static void scd_event_cmd_exec(void)
     g_pScdEventCurrent->scriptPtr = scriptData + (header >> 8);
 
     typedef int (*ScdCmdFunc)(void);
-    ((ScdCmdFunc*)script_command_funcs_table)[*g_ScdOpcodes]();
+    scd_dispatch("scd_event_cmd_exec");
 }
 
 // ============================================================================
@@ -322,20 +349,34 @@ static int scd_event_state1_anim(void)
                 g_pScdEventCurrent->scriptPtr += 8;
 
                 if (ent->lookAtFlags == 0x93) {
-                    // Target mode: set scd_target_ptr based on type
-                    unsigned short* params = (unsigned short*)g_pScdEventCurrent->scriptPtr;
+                    // Target mode: set scd_target_ptr based on type.
+                    //
+                    // The selector is the word at +2 and the target index is the
+                    // SIGNED word at +4 (0x0041dad1: MOVSX EAX,[EDX] with
+                    // EDX = base+2, then LEA ECX,[EDX+2] for the index). An
+                    // earlier revision read the index from +10 - the position
+                    // the script pointer has already been advanced to - which
+                    // indexed the enemy list with unrelated script bytes.
+                    //
+                    // Type 0 stores the player entity's own address: the original
+                    // is MOV dword ptr [ESI+0xb8],0xbe62e4, and 0x00be62e4 is
+                    // g_playerEntity's base (update_player_anim reaches its
+                    // position field as 0x00be6318 = base+0x34). Ghidra renders
+                    // that as &g_playerEntityPointer only because it named the
+                    // entity object itself "g_playerEntityPointer".
+                    short targetIndex = (short)opcodes[2];
                     switch (*(opcodes + 1)) {
                     case 0:
                         ent->scd_target_ptr = (unsigned int)&g_playerEntity;
                         break;
                     case 1:
-                        ent->scd_target_ptr = (unsigned int)&g_EnemiesList[params[0]];
+                        ent->scd_target_ptr = (unsigned int)&g_EnemiesList[targetIndex];
                         break;
                     case 2:
-                        ent->scd_target_ptr = (unsigned int)g_itemboxes_covers_table[params[0]];
+                        ent->scd_target_ptr = (unsigned int)g_itemboxes_covers_table[targetIndex];
                         break;
                     case 3:
-                        ent->scd_target_ptr = (unsigned int)g_desks_pointers_table[params[0]];
+                        ent->scd_target_ptr = (unsigned int)g_desks_pointers_table[targetIndex];
                         break;
                     }
                 } else {
@@ -354,11 +395,13 @@ static int scd_event_state1_anim(void)
                     ent->scd_pos_z = (int)(short)opcodes[3];
                 }
 
-                // Set step size and flags
-                unsigned char step = g_pScdEventCurrent->scriptPtr[0];
+                // Set step size and flags. Both bytes come from the word at
+                // +8: the original walks a separate cursor (ECX) that ends at
+                // base+8 in every branch, while scriptPtr is already at +10.
+                unsigned short stepFlags = opcodes[4];
+                unsigned char step = (unsigned char)stepFlags;
                 ent->lookAtYawStep = step ? step : 0xC0;
 
-                unsigned short stepFlags = opcodes[4];
                 if ((stepFlags & 0xFF00) != 0) {
                     ent->lookAtPitchStep = (unsigned char)(stepFlags >> 8);
                 } else {
@@ -402,8 +445,7 @@ static int scd_event_state1_anim(void)
         g_pScdEventCurrent->scriptPtr += 2;
         ent->scd_anim_param = *g_pScdEventCurrent->scriptPtr;
         g_pScdEventCurrent->scriptPtr++;
-        ent->scd_timer_lo = 0x28;
-        ent->scd_timer_hi = 0;
+        ent->scd_timer = 0x28;
         ent->scd_entity_flags = 0;
         return 1;
 
@@ -420,7 +462,8 @@ static int scd_event_state1_anim(void)
             ent->animationId = (unsigned char)(animParam >> 8);
             ent->scd_anim_param = (unsigned char)animData;
             ent->scd_entity_flags = (unsigned short)((animData >> 6) & 0x3FC);
-            ent->scd_timer_lo = 0;
+            // 0x0041ddae: MOV word ptr [EDI+0xde],0 - clears both timer bytes
+            ent->scd_timer = 0;
         }
         return 1;
 
@@ -436,8 +479,7 @@ static int scd_event_state1_anim(void)
             ent->action_state = (unsigned char)((val >> 8) >> 8);
             ent->animationId = (unsigned char)animParam;
             ent->scd_anim_param = (unsigned char)(animParam >> 8);
-            ent->scd_timer_lo = 0;
-            ent->scd_timer_hi = 0;
+            ent->scd_timer = 0;
             ent->scd_entity_flags = 0;
         }
         return 1;
@@ -468,10 +510,10 @@ static int scd_event_state1_anim(void)
         }
         return 1;
 
-    case 0x88: // Set animation timer bytes
+    case 0x88: // Set the SCD animation timer (16-bit, little-endian in script)
         g_pScdEventCurrent->scriptPtr = (unsigned char*)(opcodes + 1);
-        ent->scd_timer_lo = g_pScdEventCurrent->scriptPtr[0];
-        ent->scd_timer_hi = g_pScdEventCurrent->scriptPtr[1];
+        ent->scd_timer = (unsigned short)(g_pScdEventCurrent->scriptPtr[0]
+                                       | (g_pScdEventCurrent->scriptPtr[1] << 8));
         g_pScdEventCurrent->scriptPtr += 2;
         return 1;
 
@@ -490,10 +532,9 @@ static int scd_event_state1_anim(void)
                 if (ent->animationId > 0x0F) {
                     ent->action_state = 3;
                 } else {
-                    // Lookup table at 0x004bec80: pairs of (base_anim, action_state_offset)
-                    extern const unsigned char DAT_004bec80[];
-                    ent->action_state = DAT_004bec80[(unsigned int)ent->animationId * 2] + 1;
-                    ent->animationId = DAT_004bec80[(unsigned int)ent->animationId * 2 + 1];
+                    // g_ScdAnimRemap (0x004bec80): (actionStateBase, animationId) pairs
+                    ent->action_state = g_ScdAnimRemap[(unsigned int)ent->animationId * 2] + 1;
+                    ent->animationId = g_ScdAnimRemap[(unsigned int)ent->animationId * 2 + 1];
                 }
             } else {
                 ent->action_state = 1;
@@ -552,6 +593,101 @@ static int scd_event_state1_anim(void)
 //   0x08 - Reinitialize current event
 //   0x09 - Deactivate another event
 // ============================================================================
+
+
+// ============================================================================
+// DIAGNOSTIC: event-script opcode trace.
+//
+// The intro cutscene's script deactivates instead of running on into the fade and
+// door transition, and the event VM has four ways to clear a slot's active flag -
+// three of them silent:
+//   1. control-flow 0xFF
+//   2. the end-of-script check at event_next_entry
+//   3. the state-0 default branch, i.e. an opcode the switch does not implement
+//   4. another slot's opcode 0x09 (or command 0x44)
+// Recording the opcodes each slot executed and naming the exit path separates "the
+// script ended as written" from "an unimplemented opcode killed it". Offsets are
+// relative to g_EvtScripts so they line up with an RDT dump.
+// Remove once the door transition works.
+// ============================================================================
+#define SCD_TRACE_LEN 48
+static unsigned short g_scdTraceOff[8][SCD_TRACE_LEN];
+static unsigned char  g_scdTraceOp[8][SCD_TRACE_LEN];
+static unsigned char  g_scdTraceSt[8][SCD_TRACE_LEN];
+static unsigned char  g_scdTraceCmd[8][SCD_TRACE_LEN];
+static unsigned char* g_scdTraceLastPtr[8];
+static int            g_scdTraceHead[8];
+static int            g_scdTraceCount[8];
+
+static void scd_trace_record(int slot, unsigned char* p, unsigned char state)
+{
+    int i = g_scdTraceHead[slot];
+    unsigned char op = *p;
+    unsigned char cmd = 0;
+
+    // The interesting opcodes carry a nested *command* opcode, and that command is
+    // what actually acts on the world. 0x06/0x07 embed it at p+2; 0xFD reads it
+    // through the call stack. Without this the trace shows the VM's control flow
+    // but not what the script was doing.
+    if (op == 0x06 || op == 0x07) {
+        cmd = p[2];
+    } else if (op == 0xFD) {
+        ScdEventEntry* e = &g_ScdEventTable[slot];
+        signed char top = (signed char)e->stackDepth;
+        if (top >= 0 && top < 4 && e->callStack[top] != 0) {
+            cmd = *(unsigned char*)e->callStack[top];
+        }
+    }
+
+    g_scdTraceOff[slot][i] = (unsigned short)(p - (unsigned char*)g_EvtScripts);
+    g_scdTraceOp[slot][i]  = op;
+    g_scdTraceSt[slot][i]  = state;
+    g_scdTraceCmd[slot][i] = cmd;
+    g_scdTraceLastPtr[slot] = p;
+    g_scdTraceHead[slot]   = (i + 1) % SCD_TRACE_LEN;
+    if (g_scdTraceCount[slot] < SCD_TRACE_LEN) {
+        g_scdTraceCount[slot]++;
+    }
+}
+
+static void scd_trace_dump(int slot, const char* reason)
+{
+    char buf[1200];
+    int n = 0;
+    int cnt = g_scdTraceCount[slot];
+    int start = (g_scdTraceHead[slot] - cnt + SCD_TRACE_LEN) % SCD_TRACE_LEN;
+
+    n += sprintf(buf + n, "[scd] slot %d DEACTIVATED (%s) last %d ops:",
+                 slot, reason, cnt);
+    for (int k = 0; k < cnt; k++) {
+        int i = (start + k) % SCD_TRACE_LEN;
+        n += sprintf(buf + n, " %04X:%02X/s%u",
+                     (unsigned int)g_scdTraceOff[slot][i],
+                     (unsigned int)g_scdTraceOp[slot][i],
+                     (unsigned int)g_scdTraceSt[slot][i]);
+        if (g_scdTraceCmd[slot][i] != 0) {
+            n += sprintf(buf + n, ".c%02X", (unsigned int)g_scdTraceCmd[slot][i]);
+        }
+        if (n > (int)sizeof(buf) - 48) {
+            break;
+        }
+    }
+
+    // Raw bytes around the exit point, so the tail can be decoded by hand even if
+    // the nested-command capture above misses an edge case.
+    if (g_scdTraceLastPtr[slot] != NULL) {
+        unsigned char* p = g_scdTraceLastPtr[slot] - 8;
+        n += sprintf(buf + n, " | bytes@%04X:",
+                     (unsigned int)(p - (unsigned char*)g_EvtScripts));
+        for (int k = 0; k < 24; k++) {
+            n += sprintf(buf + n, "%02X ", (unsigned int)p[k]);
+        }
+    }
+
+    dbg_printf("%s\n", buf);
+    g_scdTraceCount[slot] = 0;
+}
+
 void room_events_check(void)
 {
     int result;
@@ -567,9 +703,58 @@ void room_events_check(void)
         g_pScdEventCurrent = entry;
 
         if (entry->active != 0) {
-            // Main event processing loop
+            // DIAGNOSTIC: locate a stalled event script precisely.
+            //
+            // A script whose instruction pointer has not moved for two seconds is
+            // parked, not merely waiting. Reporting the opcode plus both inputs to
+            // the 0xF7 wait test distinguishes the three candidate causes: a wait
+            // on a fade that never completes, a wait on a menu flag that is never
+            // cleared, or a state-1/2 opcode whose entity condition never
+            // resolves. Remove once the intro cutscene runs to completion.
+            {
+                int slot = (int)(entry - g_ScdEventTable);
+                static unsigned char* lastPtr[8] = {};
+                static int stallFrames[8] = {};
+                static int reported[8] = {};
+
+                if (entry->scriptPtr == lastPtr[slot]) {
+                    if (++stallFrames[slot] > 120 && reported[slot] == 0) {
+                        reported[slot] = 1;
+                        dbg_printf("[scd] slot %d PARKED op=0x%02X state=%u depth=%d"
+                                   " waitFlag=%u waitMenu=%u fade=%d fadeCnt=%d"
+                                   " msf=%08X msf2=%08X\n",
+                                   slot, (unsigned int)*entry->scriptPtr,
+                                   (unsigned int)entry->state,
+                                   (int)(signed char)entry->stackDepth,
+                                   (unsigned int)(((unsigned char*)&g_main_state_flags)[1] & 2),
+                                   (unsigned int)(g_menu_choice_id & 0x80),
+                                   (int)(short)g_fading_state, (int)g_fading_counter,
+                                   (unsigned int)g_main_state_flags,
+                                   (unsigned int)g_main_state_flags2);
+                    }
+                } else {
+                    lastPtr[slot] = entry->scriptPtr;
+                    stallFrames[slot] = 0;
+                    reported[slot] = 0;
+                }
+            }
+
+            // Main event processing loop.
+            //
+            // event_dispatch corresponds to switchD_0041d6f9_default in the
+            // original, which sits at the TOP of this loop: every opcode that
+            // completes without yielding re-enters the dispatcher and runs the
+            // NEXT opcode of the SAME entry in the same frame. An earlier
+            // revision put the label down at the entry advance, so each event
+            // executed exactly one opcode per frame and the end-of-script check
+            // never ran - which is what made scripted sequences crawl or stall.
+            // Only 0xF6-0xF9, 0xFE, 0xFF and state-0 opcode 0x08 yield the frame.
+event_dispatch:
             do {
                 unsigned char* scriptByte = g_pScdEventCurrent->scriptPtr;
+
+                scd_trace_record((int)(g_pScdEventCurrent - g_ScdEventTable),
+                                 scriptByte, g_pScdEventCurrent->state);
 
                 // Process control flow opcodes (0xF6-0xFF)
                 switch (*scriptByte) {
@@ -606,7 +791,7 @@ void room_events_check(void)
                     g_pScdEventCurrent->scriptPtr += 4;
                     g_pScdEventCurrent->returnStack[(signed char)g_pScdEventCurrent->stackDepth] =
                         (unsigned int)g_pScdEventCurrent->scriptPtr;
-                    goto event_restart_switch;
+                    goto event_dispatch;
 
                 case 0xFB: // Loop end
                     g_pScdEventCurrent->counterStack[(signed char)g_pScdEventCurrent->stackDepth]--;
@@ -617,7 +802,7 @@ void room_events_check(void)
                         g_pScdEventCurrent->scriptPtr =
                             (unsigned char*)g_pScdEventCurrent->returnStack[(signed char)g_pScdEventCurrent->stackDepth];
                     }
-                    goto event_restart_switch;
+                    goto event_dispatch;
 
                 case 0xFC: // Call subroutine
                     g_pScdEventCurrent->stackDepth++;
@@ -627,12 +812,12 @@ void room_events_check(void)
                         g_pScdEventCurrent->scriptPtr + g_pScdEventCurrent->scriptPtr[1];
                     g_pScdEventCurrent->returnStack[(signed char)g_pScdEventCurrent->stackDepth] =
                         (unsigned int)g_pScdEventCurrent->scriptPtr;
-                    goto event_restart_switch;
+                    goto event_dispatch;
 
                 case 0xFD: // Call SCD command from call stack
                     g_ScdOpcodes = (unsigned char*)g_pScdEventCurrent->callStack[(signed char)g_pScdEventCurrent->stackDepth];
                     typedef int (*ScdCmdFunc)(void);
-                    result = ((ScdCmdFunc*)script_command_funcs_table)[*g_ScdOpcodes]();
+                    result = scd_dispatch("event 0xFD");
                     if (result == 0) {
                         g_pScdEventCurrent->scriptPtr++;
                         g_pScdEventCurrent->stackDepth--;
@@ -640,9 +825,11 @@ void room_events_check(void)
                         g_pScdEventCurrent->scriptPtr =
                             (unsigned char*)g_pScdEventCurrent->returnStack[(signed char)g_pScdEventCurrent->stackDepth];
                     }
-                    goto event_restart_switch;
+                    goto event_dispatch;
 
                 case 0xFF: // Deactivate event
+                    scd_trace_dump((int)(g_pScdEventCurrent - g_ScdEventTable),
+                                   "control-flow 0xFF");
                     g_pScdEventCurrent->active = 0;
                     // fall through
                 case 0xFE: // Advance pointer (NOP)
@@ -688,37 +875,43 @@ void room_events_check(void)
                         scd_event_cmd_init();
                         goto event_next_entry;
                     case 0x09: // Deactivate another event
+                        if (g_ScdEventTable[scriptByte[1]].active != 0) {
+                            scd_trace_dump(scriptByte[1], "opcode 0x09 from another slot");
+                        }
                         g_ScdEventTable[scriptByte[1]].active = 0;
                         g_pScdEventCurrent->scriptPtr += 2;
                         break;
                     default: // Unknown opcode: deactivate
+                        scd_trace_dump((int)(g_pScdEventCurrent - g_ScdEventTable),
+                                       "UNIMPLEMENTED state-0 opcode");
                         g_pScdEventCurrent->active = 0;
                         return;
                     }
-                    goto event_restart_switch;
+                    goto event_dispatch;
                 }
                 case 1: // Wait animation state
                     result = scd_event_state1_anim();
                     break;
                 case 2: // Movement state
                     scd_event_state2_movement();
-                    goto event_restart_switch;
+                    goto event_dispatch;
                 case 3: // Set behavior state
                     result = scd_event_state3_set_behavior();
                     break;
                 default:
-                    goto event_restart_switch;
+                    goto event_dispatch;
                 }
             } while (result != 0);
 
         event_next_entry:
-            // Check for end-of-script marker
+            // 0x0041d99d: check for the end-of-script marker before yielding
             if (*g_pScdEventCurrent->scriptPtr == 0xFF) {
+                scd_trace_dump((int)(g_pScdEventCurrent - g_ScdEventTable),
+                               "end-of-script 0xFF at event_next_entry");
                 g_pScdEventCurrent->active = 0;
             }
         }
 
-    event_restart_switch:
         entry++;
         // Termination: iterate all 8 entries
         if (entry > &g_ScdEventTable[7]) {

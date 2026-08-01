@@ -1,6 +1,7 @@
 // Original addresses from Ghidra marked for each global variable
 #include "Globals.h"
 #include "game/PrintText.h"
+#include "system/AssetPath.h"
 
 // ============================================================================
 // Task scheduler state section
@@ -68,6 +69,7 @@
 #pragma section(".gwipe$63a8", read, write)
 #pragma section(".gwipe$63b0", read, write)
 #pragma section(".gwipe$6464", read, write)
+#pragma section(".gwipe$92cc", read, write)
 #pragma section(".gwipe$9614", read, write)
 #pragma section(".gwipe$961d", read, write)
 #pragma section(".gwipe$961e", read, write)
@@ -411,8 +413,8 @@ int g_BgmSoundBank = 0;
 int g_SfxBanks[64] = {};
 int g_RoomSfxBanks[64] = {};
 int g_CharacterSfxBanks[64] = {};
-int g_emSndBanks[64] = {};
-int g_SndBank[64] = {};
+int g_emSndBanks[96] = {};   // 48 records x 2 ints - see Globals.h
+SndBankSlot g_SndBank[3] = {};          // 0x00ac99d0 - 3 BGM channels
 int g_SfxVolume = -1;
 char g_BgmPaused = 0;
 int g_SndRampDirection = 0;
@@ -423,25 +425,21 @@ int g_EnemySndVolume = -1;              // 0x00ac98d0 - enemy sound volume
 unsigned int g_SoundSystemFlags = 0;    // 0x004b3998 - sound system flags
 char g_SoundAltPathPrefix[256] = {};    // 0x00d91bd0
 
-// Sound callback function pointers (set by Room_SetupCollisionCallbacks)
-SoundCallbackRect   g_SoundCallbackRect = NULL;    // 0x00ac9c04
-SoundCallbackRect   g_SoundCallbackRect2 = NULL;   // 0x00ac9c14
-SoundCallbackCircle g_SoundCallbackCircle = NULL;  // 0x00ac9c0c
-SoundCallbackFlag   g_SoundCallbackFlag = NULL;    // 0x00ac9c10
+// g_CollisionShapeHandlers (0x00ac9c00) is defined in game/RoomCollision.cpp,
+// next to the handlers it holds.
 
 void* g_SoundManager = NULL;
 DirectSound* g_pDirectSound = NULL;
 DWORD g_CachedWaveOutVolume = 0;
 int g_WaitForMusicTimer = 0;
-unsigned char g_BGM_STATE = 0xFF;
+unsigned int g_BGM_STATE = 0xFF;        // 0x00d226a0 - see Globals.h
 HWND g_MainWindowHandle = NULL;
 int g_setVolResult = 0;
 int g_CurBank = 0;
-unsigned char g_snd_slot_00ac99d5 = 0;
-int           g_snd_bank_00ac99d8 = 0;          // 0x00ac99d8 - secondary BGM bank 1
-unsigned char g_snd_slot_00ac99dd = 0;          // 0x00ac99dd - secondary BGM slot 1
-int           g_snd_bank_00ac99e0 = 0;          // 0x00ac99e0 - secondary BGM bank 2
-unsigned char g_snd_slot_00ac99e5 = 0;          // 0x00ac99e5 - secondary BGM slot 2
+// 0x00ac99d5 / d8 / dd / e0 / e5 are fields inside the g_SndBank record array
+// (g_SndBank[0].slot, [1].handle, [1].slot, [2].handle, [2].slot). They used to be
+// declared here as five independent globals for addresses that fall inside that
+// array, so writes through one name were invisible to the others.
 int           g_bgmDefaultVolume = -1;           // 0x00ac98c4
 unsigned short g_snd_pan_left  = 0x7F;        // 0x00ac98c8 - 3D sound left channel pan
 unsigned short g_snd_pan_right = 0x7F;        // 0x00ac98cc - 3D sound right channel pan
@@ -706,6 +704,14 @@ BYTE  g_KeyBindingVectors[32] = {};
 DWORD g_VideoDriverArray_D0[64] = {};
 DWORD g_VideoDriverArray_03c[64] = {};
 DWORD g_VideoDriverArray_04c[64] = {};
+unsigned char g_eventItemUsedFlag = 0;   // 0x00be9615
+int g_pendingDoorRecord = 0;             // 0x00bebcbc
+unsigned char g_nextRoomDoorType = 0;    // 0x00be0bc8
+unsigned char g_nextRoomSfxId = 0;       // 0x00be0bc1
+unsigned char g_nextRoom_be05b7 = 0;     // 0x00be05b7
+unsigned char g_nextRoomCameraId = 0;    // 0x00be0dd4
+unsigned char g_nextRoomDest = 0;        // 0x00be0bc0
+int g_roomTransitionBusy = 0;            // 0x004d2290
 DWORD g_VideoDriverArray_068[64] = {};
 DWORD g_VideoDriverArray_06c[64] = {};
 DWORD g_VideoDriverArray_4d0[1024] = {};
@@ -852,6 +858,12 @@ __declspec(allocate(".gwipe$62e4")) PlayerEntity g_playerEntity = {};
 // 0x00be6464 - Enemy entity array (30 x 0x18C bytes)
 __declspec(allocate(".gwipe$6464")) Entity g_EnemiesList[30] = {};
 
+// 0x00be92cc - saved enemy state table, 16 x 0x1C bytes (0x00be92cc-0x00be948b).
+// Inside the game-init wipe block, so it needs a .gwipe tag (see docs/MEMORY_LAYOUT.md).
+// The slot below is g_EnemiesList, which ends at 0x00be928b; the slot above is
+// 0x00be9614 - the range is otherwise unoccupied.
+__declspec(allocate(".gwipe$92cc")) SavedEnemyState g_savedEnemyStates[16] = {};
+
 // 0x00be41e2 - Enemy count (inside the wiped range: original zeroes it on game init)
 __declspec(allocate(".gwipe$41e2")) int g_enemy_count = 0;
 
@@ -867,6 +879,7 @@ unsigned char g_freeEffectSlots = 0;
 
 // 0x00bebcd4 - Pointer to current active entity (points to g_playerEntity during gameplay)
 Entity* ENTITY = NULL;
+SavedEnemyState* g_pSavedEnemyState = NULL;              // 0x00bebcd8
 
 // 0x00be9a5c - Controller configuration byte
 unsigned char g_controllerConfig = 0;
@@ -1208,14 +1221,21 @@ static constexpr auto s_gm23 = STR("There is no time to check\\nit.");
 static constexpr auto s_gm24 = STR("\\nThe desk is locked.");
 // [25] 0x004BF72F - Desk locked, use item prompt
 static constexpr auto s_gm25 = STR("\\nThe desk is locked.\\pWill you use\\nthe \\i");
+// The four opening narrations are the only global messages that auto-dismiss.
+// Every other entry in this table ends `01 00` in the original and holds until
+// the player presses a button; these end `01 30` (26/27/28) and `01 40` (29),
+// i.e. clear themselves after 48 and 64 frames. The trailing \dT / \dd encodes
+// that operand ('T' -> 0x30, 'd' -> 0x40); without it the intro text stalls on
+// screen waiting for input instead of playing through. Verified against
+// 0x004bf763 / 0x004bf795 / 0x004bf7e4 / 0x004bf836 in ResidentEvil.exe.
 // [26] 0x004BF763 - Opening narration: Chris
-static constexpr auto s_gm26 = STR("\\n\\s           Chris...\\s4\\pT\\n \\s          Chris...\\s\\n");
+static constexpr auto s_gm26 = STR("\\n\\s           Chris...\\s4\\pT\\n \\s          Chris...\\s\\n\\dT");
 // [27] 0x004BF795 - Opening narration: escaped into mansion
-static constexpr auto s_gm27 = STR("\\s\\nThey have escaped\\ninto the mansion\\pTwhere they thought\\nit was safe.\\pTYet...");
+static constexpr auto s_gm27 = STR("\\s\\nThey have escaped\\ninto the mansion\\pTwhere they thought\\nit was safe.\\pTYet...\\dT");
 // [28] 0x004BF7E4 - Opening narration: survival horror
-static constexpr auto s_gm28 = STR("\\s\\nYou have once\\n\\s\\nagain entered\\pT\\s\\nthe world of\\n\\s\\nsurvival horror.\\pT\\s\\nGood luck!");
+static constexpr auto s_gm28 = STR("\\s\\nYou have once\\n\\s\\nagain entered\\pT\\s\\nthe world of\\n\\s\\nsurvival horror.\\pT\\s\\nGood luck!\\dT");
 // [29] 0x004BF836 - Opening narration: be smart
-static constexpr auto s_gm29 = STR("\\s\\nBe smart!\\n\\s\\nFighting foes\\pT\\s\\nisn't the only\\n\\s\\nway to survive\\pT\\s\\nthis horror.");
+static constexpr auto s_gm29 = STR("\\s\\nBe smart!\\n\\s\\nFighting foes\\pT\\s\\nisn't the only\\n\\s\\nway to survive\\pT\\s\\nthis horror.\\dd");
 // [30] 0x004BF886 - Typewriter, no ink ribbon
 static constexpr auto s_gm30 = STR("\\nIt's an old typewriter.\\p If I had an \\i");
 // [31] 0x004BF8D9 - Typewriter, use ink ribbon prompt
@@ -1421,13 +1441,15 @@ int            g_bgCacheMode = 1;             // 0x004d46b4 — original value i
 char           g_hexCharTable[17] = "0123456789abcdef";
 
 // 0x004c2078 - Path template for room background PAK files (mutated at runtime)
-// Format: ".\usa\stageS\rcSRRC.pak"
+// Format: <GAME_DATA_ROOT>stageS\rcSRRC.pak
 // Positions 0x0B, 0x0F = stage digit, 0x10 = room high nibble, 0x11 = room low nibble
 // Position 0x12 = camera digit (cache mode only)
-char           g_bgPathTemplate[28] = {
-    '.','\\','u','s','a','\\','s','t','a','g','e','S','\\','r','c','S','R','R','C','.','p','a','k','\0',
-    0, 0, 0, 0
-};
+// Built from GAME_DATA_ROOT so the debug asset root is substituted at compile
+// time. The characters below are patched by index at runtime, and the original's
+// indices are relative to its own 6-character root - call sites go through
+// GAME_DATA_PATH_IDX() rather than hardcoding. Sized with headroom for the longer
+// debug root.
+char           g_bgPathTemplate[40] = GAME_DATA_ROOT "stageS\\rcSRRC.pak";
 
 // 0x004c2090 - Camera hex char (stored after path template)
 char           DAT_004c2090 = 0;
@@ -1448,9 +1470,10 @@ unsigned short HEALTH_STATUS_BKP = 0;
 
 // 0x00d22768 - Pointer to active character's item slots (g_ItemsSlots or g_RebeccaItemSlots)
 void*          g_ItemSlotsPointer = NULL;
+unsigned char* g_pCurrentItemSlot = NULL;               // 0x00d226f0
 
 // 0x00aea08c/0x00aea090 - Per-camera offset into g_bgCacheBuffer
-int            g_bgCameraOffsets[16] = {};
+int            g_bgCameraOffsets[17] = {};
 
 // 0x00ae9e80 - Per-camera mask offset into g_bgMaskDataBuffer
 int            g_bgMaskOffsets[16] = {};
@@ -1459,12 +1482,10 @@ int            g_bgMaskOffsets[16] = {};
 BYTE           g_bgMaskDataBuffer[0x20000] = {};
 
 // 0x004c3bc8 - Path template for mask PAK files (mutated at runtime)
-// Format: "./usa/objspr/osp0SRRC.pak"
+// Format: <GAME_DATA_ROOT>objspr\osp0SRRC.pak
 // Position 0x11 = stageId+'0', 0x12/0x13 = roomId decimal digits, 0x14 = camera index+'0'
-char           g_maskPathTemplate[28] = {
-    '.','/','u','s','a','/','o','b','j','s','p','r','/','o','s','p','0','S','R','R','C','.','p','a','k','\0',
-    0, 0
-};
+// Same treatment as g_bgPathTemplate - see the note there.
+char           g_maskPathTemplate[40] = GAME_DATA_ROOT "objspr\\osp0SRRC.pak";
 
 // ============================================================================
 // LZW decompression state (unpack_pakfile_ at 0x00425ab0)
@@ -1488,13 +1509,10 @@ unsigned int   g_pakDecompNextCode = 0x103;
 // 0x00d2b0a0 - Maximum code value for current code size
 unsigned int   g_pakDecompMaxCode = 0x1ff;
 
-// 0x00d2b0b4 - LZW dictionary prefix entries (8192 entries, 4 bytes each)
-// In original: 12 bytes per dict entry, prefix at offset +4
-int            g_pakDictPrefix[8192] = {};
-
-// 0x00d2b0b8 - LZW dictionary character entries (8192 entries, 4 bytes each)
-// In original: 12 bytes per dict entry, char at offset +8
-char           g_pakDictChar[8192] = {};
+// 0x00d2b0b0 - LZW dictionary: one array of 12-byte records. The prefix field
+// (+4) and char field (+8) were previously declared as two separate arrays,
+// which put every dictionary access at the wrong address. See Globals.h.
+PakDictEntry   g_pakDict[PAK_DICT_ENTRIES] = {};
 
 // 0x00d227d0 - String output buffer for building decoded strings
 char           g_pakStringBuf[512] = {};
@@ -1557,14 +1575,14 @@ unsigned int   DAT_00d22770 = 0;                        // 0x00d22770
 
 // Sound system BGM state
 unsigned char  DAT_00bf07ef = 0;                        // 0x00bf07ef
-int            DAT_00bf07f0 = -1;                       // 0x00bf07f0
+// 0x00bf07f0 == g_targetBgmState; the duplicate DAT_00bf07f0 was removed.
 
 // Room BGM state table
 unsigned char  g_abRoomBgmState[224] = {};              // 0x00ac98e8
 
 // Screen effect parameter storage
-unsigned int   DAT_00ac98e0[4] = {};                    // 0x00ac98e0
-unsigned int   DAT_00ac98e4[4] = {};                    // 0x00ac98e4
+SndPanVol      g_SndPanVol[3] = {};                     // 0x00ac98e0 (bound 0x00ac98f8)
+int            DAT_00ac98f8 = 0;                        // 0x00ac98f8
 
 // Special room lighting globals (also used by MainLoop.cpp)
 __declspec(allocate(".gwipe$961d")) int            g_SpecialR1 = 0;           // 0x00be961d
@@ -1604,7 +1622,10 @@ int            DAT_004d2294 = 0;
 int            DAT_004d2288 = 0;
 
 // 0x004d46a4 - Camera/lighting update enable flag (set by room_set)
-int            DAT_004d46a4 = 0;
+// 0x004d46a4 / 0x004d46a8 - render feature gates, both statically 1 in the
+// original .data and never written. See the note in Globals.h before changing.
+int            g_dwCameraLightingEnabled = 1;
+int            g_dwEntityRenderEnabled = 1;
 
 // 0x004d4680 - Debug save menu display trigger (toggled by debug key)
 int            g_displayDebugSaveMenu = 0;

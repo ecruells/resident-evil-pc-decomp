@@ -3,8 +3,10 @@
 #include "../Globals.h"
 #include "../marni/MarniSound.h"
 #include "Entities.h"
+#include "../DebugPrint.h"
 #include <cmath>
 #include <cstdio>
+#include "../system/AssetPath.h"
 
 // ============================================================================
 // sounds_reset (0x0047eb70)
@@ -38,20 +40,24 @@ void sounds_reset(void)
         }
         g_CharacterSfxBanks[i + 1] = 0;
     }
-    for (int i = 0; i < 64; i += 2) {
+    // 48 records, i.e. 96 ints - the array is record-strided, not int-strided
+    for (int i = 0; i < 96; i += 2) {
         if (g_emSndBanks[i] != 0) {
             destroySndBank(g_emSndBanks[i]);
             g_emSndBanks[i] = 0;
         }
         g_emSndBanks[i + 1] = 0;
     }
-    for (int i = 0; i < 64; i += 3) {
-        if (g_SndBank[i] != 0) {
-            destroySndBank(g_SndBank[i]);
-            g_SndBank[i] = 0;
+    // Original: stride 8, bound 0x00ac99e8 -> 3 records; clears handle, field_04,
+    // slot and (uniquely for this array) paused.
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle != 0) {
+            destroySndBank(g_SndBank[i].handle);
         }
-        g_SndBank[i + 1] = 0;
-        g_SndBank[i + 2] = 0;
+        g_SndBank[i].handle   = 0;
+        g_SndBank[i].field_04 = 0;
+        g_SndBank[i].slot     = 0;
+        g_SndBank[i].paused   = 0;
     }
 
     g_SfxVolume = -1;
@@ -98,7 +104,7 @@ void LoadSoundBank(int sound_bank_id, void* buffer)
         const char* filename = *(const char**)((BYTE*)subtable + iVar6);
         if (filename != NULL) {
             char path[256];
-            sprintf(path, ".\\usa\\sound\\%s.wav", filename);
+            sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", filename);
 
             sprintf(dbg, "[DEBUG] LoadSoundBank: loading '%s' ...\n", path);
             OutputDebugStringA(dbg);
@@ -159,8 +165,8 @@ void play_sfx(int bank, int soundId)
         break;
 
     case 4:
-        if (soundId < 48 && g_SndBank[0] != 0) {
-            SetSndSlot(g_SndBank[0], g_snd_slot_00ac99d5);
+        if (soundId < 48 && g_SndBank[0].handle != 0) {
+            SetSndSlot(g_SndBank[0].handle, g_SndBank[0].slot);
         }
         return;
 
@@ -186,11 +192,11 @@ void PauseSounds(void)
         }
     }
 
-    for (int i = 0; i < 64; i += 3) {
-        if (g_SndBank[i] != 0) {
-            if (getSndStat(g_SndBank[i]) == 1) {
-                setSndStop(g_SndBank[i]);
-                *(char*)&g_SndBank[i + 2] = 1;
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle != 0) {
+            if (getSndStat(g_SndBank[i].handle) == 1) {
+                setSndStop(g_SndBank[i].handle);
+                g_SndBank[i].paused = 1;
             }
         }
     }
@@ -207,10 +213,10 @@ void ResumePausedSounds(void)
         g_BgmPaused = 0;
     }
 
-    for (int i = 0; i < 64; i += 3) {
-        if (g_SndBank[i] != 0 && *(char*)&g_SndBank[i + 2] == 1) {
-            playSnd(g_SndBank[i], *(char*)&g_SndBank[i + 1]);
-            *(char*)&g_SndBank[i + 2] = 0;
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle != 0 && g_SndBank[i].paused == 1) {
+            playSnd(g_SndBank[i].handle, (int)g_SndBank[i].slot);
+            g_SndBank[i].paused = 0;
         }
     }
 }
@@ -229,11 +235,11 @@ void UpdateSoundFadeState(void)
             return;
         }
         if (g_SndFadeType == -2) {
-            for (int i = 0; i < 64; i += 3) {
-                if (g_SndBank[i] != 0) {
-                    setSndStop(g_SndBank[i]);
-                    destroySndBank(g_SndBank[i]);
-                    g_SndBank[i] = 0;
+            for (int i = 0; i < 3; i++) {
+                if (g_SndBank[i].handle != 0) {
+                    setSndStop(g_SndBank[i].handle);
+                    destroySndBank(g_SndBank[i].handle);
+                    g_SndBank[i].handle = 0;
                 }
             }
             return;
@@ -245,9 +251,9 @@ void UpdateSoundFadeState(void)
             return;
         }
         if (g_SndFadeType == -29 && g_BGM_STATE != 0xFF) {
-            for (int i = 0; i < 64; i += 3) {
-                if (g_SndBank[i] != 0) {
-                    setSndStop(g_SndBank[i]);
+            for (int i = 0; i < 3; i++) {
+                if (g_SndBank[i].handle != 0) {
+                    setSndStop(g_SndBank[i].handle);
                 }
             }
             return;
@@ -263,7 +269,8 @@ void UpdateSoundFadeState(void)
 // ============================================================================
 void UpdateSoundDecay(void)
 {
-    int bank = g_SndBank[g_SndRampBankIndex * 3];
+    // Original: MOV EAX,dword ptr [EAX*0x8 + 0xac99d0] - a record index, not *3.
+    int bank = g_SndBank[g_SndRampBankIndex].handle;
     if (bank != 0) {
         int vol = getSndVol(bank);
         if (vol == 2000) {
@@ -488,7 +495,7 @@ void load_room_sfx(unsigned char soundTableIndex)
             const char* filename = *(const char**)((BYTE*)puVar2 + iVar6);
             if (filename != NULL) {
                 char path[260];
-                sprintf(path, ".\\usa\\sound\\%s.wav", filename);
+                sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", filename);
                 findAndOpenFile(path);
 
                 int bank = loadSndBankFromWav(path);
@@ -600,7 +607,7 @@ void load_character_sfx(unsigned char charId)
             const char* filename = *(const char**)((BYTE*)puVar2 + iVar6);
             if (filename != NULL) {
                 char path[260];
-                sprintf(path, ".\\usa\\sound\\%s.wav", filename);
+                sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", filename);
                 findAndOpenFile(path);
 
                 int bank = loadSndBankFromWav(path);
@@ -614,6 +621,12 @@ void load_character_sfx(unsigned char charId)
 
         iVar6 += 4;
         piVar7 += 2;
+        // This bound is the authoritative size of g_CharacterSfxBanks: stride 8,
+        // last record at base+120, i.e. 16 records spanning 0x00ac9950-0x00ac99cf
+        // (ending exactly where g_SndBank begins). Original: `ptr <= 0xac99cf`.
+        // Note sounds_reset / DestroyAllSoundBanks / UpdateSoundFade stop at
+        // 0xac9998 in the original and so only cover the first 9 - that is a
+        // Capcom bug (records 9-15 leak); see docs/SCD_SCRIPT_SYSTEM.md 6g.
     } while (piVar7 <= (int*)&g_CharacterSfxBanks[30]);
 }
 
@@ -624,17 +637,17 @@ void load_character_sfx(unsigned char charId)
 static void bgm_fade_out_all(void)
 {
     // mute all secondary sound banks
-    for (int i = 0; i < 64; i += 2) {
-        if (g_SndBank[i] != 0) {
-            set_volume(g_SndBank[i], 0xffffd8f1);
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle != 0) {
+            set_volume(g_SndBank[i].handle, 0xffffd8f1);
         }
     }
     Task_sleep(1);
 
     // stop all secondary sound banks
-    for (int i = 0; i < 64; i += 2) {
-        if (g_SndBank[i] != 0) {
-            setSndStop(g_SndBank[i]);
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle != 0) {
+            setSndStop(g_SndBank[i].handle);
         }
     }
 
@@ -653,10 +666,10 @@ static void bgm_fade_out_all(void)
     Task_sleep(1);
 
     // destroy all secondary banks
-    for (int i = 0; i < 64; i += 2) {
-        if (g_SndBank[i] != 0) {
-            destroySndBank(g_SndBank[i]);
-            g_SndBank[i] = 0;
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle != 0) {
+            destroySndBank(g_SndBank[i].handle);
+            g_SndBank[i].handle = 0;
         }
     }
 }
@@ -680,11 +693,11 @@ static void bgm_load_and_start(unsigned char bgmState)
                 // pass - continue with slotCount=3
             } else {
                 slotCount = 2;
-                if (g_snd_bank_00ac99e0 != 0) {
-                    destroySndBank(g_snd_bank_00ac99e0);
+                if (g_SndBank[2].handle != 0) {
+                    destroySndBank(g_SndBank[2].handle);
                 }
-                g_snd_bank_00ac99e0 = 0;
-                g_snd_slot_00ac99e5 = 0;
+                g_SndBank[2].handle = 0;
+                g_SndBank[2].slot   = 0;
             }
         }
     }
@@ -692,14 +705,14 @@ static void bgm_load_and_start(unsigned char bgmState)
     unsigned char bgmIndex = bgmState & 7;
 
     for (int idx = 0; idx < slotCount; idx++) {
-        int* bankPtr = &g_SndBank[idx * 2];
-        if (*bankPtr != 0) {
-            destroySndBank(*bankPtr);
+        SndBankSlot* ch = &g_SndBank[idx];
+        if (ch->handle != 0) {
+            destroySndBank(ch->handle);
         }
-        *bankPtr = 0;
-        *((unsigned char*)&bankPtr[1]) = 0;
-        *((unsigned char*)&bankPtr[1] + 1) = 0;
-        *((unsigned char*)&bankPtr[1] + 2) = 0;
+        ch->handle   = 0;
+        ch->field_04 = 0;
+        ch->slot     = 0;
+        ch->paused   = 0;
 
         // TODO: Read BGM type byte from g_bgmDataTable[g_stageId][g_roomId] at offset bgmIndex
         // const unsigned char* bgmData = (unsigned char*)g_bgmDataTable + (g_stageId * 0x20 + g_roomId) * 4;
@@ -720,20 +733,20 @@ static void bgm_start_secondary_slots(void)
     if (g_targetBgmState == 0xFF) return;
 
     if (g_targetBgmState & 8) {
-        if (g_SndBank[0] != 0) {
-            SetSndSlot(g_SndBank[0], g_snd_slot_00ac99d5);
+        if (g_SndBank[0].handle != 0) {
+            SetSndSlot(g_SndBank[0].handle, g_SndBank[0].slot);
         }
         g_BGM_STATE |= 8;
     }
     if (g_targetBgmState & 0x10) {
-        if (g_snd_bank_00ac99d8 != 0) {
-            SetSndSlot(g_snd_bank_00ac99d8, g_snd_slot_00ac99dd);
+        if (g_SndBank[1].handle != 0) {
+            SetSndSlot(g_SndBank[1].handle, g_SndBank[1].slot);
         }
         g_BGM_STATE |= 0x10;
     }
     if (g_targetBgmState & 0x20) {
-        if (g_snd_bank_00ac99e0 != 0) {
-            SetSndSlot(g_snd_bank_00ac99e0, g_snd_slot_00ac99e5);
+        if (g_SndBank[2].handle != 0) {
+            SetSndSlot(g_SndBank[2].handle, g_SndBank[2].slot);
         }
         g_BGM_STATE |= 0x20;
     }
@@ -790,23 +803,23 @@ void update_room_bgm(void)
                     // bit-level sound slot toggling
                     if ((g_targetBgmState ^ g_prevBgmState) & 8) {
                         if (!(g_targetBgmState & 8)) {
-                            if (g_SndBank[0] != 0) setSndStop(g_SndBank[0]);
+                            if (g_SndBank[0].handle != 0) setSndStop(g_SndBank[0].handle);
                         } else {
-                            if (g_SndBank[0] != 0) SetSndSlot(g_SndBank[0], g_snd_slot_00ac99d5);
+                            if (g_SndBank[0].handle != 0) SetSndSlot(g_SndBank[0].handle, g_SndBank[0].slot);
                         }
                     }
                     if ((g_targetBgmState ^ g_prevBgmState) & 0x10) {
                         if (!(g_targetBgmState & 0x10)) {
-                            if (g_snd_bank_00ac99d8 != 0) setSndStop(g_snd_bank_00ac99d8);
+                            if (g_SndBank[1].handle != 0) setSndStop(g_SndBank[1].handle);
                         } else {
-                            if (g_snd_bank_00ac99d8 != 0) SetSndSlot(g_snd_bank_00ac99d8, g_snd_slot_00ac99dd);
+                            if (g_SndBank[1].handle != 0) SetSndSlot(g_SndBank[1].handle, g_SndBank[1].slot);
                         }
                     }
                     if ((g_targetBgmState ^ g_prevBgmState) & 0x20) {
                         if (!(g_targetBgmState & 0x20)) {
-                            if (g_snd_bank_00ac99e0 != 0) setSndStop(g_snd_bank_00ac99e0);
+                            if (g_SndBank[2].handle != 0) setSndStop(g_SndBank[2].handle);
                         } else {
-                            if (g_snd_bank_00ac99e0 != 0) SetSndSlot(g_snd_bank_00ac99e0, g_snd_slot_00ac99e5);
+                            if (g_SndBank[2].handle != 0) SetSndSlot(g_SndBank[2].handle, g_SndBank[2].slot);
                         }
                     }
                     goto done;
@@ -1025,9 +1038,9 @@ void Play3DSnd(int bank, int soundId, int vol, int pos) // 0x0047f9c0
     case 4:
         if (soundId < 0x30) {
             Calc3DSndPan(soundPos);
-            if (g_SndBank[0] != 0) {
-                pan_set(g_SndBank[0], (g_snd_pan_right - g_snd_pan_left) * 0x4E);
-                SetSndSlot(g_SndBank[0], (int)g_snd_slot_00ac99d5);
+            if (g_SndBank[0].handle != 0) {
+                pan_set(g_SndBank[0].handle, (g_snd_pan_right - g_snd_pan_left) * 0x4E);
+                SetSndSlot(g_SndBank[0].handle, (int)g_SndBank[0].slot);
             }
         }
         return;
@@ -1045,6 +1058,171 @@ void Play3DSnd(int bank, int soundId, int vol, int pos) // 0x0047f9c0
 }
 
 // ============================================================================
+// SCD voice playback (opcode 0x1E, cmd_sfx_set)
+//
+// Cutscene dialogue is one WAV per line under .\usa\voice\, loaded into
+// g_BgmSoundBank. The handshake with the script matters: cmd_sfx_set SETS
+// g_main_state_flags bit 17 (0x20000) after asking for a voice, and
+// play_sound_and_voice_effect type 2 CLEARS it. Event-VM opcode 0xF7 waits on
+// that bit, so the voice is what gates a cutscene line advancing. While
+// play_sound_and_voice_effect was an empty stub the bit was only ever cleared as
+// a side effect of UpdateMusicWaitState finding no BGM playing - which is why
+// scripted lines advanced silently instead of hanging.
+//
+// Voice state block at 0x00ae9ec8-0x00ae9ee0. None of these existed in the port.
+// ============================================================================
+static unsigned char g_voiceActive       = 0;  // 0x00ae9ec8
+static unsigned char g_voiceExtraCount   = 0;  // 0x00ae9ec9
+static int           g_voiceChannelCount = 0;  // 0x00ae9ecc
+static int           g_voiceBankBase     = 0;  // 0x00ae9ec4
+static int           g_voiceCursor       = 0;  // 0x00ae9ec0
+static int           g_voiceBankLimit    = 0;  // 0x00ae9ed8
+static int           g_voiceFinished     = 0;  // 0x00ae9ed4
+static unsigned char g_voicePanMode      = 0;  // 0x00ae9ee0
+static unsigned char g_voicePan[4]       = {0};// 0x00ae9edc-0x00ae9edf
+static int           g_voiceMixerReset   = 0;  // 0x008f87ac
+static int           g_voiceVolume       = 0;  // 0x00ac9900 - 0 in the image (no attenuation)
+
+// ============================================================================
+// voice_set_pan (0x00475640)
+// Fills the four per-channel pan bytes. Mode 1 puts the raw value on channels 0
+// and 2 with 0 between; any other mode halves it across all four.
+// ============================================================================
+static void voice_set_pan(unsigned char value)
+{
+    if (g_voicePanMode == 1) {
+        g_voicePan[0] = value;
+        g_voicePan[1] = 0;
+        g_voicePan[2] = value;
+        g_voicePan[3] = 0;
+        return;
+    }
+    g_voicePan[0] = (unsigned char)(value >> 1);
+    g_voicePan[1] = g_voicePan[0];
+    g_voicePan[2] = g_voicePan[0];
+    g_voicePan[3] = g_voicePan[0];
+}
+
+// ============================================================================
+// voice_mixer_reset (0x004756b0)
+// One store. The original is called as FUN_004756b0(9,0,0) but takes no
+// parameters - the three pushes are dead, the same pattern as rotate_entity's
+// fourth argument and PlayEntitySnd's second.
+// ============================================================================
+static void voice_mixer_reset(void)
+{
+    g_voiceMixerReset = 0;
+}
+
+// ============================================================================
+// voice_load_and_play (0x004753c0)
+// Loads the WAV for voice line `id` and starts it.
+//
+// The long inlined strcpy/strlen chains in the decompilation are the compiler
+// expanding three strcats: voice directory, then the 9-byte name from
+// g_StageVoiceNamesTable[stageId] + id*9, then ".wav".
+//
+// g_StageDataPtr is walked as 16-bit entries; an entry with bit 15 set consumes
+// an extra word and bumps a counter. That counter and the two bank offsets it
+// feeds are stored but nothing on this path reads them back - FUN_004753b0, whose
+// return value seeds them, is an empty function in the original. Kept for
+// fidelity, marked as inert.
+// ============================================================================
+static void voice_load_and_play(unsigned int id)
+{
+    int extra = 0;
+    unsigned short* p = (unsigned short*)g_StageDataPtr;
+
+    for (unsigned int i = 0; i < id; i++) {
+        if ((*p & 0x8000) != 0) {
+            extra++;
+            p++;
+        }
+        p++;
+    }
+
+    g_voiceExtraCount = (unsigned char)extra;
+    g_voiceActive     = 1;
+
+    // 0x004753b0 is an empty function; these three stay inert.
+    g_voiceBankLimit = 0;
+    g_voiceBankBase  = g_voiceBankLimit + (*p & 0x7fff) * 0x10 + extra;
+    g_voiceCursor    = 0;
+    g_voiceBankLimit = g_voiceBankLimit + (p[1] & 0x7fff) * 0x10 + extra;
+
+    // Wait for the previous voice to finish, then release its bank.
+    if (g_BgmSoundBank != 0) {
+        // PORT-ONLY BOUND: the original spins here with no yield, which is safe
+        // in its cooperative scheduler only because getSndStat eventually stops
+        // returning 1. Bounding it turns a whole-game hang into a diagnostic.
+        int spin = 0;
+        while (getSndStat(g_BgmSoundBank) == 1) {
+            if (++spin > 100000) {
+                dbg_printf("[voice] bank %d never reported finished - abandoning wait\n",
+                           g_BgmSoundBank);
+                break;
+            }
+        }
+        destroySndBank(g_BgmSoundBank);
+        g_BgmSoundBank = 0;
+    }
+
+    if (g_stageId >= 8 || g_StageVoiceNamesTable[g_stageId] == NULL) {
+        return;
+    }
+
+    const char* name = g_StageVoiceNamesTable[g_stageId] + id * 9;
+    if (name[0] == '\0') {
+        return;
+    }
+
+    char path[260];
+    sprintf(path, "%s%s%s", GAME_DATA_ROOT "voice\\", name, ".wav");
+
+    if (findAndOpenFile(path) == 0) {
+        dbg_printf("[voice] could not open file: %s\n", path);
+        return;
+    }
+
+    g_BgmSoundBank = loadSndBankFromWav(path);
+    if (g_BgmSoundBank != 0) {
+        pan_set(g_BgmSoundBank, 0);
+        int volume = g_voiceVolume;
+        // 0x0047558?: one line in stage 0 is mixed well down
+        if ((id == 0x33) && (g_stageId == 0)) {
+            volume = -300;
+        }
+        set_volume(g_BgmSoundBank, volume);
+        SetSndSlot(g_BgmSoundBank, 0);
+    }
+}
+
+// ============================================================================
+// play_sound_and_voice_effect (0x00475340)
+// SCD opcode 0x1E dispatches here. Type 1 starts a voice line; type 2 ends the
+// current one, resets the mixer and clears the 0x20000 wait flag the script is
+// blocked on. Any other type is ignored.
+// ============================================================================
+void play_sound_and_voice_effect(int type, int id)
+{
+    if (type == 1) {
+        voice_load_and_play((unsigned int)id);
+        return;
+    }
+    if (type != 2) {
+        return;
+    }
+
+    for (int i = g_voiceChannelCount; i != 0; i--) {
+        voice_set_pan((unsigned char)i);
+    }
+    voice_set_pan(0);
+    voice_mixer_reset();
+    g_voiceFinished = 0;
+    g_main_state_flags &= 0xFFFDFFFF;
+}
+
+// ============================================================================
 // LookupFootstepZone (0x00460480)
 // Scans RDT footstep_sound_zones table for the zone containing (posX, posZ).
 // Returns packed byte: high = zone type, low = sound offset for that zone.
@@ -1055,10 +1233,29 @@ unsigned short LookupFootstepZone(short posX, short posZ) // 0x00460480
     //   [0]=baseX [1]=baseZ [2]=width [3]=height [4]=soundData
     unsigned short* entry = (unsigned short*)(g_RdtPointer->footstep_sound_zones + 2);
 
-    // Scan until position falls within zone bounds
+    // Scan until position falls within zone bounds.
+    //
+    // The original has no terminator check either - it relies on the last zone in
+    // every room's table being a catch-all that always matches, so the loop is
+    // guaranteed to stop. That holds only while the entity is somewhere inside the
+    // room. An entity that walks out of bounds makes this scan run off the end of
+    // the RDT and fault (seen crashing at 0x0140F000 with the player overshooting
+    // his scripted run target).
+    //
+    // PORT-ONLY GUARD, no behavioural change: in correct operation the catch-all
+    // matches long before the cap, so this never fires. It exists so an
+    // out-of-bounds entity produces a diagnostic instead of an access violation,
+    // which would otherwise mask whatever actually moved the entity out of the
+    // room. Remove it only once out-of-bounds movement is impossible.
+    int guard = 0;
     while ((unsigned int)entry[2] <= (int)posX - (unsigned int)entry[0] ||
            (unsigned int)entry[3] <= (int)posZ - (unsigned int)entry[1]) {
         entry += 5;
+        if (++guard > 256) {
+            dbg_printf("[footstep] no zone contains (%d,%d) after %d entries - "
+                       "entity is outside the room\n", (int)posX, (int)posZ, guard);
+            return 0;
+        }
     }
 
     // Pack high byte of height field and low byte of sound data
@@ -1091,11 +1288,16 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
         soundType = soundType + 0x23;
     }
 
-    if (soundType >= 0x30) return;
+    if (soundType >= 0x30) {
+        dbg_printf("[entsnd] type=%u out of range (>=0x30) - no sound\n",
+                   (unsigned int)soundType);
+        return;
+    }
 
     Calc3DSndPan((VECTOR*)ENTITY->scaMatrixData.localMatrix.t);
 
     int handle = g_emSndBanks[(unsigned int)soundType * 2];
+
     if (handle != 0) {
         int volume = CalcPanVolume(g_snd_pan_right, g_snd_pan_left);
         set_volume(handle, volume);
@@ -1125,63 +1327,10 @@ void Snd_em(unsigned char em_snd_id) // 0x0047fca0
     }
 }
 
-// ============================================================================
-// collision_flag_set (0x0047e1b0)
-// Sets collision flag bit 3 on the player entity.
-// Called as a sound callback from Room_SetupCollisionCallbacks.
-// ============================================================================
-static void collision_flag_set(void) {
-    ENTITY->collisionFlags |= 0x08;
-}
-
-// ============================================================================
-// collision_push_rect (0x0047df10)
-// Rectangular boundary collision callback. Computes push-back vectors for
-// the player entity against rectangular collision boundaries.
-// ============================================================================
-// TODO: Implement collision_push_rect (0x0047df10) - complex collision physics
-// Depends on: player_distance_z, g_scaled_down_dist, DAT_00be0dec,
-//             action_behavior_00be0df0, g_entity_bkp, _g_00be0dfc_var
-static void collision_push_rect(short* bounds, int* pos, short* prevPos) {
-    // Stub - collision callback placeholder
-}
-
-// ============================================================================
-// collision_push_circle (0x0047e0e0)
-// Circular boundary collision callback. Uses SquareRoot0 for distance
-// calculation and pushes the player entity out of circular boundaries.
-// ============================================================================
-// TODO: Implement collision_push_circle (0x0047e0e0) - complex collision physics
-static unsigned int collision_push_circle(unsigned short* bounds, int* pos) {
-    // Stub - collision callback placeholder
-    return 0;
-}
-
-// ============================================================================
-// Room_SetupCollisionCallbacks (0x0047d140)
-// Sets up room boundary collision data from RDT and installs sound/collision
-// callback function pointers. Called from room_set during room initialization.
-// ============================================================================
-void Room_SetupCollisionCallbacks(void) {
-    unsigned char* boundaries = g_RdtPointer->boundaries;
-    int count = *(int*)(boundaries + 4);
-    *(int*)(boundaries + 4) = (int)(boundaries + 0x18);
-
-    int* ptrTable = (int*)(boundaries + 8);
-    g_playerDisplacement = 0;
-    do {
-        int prev = *ptrTable;
-        *ptrTable = (int)(boundaries + 0x18) + count * 0x0C;
-        ptrTable++;
-        g_playerDisplacement++;
-        count += prev;
-    } while (g_playerDisplacement < 4);
-
-    g_SoundCallbackRect = collision_push_rect;
-    g_SoundCallbackRect2 = collision_push_rect;
-    g_SoundCallbackCircle = collision_push_circle;
-    g_SoundCallbackFlag = collision_flag_set;
-}
+// collision_flag_set / collision_push_rect / collision_push_circle and
+// Room_SetupCollisionCallbacks now live in RoomCollision.cpp, with the rest of
+// the room boundary system. They were only ever here because the original's
+// callback table sits next to the sound bank globals.
 
 // ============================================================================
 // Room_LoadEnemySoundBanks (0x0047eed0)
@@ -1209,7 +1358,7 @@ void Room_LoadEnemySoundBanks(void) {
             const char* filename = soundTable[iVar6 / 4];
             if (filename != NULL) {
                 char path[260];
-                sprintf(path, ".\\usa\\sound\\%s.wav", filename);
+                sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", filename);
                 findAndOpenFile(path);
 
                 int bank = loadSndBankFromWav(path);
@@ -1223,5 +1372,13 @@ void Room_LoadEnemySoundBanks(void) {
 
         iVar6 += 4;
         piVar7 += 2;
-    } while (piVar7 <= (int*)&g_emSndBanks[48]);
+        // The original bounds this with an absolute address:
+        //   piVar7 walks from g_emSndBanks (0x00ac99f0) in 8-byte steps and the
+        //   loop ends once piVar7 > 0xac9b6f, which is records 0 through 47.
+        // &g_emSndBanks[48] is only base+192 bytes - element 48 of an int array,
+        // not record 48 - so this stopped after 25 records and left every enemy
+        // and footstep sound from id 25 up with a null bank. That is why no SFX
+        // played: PlayEntitySnd looks up g_emSndBanks[soundType * 2], finds 0 and
+        // silently returns.
+    } while (piVar7 < (int*)&g_emSndBanks[96]);
 }

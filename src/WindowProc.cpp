@@ -158,6 +158,13 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (wParam == VK_SNAPSHOT) {
                 CreateTimestampedLogFile();
             }
+            // Not in the original: F5 toggles the collision boundary overlay.
+            // Handled on KEYUP, like PrintScreen above, because that fires once
+            // per press - WM_KEYDOWN autorepeats while the key is held and would
+            // flip the toggle every repeat.
+            else if (wParam == VK_F5) {
+                g_bShowCollisionDebug = g_bShowCollisionDebug ? FALSE : TRUE;
+            }
             break;
         
         // --- WM_SYSCOMMAND ---

@@ -4,6 +4,7 @@
 #include "SpriteRenderer.h"
 #include <cstdio>
 #include <cstring>
+#include "../system/AssetPath.h"
 
 // Forward declarations for functions defined in other files
 extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
@@ -247,7 +248,7 @@ static void load_effect_sprites(void)
         unsigned int relIdx = (unsigned int)g_RoomEffectSpriteTable[
             ((unsigned int)g_stageId * 32 + (unsigned int)g_roomId) * 4 + i];
         if (relIdx != 0xFF) {
-            sprintf(pathBuf, ".\\usa\\effspr\\%s.tim", g_EffectSpriteNames[relIdx]);
+            sprintf(pathBuf, GAME_DATA_ROOT "effspr\\%s.tim", g_EffectSpriteNames[relIdx]);
             LoadFile(pathBuf, g_TimImageBuffer__bitmap, 0x20);
             TexturePage_Load(i, g_TimImageBuffer__bitmap);
         }
@@ -268,18 +269,29 @@ void InitRoomEffSprite(void)
     g_freeEffectSlots = 64;
     memset(g_effectPool, 0, sizeof(g_effectPool));
 
-    // 0x0047b9c3: Clear shoot direction effect sprite entries (indices 0-7)
+    // 0x0047b9c3: invalidate the PREVIOUS room's effect entries before the new
+    // room's are loaded.
+    //
+    // The index is `+ 8`, not bare. The original reads and writes
+    // g_abEffSpriteIndexTable[uVar4 + 8], and it has to: load_effect_sprite_data
+    // below is called with startSlot = 8, so the room's entries live at [8..15].
+    // Slots [0..7] are the shoot-direction entries and belong to nobody here.
+    //
+    // Without the +8 this loop invalidated the wrong block, so a departing room's
+    // g_effectSpriteInfo[] slots kept stale pointers while entries the new room did
+    // not declare stayed 0 instead of 0xFFFFFFFF - and Effect_CreateBillboard then
+    // dereferenced 0+2, faulting at 0x00000002 inside opcode 0x18.
     unsigned char i = 0;
     do {
         unsigned int idx = (unsigned int)i;
-        unsigned char spriteIdx = g_abEffSpriteIndexTable[idx];
+        unsigned char spriteIdx = g_abEffSpriteIndexTable[idx + 8];
         if (spriteIdx == 0xFF) {
             i = 8;
         } else {
             i = i + 1;
             g_effectSpriteInfo[spriteIdx] = 0xFFFFFFFF;
             g_effectAnimData[spriteIdx] = 0xFFFFFFFF;
-            g_abEffSpriteIndexTable[idx] = 0xFF;
+            g_abEffSpriteIndexTable[idx + 8] = 0xFF;
         }
     } while (i < 8);
 
@@ -304,11 +316,12 @@ void InitRoomEffSprite(void)
 }
 
 // ============================================================================
-// FUN_0048bea0 (0x0048bea0) - Reverse animation frame data order
+// reverse_anim_frame_data (0x0048bea0) - Reverse animation frame data order
 // Swaps animation entries to reverse the playback order.
 // param_1: pointer to joint anim_field (offset 0x0C within JointStruct)
+// Externally visible: FUN_0048c020 (SCD opcode 0x0F) also calls this.
 // ============================================================================
-static void FUN_0048bea0(int param_1)
+void reverse_anim_frame_data(int param_1)
 {
     AnimSlot* slot = *(AnimSlot**)(param_1 + 8);
     unsigned short count = slot->entryCount;
@@ -382,7 +395,7 @@ void SetupEntityJointAnimation(void)
             int* fixupPtr = (int*)(*(int*)(jointBase + 0x14) + 0x10);
             *fixupPtr = *fixupPtr + (newAnimSlotPtr - (int)origAnimSlotPtr);
 
-            FUN_0048bea0(animFieldAddr);
+            reverse_anim_frame_data(animFieldAddr);
 
             g_loadDataDestPointer = CreateAnimObject(animFieldAddr, (unsigned int*)g_loadDataDestPointer);
 
@@ -433,7 +446,7 @@ void SetupTextureBankData(short param_1)
 void load_slides_images(void)
 {
     // 0x00478110: Load slide TIM file into display image buffer
-    LoadFile("./usa/data/slide.tim", g_TimImageBuffer__bitmap, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\slide.tim", g_TimImageBuffer__bitmap, 0x20);
     // 0x00478124: Create texture page from loaded TIM data
     TexturePage_LoadImage(g_TimImageBuffer__bitmap, 9, 0xd);
 }
@@ -446,13 +459,15 @@ void load_slides_images(void)
 // FUN_00425a70 - Reset LZW decompression dictionary
 static void pak_decomp_reset(void)
 {
-    // 0x00425a70: Clear all dictionary entries (set prefix to -1)
-    for (int i = 0; i < 8192; i++) {
-        g_pakDictPrefix[i] = -1;
+    // 0x00425a70-0x00425a5e: set field +0 of every 12-byte record to -1. Note
+    // this clears the record's UNUSED word, not the prefix — the decoder never
+    // reads it, so the reset is effectively vestigial. Reproduced as-is.
+    for (int i = 0; i < PAK_DICT_ENTRIES; i++) {
+        g_pakDict[i].unused = -1;
     }
     g_pakDecompNextCode = 0x103;
     g_pakDecompCodeSize = 9;
-    g_pakDecompMaxCode = 0x1ff;
+    g_pakDecompMaxCode = 0x1ff;   // 0x00425a68: _DAT_00d2b0a0
 }
 
 // FUN_00425a00 - Read a code of 'codeSize' bits from the input bitstream
@@ -486,13 +501,12 @@ static unsigned int pak_decomp_read_code(void* src, unsigned int codeSize)
 static int pak_decomp_decode_string(int startPos, unsigned int code)
 {
     if (code > 0xFF) {
-        // Multi-character: walk the chain
+        // Multi-character: walk the prefix chain, emitting characters in reverse
         int pos = startPos;
         do {
-            int idx = code;
-            int dictOfs = code * 12;
-            code = *(int*)((char*)g_pakDictPrefix + dictOfs - 4); // prefix at entry+4
-            g_pakStringBuf[pos] = g_pakDictChar[idx];
+            unsigned int idx = code;
+            code = (unsigned int)g_pakDict[idx].prefix;
+            g_pakStringBuf[pos] = g_pakDict[idx].ch;
             pos++;
         } while (code > 0xFF);
         g_pakStringBuf[pos] = (char)code;
@@ -529,6 +543,12 @@ int unpack_pakfile_(void* src, void* dst)
         outPos++;
         unsigned int prevCode = curCode;
 
+        // The original tracks the first character of the PREVIOUSLY decoded
+        // string separately from the previous code (local_4 vs local_8). They
+        // only coincide while codes are single characters, so they must not be
+        // conflated — the KwKwK case below appends this character.
+        unsigned int prevFirstChar = curCode;
+
         // 0x00425aee: Main decompression loop
         while (true) {
             curCode = pak_decomp_read_code(src, g_pakDecompCodeSize);
@@ -547,50 +567,43 @@ int unpack_pakfile_(void* src, void* dst)
                 continue;
             }
 
+            // 0x00425b20: KwKwK case — the code is not in the table yet, so
+            // decode the PREVIOUS string and append its first character. That
+            // trailing character goes in stringBuf[0], which the reversed output
+            // loop below emits last.
             unsigned int lookupCode = curCode;
             bool special = (g_pakDecompNextCode <= curCode);
             if (special) {
-                // Special case: code not yet in table
-                g_pakStringBuf[0] = (char)prevCode; // store first char of prev
+                g_pakStringBuf[0] = (char)prevFirstChar;
                 lookupCode = prevCode;
             }
 
-            // 0x00425b3d: Decode string
+            // 0x00425b3d: Decode string (reversed into g_pakStringBuf)
             int charCount = pak_decomp_decode_string(special ? 1 : 0, lookupCode);
 
-            // 0x00425b50: Get first character of decoded string
-            unsigned char firstChar;
-            if (special) {
-                firstChar = (unsigned char)g_pakStringBuf[0];
-            } else {
-                firstChar = (unsigned char)g_pakStringBuf[charCount - 1];
-            }
+            // 0x00425b50: The decoded string is reversed, so its first character
+            // is the last one written. The original reads this uniformly, with no
+            // special-case branch.
+            char firstChar = g_pakStringBuf[charCount - 1];
+            prevFirstChar = (unsigned int)firstChar;
 
-            // 0x00425b64: Output decoded string in correct order
-            int outputCount = charCount;
-            if (special) {
-                // Output from stringBuf[charCount-1] down to stringBuf[1], then stringBuf[0]
-                for (int i = charCount - 1; i >= 1; i--) {
-                    ((unsigned char*)dst)[outPos] = (unsigned char)g_pakStringBuf[i];
-                    outPos++;
-                }
-                ((unsigned char*)dst)[outPos] = (unsigned char)g_pakStringBuf[0];
+            // 0x00425b64: Emit the string forwards by walking the buffer back
+            // down to index 0 (which is the appended char in the KwKwK case).
+            for (int i = charCount; i != 0; i--) {
+                ((unsigned char*)dst)[outPos] = (unsigned char)g_pakStringBuf[i - 1];
                 outPos++;
-            } else {
-                for (int i = charCount - 1; i >= 0; i--) {
-                    ((unsigned char*)dst)[outPos] = (unsigned char)g_pakStringBuf[i];
-                    outPos++;
-                }
             }
 
-            // 0x00425b98: Update state for next iteration
-            prevCode = curCode;
-
-            // 0x00425b90: Add new dictionary entry
+            // 0x00425b90: Add the new dictionary entry. Its prefix is the code
+            // from the PREVIOUS iteration, so prevCode must not be advanced
+            // until after this write.
             unsigned int newIdx = g_pakDecompNextCode;
-            g_pakDecompNextCode++;
-            g_pakDictPrefix[newIdx] = (int)prevCode;
-            g_pakDictChar[newIdx] = (char)firstChar;
+            g_pakDecompNextCode = newIdx + 1;
+            g_pakDict[newIdx].prefix = (int)prevCode;
+            g_pakDict[newIdx].ch = firstChar;
+
+            // 0x00425ba9: Update state for next iteration
+            prevCode = curCode;
         }
     } while (true);
 }

@@ -21,6 +21,15 @@
 //     STR("USE " STR_BTN_L1 " TO AIM")
 //
 // The encoded data is terminated with 0x01 (end of text block).
+//
+// Escapes:
+//   \n  0x02  newline          \p  0x03  page break (next char = delay operand)
+//   \s  0x04  set char delay   \i  0x05  item-name placeholder
+//   \c  0x08  yes/no prompt    \q  0x0A  square glyph
+//   \d        auto-dismiss: the next char is encoded and written AFTER the
+//             0x01 terminator, making the message clear itself after that many
+//             frames instead of waiting for a button press. Omit it and the
+//             terminator is followed by 0, which is the wait-for-input form.
 // ============================================================================
 
 // --- 8x14 controller symbol constants (direct font indices) ---
@@ -91,6 +100,7 @@ struct Encoded {
     constexpr Encoded(const char (&str)[N]) : bytes{}
     {
         int out = 0;
+        unsigned char dismissDelay = 0;
         for (int i = 0; i < N - 1; i++) {
             unsigned char c = (unsigned char)str[i];
             if (c == 0x5C && i + 1 < N - 1) {
@@ -101,13 +111,35 @@ struct Encoded {
                     case 'i': bytes[out++] = 0x05; i++; continue;
                     case 'c': bytes[out++] = 0x08; i++; continue;
                     case 'q': bytes[out++] = 0x0A; i++; continue;
+                    case 'd':
+                        // Auto-dismiss delay. Emits nothing here; the NEXT
+                        // character is encoded (same operand convention as \p)
+                        // and written after the 0x01 terminator. See the note
+                        // on the terminator below.
+                        if (i + 2 < N - 1) {
+                            dismissDelay = encodeChar((unsigned char)str[i + 2]);
+                            i += 2;
+                        } else {
+                            i++;
+                        }
+                        continue;
                     case 0x5C: bytes[out++] = encodeChar(0x5C); i++; continue;
                     default: break;
                 }
             }
             bytes[out++] = encodeChar(c);
         }
-        bytes[out] = 0x01;
+        // The byte FOLLOWING the 0x01 terminator is read by the message state
+        // machine (UpdateMessageDisplay / FUN_004557b0, tag-1 handler) and is
+        // part of the message, not padding:
+        //     next == 0  -> state 5: hold the text and wait for a button press
+        //     next != 0  -> state 6: auto-dismiss after `next` frames
+        // Zero-initialised `bytes` gives the wait-for-input form by default,
+        // which is right for the item/door texts. Messages that must play and
+        // clear themselves supply the frame count with \d — in the original all
+        // four opening narrations do (0x004bf763/95/e4, 0x004bf836).
+        bytes[out++] = 0x01;
+        if (dismissDelay != 0) bytes[out] = dismissDelay;
     }
 
     operator const unsigned char*() const { return bytes; }

@@ -144,7 +144,7 @@ static void GteRotationMatrixCalc(int sx, int sy, int sz, int* result)
 }
 
 // ============================================================================
-// RotMatrix (0x004406a0)
+// RotMatrix (0x00409df0) - calls GteRotationMatrixCalc at 0x004406a0
 // Builds a 3x3 rotation matrix from a PS1 SVECTOR rotation (12-bit angles)
 // ============================================================================
 MATRIX* RotMatrix(SVECTOR* r, MATRIX* m)
@@ -222,6 +222,83 @@ void GetMatrixTranslation(MATRIX* m)
 }
 
 // ============================================================================
+// MulMatrixVec3 (0x004410e0)
+// 3x3 matrix times 3-vector in the fixed-point pipe's scale. The pipe holds
+// matrices shifted left by 2 (SetGlobalScaledRotationMatrix), so 1.0 is 16384 and
+// the products come back down with >> 14 - the same 14-bit convention as the trig
+// tables, not the 4.12 used by MATRIX itself.
+// ============================================================================
+void MulMatrixVec3(const int* m, const int* v, int* out)
+{
+    int acc;
+    acc    = v[0] * m[0] + m[2] * v[2] + m[1] * v[1];
+    out[0] = (int)(acc + (acc >> 31 & 0x3FFFU)) >> 14;
+    acc    = m[4] * v[1] + m[3] * v[0] + m[5] * v[2];
+    out[1] = (int)(acc + (acc >> 31 & 0x3FFFU)) >> 14;
+    acc    = m[8] * v[2] + m[7] * v[1] + m[6] * v[0];
+    out[2] = (int)(acc + (acc >> 31 & 0x3FFFU)) >> 14;
+}
+
+// ============================================================================
+// ProjectEffectSprite (0x0040aa50)
+// Projects one shadow/effect-sprite corner to screen space through the global
+// fixed-point pipe, and returns its depth.
+//
+// `outxy` receives both screen coordinates packed into one dword: X in the low
+// 16 bits, Y in the high 16. The +160/+120 are half of the 320x240 framebuffer,
+// i.e. the screen origin. Y is negated on the way in (PSX screen space is Y-down
+// while the world is Y-up) and negated again via matrix_t1 - out[1].
+//
+// The returned depth is out[2] >> 2, which is what RotAverage4 averages into a
+// sort key.
+// ============================================================================
+int ProjectEffectSprite(SVECTOR* world, int* outxy)
+{
+    int v[3];
+    int out[3];
+
+    v[0] =  (int)world->x;
+    v[1] = -(int)world->y;
+    v[2] =  (int)world->z;
+
+    MulMatrixVec3(&g_fixedPointPipe_matrix_m00, v, out);
+
+    out[2] += matrix_t2;
+    if (out[2] == 0) {
+        out[2] = 1;   // the original guards the divide this way, not by skipping
+    }
+
+    unsigned int sx = ((unsigned int)(((out[0] + matrix_t0) * g_sceneRenderParam) / out[2] + 160))
+                      & 0xFFFF;
+    int sy = ((matrix_t1 - out[1]) * g_sceneRenderParam) / out[2] + 120;
+    *outxy = (int)(sx + (unsigned int)sy * 0x10000);
+
+    return out[2] >> 2;
+}
+
+// ============================================================================
+// RotAverage4 (0x0040ab00)
+// Projects four corners and returns their mean depth, rounded toward zero. The
+// trailing `p` and `flag` parameters exist in the original's signature and are
+// never read - the PSX GTE equivalent returned them, this reimplementation does
+// not.
+// ============================================================================
+int RotAverage4(SVECTOR* v0, SVECTOR* v1, SVECTOR* v2, SVECTOR* v3,
+                int* sxy0, int* sxy1, int* sxy2, int* sxy3,
+                int* p, int* flag)
+{
+    (void)p; (void)flag;
+
+    int z0 = ProjectEffectSprite(v0, sxy0);
+    int z1 = ProjectEffectSprite(v1, sxy1);
+    int z2 = ProjectEffectSprite(v2, sxy2);
+    int z3 = ProjectEffectSprite(v3, sxy3);
+
+    int sum = z3 + z2 + z1 + z0;
+    return (int)(sum + (sum >> 31 & 3U)) >> 2;
+}
+
+// ============================================================================
 // GteSpriteHeaderInit (0x0040abc0)
 // Initializes a PS1-style sprite primitive header
 // ============================================================================
@@ -270,6 +347,21 @@ static inline int GteFixedMul12(int a, int b)
 }
 
 // ============================================================================
+// GteFixedMul14 (helper)
+// Multiply a 14-bit-amplitude trig value (GteSin/GteCos return +/-0x3FFF for
+// +/-1.0) by a 4.12 matrix element and get a 4.12 result: (a * b) >> 14.
+//
+// Mixing the two scales through GteFixedMul12 instead makes the product 4x too
+// large - (0x4000 * 0x1000) >> 12 is 0x4000 where 0x1000 is correct. Every other
+// sin/cos consumer in this file does its own >> 0xe for exactly this reason.
+// ============================================================================
+static inline int GteFixedMul14(int a, int b)
+{
+    int val = a * b;
+    return (val + (val >> 31 & 0x3FFF)) >> 14;
+}
+
+// ============================================================================
 // RotMatrixY (0x00409aa0)
 // Rotates matrix m around the Y axis by PS1 12-bit angle r.
 // m = Ry(r) * m
@@ -289,23 +381,50 @@ MATRIX* RotMatrixY(int r, MATRIX* m)
     // [cos  0  sin]   [r00 r01 r02]   [cos*r00+sin*r20  cos*r01+sin*r21  cos*r02+sin*r22]
     // [  0  1    0] * [r10 r11 r12] = [      r10              r11              r12       ]
     // [-sin 0  cos]   [r20 r21 r22]   [-sin*r00+cos*r20 -sin*r01+cos*r21 -sin*r02+cos*r22]
-    m->m[0][0] = (short)(GteFixedMul12(cosR, r00) + GteFixedMul12(sinR, r20));
-    m->m[0][1] = (short)(GteFixedMul12(cosR, r01) + GteFixedMul12(sinR, r21));
-    m->m[0][2] = (short)(GteFixedMul12(cosR, r02) + GteFixedMul12(sinR, r22));
+    // GteFixedMul14, not 12: sinR/cosR are 14-bit amplitude while the matrix is
+    // 4.12. Using the 12-bit multiply here scaled every rotation built by this
+    // function up by 4, and since Add_speedXZ feeds the result to ApplyMatrixSV
+    // (which divides by 4096) every walking or running entity moved 4x its
+    // move_speed_current per frame. That is what made the player overshoot his
+    // scripted run target - he stepped 840 units a frame past a 250-unit stop
+    // threshold - and made NPCs circle a target they could never close on.
+    m->m[0][0] = (short)(GteFixedMul14(cosR, r00) + GteFixedMul14(sinR, r20));
+    m->m[0][1] = (short)(GteFixedMul14(cosR, r01) + GteFixedMul14(sinR, r21));
+    m->m[0][2] = (short)(GteFixedMul14(cosR, r02) + GteFixedMul14(sinR, r22));
 
-    m->m[2][0] = (short)(GteFixedMul12(-sinR, r00) + GteFixedMul12(cosR, r20));
-    m->m[2][1] = (short)(GteFixedMul12(-sinR, r01) + GteFixedMul12(cosR, r21));
-    m->m[2][2] = (short)(GteFixedMul12(-sinR, r02) + GteFixedMul12(cosR, r22));
+    m->m[2][0] = (short)(GteFixedMul14(-sinR, r00) + GteFixedMul14(cosR, r20));
+    m->m[2][1] = (short)(GteFixedMul14(-sinR, r01) + GteFixedMul14(cosR, r21));
+    m->m[2][2] = (short)(GteFixedMul14(-sinR, r02) + GteFixedMul14(cosR, r22));
 
     return m;
 }
 
 // ============================================================================
 // ApplyMatrix (0x00409cd0)
-// Applies rotation matrix to vector (PS1 GTE convention: Y-negated I/O)
-// result = M * v (with PS1 Y-axis handling)
+// Applies a rotation matrix to an SVECTOR (PS1 GTE convention: Y-negated I/O).
+// result = M * v, rotation only.
+//
+// The DESTINATION IS A `VECTOR` - three 32-bit ints, not an SVECTOR. The original
+// ends with three dword stores:
+//
+//   00409d94: MOV EAX,dword ptr [ESP+0x54]      ; arg3
+//   00409d9c: MOV dword ptr [EAX],ECX           ; ->x
+//   00409d9e: MOV dword ptr [EAX+0x4],EDX       ; ->y
+//   00409da5: MOV dword ptr [EAX+0x8],ECX       ; ->z
+//
+// This was declared `SVECTOR* v1` and wrote shorts at stride 2, so callers that
+// read the result back as ints - MovePlayerXZ does exactly that, from
+// g_playerPosScratch - got the low halves of x/y interleaved as garbage. Rotation
+// results routinely exceed 0x7FFF, so the width is load-bearing.
+//
+// Two details of the original that do NOT change the arithmetic:
+//  - it copies the matrix into a scratch struct with every element << 2 and calls
+//    MulMatrixVec3, which shifts down by 14. Net (m<<2 * v) >> 14 == (m*v) >> 12,
+//    which is what this computes directly.
+//  - it also copies t[0] / -t[1] / t[2] into that struct, but MulMatrixVec3 only
+//    reads m[0..8], so the translation is dead. This is rotation only.
 // ============================================================================
-void ApplyMatrix(MATRIX* m, SVECTOR* v0, SVECTOR* v1)
+void ApplyMatrix(MATRIX* m, SVECTOR* v0, VECTOR* v1)
 {
     int vx = (int)v0->x;
     int vy = -(int)v0->y;  // PS1 Y negation
@@ -320,9 +439,9 @@ void ApplyMatrix(MATRIX* m, SVECTOR* v0, SVECTOR* v1)
     ry = (ry + (ry >> 31 & 0xFFF)) >> 12;
     rz = (rz + (rz >> 31 & 0xFFF)) >> 12;
 
-    v1->x = (short)rx;
-    v1->y = (short)(-ry);  // PS1 Y negation
-    v1->z = (short)rz;
+    v1->x = rx;
+    v1->y = -ry;           // PS1 Y negation
+    v1->z = rz;
 }
 
 // ============================================================================
@@ -507,13 +626,19 @@ void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x0044
 // Rotation formulas (recovered from the original's FPU code):
 //   dx = to_x-from_x, dy = to_y-from_y, dz = to_z-from_z
 //   len = sqrt(dx²+dy²+dz²), h = sqrt(dx²+dz²)
-//   m[0] = ( dz/h,          0,        -dx/len )
-//   m[1] = ( dx*dy/len²,    h/len,     dy*dz/(h*len) )
-//   m[2] = ( dx/len,       -dy/len,    dz/len )
-// (The mixed len² / h*len denominators and the negated m[2].y are quirks of
-// the original Capcom code, verified by instruction-level tracing.)
-// Translation: t = R * (-from), then (when roll != 0) a roll rotation is
-// composed on top via EulerToRotationMatrix(0,0,roll).
+//   m[0] = ( dz/h,           0,        -dx/h )
+//   m[1] = ( dx*dy/(h*len),  h/len,     dy*dz/(h*len) )
+//   m[2] = ( dx/len,        -dy/len,    dz/len )
+//
+// This IS an orthonormal basis, despite appearances. The original negates to_y
+// and from_y up front (0x0040a694 / 0x0040a69e) and works with dy' = -dy, so
+// m[2] is the forward axis in that flipped frame, m[0] = (dz,0,-dx)/h is the
+// horizontal right axis, and m[1] = m[2] x m[0] reduces to the row above
+// because dx²+dz² = h². The negated m[2].y is the frame flip, not a quirk.
+//
+// Translation: t = R * (-from). The original also composes a roll rotation via
+// EulerToRotationMatrix(0,0,roll) + MulMatrix0; every shipped RDT camera has
+// roll = 0, where that is the identity, so it is omitted here.
 // ============================================================================
 int MatrixToCamera(MATRIX* m) // 0x0040a680
 {
@@ -536,11 +661,21 @@ int MatrixToCamera(MATRIX* m) // 0x0040a680
     double h = sqrt(dx * dx + dz * dz);
     if (h < 1.0) h = 1.0;   // original divides by h; clamp to avoid NaN
 
+    // Two of these divided by `len` where the original divides by `h`
+    // (m[0][2] and m[1][0]). h/len is cos(pitch), so the error vanished on level
+    // cameras and grew with the tilt: the right-row came out 17% short and the
+    // up-row's X term came out with the wrong sign and magnitude on a 34-degree
+    // camera, which pulled the character toward the screen centre and made him
+    // look small and stopped short of the wall. Verified instruction by
+    // instruction against the FPU code at 0x0040a6f7-0x0040a7bа: the divisors
+    // are ST3 = h for dz and dx, and the (-dy'/L) term is multiplied by dx/h and
+    // dz/h - i.e. h*len, never len*len. The 4096.0 factors are the literals at
+    // 0x004af030 (+4096.0) and 0x004af048 (-4096.0).
     MATRIX* camMatrix = (MATRIX*)&g_RoomCameraData;
     camMatrix->m[0][0] = (short)(int)( dz / h * 4096.0);
     camMatrix->m[0][1] = 0;
-    camMatrix->m[0][2] = (short)(int)(-dx / len * 4096.0);
-    camMatrix->m[1][0] = (short)(int)( dx * dy / (len * len) * 4096.0);
+    camMatrix->m[0][2] = (short)(int)(-dx / h * 4096.0);
+    camMatrix->m[1][0] = (short)(int)( dx * dy / (h * len) * 4096.0);
     camMatrix->m[1][1] = (short)(int)( h / len * 4096.0);
     camMatrix->m[1][2] = (short)(int)( dy * dz / (h * len) * 4096.0);
     camMatrix->m[2][0] = (short)(int)( dx / len * 4096.0);
@@ -863,4 +998,57 @@ void EntityApplyLookAtRotation(void)
         RotMatrixYXZ(&g_svecScratch, &g_matrixScratch);
         CompMatrix(&joint->world, &g_matrixScratch, &joint->world);
     }
+}
+
+// ===========================================================================
+// vectorMul3 (0x0040a550)
+// libgte's OuterProduct with no fixed-point shift: v2 = v0 x v1 on plain ints.
+// The .y component is the XZ-plane cross product, which is why every caller
+// only looks at its sign - see room_check_sight_blocked in RoomCollision.cpp
+// and checkAngularViewAndDistance in entities/EntityCommon.cpp.
+//
+// All six components are read before the first store: callers pass the same
+// VECTOR as v1 and v2 (`vectorMul3(&edge, &p, &p)`), so writing as we go would
+// feed a partially updated operand back into the remaining terms.
+// ===========================================================================
+void vectorMul3(VECTOR* v0, VECTOR* v1, VECTOR* v2)
+{
+    int x0 = v0->x, y0 = v0->y, z0 = v0->z;
+    int x1 = v1->x, y1 = v1->y, z1 = v1->z;
+
+    v2->x = y0 * z1 - y1 * z0;
+    v2->y = z0 * x1 - z1 * x0;
+    v2->z = y1 * x0 - y0 * x1;
+
+    // The original stores an uninitialised stack word into .pad; nothing reads
+    // it, so zero goes here rather than an indeterminate value.
+    v2->pad = 0;
+}
+
+// ===========================================================================
+// VectorNormal (0x0040a5c0)
+// libgte's VectorNormal: scales v0 to length 4096 (ONE) into v1 and returns the
+// input's squared length. Done in x87 doubles with a truncating __ftol per
+// component, not in fixed point.
+//
+// The zero-length guard is a literal float compare against the 0.0 at
+// 0x004af038 (FCOM / TEST AH,0x40 tests C3, i.e. equality only); when it hits,
+// the divisor becomes the 1e-9 at 0x004af030+8 instead of 0. Scale factor 4096.0
+// is the double at 0x004af030.
+// ===========================================================================
+int VectorNormal(VECTOR* v0, VECTOR* v1)
+{
+    double x = (double)v0->x;
+    double y = (double)v0->y;
+    double z = (double)v0->z;
+
+    double lenSq = x * x + y * y + z * z;
+    double len = sqrt(lenSq);
+    if (len == 0.0) len = 1e-9;
+
+    v1->x = (int)(x * 4096.0 / len);
+    v1->y = (int)(y * 4096.0 / len);
+    v1->z = (int)(z * 4096.0 / len);
+
+    return (int)lenSq;
 }

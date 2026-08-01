@@ -461,9 +461,21 @@ void Display_SetParams(int param1, int param2) {
 
 // ============================================================================
 // texture_queue_reset (0x004739e0)
-// Resets the texture queue state and all 5 queue entries.
+// Resets the texture queue state and all 4 queue entries.
 // Each entry is 10 bytes. Clears counters DAT_00ae9f04, DAT_00ae9f06,
 // DAT_00ae9f00, DAT_00ae9efc.
+//
+// FOUR entries, not five: the original is `cVar2 = 4; do { ... } while (--cVar2
+// != 0);`, and FUN_00473d10 / FUN_00473d60 likewise scan exactly 4. This used to
+// loop 5 times and ran 10 bytes off the end of the 40-byte g_textureQueueData.
+// Harmless in the original address map, but our .bss puts g_MessageSpeedUpFlag,
+// g_MessageCharDelay, g_MessageCharTimer and g_MessageClutBase immediately after
+// the array, so the phantom fifth entry's `p[1] = 0` landed exactly on
+// g_MessageCharDelay. room_set -> texture_queue_reset runs a few frames into the
+// new-game loading message, so the reveal started at the correct speed and then
+// dropped to delay 0; msg_skip_char then set the timer to 0 and the next frame's
+// `timer - 1` wrapped an unsigned char to 255, stalling ~256 frames per glyph.
+// It also clobbered 6 bytes of g_psxTextureArray. Do not "restore" the 5.
 // ============================================================================
 void texture_queue_reset(void) {
     DAT_00ae9f04 = 0;
@@ -471,7 +483,7 @@ void texture_queue_reset(void) {
     DAT_00ae9f00 = 0;
     DAT_00ae9efc = 0;
     unsigned char* p = g_textureQueueData;
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 4; i++) {
         p[3] = 0;
         p[4] = 0;
         p[5] = 0;

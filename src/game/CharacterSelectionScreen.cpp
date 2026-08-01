@@ -7,6 +7,7 @@
 #include "SpriteRenderer.h"
 #include "SFXIds.h"
 #include <cstdio>
+#include "../system/AssetPath.h"
 
 // ============================================================================
 // Forward declarations for external functions
@@ -312,27 +313,18 @@ void characterSelectionScreen(void)
 
     LoadSoundBank(BANK_SELECT, g_DataBuffer);
 
-    // Load characters police cards texture (select_b.tim → slot 0xC)
-    LoadFile(".\\usa\\data\\select_b.tim", g_TimImageBuffer__bitmap, 0x20);
+    // Load characters police cards and selection arrow texture
+    LoadFile(GAME_DATA_ROOT "data\\select_b.tim", g_TimImageBuffer__bitmap, 0x20);
     g_TextureBankID = 0x0A;
     g_TextureDepthByte = 5;
     LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0C, 0, 0, 0, 0);
 
-    // Load card round borders masks texture (select_k.tim → slot 0xD)
-    // NOTE: select_k.tim is loaded into VRAM slot 0xD but is not actually
-    // used by the original character selection rendering — verified against the
-    // Ghidra disassembly of FUN_00492340 / FUN_00492d80. The card (slot 0xC)
-    // is rendered directly via AddSprite_Ex, with the cursor glyphs rendered
-    // on top by display_texture using the same slot 0xC UV region 0xC0..0xCC ×
-    // 0x30..0x6B. There is NO PS1 mask-bit pre-bake in the original, so we
-    // deliberately do NOT call BakeBorderMaskIntoCardTexture here — that helper
-    // was a fabricated step (no Ghidra counterpart) that punched transparent
-    // holes into the card's legitimate solid-color regions.
-    LoadFile(".\\usa\\data\\select_k.tim", g_TimImageBuffer__bitmap, 0x20);
+    // unused texture
+    LoadFile(GAME_DATA_ROOT "data\\select_k.tim", g_TimImageBuffer__bitmap, 0x20);
     LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0D, 7, 0, 0, 0);
 
     // Load background image
-    LoadFile(".\\usa\\data\\sel_back.pix", g_TimImageBuffer__bitmap, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\sel_back.pix", g_TimImageBuffer__bitmap, 0x20);
     display_image(0, g_TimImageBuffer__bitmap, 320, 240);
 
     title_setup_texture_pages(0, 1);

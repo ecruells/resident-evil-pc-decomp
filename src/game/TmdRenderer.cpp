@@ -29,6 +29,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <algorithm>
+#include <cmath>
+#include "../DebugPrint.h"
 
 // ============================================================================
 // Tuning constants for the projection. The original DX5 renderer projected

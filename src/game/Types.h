@@ -231,8 +231,14 @@ struct RDT_Light {
     unsigned char  green;       // 0x0D
     unsigned char  blue;        // 0x0E
     unsigned char  zero1;       // 0x0F
-    unsigned char  zero2;       // 0x10
-    unsigned char  zero3;       // 0x11
+    // 0x10 is ONE 16-bit field, not two bytes. update_entity_lighting selects
+    // point vs directional with a word test - 0x00481673:
+    // CMP word ptr [ECX+0x1c],0x0 where ECX = g_RdtPointer + i*0x14, and
+    // RDT+0x1c is lights[i]+0x10. cmd_light_set writes it as a word too.
+    // Modelling it as a single byte made a light whose high byte is non-zero
+    // read as a point light and get radial attenuation applied, when the
+    // original treats it as directional and passes the colour through unchanged.
+    unsigned short lightType;   // 0x10 - 0 = point light with radial falloff
     short          radius;      // 0x12
 };
 static_assert(sizeof(RDT_Light) == 0x14, "RDT_Light size mismatch");
@@ -254,6 +260,76 @@ struct RDT_Camera {
     int   fov;                  // 0x28
 };
 static_assert(sizeof(RDT_Camera) == 0x2C, "RDT_Camera size mismatch");
+
+// ============================================================================
+// CAM_SWITCH_ZONE (0x14 / 20 bytes each)
+// Camera switch zones, pointed to by RDT::cam_switch_zones (0x48).
+//
+// The table is grouped by source camera: every entry that shares a camFrom
+// belongs to one camera, and the first entry of each group is that camera's own
+// header record (g_CurrentRdtDataTypePtr points at it). The entries that follow
+// it are the switch zones tested against the player position; entering one sets
+// g_roomCameraId to its camTo.
+//
+// (x0,y0)..(x3,y3) form a quadrilateral in the room's XZ plane. The original
+// reads every coordinate ZERO-extended from 16 bits (see
+// is_entity_in_switch_zone), so they behave as unsigned, not signed.
+// ============================================================================
+struct CAM_SWITCH_ZONE {
+    short camTo;                // 0x00 - camera to switch to on entry
+    short camFrom;              // 0x02 - camera this group belongs to
+    short x0, y0;               // 0x04 - quad corner 0 (XZ plane)
+    short x1, y1;               // 0x08 - quad corner 1
+    short x2, y2;               // 0x0C - quad corner 2 (second pivot)
+    short x3, y3;               // 0x10 - quad corner 3
+};
+static_assert(sizeof(CAM_SWITCH_ZONE) == 0x14, "CAM_SWITCH_ZONE size mismatch");
+
+// ============================================================================
+// RDT_Boundary (0x0C / 12 bytes each)
+// One room collision record, in the block pointed to by RDT::boundaries (0x4C).
+//
+// The MAX corner comes first: the record covers [xMin..xMax] x [zMin..zMax] in
+// the room's XZ plane. See the header comment in RoomCollision.cpp for how that
+// ordering was established - the RE2-era notes on this format describe the
+// second pair as a width/depth, which does not hold here.
+//
+// type:  low byte  = shape index into g_CollisionShapeHandlers
+//                    (1 = rect push, 3 = circle push, 4 = soft zone,
+//                     5 = rect push skipped while collisionFlags bit 4 is set)
+//        bits 8-14 = floor/step magnitude, bit 15 = the step is downward
+// flags: low byte  = floor/step fine value
+//        bit 8     = record blocks movement (cleared = floor zone only)
+//        bit 9     = record participates in the "still stuck" re-test
+// ============================================================================
+// The four coordinates are UNSIGNED. boundary_classify zero-extends each one
+// (XOR EAX,EAX / MOV AX,word at 0x0047d1c1) before the signed 32-bit grow, and
+// 222 of the 5380 shipped records carry a coordinate above 32767 - e.g. stage 1
+// room 05 has one spanning x 675..35677, which read as a signed short becomes
+// x 675..-29859 and inverts the box.
+struct RDT_Boundary {
+    unsigned short xMax;        // 0x00
+    unsigned short zMax;        // 0x02
+    unsigned short xMin;        // 0x04
+    unsigned short zMin;        // 0x06
+    unsigned short type;        // 0x08
+    unsigned short flags;       // 0x0A
+};
+static_assert(sizeof(RDT_Boundary) == 0x0C, "RDT_Boundary size mismatch");
+
+// ============================================================================
+// RDT_BoundaryHeader (0x18 / 24 bytes)
+// Header of the room collision block. In the file, group[] holds the five
+// per-quadrant record counts; Room_SetupCollisionCallbacks rewrites them in
+// place into absolute pointers so quadrant q spans [group[q], group[q+1]).
+// ============================================================================
+struct RDT_BoundaryHeader {
+    short          cellX;       // 0x00 - X of the quadrant split point
+    short          cellZ;       // 0x02 - Z of the quadrant split point
+    RDT_Boundary*  group[5];    // 0x04 - counts in the file, pointers after setup
+    // 0x18: RDT_Boundary entries[]
+};
+static_assert(sizeof(RDT_BoundaryHeader) == 0x18, "RDT_BoundaryHeader size mismatch");
 
 // ============================================================================
 // RDT (Room Definition Table) - 0x94 byte header + variable data
@@ -516,3 +592,70 @@ struct SpriteAnimSlot {
 };
 #pragma pack(pop)
 static_assert(sizeof(SpriteAnimSlot) == 0x14, "SpriteAnimSlot size mismatch");
+
+// ============================================================================
+// SndBankSlot (0x08 / 8 bytes)
+// One entry of a sound-bank table. All five sound-bank arrays in the original
+// share this record layout; sounds_reset (0x0047ea90) walks each of them with a
+// stride of 8 and clears handle, field_04 and slot (plus `paused` for g_SndBank).
+//
+// Array bases and element counts, taken from the original loop bounds:
+//   g_RoomSfxBanks      0x00ac9910   2   (bound 0x00ac9920)
+//   g_CharacterSfxBanks 0x00ac9950   9   (bound 0x00ac9998)
+//   g_SndBank           0x00ac99d0   3   (bound 0x00ac99e8)  <- BGM channels
+//   g_emSndBanks        0x00ac99f0  48   (bound 0x00ac9b70)
+//   g_SfxBanks          0x00ac9b80  16   (bound 0x00ac9c00)
+// ============================================================================
+#pragma pack(push, 1)
+struct SndBankSlot {
+    int           handle;    // 0x00 - createSndBank handle; 0 = slot empty
+    unsigned char field_04;  // 0x04 - cleared by sounds_reset; purpose unknown
+    signed char   slot;      // 0x05 - slot index passed to SetSndSlot / playSnd
+    unsigned char paused;    // 0x06 - PauseSounds sets, ResumePausedSounds clears
+    unsigned char pad_07;    // 0x07
+};
+#pragma pack(pop)
+static_assert(sizeof(SndBankSlot) == 0x08, "SndBankSlot size mismatch");
+
+// ============================================================================
+// SndPanVol (0x08 / 8 bytes) - 3 entries at 0x00ac98e0 (bound 0x00ac98f8)
+// Per-BGM-channel cached pan/volume, written by SCD opcode 0x2F alongside the
+// call to snd_set_channel_pan_volume (0x004805d0). Indexed by the same channel
+// index as g_SndBank. Previously modeled as two overlapping arrays
+// (DAT_00ac98e0[4] and DAT_00ac98e4[4], whose ranges collided).
+// ============================================================================
+#pragma pack(push, 1)
+struct SndPanVol {
+    unsigned int pan;     // 0x00
+    unsigned int volume;  // 0x04
+};
+#pragma pack(pop)
+static_assert(sizeof(SndPanVol) == 0x08, "SndPanVol size mismatch");
+
+// ============================================================================
+// SavedEnemyState (0x1C / 28 bytes) - 16 entries at 0x00be92cc
+// Persists an enemy's position/orientation so that re-entering a room restores it
+// instead of respawning it at the script's coordinates. Searched by
+// restore_saved_enemy_state (0x0048f330) on (roomId, enemyType) among slots whose
+// `valid` byte is non-zero; a match is consumed (valid cleared) and copied into
+// the current ENTITY. Called from SCD opcode 0x1B (cmd_em_set): a hit makes the
+// command skip its own initialisation.
+// ============================================================================
+#pragma pack(push, 1)
+struct SavedEnemyState {
+    unsigned char  statusFlags;    // 0x00 -> ENTITY->status_flags
+    unsigned char  behaviorFlags;  // 0x01 -> ENTITY->behavior_flags
+    unsigned char  roomId;         // 0x02    match key
+    unsigned char  enemyType;      // 0x03    match key
+    unsigned char  pad_04[4];      // 0x04
+    short          posX;           // 0x08 -> localMatrix.t[0]
+    short          posY;           // 0x0A -> localMatrix.t[1], only if behaviorFlags & 0x70
+    short          posZ;           // 0x0C -> localMatrix.t[2]
+    unsigned char  pad_0e[2];      // 0x0E
+    unsigned short angle;          // 0x10 -> low half of ENTITY->angle (+0x74)
+    unsigned char  pad_12[2];      // 0x12
+    unsigned char  valid;          // 0x14    non-zero = slot occupied
+    unsigned char  pad_15[7];      // 0x15
+};
+#pragma pack(pop)
+static_assert(sizeof(SavedEnemyState) == 0x1C, "SavedEnemyState size mismatch");

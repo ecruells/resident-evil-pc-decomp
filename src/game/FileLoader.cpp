@@ -18,22 +18,18 @@
 // ============================================================================
 size_t LoadFile(const char* path, void* buffer, unsigned char flags)
 {
-    char resolvedPath[MAX_PATH];
-    const char* filePath;
+    // Paths arrive already rooted at GAME_DATA_ROOT (see system/AssetPath.h), so
+    // there is nothing to rewrite here - the build config picked the root.
+    const char* filePath = path;
 
-    // Resolve the asset path (debug: remap .\usa\ → .\assets\USA\)
-    if (ResolveAssetPath(path, resolvedPath, sizeof(resolvedPath)) != NULL) {
-        filePath = resolvedPath;
-    } else {
-        filePath = path;
-    }
-
-    // Original: if (DAT_004b3998 & flags) → prepend install path
-    // In dev mode, we skip this since assets are relative
-#if !USE_ASSET_PATH_REMAP
+    // Original: if (DAT_004b3998 & flags) prepend the install directory, skipping
+    // the first 8 characters of ".\usa\data\...". That offset is only meaningful
+    // for the retail root, which is what GAME_DATA_ROOT expands to in a release
+    // build, so the branch is compiled out for development builds where assets are
+    // relative to the working directory.
+#ifndef _DEBUG
     char fullInstallPath[MAX_PATH];
     if ((flags & 0x20) != 0) {
-        // Prepend install directory to path (skipping first 8 chars: ".\usa\d")
         sprintf(fullInstallPath, "%s%s", g_szInstallPath, filePath + 8);
         filePath = fullInstallPath;
     }

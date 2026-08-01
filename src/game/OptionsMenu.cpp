@@ -18,6 +18,7 @@
 #include "PrintText.h"
 #include <cstring>
 #include <cstdio>
+#include "../system/AssetPath.h"
 
 // ============================================================================
 // Forward declarations for unimplemented functions
@@ -167,9 +168,9 @@ static const int* const* const PTR_PTR_004c04a8[2] = { s_optJoyAnimTbl_Chris, s_
 static const int* const     PTR_DAT_004c0538[2] = { s_optJoyAnimLen_Chris, s_optJoyAnimLen_Jill };
 
 // File path strings for options menu backgrounds
-static const char s_optBgKeyConfig[]  = ".\\usa\\data\\Jopt06.tim";  // 0x004c4400
-static const char s_optBgDisplayCfg[] = ".\\usa\\data\\Opt11.tim";   // 0x004c43c8
-static const char s_optBgJoystick[]   = ".\\usa\\data\\Side06.tim";  // 0x004c43e4
+static const char s_optBgKeyConfig[]  = GAME_DATA_ROOT "data\\Jopt06.tim";  // 0x004c4400
+static const char s_optBgDisplayCfg[] = GAME_DATA_ROOT "data\\Opt11.tim";   // 0x004c43c8
+static const char s_optBgJoystick[]   = GAME_DATA_ROOT "data\\Side06.tim";  // 0x004c43e4
 
 // Options menu light data (3 lights × 16 bytes each)
 // 0x00d22700: Light 0 {pos_x, pos_y, pos_z, r, g, b, pad, pad}

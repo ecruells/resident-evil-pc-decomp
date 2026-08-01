@@ -11,6 +11,7 @@
 #include "PrintText.h"
 #include <cstdio>
 #include <cstring>
+#include "../system/AssetPath.h"
 
 extern void logos_state(void);
 extern void title_state(void);
@@ -361,7 +362,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
     // Set save/load active flag
     g_loadSaveStateFlag = 1;
 
-    LoadFile("./usa/data/type00.tim", g_TimImageBuffer, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\type00.tim", g_TimImageBuffer, 0x20);
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
     display_image(8, g_TimImageBuffer__bitmap, 320, 240);
     title_setup_texture_pages(8, 1);

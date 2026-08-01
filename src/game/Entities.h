@@ -175,7 +175,17 @@ struct Entity {
 
     // ---- Position + movement (0x6C - 0x83) ----
     SVECTOR        position;            // 0x6C (8 bytes)
-    int            angle;               // 0x74
+    // 0x72, 0x74 and 0x76 are the three components of the rotation SVECTOR that
+    // RotMatrix reads from entity+0x72 (see EntityComputeJointWorldMatrices);
+    // 0x72 is position.pad above. `angle` is the yaw and MUST be 16 bits: every
+    // place the original touches it does so as *(short *)(_ENTITY + 0x74).
+    // Modelling it as one `int` spanning 0x74-0x77 made plain
+    // `ENTITY->angle = ...` a 32-bit write that clobbered angle_z, and made
+    // `angleStep - ENTITY->angle` pull angle_z into the arithmetic. That is what
+    // stopped entity_rotate_toward_target converging: it stepped a constant
+    // amount every frame forever, walking the actor in a perfect circle.
+    short          angle;               // 0x74 - yaw (rotation SVECTOR .y)
+    short          angle_z;             // 0x76 - rotation SVECTOR .z
     SVECTOR        speed;               // 0x78 (8 bytes)
     short          move_step_x;         // 0x80 - movement step X (used by SCD event state 2)
     short          move_step_z;         // 0x82 - movement step Z (used by SCD event state 2)
@@ -216,11 +226,17 @@ struct Entity {
     unsigned char  pad_c0[2];           // 0xC0-0xC1
     unsigned short move_speed_current;  // 0xC2 - current translation speed during animation/behavior
 
-    // ---- Tick counter (0xC4) ----
-    unsigned char  action_ticks_counter;// 0xC4
+    // ---- Tick counter (0xC4 - 0xC5) ----
+    // SIXTEEN bits, not eight. Every access in the original is a word:
+    // `*(ushort *)(_ENTITY + 0xc4) = (g_RandSeed & 0x7f) + 0x32`,
+    // `sVar1 = *(short *)(_ENTITY + 0xc4)`, and zombie_init clears 0xC4 and
+    // 0xC5 together. Declared as a byte with pad_c5 after it, every one of the
+    // ~39 `(unsigned short)` stores in Zombie.cpp silently truncated, so idle
+    // and attack timers wrapped at 256 instead of 65536 - e.g. the 120-frame
+    // eat timer and the (rand & 0x7f) + 300 walk timer were both mangled.
+    unsigned short action_ticks_counter; // 0xC4
 
-    // ---- Position offsets for animation (0xC5 - 0xDC) ----
-    unsigned char  pad_c5;              // 0xC5
+    // ---- Position offsets for animation (0xC6 - 0xDC) ----
     unsigned short unk_c6;              // 0xC6 - base X position offset for animation
     unsigned short unk_c8;              // 0xC8 - base Z position offset for animation
     // ---- SCD event movement data (0xCA - 0xDB) ----
@@ -254,15 +270,24 @@ struct Entity {
     unsigned char  lookAtJointIdx;      // 0xDD
 
     // ---- SCD event timing (0xDE - 0xE1) ----
-    unsigned char  scd_timer_lo;        // 0xDE - SCD event timer low byte
-    unsigned char  scd_timer_hi;        // 0xDF - SCD event timer high byte
+    // ONE 16-bit timer, not a lo/hi pair. Every access in the exe is a word -
+    // 17 of them, zero byte accesses: `MOV word ptr [EDX + 0xde], 0x28` in
+    // scd_event_state1_anim, and `MOV AX, word ptr [EAX + 0xde]` in each
+    // npc_scd_behavior_*. The "lo/hi" split was an artifact of the wrong width.
+    //
+    // The port's writes happened to be correct anyway - storing lo then hi on
+    // little-endian lands the same bytes - so this was latent rather than live.
+    // A single-byte READ of scd_timer_lo would have truncated it, and the NPC
+    // behaviours all read it as a word.
+    unsigned short scd_timer;           // 0xDE - SCD event timer (frames)
     unsigned short scd_entity_flags;    // 0xE0 - SCD event entity flags
 
-    // ---- Timer (0xE2) ----
-    unsigned char  next_turn_timer;     // 0xE2
-
-    // ---- Pad to physics (0xE3) ----
-    unsigned char  pad_e3;              // 0xE3
+    // ---- Timer (0xE2 - 0xE3) ----
+    // 16-bit, like action_ticks_counter and the waypoint pair. zombie_chase_walk
+    // reads and writes it as `*(short *)(_ENTITY + 0xe2)` throughout, e.g.
+    // `*(ushort *)(_ENTITY + 0xe2) = (g_RandSeed & 0xf) + 0x14`. Nothing in the
+    // port referenced it yet, so widening it costs nothing.
+    unsigned short next_turn_timer;     // 0xE2 - frames of wander-turn left
 
     // ---- Physics (0xE4 - 0xEB) ----
     SVECTOR        pushVelocity;        // 0xE4
@@ -275,10 +300,16 @@ struct Entity {
     unsigned char  pad_160[3];           // 0x160-0x162
     unsigned char  death_event_id;       // 0x163 - room event index to trigger when entity is killed
     unsigned char  pad_164[2];           // 0x164-0x165
-    unsigned char  player_pos_x;        // 0x166
-    unsigned char  pad_167;             // 0x167
-    unsigned char  player_pos_z;        // 0x168
-    unsigned char  pad_169[3];          // 0x169-0x16B
+    // The movement WAYPOINT, 16 bits each - not bytes. Proven both ways in the
+    // same pair of functions: zombie_walk1 reads it with
+    // `MOVSX ECX, word ptr [EAX + 0x166]` (0x004343b5) and fast_player_facing
+    // writes it with `MOV word ptr [EAX + 0x166], DX` (0x00435d69). Declared as
+    // bytes, entity_pathfind_update's stores truncated the player's position to
+    // its low 8 bits, so every waypoint-following behaviour steered at a point
+    // within 256 units of the room origin.
+    short          player_pos_x;        // 0x166 - waypoint X
+    short          player_pos_z;        // 0x168 - waypoint Z
+    unsigned char  pad_16a[2];          // 0x16A-0x16B
 
     // ---- Extended movement state (0x16C - 0x173) ----
     unsigned char  attacking_direction; // 0x16C

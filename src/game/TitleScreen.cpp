@@ -8,6 +8,7 @@
 #include "SFXIds.h"
 #include <cstdio>
 #include <cstdlib>
+#include "../system/AssetPath.h"
 
 extern void logos_state(void);
 
@@ -77,7 +78,7 @@ void init_title_screen(void)
 
     g_roomCameraId = 0;
 
-    LoadFile(".\\usa\\data\\title.pix", g_TimImageBuffer__bitmap, 0x20);
+    LoadFile(GAME_DATA_ROOT "data\\title.pix", g_TimImageBuffer__bitmap, 0x20);
     display_image(0, g_TimImageBuffer__bitmap, 320, 240);
 
     title_setup_texture_pages(0, 1);
@@ -86,9 +87,9 @@ void init_title_screen(void)
 
     const char* buttonTexPath;
     if (!g_isSideWinderConnected) {
-        buttonTexPath = ".\\usa\\data\\t_press.tim";
+        buttonTexPath = GAME_DATA_ROOT "data\\t_press.tim";
     } else {
-        buttonTexPath = ".\\usa\\data\\t_start.tim";
+        buttonTexPath = GAME_DATA_ROOT "data\\t_start.tim";
     }
     LoadFile(buttonTexPath, g_TimImageBuffer__bitmap, 0x20);
 

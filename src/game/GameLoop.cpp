@@ -17,6 +17,9 @@
 #include "../marni/MarniInput.h"
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
+#include <cstdarg>
+#include "../DebugPrint.h"
 
 // Forward declarations for functions only used within game_loop
 extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex);
@@ -119,10 +122,15 @@ LAB_00480d7c:
                     DAT_004d2294 = DAT_004d2294 + 1;
                 }
 
-                // 0x00480d85-0x00480d98: Execute SCD room scripts
-                //run_command_functions((unsigned short*)g_RoomScdOpcodes);
-                //room_events_check();
-                //room_state_reset();
+                // 0x00480d85-0x00480d9d: Execute SCD room scripts, then step the
+                // event VM and clear the per-frame room state. The original
+                // calls these three back to back (0x00473f60, 0x0041d6a0,
+                // 0x00475700); room_events_check and room_state_reset used to be
+                // commented out here, which meant no room event script ever
+                // advanced during gameplay.
+                run_command_functions((unsigned short*)g_RoomScdOpcodes);
+                room_events_check();
+                room_state_reset();
 
                 // 0x00480d98: Check interactive screen display
                 check_and_display_interactive_screen();
@@ -191,29 +199,34 @@ LAB_00480e89:
                 update_sounds();
 
                 // 0x00480ed4: Camera/lighting update
-                if (DAT_004d46a4 != 0) {
+                if (g_dwCameraLightingEnabled != 0) {
                     room_camera_and_lighting_update();
                 }
 
-                // 0x00480ede-0x00480f3b: Entity rendering loop (enemies)
-                Entity* pEnt = g_EnemiesList;
+                // 0x00480ee5-0x00480f52: Entity rendering loop (enemies).
+                // EntityComputeJointWorldMatrices, EntityApplyLookAtRotation and
+                // calc_entity_lighting all operate on the GLOBAL ENTITY pointer,
+                // so the loop has to advance that global — walking a local copy
+                // leaves every helper transforming whichever entity was set last.
+                ENTITY = g_EnemiesList;
                 int entCount = g_enemy_count;
                 while (entCount != 0) {
-                    if ((pEnt->status_flags & 0x01) != 0) {
+                    if ((ENTITY->status_flags & 0x01) != 0) {
                         entCount = entCount - 1;
-                        EntityComputeJointWorldMatrices(*(unsigned short*)&pEnt->pad_ca);
+                        EntityComputeJointWorldMatrices(*(unsigned short*)&ENTITY->pad_ca);
                         EntityApplyLookAtRotation();
-                        if (g_SpriteQueueCount != 0) {
-                            calc_entity_lighting(pEnt);
+                        if (g_dwEntityRenderEnabled != 0) {
+                            calc_entity_lighting(ENTITY);
                         }
                     }
-                    pEnt = pEnt + 1;
+                    ENTITY++;
                 }
 
-                // 0x00480f3b-0x00480f6e: Player entity rendering
+                // 0x00480f54-0x00480f89: Player entity rendering
+                ENTITY = (Entity*)&g_playerEntity;
                 EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
                 EntityApplyLookAtRotation();
-                if (g_SpriteQueueCount != 0) {
+                if (g_dwEntityRenderEnabled != 0) {
                     calc_entity_lighting((Entity*)&g_playerEntity);
                 }
 
@@ -383,7 +396,7 @@ switchD_00480ff4_caseD_2:
             check_menus_state();
         } else {
             // First load or room transition: restore room state
-            FUN_004813c0();
+            room_transition_load();
             g_short_message_flags = 0xFFFF;
         }
 

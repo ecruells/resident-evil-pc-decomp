@@ -4,6 +4,7 @@
 #include "../Globals.h"
 #include <cstdio>
 #include <cstring>
+#include "../DebugPrint.h"
 
 // Forward declarations for functions defined in other files
 extern unsigned int set_message_display(unsigned short msg_id, unsigned short pause_game);
@@ -13,9 +14,11 @@ extern void play_sfx(int bank, int soundId);
 extern void play_sound_and_voice_effect(int type, int id);
 extern void SetSndSlot(int bank, int slot);
 extern void setSndStop(int bank);
-extern void BuildSndFadeTbl(char fadeType, int maxVol);
+extern void BuildSndFadeTbl(char distSteps, int fadeType);
 extern void set_volume(int bank, int vol);
-extern unsigned char Effect_CreateBillboard(unsigned char type, unsigned char param, unsigned short flags, MATRIX* spriteInfo, int* pos, char mode);
+// Effect_CreateBillboard is declared in Globals.h with the real signature
+// (void* spriteInfo, void* pos). Do NOT re-declare it here with MATRIX*/int* -
+// that created a second overload that resolved to an empty stub.
 extern int get_item_slot(unsigned char itemId);
 extern void rearrange_item_slots(void);
 extern unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
@@ -44,8 +47,7 @@ extern void ClearTmdProcessingFlag(void);
 extern void InitScaMatrix(int parentPtr, ScaMatrixData* matrix);
 extern unsigned char QueueTextureForProcessing(char bank, unsigned char depth);
 extern void SetupEntityJointAnimation(void);
-extern void ScdEventEntry_Create(unsigned int slot, int scriptIndex);
-extern void cmd_room_action(void);
+extern void ScdEventEntry_Create(unsigned int slot, int scriptIndex);  // RoomEvents.cpp
 extern void empty_00470960(int param);
 
 // Externs for globals used by cmd functions
@@ -175,7 +177,7 @@ int cmd_bit_op(void)
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
     case 7: flagBank = (unsigned int*)&g_roomItemsFlags; break;
     case 8: flagBank = (unsigned int*)&g_RoomFlags; break;
-    case 9: flagBank = (unsigned int*)&DAT_00d213a0; break;
+    case 9: flagBank = (unsigned int*)&DAT_00d213a0; break; // TODO: investigate what flags are these
     default: return 0;
     }
 
@@ -233,7 +235,9 @@ int cmd_obj07_test(void)
     g_ScdOpcodes += 6;
 
     unsigned short stateVal = ((short*)&g_fading_state)[(op1 & 0xff0000) >> 0x10];
-    unsigned short compareVal = (unsigned short)*(unsigned int*)(g_ScdOpcodes - 4);
+    // Original: MOV AX,word ptr [EDX+0x4] - the compare value is at +4, and the
+    // pointer has already advanced 6, so it is at -2. Reading -4 gave the +2 pad.
+    unsigned short compareVal = scd_read_u16(-2);
     unsigned char mode = (unsigned char)(op1 >> 0x18);
 
     switch (mode) {
@@ -312,10 +316,13 @@ int cmd_current_cut_set(void)
 // ============================================================================
 int cmd_message_set(void)
 {
+    // 4-byte instruction (original: two ADD ...,0x2). The pause argument is a
+    // WORD at +2 (MOV CX,word ptr [EAX]), not a byte - reading it as a byte and
+    // advancing only 1 left the stream one byte short for everything after it.
     unsigned short msgId = scd_read_u16(0);
     g_ScdOpcodes += 2;
-    set_message_display(msgId >> 8, *g_ScdOpcodes);
-    g_ScdOpcodes++;
+    set_message_display(msgId >> 8, scd_read_u16(0));
+    g_ScdOpcodes += 2;
     return 1;
 }
 
@@ -325,7 +332,7 @@ int cmd_message_set(void)
 // ============================================================================
 int cmd_door_set(void)
 {
-    printf("DOOR_AT_SET START %s\n", "door_at_set");
+    dbg_printf("DOOR_AT_SET START %s\n", "door_at_set");
     unsigned char doorNumber = g_ScdOpcodes[1];
     int tableOffset = (unsigned int)doorNumber * 0xc;
     unsigned char* entry = &g_RoomItemEventTable[tableOffset];
@@ -337,7 +344,7 @@ int cmd_door_set(void)
     *(unsigned short*)(entry + 2) = (unsigned short)doorNumber;
     *(unsigned int*)(entry + 8) = (unsigned int)(g_ScdOpcodes + 2);
     g_ScdOpcodes += 0x1a;
-    printf("DOOR_AT_SET END %s\n", "door_at_set");
+    dbg_printf("DOOR_AT_SET END %s\n", "door_at_set");
     return 1;
 }
 
@@ -450,10 +457,12 @@ int cmd_0x13(void)
 // ============================================================================
 int cmd_0x14(void)
 {
+    // The original reads a 16-bit operand here (g_ScdOpcodes is a ushort* in
+    // this function): low byte = slot, high byte = event script index. Reading
+    // it a byte at a time made scriptIndex constant 0.
     g_ScdOpcodes += 2;
-    unsigned char slot = *g_ScdOpcodes & 0xff;
-    unsigned char scriptIndex = *g_ScdOpcodes >> 8;
-    ScdEventEntry_Create(slot, scriptIndex);
+    unsigned short param = scd_read_u16(0);
+    ScdEventEntry_Create(param & 0xFF, param >> 8);
     g_ScdOpcodes += 2;
     return 1;
 }
@@ -464,14 +473,17 @@ int cmd_0x14(void)
 // ============================================================================
 int cmd_bgm_0x15(void)
 {
+    // Original: EAX = (val & 0xffffff1f) >> 5, i.e. (val >> 8) * 8 - a BYTE offset
+    // into the 8-byte g_SndBank records, so the channel index is just val >> 8.
+    // Transcribing the mask literally as (val & 0x1f) >> 5 is a constant 0, and
+    // the old int[64] view had no way to reach the slot byte at record +5.
     unsigned short val = scd_read_u16(0);
-    unsigned int bankIdx = (val & 0x1f) >> 5;
+    unsigned int ch = val >> 8;
     g_ScdOpcodes += 2;
-    int bank = ((int*)&g_SndBank)[bankIdx];
-    if (bank != 0) {
-        SetSndSlot(bank, (int)(char)(&g_snd_slot_00ac99d5)[bankIdx]);
+    if (g_SndBank[ch].handle != 0) {
+        SetSndSlot(g_SndBank[ch].handle, (int)g_SndBank[ch].slot);
     }
-    g_BGM_STATE |= 1 << ((char)(val >> 8) + 3);
+    g_BGM_STATE |= 1 << ((char)ch + 3);
     return 1;
 }
 
@@ -481,17 +493,17 @@ int cmd_bgm_0x15(void)
 // ============================================================================
 int cmd_volume_set(void)
 {
+    // Same (val >> 8) channel index as opcode 0x15; see the note there.
     unsigned short val = scd_read_u16(0);
+    unsigned int ch = val >> 8;
     g_ScdOpcodes += 2;
-    unsigned int bit = 1 << ((char)(val >> 8) + 3);
+    unsigned int bit = 1 << ((char)ch + 3);
     if ((g_BGM_STATE & bit) != 0) {
-        int* bankPtr = &((int*)&g_SndBank)[(val & 0x1f) >> 5];
-        int bank = *bankPtr;
-        if (bank != 0) {
-            setSndStop(bank);
+        if (g_SndBank[ch].handle != 0) {
+            setSndStop(g_SndBank[ch].handle);
         }
         g_BGM_STATE &= ~bit;
-        set_volume(*bankPtr, -1);
+        set_volume(g_SndBank[ch].handle, -1);
     }
     return 1;
 }
@@ -512,28 +524,30 @@ int cmd_player_pos_0x17(void)
     char vol = (char)(op2 >> 8);
     unsigned char posType = (unsigned char)op3;
 
+    // Positional sources are the 3-int scaMatrixData.localMatrix.t (entity +0x34),
+    // NOT the packed SVECTOR `position` (+0x6C) - Play3DSnd reads three ints.
     switch (posType) {
-    case 0: {
-        int posX = (int)(short)scd_read_s16(0);
-        int posZ = (int)(short)scd_read_s16(2);
+    case 0:
+        // Original writes the global scratch VECTOR at 0x00be11b0 as three ints
+        // and passes its address; it does not build a local SVECTOR of shorts.
+        g_playerPosScratch.x = (int)scd_read_s16(0);
+        g_playerPosScratch.y = 0;
+        g_playerPosScratch.z = (int)scd_read_s16(2);
         g_ScdOpcodes += 4;
-        SVECTOR pos;
-        pos.x = (short)posX;
-        pos.y = 0;
-        pos.z = (short)posZ;
-        Play3DSnd(sndType, sndId, (int)vol, (unsigned int)&pos);
+        Play3DSnd(sndType, sndId, (int)vol, (unsigned int)&g_playerPosScratch);
         break;
-    }
     case 1:
         g_ScdOpcodes += 4;
-        Play3DSnd(sndType, sndId, (int)vol, (unsigned int)&g_playerEntity.position);
+        Play3DSnd(sndType, sndId, (int)vol,
+            (unsigned int)g_playerEntity.scaMatrixData.localMatrix.t);
         break;
     case 2:
         g_ScdOpcodes += 4;
         Play3DSnd(sndType, sndId, (int)vol,
-            (unsigned int)(op3 >> 8) * 0x18c + (unsigned int)&g_EnemiesList[0].position);
+            (unsigned int)g_EnemiesList[op3 >> 8].scaMatrixData.localMatrix.t);
         break;
     case 3:
+        // Original pushes a third (unused) argument; play_sfx reads only two.
         g_ScdOpcodes += 4;
         play_sfx(sndType, sndType);
         break;
@@ -547,7 +561,7 @@ int cmd_player_pos_0x17(void)
 // ============================================================================
 int cmd_item_model_set(void)
 {
-    printf("ITEM MODEL START %s\n", "imodel_set");
+    dbg_printf("ITEM MODEL START %s\n", "imodel_set");
 
     // Check for '/' character special case with Jill
     if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
@@ -579,9 +593,14 @@ int cmd_item_model_set(void)
     }
     entry[0] = visFlag;
 
+    // The original READS the word at +0x18, then WRITES BACK `word & 1` into the
+    // opcode stream, and stores that masked value in entry+2. Everything after
+    // keeps using the pre-mask value (flags18). The write-back and the mask were
+    // both missing, so entry+2 received the full 16-bit value.
     unsigned short flags18 = scd_read_u16(0x18);
+    *(unsigned short*)(g_ScdOpcodes + 0x18) = flags18 & 1;
     entry[1] = g_ScdOpcodes[0x17];
-    *(unsigned short*)(entry + 2) = flags18;
+    *(unsigned short*)(entry + 2) = scd_read_u16(0x18);
     *(unsigned short*)(entry + 4) = (unsigned short)g_ScdOpcodes[0xc];
     *(unsigned short*)(entry + 6) = (unsigned short)g_ScdOpcodes[0x16];
     *(unsigned int*)(entry + 8) = (unsigned int)(g_ScdOpcodes + 2);
@@ -592,6 +611,9 @@ int cmd_item_model_set(void)
     char* deskPtr = (char*)g_desks_pointers_table[g_ScdOpcodes[0xc]];
     int* obstacleData = (int*)((char*)g_RdtPointer->obstacles_models + (unsigned int)g_ScdOpcodes[0xc] * 8);
 
+    // spriteInfo is chosen per branch below (it is NOT always deskPtr+0x20).
+    MATRIX* spriteInfo = (MATRIX*)(deskPtr + 0x20);
+
     if (*obstacleData == 0) {
         deskPtr[0x14] = 0; deskPtr[0x15] = 0;
         deskPtr[0x16] = 0; deskPtr[0x17] = 0;
@@ -600,6 +622,23 @@ int cmd_item_model_set(void)
             DAT_008e1c78 = g_TextureBankID;
             DAT_008e1c70 = g_TextureDepthByte;
             ClearTmdProcessingFlag();
+            // Item types 'R' (0x52) and 'P' (0x50) get their 256-entry 5551 palette
+            // darkened: each 5-bit channel drops by 9, clamped at 0, bit 15 kept.
+            // This loop was missing entirely.
+            if ((char)g_ScdOpcodes[10] == 'R' || (char)g_ScdOpcodes[10] == 'P') {
+                unsigned short* pal = (unsigned short*)(obstacleData[1] + 0x14);
+                for (int n = 0; n < 256; n++) {
+                    unsigned short c = *pal;
+                    unsigned char r = (unsigned char)(c & 0x1f);
+                    unsigned char g = (unsigned char)((c >> 5) & 0x1f);
+                    unsigned char b = (unsigned char)((c >> 10) & 0x1f);
+                    r = (r < 10) ? 0 : (unsigned char)(r - 9);
+                    g = (g < 10) ? 0 : (unsigned char)(g - 9);
+                    b = (b < 10) ? 0 : (unsigned char)(b - 9);
+                    *pal = (unsigned short)((c & 0x8000) | (b << 10) | (g << 5) | r);
+                    pal++;
+                }
+            }
             ProcessTmdAsync((unsigned int)obstacleData[1]);
         }
         if ((char)g_ItemModelCount == 0 || *obstacleData != *DAT_00bca0d0) {
@@ -614,10 +653,13 @@ int cmd_item_model_set(void)
         if (parentType == 0xff) {
             deskPtr[100] = 0; deskPtr[0x65] = 0;
             deskPtr[0x66] = 0; deskPtr[0x67] = 0;
+            spriteInfo = (MATRIX*)(deskPtr + 0x20);
         } else if (parentType == 0xfe) {
             *(int*)(deskPtr + 100) = (int)&g_playerEntity + 0x1c;
+            spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
         } else {
             *(int*)(deskPtr + 100) = (int)g_itemboxes_covers_table[parentType] + 0x1c;
+            spriteInfo = (MATRIX*)((int)g_itemboxes_covers_table[parentType] + 0x20);
         }
         InitScaMatrix(*(int*)(deskPtr + 100), (ScaMatrixData*)(deskPtr + 0x1c));
     }
@@ -639,27 +681,31 @@ int cmd_item_model_set(void)
             effectId = (animType == 0x600) ? 0x14 : (animType == 0x700 ? 0x1c : 0x14);
         }
 
-        SVECTOR effectPos;
+        // The original writes the global scratch VECTOR at 0x00be11b0 as three ints
+        // and passes its address - not a local SVECTOR of shorts.
         if ((char)g_ScdOpcodes[0xd] == -1) {
-            effectPos.x = 0;
-            effectPos.z = 0;
-            effectPos.y = (short)((int)(flags18 & 0xf0) * -2);
+            g_playerPosScratch.x = 0;
+            g_playerPosScratch.z = 0;
+            g_playerPosScratch.y = (int)(flags18 & 0xf0) * -2;
         } else {
-            effectPos.x = scd_read_s16(0xe);
-            effectPos.y = (short)(scd_read_s16(0x10) + (int)(flags18 & 0xf0) * -2);
-            effectPos.z = scd_read_s16(0x12);
+            g_playerPosScratch.x = (int)scd_read_s16(0xe);
+            g_playerPosScratch.y = (int)scd_read_s16(0x10) + (int)(flags18 & 0xf0) * -2;
+            g_playerPosScratch.z = (int)scd_read_s16(0x12);
         }
-        MATRIX* spriteInfo = (MATRIX*)(deskPtr + 0x20);
-        unsigned char effResult = Effect_CreateBillboard(0x0b, effectId, 0, spriteInfo, (int*)&effectPos, 0);
+        // spriteInfo is the one selected by the parent-type branch above.
+        unsigned char effResult = Effect_CreateBillboard(0x0b, effectId, 0, spriteInfo, &g_playerPosScratch, 0);
         *(short*)(deskPtr + 0x86) = (short)(char)effResult;
     }
 
+    // These two writes target the DESK object's byte 0 (`*pcVar5` in the original),
+    // not the room-item-event entry - the entry's byte 0 was already set from
+    // visFlag further up.
     flagResult = Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
-    entry[0] = 1 - (flagResult == 0);
+    deskPtr[0] = (char)(1 - (flagResult == 0));
 
     if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
         if (Flg_ck((int)&g_PlayerFlags, 0x7b) == 0) {
-            entry[0] = 0;
+            deskPtr[0] = 0;
         }
     }
 
@@ -686,7 +732,7 @@ int cmd_item_model_set(void)
     *(char*)&g_ItemModelCount = (char)g_ItemModelCount + 1;
     g_ScdOpcodes += 0x1a;
     DAT_00bca0d0 = obstacleData;
-    printf("ITEM MODEL END %s\n", "imodel_set");
+    dbg_printf("ITEM MODEL END %s\n", "imodel_set");
     return 1;
 }
 
@@ -727,12 +773,12 @@ int cmd_item_search(void)
 // ============================================================================
 int cmd_em_set(void)
 {
-    printf("ENEMY SET START %s\n", "enemy_set");
+    dbg_printf("ENEMY SET START %s\n", "enemy_set");
 
     if ((char)g_ScdOpcodes[3] != -1) {
         if (Flg_ck((int)g_RoomEventFlags, (char)g_ScdOpcodes[3]) != 0) {
             g_ScdOpcodes += 0x16;
-            printf("ENEMY SET END %s\n", "enemy_set");
+            dbg_printf("ENEMY SET END %s\n", "enemy_set");
             return 1;
         }
     }
@@ -740,11 +786,13 @@ int cmd_em_set(void)
     unsigned char enemySlot = g_ScdOpcodes[0x12] & 0xf;
     ENTITY = &g_EnemiesList[enemySlot];
     g_EnemiesList[enemySlot].scaMatrixData.localMatrix.t[1] = (int)scd_read_s16(0xe);
-    g_EnemiesList[enemySlot].pad_164[0] = g_ScdOpcodes[0x12] & 0xf;
-    g_EnemiesList[enemySlot].pad_164[0] |= (char)g_ScdOpcodes[0x15] << 4;
+    // Original target is entity +0x161, i.e. pad_160[1] - not pad_164[0] (+0x164).
+    // Low nibble = enemy slot, high nibble = the byte at +0x15, bit 7 set below.
+    g_EnemiesList[enemySlot].pad_160[1] = g_ScdOpcodes[0x12] & 0xf;
+    g_EnemiesList[enemySlot].pad_160[1] |= (char)g_ScdOpcodes[0x15] << 4;
 
     if ((char)g_ScdOpcodes[4] != 0) {
-        ENTITY->pad_164[0] |= 0x80;
+        ENTITY->pad_160[1] |= 0x80;
     }
 
     bool shouldInit = true;
@@ -772,13 +820,15 @@ int cmd_em_set(void)
         ENTITY->action_behavior = 0;
         ENTITY->action_state = 0;
         ENTITY->id = g_ScdOpcodes[1];
-        ENTITY->pad_167 = g_ScdOpcodes[3];
+        // Original writes entity +0x163 = death_event_id, not pad_167 (+0x167).
+        ENTITY->death_event_id = g_ScdOpcodes[3];
         ENTITY->position.pad = scd_read_s16(6);
         *((unsigned short*)&ENTITY->angle + 1) = scd_read_u16(10);
         ENTITY->hit_state = 0;
         *(unsigned short*)&ENTITY->pad_ca[0] = 0;
         ENTITY->collisionFlags = 0;
-        ENTITY->death_timer = 0;
+        // Original clears entity +0xD8 = lookAtFlags, not death_timer (+0xBC).
+        ENTITY->lookAtFlags = 0;
         ENTITY->Sca_info = (unsigned int)g_scaDataTable;
         ENTITY->pSca_hit_data = g_scaPoolPtr;
         g_enemy_count++;
@@ -786,7 +836,7 @@ int cmd_em_set(void)
     }
 
     g_ScdOpcodes += 0x16;
-    printf("ENEMY SET END %s\n", "enemy_set");
+    dbg_printf("ENEMY SET END %s\n", "enemy_set");
     return 1;
 }
 
@@ -853,7 +903,7 @@ int cmd_sfx_set(void)
 // ============================================================================
 int cmd_omodel_set(void)
 {
-    printf("OMODEL SET START %s\n", "omodel_set");
+    dbg_printf("OMODEL SET START %s\n", "omodel_set");
 
     unsigned int slotIdx = (unsigned int)(g_ScdOpcodes[1] & 0x3f);
     char* objPtr = (char*)g_itemboxes_covers_table[slotIdx];
@@ -869,26 +919,50 @@ int cmd_omodel_set(void)
         DAT_008e1c7c = g_TextureBankID;
         DAT_008e1c74 = g_TextureDepthByte;
 
-        // Stage 4 room-specific texture bank overrides
+        // Stage 4 room-specific texture bank overrides.
+        //
+        // The original's control flow here has THREE outcomes, not two - a bank
+        // override falls straight past both the palette block and ProcessTmdAsync:
+        //   stage4/room4  bank==9        -> override, no palette, NO async
+        //   stage4/room4  bank!=9        -> jmp LAB_00461d35: async only
+        //   stage4/room6  bank in 7/9/0B -> override, no palette, NO async
+        //   stage4/room6  other bank     -> jmp LAB_00461d35: async only
+        //   stage4/other room            -> jmp LAB_00461bfe: palette + async
+        //   stage != 4                   -> palette + async
+        // The port previously nested ProcessTmdAsync inside the `else`, so stage 4
+        // never called it at all, and stage-4 rooms other than 4/6 also skipped
+        // ClearTmdProcessingFlag.
+        bool doPaletteBlock = true;
+        bool doProcessAsync = true;
+
         if (g_stageId == 4) {
+            doPaletteBlock = false;
             if (g_roomId == 4) {
                 if (g_TextureBankID == 9) {
                     g_TextureBankID = 0x0e;
                     g_TextureDepthByte = 0x13;
+                    doProcessAsync = false;
                 }
             } else if (g_roomId == 6) {
                 if (g_TextureBankID == 7) {
                     g_TextureBankID = 9;
                     g_TextureDepthByte++;
+                    doProcessAsync = false;
                 } else if (g_TextureBankID == 9) {
                     g_TextureBankID = 0x0b;
                     g_TextureDepthByte++;
+                    doProcessAsync = false;
                 } else if (g_TextureBankID == 0x0b) {
                     g_TextureBankID = 0x0d;
                     g_TextureDepthByte++;
+                    doProcessAsync = false;
                 }
+            } else {
+                doPaletteBlock = true;
             }
-        } else {
+        }
+
+        if (doPaletteBlock) {
             // Stage 0 room 12: adjust TMD colors
             if (g_stageId == 0 && g_roomId == 12 && (g_ScdOpcodes[1] & 0x3f) == 0) {
                 unsigned short* colorPtr = (unsigned short*)(modelData[1] + 0x14);
@@ -909,14 +983,19 @@ int cmd_omodel_set(void)
                 ClearTmdProcessingFlag();
             }
 
-            // Stage 1 room 11: fix transparent colors
+            // Stage 1 room 11: fix transparent colors.
+            // The original zeroes palette entry 0 before the scan; that was missing.
             if ((g_stageId + 1) % 5 == 2 && g_roomId == 0x0b && (g_ScdOpcodes[1] & 0x3f) == 0) {
                 unsigned short* colorPtr = (unsigned short*)(modelData[1] + 0x14);
+                *colorPtr = 0;
                 for (int i = 0; i < 256; i++) {
                     if ((*colorPtr & 0x7fff) == 0x7fff) *colorPtr = 0x4e73;
                     colorPtr++;
                 }
             }
+        }
+
+        if (doProcessAsync) {
             ProcessTmdAsync((unsigned int)modelData[1]);
         }
     }
@@ -959,7 +1038,12 @@ int cmd_omodel_set(void)
     } else if (parentByte < 0x80) {
         *(int*)(objPtr + 100) = (int)g_itemboxes_covers_table[parentIdx] + 0x1c;
     } else {
-        *(unsigned int*)(objPtr + 100) = (unsigned int)(parentByte & 0x7f) * 0x18c + 0xbe6480;
+        // Original: (parent & 0x7F) * 0x18C + 0xBE6480, i.e. the scaMatrixData (+0x1C)
+        // of g_EnemiesList[parent & 0x7F] - g_EnemiesList is at 0x00BE6464. Must be
+        // computed from the symbol: a literal 0xBE6480 does not point at the port's
+        // array.
+        *(unsigned int*)(objPtr + 100) =
+            (unsigned int)&g_EnemiesList[parentByte & 0x7f].scaMatrixData;
     }
     InitScaMatrix(*(int*)(objPtr + 100), (ScaMatrixData*)(objPtr + 0x1c));
 
@@ -1036,7 +1120,7 @@ setupObject:
     *(char*)&g_omodelCount = (char)g_omodelCount + 1;
     g_ScdOpcodes += 0x1c;
     DAT_00bca0d4 = modelData;
-    printf("OMODEL SET END %s\n", "omodel_set");
+    dbg_printf("OMODEL SET END %s\n", "omodel_set");
     return 1;
 }
 
@@ -1046,7 +1130,8 @@ setupObject:
 // ============================================================================
 int cmd_player_pos_set(void)
 {
-    g_playerEntity.unk_e0 &= ~8u;
+    // Original: AND word ptr [player+0xE0],0xfff3 - clears bits 2 AND 3.
+    g_playerEntity.unk_e0 &= 0xFFF3;
     g_playerEntity.position.pad = scd_read_s16(2);
     g_playerEntity.directionAngle = scd_read_s16(4);
     g_playerEntity.speed.x = scd_read_s16(6);
@@ -1067,21 +1152,34 @@ int cmd_player_pos_set(void)
 // ============================================================================
 int cmd_enemy_pos_set(void)
 {
-    g_ScdOpcodes += 7;
-    unsigned char enemyIdx = (unsigned char)(scd_read_u16(-5) >> 8);
-    *(unsigned short*)&g_EnemiesList[enemyIdx].pad_ec[0x70] &= ~8u;
-    g_EnemiesList[enemyIdx].position.pad = scd_read_s16(-3);
-    *(short*)&g_EnemiesList[enemyIdx].angle = scd_read_s16(-1);
-    *((short*)&g_EnemiesList[enemyIdx].angle + 1) = scd_read_s16(1);
-    short posX = scd_read_s16(3);
-    g_EnemiesList[enemyIdx].position.x = posX;
-    g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t[0] = (int)posX;
-    short posY = scd_read_s16(5);
-    g_EnemiesList[enemyIdx].position.y = posY;
-    g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t[1] = (int)posY;
-    short posZ = scd_read_s16(7);
-    g_EnemiesList[enemyIdx].position.z = posZ;
-    g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t[2] = (int)posZ;
+    // 14-byte instruction (original advances 0xE, not 7), same operand layout as
+    // cmd_player_pos_set (0x20):
+    //   +0  [op, enemyIdx]   +2  position.pad
+    //   +4  angle low half   +6  angle high half
+    //   +8  position.x -> t[0]   +10 position.y -> t[1]   +12 position.z -> t[2]
+    // enemyIdx comes from an arithmetic shift of the signed word (SAR AX,0x8).
+    int enemyIdx = scd_read_s16(0) >> 8;
+    Entity* ent = &g_EnemiesList[enemyIdx];
+
+    // Original: AND word ptr [ent+0xE0],0xfff3 - that is scd_entity_flags, and it
+    // clears bits 2 AND 3. The old code masked ~8 into pad_ec[0x70], which
+    // resolves to entity offset 0x15C - a completely different field.
+    ent->scd_entity_flags &= 0xFFF3;
+
+    ent->position.pad = scd_read_s16(2);
+    *(short*)&ent->angle = scd_read_s16(4);
+    *((short*)&ent->angle + 1) = scd_read_s16(6);
+    short posX = scd_read_s16(8);
+    ent->position.x = posX;
+    ent->scaMatrixData.localMatrix.t[0] = (int)posX;
+    short posY = scd_read_s16(10);
+    ent->position.y = posY;
+    ent->scaMatrixData.localMatrix.t[1] = (int)posY;
+    short posZ = scd_read_s16(12);
+    ent->position.z = posZ;
+    ent->scaMatrixData.localMatrix.t[2] = (int)posZ;
+
+    g_ScdOpcodes += 14;
     return 1;
 }
 
@@ -1162,14 +1260,21 @@ int cmd_cut_toogle(void)
 // ============================================================================
 // 0x24 - cmd_room_action (0x004312b0)
 // Execute a room action callback from the room_check_actions table.
+// Also invoked directly by cmd_got_item (opcode 0x2D), which is why this keeps
+// the original symbol name rather than an _impl suffix.
 // ============================================================================
-int cmd_room_action_impl(void)
+int cmd_room_action(void)
 {
     unsigned char slotIdx = g_ScdOpcodes[1];
     unsigned char actionIdx = g_ScdOpcodes[2];
     g_ScdOpcodes += 4;
-    extern void* room_check_actions[];
     typedef void (*RoomActionFunc)(void*);
+    // The original indexes room_check_actions (0x004b9340) unguarded. Guard it
+    // here until all 18 handlers are decompiled: an unimplemented entry is a
+    // no-op instead of a jump through a null/out-of-range slot.
+    if (actionIdx >= ROOM_CHECK_ACTION_COUNT || room_check_actions[actionIdx] == nullptr) {
+        return 1;
+    }
     ((RoomActionFunc)room_check_actions[actionIdx])(
         &g_RoomItemEventTable[(unsigned int)slotIdx * 0xc]);
     return 1;
@@ -1183,10 +1288,13 @@ int cmd_room_action_impl(void)
 int cmd_rdt_0x25(void)
 {
     g_ScdOpcodes += 2;
-    if ((*g_ScdOpcodes & 0xff00) == 0) {
-        RoomSpr_SetActive((char)(*g_ScdOpcodes & 0xff));
+    // The original reads a WORD here and tests its high byte. On a byte pointer
+    // `*g_ScdOpcodes & 0xff00` is always 0, so this always took the Active branch.
+    unsigned short v = scd_read_u16(0);
+    if ((v & 0xFF00) == 0) {
+        RoomSpr_SetActive((char)(v & 0xFF));
     } else {
-        RoomSpr_SetInactive((char)(*g_ScdOpcodes & 0xff));
+        RoomSpr_SetInactive((char)(v & 0xFF));
     }
     g_ScdOpcodes += 2;
     return 1;
@@ -1194,10 +1302,20 @@ int cmd_rdt_0x25(void)
 
 // ============================================================================
 // 0x26 - cmd_nop_0x26 (0x00460ce0)
+// DEAD TABLE SLOT - hangs the interpreter, faithfully.
+//
+// The original is a bare RET that never touches EAX. The dispatcher leaves the
+// opcode value there (XOR EAX,EAX / MOV AL,[ECX] / CALL [EAX*4+table]), so this
+// returns 0x26 - non-zero - while consuming no opcode bytes. run_command_functions
+// loops `do { r = f(); } while (r != 0)`, so the original spins forever on this
+// opcode. It is therefore never emitted by any shipped script.
+//
+// Returning the opcode byte reproduces that exactly. Do NOT "fix" this to return
+// 0: that would silently diverge from the original by ending the block instead.
 // ============================================================================
 int cmd_nop_0x26(void)
 {
-    return 1;
+    return *g_ScdOpcodes;
 }
 
 // ============================================================================
@@ -1318,7 +1436,13 @@ int cmd_effect_spawn(void)
     } else if (parentType == 1) {
         spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
     } else if ((parentParam & 0x8000) == 0) {
-        spriteInfo = (MATRIX*)(g_effectPool[parentType * 3 + 0x3d].animDataBase + 0x10);
+        // Original: `g_effectPool[parentType * 3 + 0x3D].pAnimHeader + 0x10`, where
+        // pAnimHeader is the byte ARRAY at effect +0x04 - so this is the ADDRESS
+        // effect + 0x14, not the value of the `animDataBase` field (which lives at
+        // +0x7C). Reproduced as an address; note the index itself exceeds the 64-slot
+        // pool for every parentType >= 2 that can reach here, which is the original's
+        // own out-of-bounds read.
+        spriteInfo = (MATRIX*)((char*)&g_effectPool[parentType * 3 + 0x3d] + 0x14);
     } else {
         spriteInfo = (MATRIX*)((int)g_itemboxes_covers_table[(parentParam & 0x7f00) >> 8] + 0x20);
     }
@@ -1385,10 +1509,11 @@ int cmd_got_item(void)
 
 // ============================================================================
 // 0x2E - cmd_nop_0x2e (0x00460a70)
+// DEAD TABLE SLOT - bare RET, same as cmd_nop_0x26 (0x26). See the note there.
 // ============================================================================
 int cmd_nop_0x2e(void)
 {
-    return 1;
+    return *g_ScdOpcodes;
 }
 
 // ============================================================================
@@ -1401,10 +1526,14 @@ int cmd_0x2f(void)
     g_ScdOpcodes += 2;
     unsigned short op2 = scd_read_u16(0);
     g_ScdOpcodes += 2;
-    unsigned int idx = (op1 & 0x1f) >> 5;
-    FUN_004805d0((short)(unsigned char)DAT_00bf07ef, op1 >> 8, op2 & 0xff, (unsigned int)(op2 >> 8));
-    *(unsigned int*)((char*)DAT_00ac98e0 + idx) = op2 & 0xff;
-    *(unsigned int*)((char*)DAT_00ac98e4 + idx) = (unsigned int)(op2 >> 8);
+    // Original: EAX = (op1 & 0xffffff1f) >> 5 = (op1 >> 8) * 8, a byte offset into
+    // the 8-byte g_SndPanVol records - so the channel index is op1 >> 8. The old
+    // (op1 & 0x1f) >> 5 was a constant 0, and the two overlapping DAT_00ac98e0 /
+    // DAT_00ac98e4 arrays could not represent the interleaved pan/volume pair.
+    unsigned int ch = op1 >> 8;
+    FUN_004805d0((short)(unsigned char)DAT_00bf07ef, ch, op2 & 0xff, (unsigned int)(op2 >> 8));
+    g_SndPanVol[ch].pan    = op2 & 0xff;
+    g_SndPanVol[ch].volume = (unsigned int)(op2 >> 8);
     return 1;
 }
 
@@ -1444,7 +1573,10 @@ int cmd_0x31(void)
     unsigned short op1 = scd_read_u16(0);
     unsigned short value = scd_read_u16(2);
     g_ScdOpcodes += 4;
-    ((short*)&g_fading_state)[(op1 >> 7) & 0xfffe] = value;
+    // Original: MOV word ptr [ECX + 0xbe9834],AX with ECX = (op1 >> 7) & ~1.
+    // That is a BYTE offset ((op1 >> 8) * 2), not an element index - indexing a
+    // short* with it doubled the offset and wrote into the wrong field.
+    *(unsigned short*)((char*)&g_fading_state + (((unsigned int)op1 >> 7) & 0xFFFFFFFEu)) = value;
     return 1;
 }
 
@@ -1637,7 +1769,10 @@ int cmd_0x37(void)
     g_ScdOpcodes += 2;
     unsigned short op2 = scd_read_u16(0);
     g_ScdOpcodes += 2;
-    unsigned int idx = ((op1 & 0x07) >> 3) + (op2 & 0xff);
+    // Original: AND ECX,0xffffff07 / SHR ECX,0x3 -> (op1 >> 8) * 32, a byte offset
+    // into g_roomBgmState (BYTE[224] = 7 stages x 32 rooms). Transcribing the mask
+    // literally as (op1 & 0x07) >> 3 is a constant 0, so every stage wrote row 0.
+    unsigned int idx = (((unsigned int)op1 & 0xFFFFFF07u) >> 3) + (op2 & 0xFF);
     g_roomBgmState[idx] = (unsigned char)(op2 >> 8);
     return 1;
 }
@@ -1694,11 +1829,17 @@ int cmd_0x3b(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
+    // Original selector offsets (both are BYTE offsets into the pointer tables):
+    //   desks      (uVar1 >> 6) & 0xfffffffc  == (op1 >> 8) * 4      -> element op1 >> 8
+    //   itemboxes  (uVar1 & 0x7f00) >> 6      == ((op1 >> 8) & 0x7f) * 4
+    // The desks branch previously used element index ((op1 >> 6) & 0x3f), which is
+    // 4x too large - for op1 = 0x0100 it picked desk 4 instead of desk 1.
+    // Note the asymmetry is the original's: only the itembox branch masks with 0x7f.
     char* objPtr;
     if (op1 < 0x8000) {
-        objPtr = (char*)g_desks_pointers_table[(op1 >> 6) & 0x3f];
+        objPtr = (char*)g_desks_pointers_table[op1 >> 8];
     } else {
-        objPtr = (char*)g_itemboxes_covers_table[(op1 & 0x7f00) >> 8];
+        objPtr = (char*)g_itemboxes_covers_table[(op1 >> 8) & 0x7f];
     }
     if (*objPtr != 0) {
         *(unsigned short*)(objPtr + 0x72) = scd_read_u16(0);
@@ -1746,9 +1887,12 @@ int cmd_bullet_0x3d(void)
 {
     unsigned short typeParam = scd_read_u16(0);
     unsigned short parentParam = scd_read_u16(2);
-    int posX = (int)scd_read_s16(4);
-    int posY = (int)scd_read_s16(6);
-    int posZ = (int)scd_read_s16(8);
+    // Unlike opcode 0x2A, the original ZERO-extends the position words here
+    // (`(int)g_ScdOpcodes[2]` on a ushort*, not `(int)(short)...`). Sign-extending
+    // them made negative coordinates spawn effects at the wrong place.
+    int posX = (int)scd_read_u16(4);
+    int posY = (int)scd_read_u16(6);
+    int posZ = (int)scd_read_u16(8);
     unsigned short effectFlags = scd_read_u16(10);
     g_ScdOpcodes += 12;
 
@@ -1758,9 +1902,16 @@ int cmd_bullet_0x3d(void)
     } else if ((parentParam >> 8) == 1) {
         spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
     } else if ((parentParam & 0x8000) == 0) {
-        spriteInfo = (MATRIX*)(g_effectPool[((unsigned int)(typeParam >> 8) >> 8) * 3 + 0x3d].animDataBase + 0x10);
+        // As in 0x2A this is the ADDRESS effect + 0x14 (pAnimHeader is the array at
+        // +0x04), not the `animDataBase` field at +0x7C. The index degenerates to
+        // 0x3D because the original shifts the already-shifted high byte again.
+        spriteInfo = (MATRIX*)((char*)&g_effectPool[((unsigned int)(typeParam >> 8) >> 8) * 3 + 0x3d] + 0x14);
     } else {
-        spriteInfo = (MATRIX*)(*(int*)((int)&g_itemboxes_covers_table + ((typeParam >> 6) & 0xfffffffc)) + 0x20);
+        // The original indexes with the ALREADY-shifted high byte (`uVar2 >> 6` where
+        // uVar2 == typeParam >> 8), so the byte offset is always 0 - i.e. itembox 0.
+        // Using `typeParam >> 6` instead picked a different object entirely.
+        spriteInfo = (MATRIX*)(*(int*)((char*)&g_itemboxes_covers_table +
+                        (((unsigned int)(typeParam >> 8) >> 6) & 0xFFFFFFFC)) + 0x20);
     }
 
     unsigned char effectType = (unsigned char)(typeParam >> 8);
@@ -1891,7 +2042,9 @@ int cmd_0x46(void)
 // ============================================================================
 int cmd_light_set_0x47(void)
 {
-    g_ScdOpcodes += 4;
+    // 44-byte instruction: 2 header + 3 lights x 12 + 3 words x 2.
+    // The original advances 2 here, not 4.
+    g_ScdOpcodes += 2;
     for (unsigned int offset = 0; offset < 0x3c; offset += 0x14) {
         int* light = (int*)((char*)&g_RdtPointer->lights[0].pos_x + offset);
         light[0] = (int)scd_read_s16(0);
@@ -1900,15 +2053,25 @@ int cmd_light_set_0x47(void)
         ((unsigned char*)light)[12] = g_ScdOpcodes[6];
         ((unsigned char*)light)[13] = g_ScdOpcodes[7];
         ((unsigned char*)light)[14] = g_ScdOpcodes[8];
-        *(unsigned short*)((char*)light + 16) = (unsigned short)g_ScdOpcodes[9];
-        *(short*)((char*)light + 20) = scd_read_s16(10);
+        // Word write at +0x10 spans zero2/zero3; radius is at +0x12, not +0x14.
+        // Writing +0x14 landed in the NEXT RDT_Light's pos_x (and past lights[2]
+        // for the last iteration) - a silent out-of-bounds corruption.
+        *(unsigned short*)((char*)light + 0x10) = (unsigned short)g_ScdOpcodes[9];
+        *(short*)((char*)light + 0x12) = scd_read_s16(10);
         g_ScdOpcodes += 12;
     }
     for (unsigned int i = 0; i < 6; i += 2) {
         *(short*)(g_RdtPointer->unknown_03 + i + 3) = scd_read_s16(0);
         g_ScdOpcodes += 2;
     }
-    setBackColor((unsigned char)g_RdtPointer->ambient_light_r, (unsigned char)g_RdtPointer->ambient_light_g, (unsigned char)g_RdtPointer->ambient_light_b);
+    // RDT ambient_light is a COLOR of three SHORTS (Ghidra: COLOR at RDT+6,
+    // size 6), and setBackColor takes the full 16-bit values - the menu passes
+    // 0x199 (409) here, well over 255. Casting to unsigned char truncated the
+    // room ambient: this room's 1775 became 239, which is why every character
+    // rendered far too dark.
+    setBackColor((unsigned short)g_RdtPointer->ambient_light_r,
+                 (unsigned short)g_RdtPointer->ambient_light_g,
+                 (unsigned short)g_RdtPointer->ambient_light_b);
     return 1;
 }
 
@@ -1943,7 +2106,7 @@ int cmd_0x48(void)
 int cmd_0x49(void)
 {
     g_freeEffectSlots = 0;
-    g_ScdOpcodes += 4;
+    g_ScdOpcodes += 2;   // original advances 2, not 4
     do {
         g_effectPool[g_freeEffectSlots].updateId = 0;
         g_effectPool[g_freeEffectSlots].animId = g_effectPool[g_freeEffectSlots].updateId;
@@ -1974,17 +2137,16 @@ int cmd_0x4a(void)
 // ============================================================================
 int cmd_snd_set0x4b(void)
 {
-    g_ScdOpcodes += 4;
-    if ((int)DAT_00bf07f0 != -1) {
+    // Original advances 2 (ADD dword ptr [g_ScdOpcodes],0x2), not 4, and the
+    // guard is CMP byte ptr [g_targetBgmState],0xff - it reads the same byte
+    // update_room_bgm writes, not a separate int that was always -1.
+    g_ScdOpcodes += 2;
+    if (g_targetBgmState != 0xFF) {
         g_BGM_STATE = g_BGM_STATE >> 8;
-        if ((g_BGM_STATE & 8) != 0 && g_SndBank[0] != 0) {
-            SetSndSlot(g_SndBank[0], (int)g_snd_slot_00ac99d5);
-        }
-        if ((g_BGM_STATE & 0x10) != 0 && g_snd_bank_00ac99d8 != 0) {
-            SetSndSlot(g_snd_bank_00ac99d8, (int)g_snd_slot_00ac99dd);
-        }
-        if ((g_BGM_STATE & 0x20) != 0 && g_snd_bank_00ac99e0 != 0) {
-            SetSndSlot(g_snd_bank_00ac99e0, (int)g_snd_slot_00ac99e5);
+        for (int ch = 0; ch < 3; ch++) {
+            if ((g_BGM_STATE & (8u << ch)) != 0 && g_SndBank[ch].handle != 0) {
+                SetSndSlot(g_SndBank[ch].handle, (int)g_SndBank[ch].slot);
+            }
         }
     }
     return 1;
@@ -1996,11 +2158,12 @@ int cmd_snd_set0x4b(void)
 // ============================================================================
 int cmd_0x4c(void)
 {
-    g_ScdOpcodes += 4;
-    if ((int)DAT_00bf07f0 != -1) {
-        if (g_SndBank[0] != 0) setSndStop(g_SndBank[0]);
-        if (g_snd_bank_00ac99d8 != 0) setSndStop(g_snd_bank_00ac99d8);
-        if (g_snd_bank_00ac99e0 != 0) setSndStop(g_snd_bank_00ac99e0);
+    // Original advances 2, not 4; same g_targetBgmState byte guard as 0x4A.
+    g_ScdOpcodes += 2;
+    if (g_targetBgmState != 0xFF) {
+        for (int ch = 0; ch < 3; ch++) {
+            if (g_SndBank[ch].handle != 0) setSndStop(g_SndBank[ch].handle);
+        }
         if (g_BgmSoundBank != 0) setSndStop(g_BgmSoundBank);
         g_BGM_STATE = g_BGM_STATE << 8;
     }
@@ -2021,16 +2184,24 @@ int cmd_0x4d(void)
     unsigned int slotIdx = op2 & 0xff;
     unsigned int fieldIdx = op2 >> 8;
 
+    // Entry +8 holds a POINTER to the originating SCD record (cmd_door_set /
+    // cmd_item_set store g_ScdOpcodes + 2 there). The original dereferences it and
+    // reads/writes bytes +8 and +9 *inside that record*:
+    //   (&DAT_00d91aa8)[slot * 3]   ==  *(u8**)(table + slot * 0xC + 8)
+    // The old code indexed the table entry itself at +9 / +8, i.e. it read and wrote
+    // the bytes of the pointer instead of following it.
+    unsigned char* rec = *(unsigned char**)&g_RoomItemEventTable[slotIdx * 0xc + 8];
+
     if (mode == 0) {
-        (&g_stageId)[fieldIdx] = ((unsigned char*)g_RoomItemEventTable + slotIdx * 0xc + 8)[1];
+        (&g_stageId)[fieldIdx] = rec[9];
     } else if (mode == 1) {
-        ((unsigned char*)g_RoomItemEventTable + slotIdx * 0xc + 8)[1] = (&g_stageId)[fieldIdx];
+        rec[9] = (&g_stageId)[fieldIdx];
     } else if (mode == 2) {
-        int itemSlot = get_item_slot(((unsigned char*)g_RoomItemEventTable + slotIdx * 0xc + 8)[0]);
+        int itemSlot = get_item_slot(rec[8]);
         if (itemSlot >= 0) {
             unsigned char val = ((unsigned char*)g_ItemSlotsPointer)[itemSlot * 2 + 1];
             (&g_stageId)[fieldIdx] = val;
-            ((unsigned char*)g_RoomItemEventTable + slotIdx * 0xc + 8)[1] = val;
+            rec[9] = val;
         }
     }
     return 1;
@@ -2042,27 +2213,25 @@ int cmd_0x4d(void)
 // ============================================================================
 int cmd_0x4e(void)
 {
-    // This function calls FUN_0048a190 multiple times with different entity
-    // sub-structure offsets to reset lighting colors to 0x606060 (medium grey).
-    // The entity offsets are: 0x00, 0x7c, 0xf8, 0x45c, 0x5d0, 0x174, 0x1f0,
-    //                        0x26c, 0x2e8, 0x364, 0x3e0, 0x4d8, 0x554, 0x64c
-    // Each call: FUN_0048a190(offset_ptr, 0x30, 0x00080820, 0x00606060)
+    // Applies a joint colour tint to the player via JointApplyColorTint
+    // (0x0048a190). The tint actually applied is the SECOND argument, 0x30
+    // (r=0x30,g=0,b=0) - JointSetColorTint reads only two arguments, so the
+    // 0x00080820 and 0x00606060 pushed here are dead. An earlier comment here
+    // described this as "reset to 0x606060 medium grey", which is wrong.
+    //
+    // The base is `MOV ESI,dword ptr [0x00be637c]` - the POINTER stored at
+    // g_playerEntity+0x98, i.e. jointsStructs - not the address of the entity
+    // itself. The old code offset from &g_playerEntity and so tinted unrelated
+    // entity fields while leaving the joints untouched.
+    //
+    // The 14 offsets are joints 0-13 at the JointStruct stride of 0x7c. The odd
+    // visiting order (0,1,2,9,12,3,4,5,6,7,8,10,11,13) is the original's.
     extern void FUN_0048a190(void* ptr, int size, int flags, int color);
-    int* entity = (int*)&g_playerEntity;
-    FUN_0048a190(entity, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x7c, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0xf8, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x45c, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x5d0, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x174, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x1f0, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x26c, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x2e8, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x364, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x3e0, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x4d8, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x554, 0x30, 0x00080820, 0x00606060);
-    FUN_0048a190((char*)entity + 0x64c, 0x30, 0x00080820, 0x00606060);
+    char* joints = (char*)g_playerEntity.jointsStructs;
+    static const int kJointOrder[14] = { 0, 1, 2, 9, 12, 3, 4, 5, 6, 7, 8, 10, 11, 13 };
+    for (int i = 0; i < 14; i++) {
+        FUN_0048a190(joints + kJointOrder[i] * 0x7c, 0x30, 0x00080820, 0x00606060);
+    }
     g_ScdOpcodes += 2;
     return 1;
 }
@@ -2079,9 +2248,12 @@ int cmd_0x4f(void)
     g_ScdOpcodes += 2;
     unsigned int mode = op1 >> 8;
 
-    unsigned char* ptr = (unsigned char*)&g_effectPool[0].animId + 2;
+    // The flag word is at effect +0x0E (inside animHeader), not +0x02. The original
+    // walks with a cursor at effect+0x0E and reaches animId/updateId via [-0xE]/[-0xD];
+    // starting the cursor at +0x02 made this OR/AND/XOR into `type`/`lightFactor`.
+    unsigned char* ptr = (unsigned char*)&g_effectPool[0] + 0x0E;
     while (ptr < (unsigned char*)&g_playerEntity.unk_0e) {
-        Effect* eff = (Effect*)(ptr - 2);
+        Effect* eff = (Effect*)(ptr - 0x0E);
         if (eff->animId != 0 || eff->updateId != 0) {
             unsigned short* flagsPtr = (unsigned short*)ptr;
             if (mode == 0) *flagsPtr |= op2;
@@ -2158,7 +2330,7 @@ void* script_command_funcs_table[256] = {
     /* 0x21 */ (void*)cmd_enemy_pos_set,     // 0x00430fe0
     /* 0x22 */ (void*)cmd_item_cmd_0x22,     // 0x00431100
     /* 0x23 */ (void*)cmd_cut_toogle,        // 0x00431280
-    /* 0x24 */ (void*)cmd_room_action_impl,  // 0x004312b0
+    /* 0x24 */ (void*)cmd_room_action,       // 0x004312b0
     /* 0x25 */ (void*)cmd_rdt_0x25,          // 0x004621d0
     /* 0x26 */ (void*)cmd_nop_0x26,          // 0x00460ce0
     /* 0x27 */ (void*)cmd_snd_fade_set,      // 0x00460cf0

@@ -534,11 +534,7 @@ int DirectSound::CreateSound(const char* wavName)
     sprintf(dbg, "[DEBUG] CreateSound: '%s' -> bank %d\n", wavName, bank);
     OutputDebugStringA(dbg);
 
-    char resolvedPath[MAX_PATH];
     const char* actualPath = wavName;
-    if (ResolveAssetPath(wavName, resolvedPath, sizeof(resolvedPath)) != NULL) {
-        actualPath = resolvedPath;
-    }
 
     sprintf(dbg, "[DEBUG]   resolved path: '%s'\n", actualPath);
     OutputDebugStringA(dbg);
@@ -692,6 +688,8 @@ void DirectSound::ErrorRoutine(int code)
 // ============================================================================
 int loadSndBankFromWav(const char* path)
 {
+    // Callers build the path with GAME_DATA_ROOT, so it is already correct for the
+    // build configuration - nothing to rewrite here.
     char dbg[256];
     sprintf(dbg, "[DEBUG] loadSndBankFromWav: '%s' (sync, g_pDS=%p)\n", path, g_pDirectSound);
     OutputDebugStringA(dbg);
@@ -788,10 +786,13 @@ void UpdateSoundFade(int steps)
     for (int* p = g_RoomSfxBanks; p < &g_SndRampDirection; p += 2) apply_vol_delta(p, steps);
     for (int* p = g_CharacterSfxBanks; p < g_CharacterSfxBanks + 48; p += 2) apply_vol_delta(p, steps);
     for (int* p = g_emSndBanks; p < g_emSndBanks + 48; p += 2) apply_vol_delta(p, steps);
-    int* fadeStep = g_SndFadeStepTbl;
-    for (int* p = g_SndBank; p < g_SndBank + 48; p += 2) {
-        if (*p != 0 && *fadeStep > 0) { apply_vol_delta(p, steps); (*fadeStep)--; }
-        fadeStep++;
+    // Original bound is 0x00ac99e8, i.e. 3 records - not 24 (the old `+ 48` on an
+    // int* over-ran the array by 21 entries).
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle != 0 && g_SndFadeStepTbl[i] > 0) {
+            apply_vol_delta(&g_SndBank[i].handle, steps);
+            g_SndFadeStepTbl[i]--;
+        }
     }
 }
 
@@ -925,5 +926,6 @@ void ResumeGameSoundsCallback(void) { ResumePausedSounds(); }
 
 int findAndOpenFile(char* path)
 {
+    // Callers build the path with GAME_DATA_ROOT; no rewriting needed.
     return (GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES) ? 1 : 0;
 }

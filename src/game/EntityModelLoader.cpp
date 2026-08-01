@@ -4,6 +4,7 @@
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include <cstdio>
+#include "../system/AssetPath.h"
 
 // ============================================================================
 // Extern data declarations (not yet extracted to Globals.h)
@@ -43,9 +44,17 @@ int __stdcall VideoDriver_ClearState348(void* obj, void* context);
 
 // ============================================================================
 // EMD model path table (0x004c1320)
-// 1802 bytes total
-// 106 entries per character/enemy block, each entry is 17 bytes
+// 1802 bytes total = 106 entries of 17 bytes, two 53-entry blocks
+// (block 0 = Chris scenario, block 1 = Jill scenario).
 // Indexed by: base + ((characterId & 1) * 0x35 + entity_id) * 0x11
+//
+// Each block is 4 player models + 22 enemy models + **10** filler entries +
+// 17 character models. The filler run matters: an earlier revision had 9, which
+// shifted every character model from index 35 up by one (entity id 37 - Jill -
+// loaded Barry's em1022) and put the second block's base one entry early, so the
+// Jill scenario was misaligned throughout. Verified against 0x004c1320: index 26
+// through 35 are em100a, index 36 is em1020, index 53 is char10, index 79
+// through 88 are em110a and index 89 is em1020.
 // ============================================================================
 static const char g_emdPathTable[106][17] = {
     "enemy/char10.emd", // chris
@@ -83,7 +92,8 @@ static const char g_emdPathTable[106][17] = {
     "enemy/em100a.emd",
     "enemy/em100a.emd",
     "enemy/em100a.emd",
-    "enemy/em1020.emd", // chris (regular model)
+    "enemy/em100a.emd", // 10th filler - index 35
+    "enemy/em1020.emd", // chris (regular model) - index 36
     "enemy/em1021.emd", // jill (regular model)
     "enemy/em1022.emd", // barry (regular model)
     "enemy/em1023.emd", // rebecca (regular model)
@@ -136,7 +146,8 @@ static const char g_emdPathTable[106][17] = {
     "enemy/em110a.emd",
     "enemy/em110a.emd",
     "enemy/em110a.emd",
-    "enemy/em1020.emd",
+    "enemy/em110a.emd", // 10th filler - index 88
+    "enemy/em1020.emd", // index 89
     "enemy/em1021.emd",
     "enemy/em1022.emd",
     "enemy/em1023.emd",
@@ -444,7 +455,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     }
 
     sprintf(FILE_PATH, "%s%s",
-            ".\\usa\\",
+            GAME_DATA_ROOT,
             g_emdPathTable[(g_playerEntity.id & 1) * 53 + entity_id]);
     SetSpriteBufferFlag();
 
@@ -541,7 +552,7 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
     }
 
     sprintf(FILE_PATH, "%s%s",
-            ".\\usa\\",
+            GAME_DATA_ROOT,
             g_weaponPathTable[g_playerEntity.id & 3][weapon_id]);
     SetSpriteBufferFlag();
 
