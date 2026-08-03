@@ -137,7 +137,13 @@ struct PlayerEntity {
     // ---- Tail (0x174 - 0x17F) ----
     unsigned char  pad_174;             // 0x174
     unsigned char  maxHealth;           // 0x175
-    unsigned char  pad_176[10];         // 0x176-0x17F
+    unsigned char  weaponAimFlags;      // 0x176 - aim direction: 0x20 up, 0x40 neutral, 0x80
+                                        //        down (gun family); also mirrored into the
+                                        //        flags byte @ +0x00 for hit detection
+    unsigned char  pad_177;             // 0x177
+    unsigned short weaponAimState;      // 0x178 - reticle scan state: 0 none, 1 target,
+                                        //        bit 1 set = scan result armed
+    unsigned char  pad_17a[6];          // 0x17A-0x17F
 };
 #pragma pack(pop)
 static_assert(sizeof(PlayerEntity) == 0x180, "PlayerEntity size mismatch");

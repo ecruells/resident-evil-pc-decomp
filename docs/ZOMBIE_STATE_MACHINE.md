@@ -681,9 +681,19 @@ severing.
 
 ### Other weapon tables
 
-| Table | Address |
-|---|---|
-| `PTR_post_hit_callbacks` | `0x004bb558` |
-| `weapons_ranges` | `0x004bb560` |
-| `weapons_damage_table` (easy) | `0x004bb698` |
-| `weapon_damage_tbl_normal` | `0x004bbffe` |
+All verified byte-for-byte against the exe when the aim/fire system landed
+(2026-08-03). The hit records are **12-byte** records, not shorts:
+
+| Table | Address | Layout |
+|---|---|---|
+| `PTR_post_hit_callbacks` | `0x004bb558` | 10 fn ptrs (knife sfx+reaction, reaction-only, shotgun range chip, blood FX family) |
+| `g_enemy_hit_reactions` | `0x004bb580` | 20 fn ptrs, indexed by enemy id (`g_weaponHitEnemyType`) |
+| `g_enemyHitJointLists` | `0x004bb5d0` | 20 enemy types × 6 joint indices for the blood spurts |
+| `weapons_ranges` | **`0x004bb648`** (DWORDs) | 10 weapons × 2 characters, `weaponAdj + (id&1)*10` |
+| `weapon_hit_records_easy` | `0x004bb698` | 200 × 12B: `{short kx,ky,kz; short dmg@+6; byte type@+8, data@+9, hit@+10, pad}` — kx/ky/kz (knockback → `g_playerPosScratch`), type/data (→ `0x00be0dec`/`0x00be0df0`) and the health snapshot (`0x00be0df4`) are used for **both** difficulties |
+| `weapon_hit_records_normal` | `0x004bbffe` | 200 × 12B: `{short dmg@+0; short unk@+2; byte hit@+4; short kx,ky,kz}` |
+
+`apply_weapon_damage` (0x0043c020) writes `g_weaponHitEnemyType` (0x00be0de4)
+= enemy id before the post-hit callback, which the callbacks and reactions
+read. The previous port stubs (`weapons_damage_table[30]` etc.) had the wrong
+layout and were removed.

@@ -2535,9 +2535,1370 @@ static void player_ctrl_frame1(void)
         return;
     }
 }
-static void player_ctrl_frame2(void) { player_state_report_missing("animFrameId 2 -> 0x00495330"); }
-static void player_ctrl_frame3(void) { player_state_report_missing("animFrameId 3 -> 0x00495530"); }
-static void player_ctrl_frame4(void) { player_state_report_missing("animFrameId 4 -> 0x004955e0"); }
+// ============================================================================
+// Aim / fire subsystem (0x004578f0 - 0x0045a650)
+//
+// animFrameId 3 (guns) and 4 (knife) host the whole weapon state machine. The
+// original dispatches action_behavior 0x12-0x1A (guns, table at 0x004955b8)
+// and 0x12-0x16 (knife, table at 0x004d4570) into the handlers below; every
+// handler plays motions through Joint_move on the WEAPON buffers
+// (jointMoveData0/1), never the body's animHeader/animBase.
+//
+// Two aim-direction copies exist, exactly as in the original: weaponAimFlags
+// (entity+0x176) drives the raise/hold/fire motion selection, while the flags
+// byte (entity+0x00) is what apply_weapon_damage's cone filter reads. The
+// knife writes the flags byte directly; the guns write weaponAimFlags, and
+// the auto-aim pitch (auto_aim_pitch_update) refreshes the flags byte from
+// the target at fire time. The shared 0x00be0dfc scratch (g_animFrameIdSave)
+// doubles as the manual-fire reverse flag and the lock-on turn angle, which
+// never conflict because the frame dispatcher sets it immediately before use.
+// ============================================================================
+
+extern unsigned char apply_weapon_damage(unsigned int weapon_id);   // 0x0043c020
+extern int  get_item_slot(unsigned char itemId);                    // 0x004516a0
+extern int  rand(void);
+extern int  turn_toward_target(VECTOR* target_pos, short angle_step);          // 0x00489960
+extern void entity_rotate_toward_target(VECTOR* pos, unsigned short angleStep);// 0x004899b0
+
+// 0x00456560 - special-weapon frame window clamp. Returns 1 when the current
+// frame is outside the per-(character,motion) window at 0x004c0cc0, and
+// clamps it: mode 0 holds at end-1, mode 1 rewinds to the window start.
+static unsigned int weapon_special_frame_update(int step, int mode)
+{
+    unsigned int uVar3 = (unsigned int)(step + 1) & 3;
+    int iVar1 = ((unsigned int)(g_playerEntity.id & 1) * 3 + (g_playerEntity.attackAnim - 1 & 3)) * 4;
+    unsigned int frame = (unsigned int)g_playerEntity.animation_frame_id;
+
+    if (frame < g_weaponSpecialFrameWindows[step + iVar1]
+        || g_weaponSpecialFrameWindows[iVar1 + uVar3] <= frame) {
+        if (mode == 0) {
+            g_playerEntity.animation_frame_id =
+                (unsigned char)(g_weaponSpecialFrameWindows[iVar1 + uVar3] - 1);
+        } else if (mode == 1) {
+            g_playerEntity.animation_frame_id =
+                (unsigned char)g_weaponSpecialFrameWindows[step + iVar1];
+        }
+        return 1;
+    }
+    return 0;
+}
+
+// ============================================================================
+// auto_aim_pitch_update @ 0x0045a370
+// Composes the weapon/head joint chain (joints 0, 9, 10, 11) to find the aim
+// target height, then sets the flags byte's aim direction (0x20 up, 0x40
+// neutral, 0x80 down) from the per-character height table at 0x004c0fc0.
+// Runs at fire time (weapon 6 via the frame-3 tail, all weapons at fire
+// frame 2) so the hit cone matches the locked target's height.
+// ============================================================================
+static void auto_aim_pitch_update(void)
+{
+    JointStruct* joints = ENTITY->jointsStructs;
+
+    RotMatrix((SVECTOR*)&ENTITY->position.pad, &ENTITY->scaMatrixData.localMatrix);
+    ApplyLVAndMul0Matrix(&ENTITY->scaMatrixData.localMatrix, &joints[0].transform, &g_matrixScratch);
+    ApplyLVAndMulMatrix(&g_matrixScratch, &joints[9].transform);
+    ApplyLVAndMulMatrix(&g_matrixScratch, &joints[10].transform);
+    ApplyLVAndMulMatrix(&g_matrixScratch, &joints[11].transform);
+
+    unsigned char bVar2 = g_playerEntity.flags & 0x1f;
+    g_playerEntity.flags = (g_playerEntity.flags & 0x1f) | 0x40;
+    if (g_playerEntity.equippedWeaponId != 10) {
+        int t = (g_playerEntity.id & 1) * 6;
+        short low  = g_aimHeightTable[t + 0] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+        short high = g_aimHeightTable[t + 1] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+        if (g_playerEntity.equippedWeaponId < 6 && g_playerEntity.equippedWeaponId != 3) {
+            low  = g_aimHeightTable[t + 2] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+            high = g_aimHeightTable[t + 3] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+        }
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            low  = g_aimHeightTable[t + 4] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+            high = g_aimHeightTable[t + 5] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+        }
+        if (g_matrixScratch.t[1] < low) {
+            g_playerEntity.flags = bVar2 | 0x80;
+        }
+        if (high < g_matrixScratch.t[1]) {
+            g_playerEntity.flags = (g_playerEntity.flags & 0x1f) | 0x20;
+        }
+    }
+}
+
+// ============================================================================
+// weapon_autoaim_check @ 0x0045a4b0
+// The auto-aim fire gate: returns the ammo count (masked to 0x7f) when the
+// equipped slot still has rounds, and 0 when empty. The knife never passes.
+// The special weapons (id >= 0x6f) and the infinite-ammo flag (player flag
+// bit 0x7e, id 10) are topped back up to 4.
+// ============================================================================
+static unsigned char weapon_autoaim_check(void)
+{
+    if (g_EquippedItemId == 0) return 0;
+
+    unsigned char* slot = (unsigned char*)g_ItemSlotsPointer + (g_EquippedItemId - 1) * 2;
+    unsigned char itemId = slot[0];
+    unsigned char qty = slot[1];
+
+    if (itemId == 1) return 0;            // knife: no auto-aim
+    if (itemId == 6) return qty;
+    if ((qty & 0x7f) != 0) return qty & 0x7f;
+
+    if (Flg_ck((int)g_PlayerFlags, 0x7e) != 0 && itemId == 10) {
+        slot[1] = 4;
+        return 4;
+    }
+    if (itemId < 0x6f) return 0;
+    slot[1] = 4;
+    return 4;
+}
+
+// 0x0045a530 - does the player hold the weapon's ammo item? The original
+// looks up (weaponId + 9) in the inventory and returns slot+1 (0 = absent).
+static char weapon_fire_check(void)
+{
+    return (char)(get_item_slot(g_playerEntity.equippedWeaponId + 9) + 1);
+}
+
+// ============================================================================
+// player_aim_cone_test @ 0x00496be0
+// Does the ray from the player through `delta` cross a sight-blocking room
+// boundary? Walks ALL quadrant lists (group[0]..group[4]) - unlike
+// room_check_sight_blocked, which takes one quadrant - and runs the same
+// two-diagonal straddle test on every record whose flags mask to 0x300 (type
+// 4/5 never block). No Yawn exception here: the player's id is never 13/18.
+// ============================================================================
+static unsigned int player_aim_cone_test(VECTOR* delta)
+{
+    if (g_RdtPointer == NULL || g_RdtPointer->boundaries == NULL) return 0;
+
+    RDT_BoundaryHeader* hdr = (RDT_BoundaryHeader*)g_RdtPointer->boundaries;
+    RDT_Boundary* first = hdr->group[0];
+    RDT_Boundary* last  = hdr->group[4];
+
+    int playerX = g_playerEntity.scaMatrixData.localMatrix.t[0] / 18;
+    int playerZ = g_playerEntity.scaMatrixData.localMatrix.t[2] / 18;
+    int dirX = delta->x / 18;
+    int dirZ = delta->z / 18;
+
+    for (RDT_Boundary* rec = first; rec < last; rec++) {
+        unsigned short blocking = (unsigned short)(rec->flags & 0x300);
+        rec->flags = blocking;            // the original writes the mask back
+        if (blocking != 0x300) continue;
+        if (rec->type == 4 || rec->type == 5) continue;
+
+        int xMax = (int)(rec->xMax / 18u);
+        int zMax = (int)(rec->zMax / 18u);
+        int xMin = (int)(rec->xMin / 18u);
+        int zMin = (int)(rec->zMin / 18u);
+
+        // ---- diagonal 1 (xMax,zMin) -> (xMin,zMax), with the VectorNormal ----
+        VECTOR edge, p0, p1;
+        edge.x = xMin - xMax; edge.y = 0; edge.z = zMax - zMin;
+        p1.x = (playerX + dirX) - xMax; p1.y = 0; p1.z = (playerZ + dirZ) - zMin;
+        p0.x = playerX - xMax; p0.y = 0; p0.z = playerZ - zMin;
+        vectorMul3(&edge, &p1, &p1);
+        vectorMul3(&edge, &p0, &p0);
+        if ((((unsigned int)p0.y ^ (unsigned int)p1.y) & 0x80000000u) != 0) {
+            p1.x = xMin - playerX; p1.y = 0; p1.z = zMin - playerZ;
+            vectorMul3(delta, &p1, &p1);
+            p0.x = xMax - playerX; p0.y = 0; p0.z = zMax - playerZ;
+            VectorNormal(&p0, &p0);
+            vectorMul3(delta, &p0, &p0);
+            if ((((unsigned int)p0.y ^ (unsigned int)p1.y) & 0x80000000u) != 0) {
+                return 1;
+            }
+        }
+
+        // ---- diagonal 2 (xMin,zMin) -> (xMax,zMax), no normalize ----
+        edge.x = xMax - xMin; edge.y = 0; edge.z = zMax - zMin;
+        p1.x = (playerX + dirX) - xMin; p1.y = 0; p1.z = (playerZ + dirZ) - zMin;
+        p0.x = playerX - xMin; p0.y = 0; p0.z = playerZ - zMin;
+        vectorMul3(&edge, &p1, &p1);
+        vectorMul3(&edge, &p0, &p0);
+        if ((((unsigned int)p0.y ^ (unsigned int)p1.y) & 0x80000000u) != 0) {
+            p1.x = xMax - playerX; p1.y = 0; p1.z = zMax - playerZ;
+            vectorMul3(delta, &p1, &p1);
+            p0.x = xMin - playerX; p0.y = 0; p0.z = zMin - playerZ;
+            vectorMul3(delta, &p0, &p0);
+            if ((((unsigned int)p0.y ^ (unsigned int)p1.y) & 0x80000000u) != 0) {
+                return 1;
+            }
+        }
+    }
+    return 0;
+}
+
+// ============================================================================
+// player_find_aim_target @ 0x00496ae0
+// Walks the enemy list forward from the current lock (unk_b8) and locks the
+// first alive, script-free enemy inside the aim cone. Returns 1 on lock.
+// ============================================================================
+static unsigned int player_find_aim_target(void)
+{
+    unsigned char idx = 0;
+    Entity* ent = g_EnemiesList;
+    while ((Entity*)g_playerEntity.unk_b8 != ent) {   // find the current lock
+        idx++;
+        ent = &g_EnemiesList[idx];
+    }
+
+    unsigned char next = (unsigned char)(idx + 1);
+    ent = (Entity*)(g_playerEntity.unk_b8 + 0x18c);   // first candidate: after the lock
+    char count = g_enemy_count;
+    if (next == 30) {
+        next = 0;
+        ent = g_EnemiesList;
+    }
+    do {
+        while (true) {
+            if (count == 0) return 0;
+            if ((ent->status_flags & 1) != 0) break;
+            next++;
+            ent++;
+            if (next == 30) {
+                next = 0;
+                ent = g_EnemiesList;
+            }
+        }
+        if (ent->has_enter_switch_zone != 0 && -1 < ent->health
+            && (ent->behavior_flags & 0xc0) == 0 && ent->id < 0x13) {
+            VECTOR delta;
+            delta.x = ent->scaMatrixData.localMatrix.t[0]
+                    - g_playerEntity.scaMatrixData.localMatrix.t[0];
+            delta.y = 0;
+            delta.z = ent->scaMatrixData.localMatrix.t[2]
+                    - g_playerEntity.scaMatrixData.localMatrix.t[2];
+            if (player_aim_cone_test(&delta) == 0) {
+                g_playerEntity.unk_b8 = (unsigned int)ent;
+                return 1;
+            }
+        }
+        next++;
+        ent++;
+        count--;
+    } while (true);
+}
+
+// ============================================================================
+// player_reticle_enemy @ 0x00496910
+// The aim reticle scan (live because g_aimReticleEnabled is 1 in the exe):
+// finds the nearest enemy in front, tracking standing and low (head below 1)
+// candidates separately. The knife locks the nearest; guns prefer the low
+// candidate (the last write wins). Sets unk_b8 and returns 1 when a target
+// was found.
+// ============================================================================
+static unsigned int player_reticle_enemy(void)
+{
+    char count = g_enemy_count;
+    Entity* ent = g_EnemiesList;
+    unsigned char cVar3 = 0;
+    unsigned char nearestIdx = 0, lowIdx = 0, standingIdx = 0;
+    unsigned int nearestDist = 0x7fffffff, lowDist = 0x7fffffff, standingDist = 0x7fffffff;
+
+    while (count != 0) {
+        if ((ent->status_flags & 1) != 0) {
+            if (ent->has_enter_switch_zone != 0 && -1 < ent->health
+                && (ent->behavior_flags & 0xc0) == 0 && ent->id < 0x13) {
+                VECTOR delta;
+                delta.x = ent->scaMatrixData.localMatrix.t[0]
+                        - g_playerEntity.scaMatrixData.localMatrix.t[0];
+                delta.y = 0;
+                delta.z = ent->scaMatrixData.localMatrix.t[2]
+                        - g_playerEntity.scaMatrixData.localMatrix.t[2];
+                g_scaled_down_dist = SquareRoot0(delta.z * delta.z + delta.x * delta.x);
+                if ((short)turn_toward_target((VECTOR*)ent->scaMatrixData.localMatrix.t, 0x800) == 0
+                    && player_aim_cone_test(&delta) == 0) {
+                    if (g_scaled_down_dist < nearestDist) {
+                        nearestIdx = (unsigned char)(cVar3 + 1);
+                        nearestDist = g_scaled_down_dist;
+                    }
+                    if (ent->scaMatrixData.localMatrix.t[1] < 1) {
+                        if (g_scaled_down_dist < lowDist) {
+                            lowIdx = (unsigned char)(cVar3 + 1);
+                            lowDist = g_scaled_down_dist;
+                        }
+                    } else if (g_scaled_down_dist < standingDist) {
+                        standingIdx = (unsigned char)(cVar3 + 1);
+                        standingDist = g_scaled_down_dist;
+                    }
+                }
+            }
+            count--;
+        }
+        cVar3++;
+        ent++;
+    }
+
+    if (nearestIdx == 0) {
+        g_playerEntity.unk_b8 = (unsigned int)g_EnemiesList;
+        return 0;
+    }
+    if (g_playerEntity.equippedWeaponId == 1) {
+        g_playerEntity.unk_b8 = (unsigned int)(&g_EnemiesList[nearestIdx - 1]);
+        return 1;
+    }
+    if (standingIdx != 0) {
+        g_playerEntity.unk_b8 = (unsigned int)(&g_EnemiesList[standingIdx - 1]);
+    }
+    if (lowIdx != 0) {
+        g_playerEntity.unk_b8 = (unsigned int)(&g_EnemiesList[lowIdx - 1]);
+    }
+    return 1;
+}
+
+// ============================================================================
+// weapon_lockon_effect @ 0x0045a650
+// Auto-aim lock-on visual: a fan of target billboards (type 5, depth 0x12,
+// sprite g_deadMoveValue) jittered around the current camera position, aimed
+// at the camera. The shotgun sprays four, everything else one. Runs when the
+// auto-aim raise starts for weapons 2-5.
+// ============================================================================
+static void weapon_lockon_effect(void)
+{
+    if (g_playerEntity.equippedWeaponId > 5) return;
+    unsigned char isShotgun = (g_playerEntity.equippedWeaponId == 3) ? 1 : 0;
+
+    // Camera record for the current camera, 8 dwords at RDT+0x9C
+    int* cam = (int*)((char*)g_RdtPointer + (unsigned int)g_roomCameraId * 0x2c + 0x9c);
+    int v[8];
+    for (int i = 0; i < 8; i++) v[i] = cam[i];
+
+    int dz = v[3] - v[0];          // camera span Z
+    int dx = v[5] - v[2];          // camera span X
+
+    g_animFrameIdSave = ((dx > 0) ? 0x800 : 0) + 0x400;
+    if (dz != 0) {
+        g_animFrameIdSave = ((dz < 0) ? 2 : 1) * 0x800
+                            - (unsigned int)GetAngleQuadrantValue((dx * 0x1000) / dz);
+    }
+
+    // Aiming fan: rotate (isShotgun+1)*0xa0 by the camera angle
+    JointStruct* joints = g_playerEntity.jointsStructs;
+    g_svecScratch.x = (short)((isShotgun + 1) * 0xa0);
+    g_svecScratch.y = 0;
+    g_svecScratch.z = 0;
+    g_matrixScratch = g_identityMatrixData;
+    RotMatrixY((int)g_animFrameIdSave + 0x400, &g_matrixScratch);
+    ApplyMatrixSV(&g_matrixScratch, &g_svecScratch, &g_svecScratch);
+
+    int wx = joints[0xe].world.t[0];
+    int wy = joints[0xe].world.t[1];
+    int wz = joints[0xe].world.t[2];
+
+    VECTOR edgeL, edgeR, aimVec;
+    edgeL.x = (v[3] - wx + g_svecScratch.x) / 0x12;
+    edgeL.z = (v[2] - wz + g_svecScratch.z) / 0x12;
+    edgeL.y = (v[1] - wy + (int)((isShotgun * 5 + 5) * 0x20)) / 0x12;
+    edgeR.x = (v[0] - wx - g_svecScratch.x) / 0x12;
+    edgeR.z = (v[2] - wz - g_svecScratch.z) / 0x12;
+    edgeR.y = (v[1] - wy + (int)((isShotgun * 5 - 5) * 0x20)) / 0x12;
+
+    g_svecScratch.x = (short)(isShotgun * 400);
+    g_svecScratch.y = 1000;
+    g_svecScratch.z = 0;
+    ApplyMatrix(&joints[0xe].world, &g_svecScratch, &aimVec);
+    vectorMul3(&aimVec, &edgeL, &edgeL);
+    vectorMul3(&aimVec, &edgeR, &edgeR);
+
+    // The fan only draws when the camera is inside the wedge
+    if (((unsigned int)edgeL.y & 0x80000000u) == 0) return;
+    if (((unsigned int)edgeR.y & 0x80000000u) != 0) return;
+    if ((((unsigned int)edgeR.x ^ (unsigned int)edgeL.x) & 0x80000000u) == 0) return;
+    if ((((unsigned int)edgeR.z ^ (unsigned int)edgeL.z) & 0x80000000u) == 0) return;
+
+    // Jittered billboards around the camera position
+    g_playerPosScratch.x = dz;
+    g_playerPosScratch.y = v[5] - v[3];
+    g_playerPosScratch.z = dx;
+    VectorNormal(&g_playerPosScratch, &g_playerPosScratch);
+
+    g_playerPosScratch.x = (g_playerPosScratch.x / 8 - (rand() & 0xff)) + v[0] + 0x80;
+    g_playerPosScratch.y = (g_playerPosScratch.y / 8 - (rand() & 0xff)) + v[1] + 0x80;
+    g_playerPosScratch.z = (g_playerPosScratch.z / 8 - (rand() & 0xff)) + v[2] + 0x80;
+    Effect_CreateBillboard(0x05, 0x12, 0, (void*)g_deadMoveValue, &g_playerPosScratch, 0);
+
+    if (isShotgun) {
+        for (int i = 0; i < 3; i++) {
+            g_playerPosScratch.x += 0x100 - (rand() & 0x1ff);
+            g_playerPosScratch.y += 0x100 - (rand() & 0x1ff);
+            g_playerPosScratch.z += 0x100 - (rand() & 0x1ff);
+            Effect_CreateBillboard(0x05, 0x12, 0, (void*)g_deadMoveValue, &g_playerPosScratch, 0);
+        }
+    }
+}
+
+// ============================================================================
+// player_behavior_12_gun_aim @ 0x004578f0 - action_behavior 0x12
+// The gun aim pose. State 0 sets up the pose (motion 5), runs the reticle
+// scan and arms weaponAimState (|2). The shared tail plays the raise motion,
+// steers with the D-pad sides, and quick-fires (behavior 0x15, anim-only)
+// with the up/down bits - clearing the flags byte's aim direction as it
+// does. Special weapons clamp their frame window instead of quick-firing.
+// ============================================================================
+static void player_behavior_12_gun_aim(void)
+{
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.action_state = 1;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.isBeingAttackedFlag = 0;
+        g_playerEntity.attackAnim = 5;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.weaponAimFlags = 0;
+        if ((g_main_state_flags2 & 1) != 0) {
+            PlayEntitySnd(0);
+        }
+        if (g_aimReticleEnabled != 0) {
+            g_playerEntity.weaponAimState = (unsigned short)player_reticle_enemy();
+        }
+        g_playerEntity.weaponAimState |= 2;
+        break;
+    case 1:
+        break;
+    case 2:
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+        return;
+    default:
+        return;
+    }
+
+    // 0x0045797f: reticle follow - a fresh fire press drops the lock; a
+    // locked target (state 3) makes the player turn toward it.
+    if (g_aimReticleEnabled != 0) {
+        if ((g_button_pressed_id & 4) != 0) {
+            g_playerEntity.weaponAimState = 0;
+        }
+        if (g_playerEntity.weaponAimState == 3) {
+            g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+            if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
+                g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+            }
+            if ((g_playerEntity.id & 1) == 0 && g_playerEntity.equippedWeaponId == 2) {
+                g_animFrameIdSave += 0x20;
+            }
+            entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
+                                        (unsigned short)g_animFrameIdSave);
+        }
+    }
+
+    unsigned char ret = (unsigned char)Joint_move(0, g_playerEntity.jointMoveData0,
+                                                  g_playerEntity.jointMoveData1, 0x400);
+    g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
+
+    if ((g_PlayerDpadHeld & 2) != 0) {
+        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
+    }
+    if ((g_PlayerDpadHeld & 8) != 0) {
+        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * 0x10 - 0x48);
+    }
+    if (g_playerEntity.equippedWeaponId == 10) return;
+
+    // Fire gate: Chris may quick-fire once the raise pose has passed frame 4
+    // (weapons 2/4/5); everyone else after frame 9.
+    if ((((g_playerEntity.id & 1) == 0 && 4 < g_playerEntity.animation_frame_id)
+         && (g_playerEntity.equippedWeaponId == 2 || g_playerEntity.equippedWeaponId == 4
+             || g_playerEntity.equippedWeaponId == 5))
+        || 9 < g_playerEntity.animation_frame_id) {
+        if ((g_PlayerDpadHeld & 4) != 0) {   // up quick-fire
+            g_playerEntity.weaponAimFlags &= 0x1f;
+            g_playerEntity.flags &= 0x1f;
+            g_playerEntity.weaponAimFlags |= 0x20;
+            g_playerEntity.action_behavior = 0x15;
+            g_playerEntity.action_state = 0;
+            g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f) ? 0xb : 7;
+            return;
+        }
+        if ((g_PlayerDpadHeld & 1) != 0) {   // down quick-fire
+            g_playerEntity.weaponAimFlags &= 0x1f;
+            g_playerEntity.flags &= 0x1f;
+            g_playerEntity.weaponAimFlags |= 0x80;
+            g_playerEntity.action_behavior = 0x15;
+            g_playerEntity.action_state = 0;
+            g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f) ? 8 : 6;
+            return;
+        }
+    }
+
+    if (0x6e < g_playerEntity.equippedWeaponId && weapon_special_frame_update(0, 0) != 0) {
+        g_playerEntity.action_state = 2;
+    }
+}
+
+// ============================================================================
+// player_behavior_13_gun_raise @ 0x00457b80 - action_behavior 0x13 (part 1)
+// The raise/lower pose machine. State 0 starts the raise (motion dir*3+7),
+// state 1 blends it, state 2 holds the weapon pose (motion weapon*3+dir+2),
+// and state 3 blends back to the body idle (animHeader/animBase). Special
+// weapons use dir+5 motions and clamp with weapon_special_frame_update.
+// ============================================================================
+static void player_behavior_13_gun_raise(void)
+{
+    if (g_playerEntity.action_state >= 4) return;
+
+    char dir = (char)(g_playerEntity.weaponAimFlags >> 7);
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim =
+            (unsigned char)((((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir) * 3 + 7);
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            g_playerEntity.animation_frame_id = 0xe;
+            g_playerEntity.attackAnim =
+                (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir + 5);
+        }
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.move_speed_current = 0;
+        // fall through: the raise starts this frame
+    case 1:
+        Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            weapon_special_frame_update(0, 0);
+        }
+        break;
+    case 2:
+        if (g_playerEntity.unk_8c == 0) {
+            g_playerEntity.action_state = 3;
+            g_playerEntity.unk_bf = 0;
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.move_speed_current = 1;
+            g_playerEntity.unk_8c = 7;
+            g_playerEntity.attackAnim = (unsigned char)
+                (g_playerEntity.equippedWeaponId * 3 + (((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir) + 2);
+            if (g_playerEntity.equippedWeaponId > 0x6e) {
+                g_playerEntity.attackAnim =
+                    (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir + 5);
+                g_playerEntity.animation_frame_id = 0xf;
+                weapon_special_frame_update(0, 0);
+            }
+            if ((g_main_state_flags2 & 1) != 0) {
+                PlayEntitySnd(0);
+            }
+        } else {
+            Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x200);
+            if (g_playerEntity.equippedWeaponId > 0x6e) {
+                weapon_special_frame_update(0, 0);
+            }
+        }
+        break;
+    case 3:
+        if (g_playerEntity.unk_8c != 0) {
+            if (g_playerEntity.equippedWeaponId > 0x6e) {
+                Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x200);
+                g_playerEntity.animation_frame_id = 0xf;
+                weapon_special_frame_update(0, 0);
+            } else {
+                Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x200);
+            }
+        } else {
+            g_playerEntity.action_state = 2;
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.unk_bf = 0;
+            g_playerEntity.move_speed_current = 1;
+            g_playerEntity.unk_8c = 7;
+            g_playerEntity.attackAnim =
+                (unsigned char)((((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir) * 3 + 7);
+            if (g_playerEntity.equippedWeaponId > 0x6e) {
+                g_playerEntity.attackAnim =
+                    (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir + 5);
+                g_playerEntity.animation_frame_id = 0xf;
+                weapon_special_frame_update(0, 0);
+            }
+        }
+        break;
+    }
+}
+
+// ============================================================================
+// player_behavior_13_gun_hold_input @ 0x00457de0 - action_behavior 0x13 (part 2)
+// The aim-hold input handler. Refreshes weaponAimFlags (0x40 neutral, 0x10/
+// 0x20 bits aim down/up), quick-fires on a direction change (behavior 0x15)
+// or direction release (0x16, reverse anim), holsters on aim release (0x17),
+// starts the auto-aim fire (0x14) or the magnum-FX fire (0x18), locks a
+// special-weapon target (0x1a), and steers with the D-pad sides.
+// ============================================================================
+static void player_behavior_13_gun_hold_input(void)
+{
+    unsigned char old = g_playerEntity.weaponAimFlags;
+    g_animFrameIdSave = (unsigned int)old;
+    g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x40;
+    if ((g_PlayerDpadHeld & 0x10) != 0) {
+        g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x80;
+    }
+    if ((g_PlayerDpadHeld & 0x20) != 0) {
+        g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x20;
+    }
+
+    // A direction change quick-fires in the new direction.
+    if (((g_playerEntity.weaponAimFlags ^ old) & 0xa0) != 0) {
+        g_playerEntity.action_behavior = 0x15;
+        g_playerEntity.action_state = 0;
+        unsigned char aimDir = ((g_playerEntity.weaponAimFlags & 0x20) >> 4)
+                             + (g_playerEntity.weaponAimFlags >> 7);
+        g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f)
+            ? (unsigned char)(aimDir * 3 + 5) : (unsigned char)(aimDir + 5);
+    }
+    // Neutral -> aimed: fire; aimed -> neutral: reverse fire anim.
+    if ((old & 0x40) != 0 && (g_playerEntity.weaponAimFlags & 0xa0) != 0) {
+        g_playerEntity.action_behavior = 0x15;
+        g_playerEntity.action_state = 0;
+        unsigned char aimDir = ((g_playerEntity.weaponAimFlags & 0x20) >> 4)
+                             + (g_playerEntity.weaponAimFlags >> 7);
+        g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f)
+            ? (unsigned char)(aimDir * 3 + 5) : (unsigned char)(aimDir + 5);
+    }
+    if ((old & 0xa0) != 0 && (g_playerEntity.weaponAimFlags & 0x40) != 0) {
+        g_playerEntity.action_behavior = 0x16;
+        g_playerEntity.action_state = 0;
+        unsigned char aimDir = (old >> 5 & 1) * 2 + (old >> 7 & 1);
+        g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f)
+            ? (unsigned char)(aimDir * 3 + 5)
+            : (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4)
+                              + (g_playerEntity.weaponAimFlags >> 7) + 5);
+    }
+
+    // Aim button released -> holster.
+    if ((g_PlayerDpadHeld & 0x100) == 0) {
+        g_playerEntity.action_behavior = 0x17;
+        g_playerEntity.action_state = 0;
+        return;
+    }
+
+    // Fire button: auto-aim (with ammo), else the magnum-family FX fire.
+    if ((g_PlayerDpadHeld & 0x40) != 0) {
+        if (weapon_autoaim_check() != 0) {
+            g_playerEntity.action_behavior = 0x14;
+            g_playerEntity.action_state =
+                (g_playerEntity.equippedWeaponId == 6 || g_playerEntity.equippedWeaponId >= 0x6f) ? 3 : 0;
+            return;
+        }
+        if ((g_PlayerDpadPressed & 0x40) != 0) {
+            Play3DSnd(1, 9, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+            if (weapon_fire_check() != 0 && g_playerEntity.equippedWeaponId < 6) {
+                g_playerEntity.action_behavior = 0x18;   // 0x00458ec0 - not yet transcribed
+                g_playerEntity.action_state = 0;
+                return;
+            }
+        }
+    }
+    // Raw pad bit 4 with a target lock starts the special lock-on fire.
+    if ((g_PlayerPadHeld & 0x40) != 0 && player_find_aim_target() != 0) {
+        g_playerEntity.action_behavior = 0x1a;           // 0x00459150 - not yet transcribed
+        g_playerEntity.action_state = 0;
+        return;
+    }
+
+    // Steering: the turn bits drop the raise blend back to state 2.
+    if ((g_PlayerDpadHeld & 2) != 0) {
+        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
+        if (g_playerEntity.action_state < 2) {
+            g_playerEntity.action_state = 2;
+            g_playerEntity.unk_8c = 0;
+        }
+        return;
+    }
+    if ((g_PlayerDpadHeld & 8) != 0) {
+        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * 0x10 - 0x48);
+        if (g_playerEntity.action_state < 2) {
+            g_playerEntity.action_state = 2;
+            g_playerEntity.unk_8c = 0;
+        }
+        return;
+    }
+    if (g_playerEntity.action_state > 1) {
+        g_playerEntity.action_state = 0;
+    }
+}
+
+// ============================================================================
+// player_behavior_14_autoaim_raise @ 0x00458090 - auto-aim fire, state 0
+// Sets the auto-aim raise pose (motion (dir+2)*3), spawns the lock-on fan
+// billboards, then runs the fire state in the same frame.
+// ============================================================================
+static void player_behavior_14_autoaim_fire(void);
+static void player_behavior_14_autoaim_raise(void)
+{
+    g_playerEntity.action_state = 1;
+    g_playerEntity.animation_frame_id = 0;
+    g_playerEntity.move_speed_current = 1;
+    g_playerEntity.unk_8c = 3;
+    g_playerEntity.attackAnim = (unsigned char)
+        ((((g_playerEntity.weaponAimFlags & 0x20) >> 4) + (g_playerEntity.weaponAimFlags >> 7) + 2) * 3);
+    weapon_lockon_effect();
+    if ((g_main_state_flags2 & 1) != 0) {
+        PlayEntitySnd(1);
+    }
+    player_behavior_14_autoaim_fire();
+}
+
+// ============================================================================
+// player_behavior_14_autoaim_fire @ 0x004580f0 - auto-aim fire, state 1
+// The core firing state. Plays the fire motion; on the ammo frame decrements
+// the equipped slot and spawns the muzzle billboard; on the fire frame calls
+// apply_weapon_damage with the table weapon id and plays both fire sounds;
+// spawns the big muzzle flash and second flash; the shotgun fires twice.
+// Returns to the hold state after the end frame once the aim is released.
+// ============================================================================
+static void player_behavior_14_autoaim_fire(void)
+{
+    int weaponIdx = (int)g_playerEntity.equippedWeaponId - 2;   // table index, weapons 2..11
+
+    unsigned char ret = (unsigned char)Joint_move(0, g_playerEntity.jointMoveData0,
+                                                  g_playerEntity.jointMoveData1, 0x400);
+    g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
+    if (g_playerEntity.animation_frame_id == 2) {
+        auto_aim_pitch_update();
+    }
+
+    // ---- ammo decrement + muzzle billboard (g_weaponFireBillboard b0 = frame)
+    if (g_weaponFireBillboard[weaponIdx].b0 == g_playerEntity.animation_frame_id) {
+        ((unsigned char*)g_ItemSlotsPointer)[g_EquippedItemId * 2 - 1] -= 1;
+
+        if (weaponIdx == 8) {   // special weapon: alternate billboard entry
+            unsigned char ammo = weapon_autoaim_check();
+            int e = (ammo & 3) + weaponIdx;
+            g_collPushDepthZHi = e;
+            g_playerPosScratch.x = g_weaponFireBillboard[e].x;
+            g_playerPosScratch.y = g_weaponFireBillboard[e].y;
+            g_playerPosScratch.z = g_weaponFireBillboard[e].z;
+            Effect_CreateBillboard(g_weaponFireBillboard[e].type, g_weaponFireBillboard[e].data,
+                                   0, &g_playerEntity.jointsStructs[0xe].world,
+                                   &g_playerPosScratch, 0);
+        } else {
+            g_playerPosScratch.x = g_weaponFireBillboard[weaponIdx].x;
+            g_playerPosScratch.y = g_weaponFireBillboard[weaponIdx].y;
+            g_playerPosScratch.z = g_weaponFireBillboard[weaponIdx].z;
+            Effect_CreateBillboard(g_weaponFireBillboard[weaponIdx].type,
+                                   g_weaponFireBillboard[weaponIdx].data, 0,
+                                   &g_playerEntity.jointsStructs[0xe].world,
+                                   &g_playerPosScratch, 0);
+            if (weaponIdx == 2) {   // python: extra spark
+                g_playerPosScratch.x = 0x96;
+                g_playerPosScratch.y = 0x17c;
+                g_playerPosScratch.z = 0;
+                Effect_CreateBillboard(0x11, 0x03, 0, &g_playerEntity.jointsStructs[0xe].world,
+                                       &g_playerPosScratch, 0);
+            }
+            if (weaponIdx == 3) {   // magnum: big flash at the joint
+                g_playerPosScratch.x = 0x96;
+                g_playerPosScratch.y = 0x17c;
+                g_playerPosScratch.z = 0;
+                Effect_CreateBillboard(0x11, 0x0b, 0, &g_playerEntity.jointsStructs[0xe].world,
+                                       &g_playerPosScratch, 0);
+            }
+        }
+    }
+
+    // ---- damage + fire sounds
+    if (g_weaponFireData[weaponIdx].fireFrame == g_playerEntity.animation_frame_id) {
+        if (weaponIdx < 6) {
+            apply_weapon_damage(g_weaponFireData[weaponIdx].weaponId);
+        }
+        Play3DSnd(1, g_weaponFireData[weaponIdx].sfx1, 0,
+                  (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        Play3DSnd(1, g_weaponFireData[weaponIdx].sfx2, 0,
+                  (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+    }
+
+    // ---- big muzzle flash
+    if (g_weaponMuzzleFlash[weaponIdx].b0 == g_playerEntity.animation_frame_id) {
+        g_playerPosScratch.x = g_weaponMuzzleFlash[weaponIdx].x;
+        int yOff = (1 - weaponIdx) * (g_playerEntity.id & 1) * 300;
+        g_playerPosScratch.z = g_weaponMuzzleFlash[weaponIdx].z;
+        if (weaponIdx == 8) {
+            yOff = (g_playerEntity.id & 1) * 500;
+        }
+        g_playerPosScratch.y = yOff + g_weaponMuzzleFlash[weaponIdx].y;
+
+        // 0x0045837b: yaw = (weaponIdx-8) + CF(weaponIdx-8 < 1) - 1, masked 0x555
+        int yaw = weaponIdx - 8;
+        yaw += ((unsigned short)yaw < 1) ? 1 : 0;
+        yaw -= 1;
+
+        int fx = (int)(char)Effect_CreateBillboard(
+            g_weaponMuzzleFlash[weaponIdx].type, g_weaponMuzzleFlash[weaponIdx].data,
+            (short)(yaw & 0x555), &g_playerEntity.scaMatrixData.localMatrix,
+            &g_playerPosScratch, 0);
+        g_playerDisplacement = fx;
+        if (weaponIdx == 8) {
+            g_effectPool[fx].animHeader[0] = (unsigned char)weaponIdx;
+        } else {
+            g_effectPool[fx].animHeader[3] = (unsigned char)weaponIdx;
+        }
+    }
+
+    // ---- second flash
+    if (g_weaponFlash2[weaponIdx].b0 == g_playerEntity.animation_frame_id) {
+        int fx;
+        if (weaponIdx == 8) {
+            unsigned char ammo = weapon_autoaim_check();
+            int e = (ammo & 3) + weaponIdx;
+            g_collPushDepthZHi = e;
+            g_playerPosScratch.x = g_weaponFlash2[e].x;
+            g_playerPosScratch.y = g_weaponFlash2[e].y;
+            g_playerPosScratch.z = g_weaponFlash2[e].z;
+            fx = (int)(char)Effect_CreateBillboard(g_weaponFlash2[e].type, g_weaponFlash2[e].data,
+                                                   0, &g_playerEntity.jointsStructs[0xe].world,
+                                                   &g_playerPosScratch, 0);
+            g_collPushDepthZLo = fx;
+        } else {
+            g_playerPosScratch.x = g_weaponFlash2[weaponIdx].x;
+            g_playerPosScratch.y = g_weaponFlash2[weaponIdx].y;
+            g_playerPosScratch.z = g_weaponFlash2[weaponIdx].z;
+            fx = (int)(char)Effect_CreateBillboard(g_weaponFlash2[weaponIdx].type,
+                                                   g_weaponFlash2[weaponIdx].data, 0,
+                                                   &g_playerEntity.jointsStructs[0xe].world,
+                                                   &g_playerPosScratch, 0);
+            g_collPushDepthZHi = fx;
+        }
+        g_effectPool[fx].animHeader[0] = (unsigned char)weaponIdx;
+    }
+
+    // ---- shotgun fires twice (frames 7 and 9)
+    if (weaponIdx == 1
+        && (g_playerEntity.animation_frame_id == 7 || g_playerEntity.animation_frame_id == 9)) {
+        apply_weapon_damage(g_weaponFireData[weaponIdx].weaponId);
+    }
+
+    // ---- past the end frame with the aim released -> back to the hold
+    if (g_weaponFireEndFrame[weaponIdx] < g_playerEntity.animation_frame_id
+        && (g_PlayerDpadHeld & 0x100) == 0) {
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+    }
+
+    // ---- shotgun shell-rack sound two frames before the end
+    if ((unsigned char)(g_weaponFireEndFrame[weaponIdx] - g_playerEntity.animation_frame_id) == 2
+        && weaponIdx == 1) {
+        Play3DSnd(1, 0x0b, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+    }
+
+    // ---- shotgun: released fire direction -> neutral hold
+    if (g_weaponFireEndFrame[weaponIdx] < g_playerEntity.animation_frame_id && weaponIdx == 1
+        && (((g_playerEntity.weaponAimFlags & 0xa0) != 0 && (g_PlayerDpadHeld & 5) == 0)
+            || ((g_playerEntity.weaponAimFlags & 0x80) != 0 && (g_PlayerDpadHeld & 1) == 0)
+            || ((g_playerEntity.weaponAimFlags & 0x20) != 0 && (g_PlayerDpadHeld & 4) == 0))) {
+        g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x40;
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+    }
+}
+
+// 0x00458080 - auto-aim fire dispatcher (state table at 0x004c0d28).
+// States 0 (raise) and 1 (fire) are transcribed; 2-5 and 7 are the recoil/
+// end animations and 6 the special-weapon fire, still to do.
+static void player_behavior_14_autoaim(void)
+{
+    switch (g_playerEntity.action_state) {
+    case 0:
+        player_behavior_14_autoaim_raise();
+        return;
+    case 1:
+        player_behavior_14_autoaim_fire();
+        return;
+    default:
+        player_state_report_missing("auto-aim fire state (0x004c0d28)");
+        return;
+    }
+}
+
+// ============================================================================
+// player_behavior_15_gun_fire @ 0x00458d00 - action_behavior 0x15/0x16
+// The manual quick-fire animation (0x15 forward, 0x16 reverse, selected by
+// the g_animFrameIdSave scratch the frame dispatcher writes). Anim-only in
+// the original: no damage, no ammo. Returns to the hold on loop or on a
+// direction press.
+// ============================================================================
+static void player_behavior_15_gun_fire(void)
+{
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.isBeingAttackedFlag = 0;
+        g_playerEntity.unk_8c = 3;
+        if (g_playerEntity.equippedWeaponId > 0x6e && g_animFrameIdSave != 0) {
+            g_playerEntity.attackAnim = 5;
+            g_playerEntity.animation_frame_id = 0xf;
+            g_weaponSpecialFireCountdown = 0xf;
+        }
+        if ((g_main_state_flags2 & 1) != 0) {
+            PlayEntitySnd(0);
+        }
+        break;
+    case 1:
+        break;
+    case 2:
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+        return;
+    default:
+        return;
+    }
+
+    if (g_playerEntity.equippedWeaponId < 0x6f || g_animFrameIdSave == 0) {
+        unsigned char ret = (unsigned char)Joint_move((char)g_animFrameIdSave,
+                                                      g_playerEntity.jointMoveData0,
+                                                      g_playerEntity.jointMoveData1, 0x400);
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
+    } else {
+        // special weapons run a fixed 0xf-frame countdown instead
+        g_playerEntity.animation_frame_id = 0xf;
+        Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
+        if (g_weaponSpecialFireCountdown-- < 0) {
+            g_playerEntity.action_state++;
+        }
+    }
+
+    if ((g_PlayerDpadHeld & 5) != 0) {
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+    }
+}
+
+// ============================================================================
+// player_behavior_17_holster @ 0x00458e10 - action_behavior 0x17
+// Plays the weapon-lower motion in reverse and returns to locomotion on loop.
+// ============================================================================
+static void player_behavior_17_holster(void)
+{
+    if ((g_PlayerDpadHeld & 2) != 0) {
+        g_playerEntity.directionAngle += 0x50;
+    }
+    if ((g_PlayerDpadHeld & 8) != 0) {
+        g_playerEntity.directionAngle -= 0x50;
+    }
+
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.attackAnim = 5;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.action_state = 1;
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            g_playerEntity.animation_frame_id = 0x1c;
+        }
+        if ((g_main_state_flags2 & 1) != 0) {
+            PlayEntitySnd(0);
+        }
+    }
+
+    unsigned char ret = (unsigned char)Joint_move(1, g_playerEntity.jointMoveData0,
+                                                  g_playerEntity.jointMoveData1, 0x400);
+    if (ret != 0) {
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+        g_playerEntity.animFrameId = 0;
+        g_playerEntity.move_speed_current = 0;
+    }
+}
+
+// ============================================================================
+// player_behavior_12_knife_aim @ 0x00459370 - knife action_behavior 0x12
+// Knife aim pose: motion 5 with the reticle follow, turns of 0x20, and the
+// weapon joint update inline. The hold state takes over when the loop ends.
+// ============================================================================
+static void player_behavior_12_knife_aim(void)
+{
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.attackDirection = 0;
+        g_playerEntity.isBeingAttackedFlag = 0;
+        g_playerEntity.attackAnim = 5;
+        g_playerEntity.unk_8c = 3;
+        if (g_aimReticleEnabled != 0) {
+            g_playerEntity.weaponAimState = (unsigned short)player_reticle_enemy();
+        }
+    }
+
+    if (g_aimReticleEnabled != 0) {
+        g_playerEntity.weaponAimState |= 2;
+        if ((g_button_pressed_id & 4) != 0) {
+            g_playerEntity.weaponAimState = 0;
+        }
+        if (g_playerEntity.weaponAimState == 3) {
+            g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+            if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
+                g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+            }
+            entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
+                                        (unsigned short)g_animFrameIdSave);
+        }
+    }
+
+    unsigned char ret = (unsigned char)Joint_move(0, g_playerEntity.jointMoveData0,
+                                                  g_playerEntity.jointMoveData1, 0x400);
+    if (ret != 0) {
+        g_playerEntity.unk_8c = 0;
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+    }
+    EntityUpdateWeaponJoint(0);
+
+    if ((g_PlayerDpadHeld & 2) != 0) {
+        g_playerEntity.directionAngle += 0x20;
+        return;
+    }
+    if ((g_PlayerDpadHeld & 8) != 0) {
+        g_playerEntity.directionAngle -= 0x20;
+    }
+}
+
+// ============================================================================
+// player_behavior_13_knife_hold @ 0x004594c0 - knife action_behavior 0x13
+// Knife aim-hold: writes the aim direction straight into the flags byte
+// (the knife's hits read it there), plays the hold motions 0x0c/0x0b/0x0e
+// (down/neutral/up, +9 variant on the second pose), decrements the swing
+// cooldown (attackDirection), and swings (0x14) on the fire button when the
+// cooldown is spent. Holsters (0x15) on aim release.
+// ============================================================================
+static void player_behavior_13_knife_hold(void)
+{
+    unsigned char old = g_playerEntity.flags;
+    g_animFrameIdSave = (unsigned int)old;
+    g_playerEntity.flags = (g_playerEntity.flags & 0x1f) | 0x40;
+    if ((g_PlayerDpadHeld & 0x10) != 0) {
+        g_playerEntity.flags = (g_playerEntity.flags & 0x1f) | 0x80;
+    }
+    if ((g_PlayerDpadHeld & 0x20) != 0) {
+        g_playerEntity.flags = (g_playerEntity.flags & 0x1f) | 0x20;
+    }
+    g_playerEntity.weaponAimFlags &= 0xfd;   // clear the "already hit" flag
+
+    if (g_playerEntity.action_state == 0) {
+        if (g_playerEntity.unk_8c == 0) {
+            g_playerEntity.action_state = 1;
+            g_playerEntity.move_speed_current = 1;
+            g_playerEntity.attackAnim = (unsigned char)
+                (((g_playerEntity.flags & 0xbf) >> 6) + ((g_playerEntity.flags & 0x20) >> 3) + 10);
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.unk_bf = 0;
+            g_playerEntity.unk_8c = 0xf;
+            if ((g_main_state_flags2 & 1) != 0) {
+                PlayEntitySnd(0);
+            }
+        }
+        Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x100);
+    }
+    if (g_playerEntity.unk_8c == 0) {
+        // 0x004595a6: the word at joint[1].scale_flag (entity+0x134) is
+        // masked to its low byte - the blend-progress handshake.
+        *(unsigned short*)&g_playerEntity.jointsStructs[1].scale_flag &= 0xff;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.unk_8c = 0xf;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.attackAnim = (unsigned char)
+            (((g_playerEntity.flags & 0xbf) >> 6) + ((g_playerEntity.flags & 0x20) >> 3) + 9);
+    }
+    Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x100);
+    EntityUpdateWeaponJoint(1);
+
+    if (g_playerEntity.attackDirection != 0) {
+        g_playerEntity.attackDirection--;
+    }
+
+    if ((g_PlayerDpadHeld & 0x40) != 0 && g_playerEntity.attackDirection == 0) {
+        g_playerEntity.action_behavior = 0x14;
+        g_playerEntity.action_state = 0;
+        g_playerEntity.attackDirection = 10;
+        return;
+    }
+    if ((g_PlayerDpadHeld & 0x100) == 0) {
+        g_playerEntity.action_behavior = 0x15;   // knife holster
+        g_playerEntity.action_state = 0;
+        return;
+    }
+    if ((g_PlayerPadHeld & 4) != 0 && player_find_aim_target() != 0) {
+        g_playerEntity.action_behavior = 0x16;   // 0x004599f0 - not yet transcribed
+        g_playerEntity.action_state = 0;
+        return;
+    }
+    if ((g_PlayerDpadHeld & 2) != 0) {
+        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
+        return;
+    }
+    if ((g_PlayerDpadHeld & 8) != 0) {
+        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * 0x10 - 0x48);
+    }
+}
+
+// ============================================================================
+// player_behavior_14_knife_swing @ 0x004596c0 - knife action_behavior 0x14
+// The knife swing. The swing motion is dir*3+6 (6 neutral, 7 down, 8 up);
+// each (character, motion) pair has a fire-frame window in the 12-byte table
+// at ESP+4 ({6,7,4,2,4,4,3,8,4,2,4,4}); inside the window apply_weapon_damage
+// runs once per swing (weaponAimFlags bit 1). Returns to the hold on loop.
+// ============================================================================
+static void player_behavior_14_knife_swing(void)
+{
+    static const unsigned char kFireWindow[12] = { 6, 7, 4, 2, 4, 4, 3, 8, 4, 2, 4, 4 };
+
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.attackAnim = (unsigned char)
+            ((((g_playerEntity.flags & 0x20) >> 4) - ((char)g_playerEntity.flags >> 7)) + 6);
+    }
+
+    // Swing whistle at frame 7
+    if (g_playerEntity.animation_frame_id == 7 && (g_playerEntity.unk_bf & 1) != 0) {
+        Play3DSnd(1, 0, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+    }
+
+    // Flash + sound effects, only above the covers-table height
+    if ((g_main_state_flags2 & 1) != 0
+        && 1000 < g_playerEntity.scaMatrixData.localMatrix.t[1]
+                  - *(int*)((char*)g_itemboxes_covers_table[0] + 0x38)) {
+        if (g_playerEntity.attackAnim == 7) {
+            if (g_playerEntity.animation_frame_id < 3) {
+                g_playerPosScratch.y = *(int*)((char*)g_deadMoveValue + 0x18);
+                g_playerPosScratch.z = *(int*)((char*)g_deadMoveValue + 0x1c);
+                g_playerPosScratch.pad = *(int*)((char*)g_deadMoveValue + 0x20);
+                g_playerPosScratch.x = 0x96;
+                Effect_CreateBillboard(0x17, 8, 0, &g_playerEntity.jointsStructs[0xe].world,
+                                       &g_playerPosScratch, 0);
+            }
+            if (g_playerEntity.animation_frame_id == 0 && g_playerEntity.unk_bf == 0) {
+                PlayEntitySnd(1);
+            }
+        } else {
+            if ((g_playerEntity.animation_frame_id & 1) == 0) {
+                g_playerPosScratch.y = *(int*)((char*)g_deadMoveValue + 0x18);
+                g_playerPosScratch.z = *(int*)((char*)g_deadMoveValue + 0x1c);
+                g_playerPosScratch.pad = *(int*)((char*)g_deadMoveValue + 0x20);
+                g_playerPosScratch.x = 0x96;
+                Effect_CreateBillboard(0x17, 8, 0, &g_playerEntity.jointsStructs[0xe].world,
+                                       &g_playerPosScratch, 0);
+            }
+            if (g_playerEntity.animation_frame_id == 0 && g_playerEntity.unk_bf == 0) {
+                Play3DSnd(1, 2, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+            }
+        }
+    }
+
+    g_playerEntity.isBeingAttackedFlag = 0;
+
+    // Fire window: table entry ((id&1)*3 + attackAnim)*2 - 12
+    int e = ((g_playerEntity.id & 1) * 3 + (int)g_playerEntity.attackAnim) * 2 - 12;
+    if ((unsigned char)(g_playerEntity.animation_frame_id - kFireWindow[e]) < kFireWindow[e + 1]
+        && (g_playerEntity.weaponAimFlags & 2) == 0) {
+        if (apply_weapon_damage(1) != 0
+            && (g_playerEntity.attackAnim != 6 || g_EnemiesList[0].id == 8
+                || g_EnemiesList[0].id == 0xd || g_EnemiesList[1].id == 0x13)) {
+            g_playerEntity.weaponAimFlags |= 2;
+        }
+    }
+
+    unsigned char ret = (unsigned char)Joint_move(0, g_playerEntity.jointMoveData0,
+                                                  g_playerEntity.jointMoveData1, 0x400);
+    if (ret != 0) {
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+    }
+    EntityUpdateWeaponJoint(0);
+}
+
+// ============================================================================
+// player_behavior_15_knife_holster @ 0x00459960 - knife action_behavior 0x15
+// Knife holster: reverse motion 5 back to locomotion, weapon joint inline.
+// ============================================================================
+static void player_behavior_15_knife_holster(void)
+{
+    if ((g_PlayerDpadHeld & 2) != 0) {
+        g_playerEntity.directionAngle += 0x50;
+    }
+    if ((g_PlayerDpadHeld & 8) != 0) {
+        g_playerEntity.directionAngle -= 0x50;
+    }
+
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.attackAnim = 5;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.unk_bf = 0;
+    }
+
+    unsigned char ret = (unsigned char)Joint_move(1, g_playerEntity.jointMoveData0,
+                                                  g_playerEntity.jointMoveData1, 0x400);
+    if (ret != 0) {
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+        g_playerEntity.animFrameId = 0;
+    }
+    EntityUpdateWeaponJoint(0);
+}
+
+// ============================================================================
+// player_ctrl_frame2 @ 0x00495330 - animFrameId 2
+// The bare action_behavior dispatch (no input read - the frame-0 switch
+// without player_input_to_behavior). Reachable when a behavior carries over
+// while the machine is not on frame 0.
+// ============================================================================
+static void player_ctrl_frame2(void)
+{
+    switch (g_playerEntity.action_behavior) {
+    case 0:
+        player_behavior_00_idle();
+        return;
+    case 1:
+        player_ctrl_behavior_walk();
+        return;
+    case 2:
+        g_playerEntity.directionAngle = (g_playerEntity.directionAngle + 0x28) & 0xfff;
+        player_ctrl_behavior_walk();
+        return;
+    case 3:
+        g_playerEntity.directionAngle = (g_playerEntity.directionAngle - 0x28) & 0xfff;
+        player_ctrl_behavior_walk();
+        return;
+    case 4:
+        g_playerEntity.directionAngle = (g_playerEntity.directionAngle + 0x60) & 0xfff;
+        player_ctrl_behavior_back();
+        return;
+    case 5:
+        g_playerEntity.directionAngle = (g_playerEntity.directionAngle - 0x60) & 0xfff;
+        player_ctrl_behavior_back();
+        return;
+    case 6:
+        g_playerEntity.directionAngle = (g_playerEntity.directionAngle + 0x28) & 0xfff;
+        player_ctrl_behavior_run();
+        return;
+    case 7:
+        g_playerEntity.directionAngle = (g_playerEntity.directionAngle - 0x28) & 0xfff;
+        player_ctrl_behavior_run();
+        return;
+    case 8:
+        player_ctrl_behavior_run();
+        return;
+    case 9:
+        player_state_report_missing("action_behavior 9 under animFrameId 2 (0x00495df0)");
+        return;
+    case 10:          // door transition
+    case 0x11:
+        player_door_open_sequence();
+        return;
+    case 0x0b:
+        player_state_report_missing("action_behavior 0x0b under animFrameId 2 (0x00496480)");
+        return;
+    case 0x0c:
+        player_state_report_missing("action_behavior 0x0c under animFrameId 2 (0x00495e00)");
+        return;
+    case 0x0d:
+        player_behavior_0d_run();
+        return;
+    case 0x0e:
+    case 0x0f:
+        // 0x00495405: turn by 0x30 and pre-rotate the run velocity
+        g_playerEntity.directionAngle =
+            (g_playerEntity.directionAngle + (g_playerEntity.action_behavior == 0x0e ? 0x30 : -0x30)) & 0xfff;
+        g_svecScratch.x = g_playerEntity.move_speed_current;
+        g_svecScratch.y = 0;
+        g_svecScratch.z = 0;
+        RotMatrix((SVECTOR*)&g_playerEntity.position.pad, &g_matrixScratch);
+        ApplyMatrixSV(&g_matrixScratch, &g_svecScratch, &g_playerEntity.speed);
+        player_behavior_0d_run();
+        return;
+    case 0x10:
+        player_state_report_missing("action_behavior 0x10 under animFrameId 2 (0x00457230)");
+        return;
+    default:
+        player_state_report_missing("action_behavior under animFrameId 2");
+        return;
+    }
+}
+
+// ============================================================================
+// player_ctrl_frame3 @ 0x00495530 - animFrameId 3 (gun aim/fire family)
+// action_behavior 0x12-0x1A dispatch (table at 0x004955b8). The shared tail
+// updates the weapon joint every frame and runs the auto-aim pitch for
+// weapon 6. 0x18 (magnum FX), 0x19 (GL) and 0x1A (special lock-on) are not
+// yet transcribed and report rather than sit NULL.
+// ============================================================================
+static void player_ctrl_frame3(void)
+{
+    switch (g_playerEntity.action_behavior) {
+    case 0x12:
+        player_behavior_12_gun_aim();
+        break;
+    case 0x13:
+        player_behavior_13_gun_raise();
+        player_behavior_13_gun_hold_input();
+        break;
+    case 0x14:
+        player_behavior_14_autoaim();
+        break;
+    case 0x15:
+        g_animFrameIdSave = 0;
+        player_behavior_15_gun_fire();
+        break;
+    case 0x16:
+        g_animFrameIdSave = 1;
+        player_behavior_15_gun_fire();
+        break;
+    case 0x17:
+        player_behavior_17_holster();
+        break;
+    case 0x18:
+        player_state_report_missing("action_behavior 0x18 (0x00458ec0)");
+        break;
+    case 0x19:
+        player_state_report_missing("action_behavior 0x19 (0x00459310)");
+        break;
+    case 0x1a:
+        player_state_report_missing("action_behavior 0x1a (0x00459150)");
+        break;
+    default:
+        player_state_report_missing("action_behavior under animFrameId 3");
+        break;
+    }
+
+    // 0x0049559c: shared tail
+    EntityUpdateWeaponJoint(0);
+    if (g_playerEntity.equippedWeaponId == 6) {
+        auto_aim_pitch_update();
+    }
+}
+
+// ============================================================================
+// player_ctrl_frame4 @ 0x004955e0 - animFrameId 4 (knife aim/fire family)
+// Pure jump through the table at 0x004d4570; the knife behaviours occupy
+// 0x12-0x16, and entries 0x00-0x11 alias locomotion handlers that are only
+// reachable from states the machine cannot be in here.
+// ============================================================================
+static void player_ctrl_frame4(void)
+{
+    switch (g_playerEntity.action_behavior) {
+    case 0x12:
+        player_behavior_12_knife_aim();
+        return;
+    case 0x13:
+        player_behavior_13_knife_hold();
+        return;
+    case 0x14:
+        player_behavior_14_knife_swing();
+        return;
+    case 0x15:
+        player_behavior_15_knife_holster();
+        return;
+    case 0x16:
+        player_state_report_missing("knife action_behavior 0x16 (0x004599f0)");
+        return;
+    default:
+        player_state_report_missing("action_behavior under animFrameId 4");
+        return;
+    }
+}
 
 // ============================================================================
 // Player state 8 (0x0044cf30) — the SCD-driven animation state.

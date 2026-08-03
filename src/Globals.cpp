@@ -353,11 +353,13 @@ static const WORD g_padRemapSubTable0[16] = {
     0x0002, 0x0001, 0x0080, 0x0040
 };
 // Sub-table index 1 (controller config 1)
+// Entry [14] verified against the original binary at 0x004bf2c0: it is 0x0020,
+// not 0x0080 (the port previously had the sub-table-0 value here).
 static const WORD g_padRemapSubTable1[16] = {
     0x1000, 0x2000, 0x4000, 0x8000,
     0x1000, 0x4000, 0x0020, 0x0020,
     0x0008, 0x0040, 0x0008, 0x0004,
-    0x0002, 0x0001, 0x0080, 0x0040
+    0x0002, 0x0001, 0x0020, 0x0040
 };
 // Sub-table index 2 (controller config 2)
 static const WORD g_padRemapSubTable2[16] = {
@@ -944,6 +946,108 @@ int           g_playerDisplacement = 0;
 
 // 0x00be0df8 - Temp pointer for joint processing (second joint in weapon pair)
 void*         g_tempVar = NULL;
+
+// 0x00be0de4 - Enemy type snapshot written by apply_weapon_damage for the
+// post-hit callbacks and hit reactions (Ghidra calls it player_distance_z).
+int           g_weaponHitEnemyType = 0;
+
+// ============================================================================
+// Player aim/fire data tables (ROM .data, dumped byte-for-byte from the exe)
+// ============================================================================
+
+// 0x004c0cc0 - Special-weapon animation frame windows, 24 dwords. Indexed by
+// (character*3 + (attackAnim-1 & 3))*4 + step in weapon_special_frame_update.
+unsigned int  g_weaponSpecialFrameWindows[24] = {
+    0, 17, 25, 43,  0,  5, 13, 29,
+    0,  5, 13, 29,  0, 15, 25, 43,
+    0,  5, 13, 29,  0,  5, 13, 29,
+};
+
+// 0x004c0d58 - Auto-aim fire end frames, one byte per weapon 2..11
+// (weapons 4-9 share 0x0d, the "release after end frame" check).
+unsigned char g_weaponFireEndFrame[10] = {
+    0x08, 0x18, 0x0c, 0x0c, 0x00, 0x0d, 0x0d, 0x0d, 0x12, 0x08,
+};
+
+// 0x004c0d68 - Per-weapon auto-aim fire data, 8 bytes each, weapons 2..11
+WeaponFireData g_weaponFireData[10] = {
+    {  2,   5,  7,  8, 0 },  // weapon 2: handgun
+    {  3,   5,  7,  8, 0 },  // weapon 3: shotgun
+    {  4,   5,  7,  8, 0 },  // weapon 4: python
+    {  5,   5,  7,  8, 0 },  // weapon 5: magnum
+    {  6,   0,  0,  0, 0 },  // weapon 6
+    {  7,   2,  7,  8, 0 },  // weapon 7: grenade launcher
+    {  8,   2,  7,  8, 0 },  // weapon 8
+    {  9,   2,  7,  8, 0 },  // weapon 9
+    { 10,   5,  7,  8, 0 },  // weapon 10: special
+    {  0,   0,  0,  0, 0 },  // weapon 11: unused
+};
+
+// 0x004c0dd8 - Muzzle billboard params, 10 bytes each, weapons 2..11. The b0
+// byte is also the ammo-decrement / first billboard frame.
+WeaponFxEntry g_weaponFireBillboard[10] = {
+    {  1, 17,  0, 0,   110,   540,     0 },  // weapon 2
+    {  1, 17,  1, 0,   640,  1110,     0 },  // weapon 3
+    {  1, 17,  2, 0,   160,   610,     0 },  // weapon 4
+    {  1, 17, 10, 0,   160,   610,     0 },  // weapon 5
+    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 6
+    {  2,  8,  7, 0,   400,   660,     0 },  // weapon 7
+    {  2,  8,  7, 0,   400,   660,     0 },  // weapon 8
+    {  2,  8,  7, 0,   400,   660,     0 },  // weapon 9
+    {  1, 11,  9, 0,  -190,  1020,    90 },  // weapon 10
+    {  1, 11,  9, 0,  -190,  1020,   -60 },  // weapon 11
+};
+
+// 0x004c0e68 - Big muzzle-flash billboard params, weapons 2..11
+WeaponFxEntry g_weaponMuzzleFlash[10] = {
+    {  3,  5,  0, 0,   370, -2870,  -220 },  // weapon 2
+    { 25,  5,  9, 0,   360, -2050,  -440 },  // weapon 3
+    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 4 (frame 99 = never)
+    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 5
+    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 6
+    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 7
+    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 8
+    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 9
+    {  2,  9, 11, 0,  1400, -2800,  -300 },  // weapon 10
+    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 11
+};
+
+// 0x004c0ef8 - Second muzzle-flash billboard params, weapons 2..11
+WeaponFxEntry g_weaponFlash2[10] = {
+    {  2,  9, 11, 0,   110,   500,     0 },  // weapon 2
+    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 3
+    {  2,  9, 11, 0,   160,   610,     0 },  // weapon 4
+    {  2,  9, 11, 0,   160,   610,     0 },  // weapon 5
+    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 6
+    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 7
+    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 8
+    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 9
+    {  2,  8,  2, 0,   430,  -830,    90 },  // weapon 10
+    {  2,  8,  2, 0,   430,  -830,   -60 },  // weapon 11
+};
+
+// 0x004c0f84 - Special-weapon fire intervals (frame % interval == 0 fires)
+unsigned int  g_weaponFireIntervals[3] = { 2, 6, 10 };
+
+// 0x004c0f90 / 0x004c0f98 - per-weapon FX bytes for behavior 0x18 (magnum
+// family). The callbacks at 0x004c0fa0 are not yet transcribed.
+unsigned char g_weaponFxBytesA[8] = { 0x11, 0x0d, 0x21, 0x21, 0x11, 0x10, 0x10, 0x10 };
+unsigned char g_weaponFxBytesB[8] = { 0x0a, 0x0a, 0x0c, 0x0c, 0x0a, 0x07, 0x07, 0x07 };
+
+// 0x004c0fc0 - Per-character aim height pairs (normal / gun / special), shorts.
+// Indexed (character & 1) * 6 + pair by auto_aim_pitch_update.
+short         g_aimHeightTable[12] = {
+    -2026, -1656, -2530, -2280, -2040, -1800,   // Chris
+    -1917, -1617, -2190, -1940, -2003, -1720,   // Jill
+};
+
+// 0x004c062c - 1 in the exe: the aim reticle scan (player_reticle_enemy) is
+// live. A 0 here would skip the reticle and the auto-turn lock-on.
+unsigned char g_aimReticleEnabled = 1;
+
+// 0x008e1c68 - special-weapon fire frame countdown (weapon_special_frame_update
+// path in player_behavior_15_gun_fire)
+char          g_weaponSpecialFireCountdown = 0;
 
 // 0x004d4510 - Chris SCA collision data (16 bytes)
 DWORD         g_scaChrisData[4] = {
