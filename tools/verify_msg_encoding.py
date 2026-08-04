@@ -5,9 +5,12 @@ PrintText.h and compare the encoded global messages against the original
 message bytes in ResidentEvil.exe. Run after editing PrintText.h escapes or
 Globals.cpp message strings.
 """
+import os
 import struct
 
-EXE = r"./assets/usa/ResidentEvil.exe"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
+EXE = os.path.join(PROJECT_DIR, 'assets', 'ResidentEvil.exe')
 
 
 def pft_hex(c):

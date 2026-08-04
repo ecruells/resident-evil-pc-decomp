@@ -627,8 +627,10 @@ void SetupCharacterData(void)
     InitScaMatrix(0, &g_playerEntity.scaMatrixData);
     SetWeaponBodyParts(0xe);
     g_playerEntity.equippedWeaponId = 0;
-    if (g_equippedItemId != 0) {
-        g_playerEntity.equippedWeaponId = g_ItemsSlots[(unsigned int)g_equippedItemId].Id;
+    if (g_EquippedItemId != 0) {
+        // this is faithfull to original code
+        // itembox slots length is 48 slots, the character item slots is expected to be after the itembox slots array
+        g_playerEntity.equippedWeaponId = g_itemboxSlots[g_EquippedItemId + 47].Id;
     }
     LoadEquippedWeaponAnimation(
         g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animationBuffer, (unsigned int)&g_animObjectBuffer);

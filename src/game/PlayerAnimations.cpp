@@ -2349,6 +2349,17 @@ static void player_input_to_behavior(void)
 
     // 0x004957c6: aim button. Two ranges of equippedWeaponId select the same
     // aim behaviour; the knife (id 1) uses a different animFrameId.
+    if ((held & 0x100) != 0) {
+        static int lastAimWeapon = -1;
+        if ((int)g_playerEntity.equippedWeaponId != lastAimWeapon) {
+            lastAimWeapon = (int)g_playerEntity.equippedWeaponId;
+            dbg_printf("[aim] aim button held, equippedWeaponId=%u behavior=%u state=%u frameId=%u\n",
+                       (unsigned int)g_playerEntity.equippedWeaponId,
+                       (unsigned int)g_playerEntity.action_behavior,
+                       (unsigned int)g_playerEntity.action_state,
+                       (unsigned int)g_playerEntity.animFrameId);
+        }
+    }
     if ((held & 0x100) != 0 &&
         (g_playerEntity.equippedWeaponId > 0x6e ||
          (g_playerEntity.equippedWeaponId != 0 && g_playerEntity.equippedWeaponId < 0xb))) {
@@ -3482,6 +3493,15 @@ static void player_behavior_12_gun_aim(void)
     unsigned char ret = (unsigned char)Joint_move(0, g_playerEntity.jointMoveData0,
                                                   g_playerEntity.jointMoveData1, 0x400);
     g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
+    static unsigned char lastB12Frame = 0xff;
+    if (g_playerEntity.animation_frame_id != lastB12Frame || ret != 0) {
+        lastB12Frame = g_playerEntity.animation_frame_id;
+        dbg_printf("[aim] b12 state %u ret %u frame %u anim %u blend %u\n",
+                   (unsigned int)g_playerEntity.action_state, (unsigned int)ret,
+                   (unsigned int)g_playerEntity.animation_frame_id,
+                   (unsigned int)g_playerEntity.attackAnim,
+                   (unsigned int)g_playerEntity.unk_8c);
+    }
 
     if ((g_PlayerDpadHeld & 2) != 0) {
         g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
@@ -3531,6 +3551,15 @@ static void player_behavior_12_gun_aim(void)
 // ============================================================================
 static void player_behavior_13_gun_raise(void)
 {
+    static unsigned char lastRaiseState = 0xff;
+    if (g_playerEntity.action_state != lastRaiseState) {
+        lastRaiseState = g_playerEntity.action_state;
+        dbg_printf("[aim] b13 raise state %u blend %u anim %u frame %u\n",
+                   (unsigned int)g_playerEntity.action_state,
+                   (unsigned int)g_playerEntity.unk_8c,
+                   (unsigned int)g_playerEntity.attackAnim,
+                   (unsigned int)g_playerEntity.animation_frame_id);
+    }
     if (g_playerEntity.action_state >= 4) return;
 
     char dir = (char)(g_playerEntity.weaponAimFlags >> 7);
@@ -3539,12 +3568,17 @@ static void player_behavior_13_gun_raise(void)
         g_playerEntity.animation_frame_id = 0;
         g_playerEntity.action_state = 1;
         g_playerEntity.unk_bf = 0;
+        // 0x00457bc1: the direction term ADDS the down bit (SHR/ADD in the
+        // original). The Ghidra decompile shows "upbit - dir" only because it
+        // treats bPad_176 as signed (0x80 >> 7 = -1); the raw assembly at
+        // 0x00457bc1 is ADD DL,AL with an unsigned 0/1. The SUB form computes
+        // motion 4 for aim-down - the pickup animation - instead of 10.
         g_playerEntity.attackAnim =
-            (unsigned char)((((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir) * 3 + 7);
+            (unsigned char)((((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir) * 3 + 7);
         if (g_playerEntity.equippedWeaponId > 0x6e) {
             g_playerEntity.animation_frame_id = 0xe;
             g_playerEntity.attackAnim =
-                (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir + 5);
+                (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 5);
         }
         g_playerEntity.unk_8c = 3;
         g_playerEntity.move_speed_current = 0;
@@ -3562,11 +3596,14 @@ static void player_behavior_13_gun_raise(void)
             g_playerEntity.animation_frame_id = 0;
             g_playerEntity.move_speed_current = 1;
             g_playerEntity.unk_8c = 7;
+            // 0x00457c55: ADD as in state 0 - the down direction is +1, so
+            // the hold-down motion is weapon*3+3 (9 for the handgun), not
+            // weapon*3+1 (7, the neutral raise).
             g_playerEntity.attackAnim = (unsigned char)
-                (g_playerEntity.equippedWeaponId * 3 + (((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir) + 2);
+                (g_playerEntity.equippedWeaponId * 3 + (((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir) + 2);
             if (g_playerEntity.equippedWeaponId > 0x6e) {
                 g_playerEntity.attackAnim =
-                    (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir + 5);
+                    (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 5);
                 g_playerEntity.animation_frame_id = 0xf;
                 weapon_special_frame_update(0, 0);
             }
@@ -3596,10 +3633,10 @@ static void player_behavior_13_gun_raise(void)
             g_playerEntity.move_speed_current = 1;
             g_playerEntity.unk_8c = 7;
             g_playerEntity.attackAnim =
-                (unsigned char)((((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir) * 3 + 7);
+                (unsigned char)((((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir) * 3 + 7);
             if (g_playerEntity.equippedWeaponId > 0x6e) {
                 g_playerEntity.attackAnim =
-                    (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) - dir + 5);
+                    (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 5);
                 g_playerEntity.animation_frame_id = 0xf;
                 weapon_special_frame_update(0, 0);
             }
@@ -3618,6 +3655,15 @@ static void player_behavior_13_gun_raise(void)
 // ============================================================================
 static void player_behavior_13_gun_hold_input(void)
 {
+    static unsigned char lastHoldState = 0xff;
+    if (g_playerEntity.action_state != lastHoldState) {
+        lastHoldState = g_playerEntity.action_state;
+        dbg_printf("[aim] b13 hold state %u blend %u flags %02x dpad %04x\n",
+                   (unsigned int)g_playerEntity.action_state,
+                   (unsigned int)g_playerEntity.unk_8c,
+                   (unsigned int)g_playerEntity.weaponAimFlags,
+                   (unsigned int)g_PlayerDpadHeld);
+    }
     unsigned char old = g_playerEntity.weaponAimFlags;
     g_animFrameIdSave = (unsigned int)old;
     g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x40;
@@ -3628,12 +3674,16 @@ static void player_behavior_13_gun_hold_input(void)
         g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x20;
     }
 
-    // A direction change quick-fires in the new direction.
+    // A direction change quick-fires in the new direction. The direction term
+    // ADDS the down bit: 0x00457e5d is ADD DL,AL, so down yields motion 8
+    // (0+1)*3+5, up motion 11 (2+0)*3+5. An earlier port subtracted the bits
+    // (the Ghidra decompile's "- dir" artifact of signed >>7), which made the
+    // down quick-fire play motion 2 - the run animation.
     if (((g_playerEntity.weaponAimFlags ^ old) & 0xa0) != 0) {
         g_playerEntity.action_behavior = 0x15;
         g_playerEntity.action_state = 0;
-        unsigned char aimDir = ((g_playerEntity.weaponAimFlags & 0x20) >> 4)
-                             + (g_playerEntity.weaponAimFlags >> 7);
+        int aimDir = (int)((g_playerEntity.weaponAimFlags & 0x20) >> 4)
+                   + (int)(g_playerEntity.weaponAimFlags >> 7);
         g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f)
             ? (unsigned char)(aimDir * 3 + 5) : (unsigned char)(aimDir + 5);
     }
@@ -3641,15 +3691,17 @@ static void player_behavior_13_gun_hold_input(void)
     if ((old & 0x40) != 0 && (g_playerEntity.weaponAimFlags & 0xa0) != 0) {
         g_playerEntity.action_behavior = 0x15;
         g_playerEntity.action_state = 0;
-        unsigned char aimDir = ((g_playerEntity.weaponAimFlags & 0x20) >> 4)
-                             + (g_playerEntity.weaponAimFlags >> 7);
+        int aimDir = (int)((g_playerEntity.weaponAimFlags & 0x20) >> 4)
+                   + (int)(g_playerEntity.weaponAimFlags >> 7);
         g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f)
             ? (unsigned char)(aimDir * 3 + 5) : (unsigned char)(aimDir + 5);
     }
     if ((old & 0xa0) != 0 && (g_playerEntity.weaponAimFlags & 0x40) != 0) {
         g_playerEntity.action_behavior = 0x16;
         g_playerEntity.action_state = 0;
-        unsigned char aimDir = (old >> 5 & 1) * 2 + (old >> 7 & 1);
+        // 0x00457f09: LEA [down + up*2] - ADD semantics, so the down release
+        // also plays motion 8, not 2 (the run).
+        int aimDir = (int)(old >> 7 & 1) + (int)(old >> 5 & 1) * 2;
         g_playerEntity.attackAnim = (g_playerEntity.equippedWeaponId < 0x6f)
             ? (unsigned char)(aimDir * 3 + 5)
             : (unsigned char)(((g_playerEntity.weaponAimFlags & 0x20) >> 4)
@@ -3883,9 +3935,193 @@ static void player_behavior_14_autoaim_fire(void)
     }
 }
 
+// FUN_00458680 - auto-aim state 4 body: play the re-raise motion. State 3 arms
+// the raise pose then calls this; the motion loop advances state 4 -> 5.
+static void player_behavior_14_autoaim_raise2(void)
+{
+    char ret = (char)Joint_move(0, g_playerEntity.jointMoveData0,
+                                g_playerEntity.jointMoveData1, 0x400);
+    g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
+    if (g_playerEntity.equippedWeaponId > 0x6e) {
+        g_playerEntity.action_state++;
+    }
+}
+
+// FUN_00458c90 - auto-aim state 9 body: play the fire motion REVERSED (the
+// gun recovers to the raised pose after a quick-fire). State 8 arms the pose
+// then calls this; weaponAimFlags bit 0 is the reverse marker written by the
+// hold-fire direction logic (the Joint_move reverse arg is flags | 1, so the
+// playback is always reversed here). The motion loop advances 9 -> 10.
+static void player_behavior_14_autoaim_reverse(void)
+{
+    char ret = (char)Joint_move((char)(g_playerEntity.weaponAimFlags | 1),
+                                g_playerEntity.jointMoveData0,
+                                g_playerEntity.jointMoveData1, 0x400);
+    g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
+    if (g_playerEntity.equippedWeaponId > 0x6e) {
+        g_playerEntity.action_state += (unsigned char)weapon_special_frame_update(0, 2);
+    }
+    if ((g_PlayerDpadHeld & 5) != 0) {
+        g_playerEntity.action_state = 5;
+    }
+}
+
+// FUN_00458720 - auto-aim state 6 body: the hold-fire loop. Decrements ammo
+// (click every 15 frames, small flash every 4 for normal weapons; interval
+// fire for specials), then quick-fires on a direction change (state 8,
+// forward) or plays the reversed recover (state 8, flags | 1), or keeps
+// Joint_move'ing when nothing changed - releasing fire drops back to the hold.
+static void player_behavior_14_autoaim_holdfire(void)
+{
+    unsigned char old = g_playerEntity.weaponAimFlags;
+    g_animFrameIdSave = (unsigned int)old;
+    g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x40;
+    if ((g_PlayerDpadHeld & 0x10) != 0) {
+        g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x80;
+    }
+    if ((g_PlayerDpadHeld & 0x20) != 0) {
+        g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x20;
+    }
+
+    if (weapon_autoaim_check() == 0) {
+        Play3DSnd(1, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+        return;
+    }
+
+    unsigned char frame = g_playerEntity.animation_frame_id;
+    if (g_playerEntity.equippedWeaponId < 0x6f) {
+        // normal weapons: click every 15 frames, small flash every 4, ammo--
+        if (frame % 0xf == 0) {
+            Play3DSnd(1, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+            Play3DSnd(1, 4, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        }
+        if ((frame & 3) == 0) {
+            g_playerPosScratch.x = 0x21c;
+            g_playerPosScratch.y = 0x4ec;
+            g_playerPosScratch.z = 0;
+            Effect_CreateBillboard(0xc, 0, 0, &g_playerEntity.jointsStructs[0xe].world,
+                                   &g_playerPosScratch, 0);
+        }
+        ((unsigned char*)g_ItemSlotsPointer)[g_EquippedItemId * 2 - 1] -= 1;
+    } else {
+        // special weapons: interval fire while held. The table index is the
+        // weapon id shifted by -99 (0x6f -> entry 12), which is why the FX
+        // tables have 14 entries.
+        int idx = (int)g_playerEntity.equippedWeaponId - 99;
+        if (frame % g_weaponFireIntervals[0] == 0) {
+            auto_aim_pitch_update();
+            g_playerPosScratch.x = g_weaponFireBillboard[idx].x;
+            g_playerPosScratch.y = g_weaponFireBillboard[idx].y;
+            g_playerPosScratch.z = g_weaponFireBillboard[idx].z;
+            Effect_CreateBillboard(g_weaponFireBillboard[idx].type,
+                                   g_weaponFireBillboard[idx].data, 0,
+                                   &g_playerEntity.jointsStructs[0xe].world,
+                                   &g_playerPosScratch, 0);
+            apply_weapon_damage(g_weaponFireData[idx].weaponId);
+            Play3DSnd(1, g_weaponFireData[idx].sfx1, 0,
+                      (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+            Play3DSnd(1, g_weaponFireData[idx].sfx2, 0,
+                      (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        }
+        if (frame % g_weaponFireIntervals[1] == 0) {
+            g_playerPosScratch.x = g_weaponMuzzleFlash[idx].x;
+            g_playerPosScratch.y = g_weaponMuzzleFlash[idx].y;
+            g_playerPosScratch.z = g_weaponMuzzleFlash[idx].z;
+            int fx = (int)(char)Effect_CreateBillboard(
+                g_weaponMuzzleFlash[idx].type, g_weaponMuzzleFlash[idx].data, 0x555,
+                &g_playerEntity.scaMatrixData.localMatrix, &g_playerPosScratch, 0);
+            g_playerDisplacement = fx;
+            if (idx == 8) {
+                g_effectPool[fx].animHeader[0] = 8;
+            } else {
+                g_effectPool[fx].animHeader[3] = 0;
+            }
+        }
+        if (frame % g_weaponFireIntervals[2] == 0) {
+            g_playerPosScratch.x = g_weaponFlash2[idx].x;
+            g_playerPosScratch.y = g_weaponFlash2[idx].y;
+            g_playerPosScratch.z = g_weaponFlash2[idx].z;
+            int fx = (int)(char)Effect_CreateBillboard(
+                g_weaponFlash2[idx].type, g_weaponFlash2[idx].data, 0,
+                &g_playerEntity.jointsStructs[0xe].world, &g_playerPosScratch, 0);
+            g_collPushDepthZHi = fx;
+            g_effectPool[fx].animHeader[0] = 0;
+        }
+        if (g_weaponFireEndFrame[idx] < frame && (g_PlayerDpadHeld & 0x100) == 0) {
+            g_playerEntity.action_behavior = 0x13;
+            g_playerEntity.action_state = 0;
+        }
+    }
+
+    // Direction-change quick-fires / reversed recover. weaponAimFlags bit 0
+    // marks the reverse playback for the state-9 Joint_move.
+    char dir = (char)(g_playerEntity.weaponAimFlags >> 7);
+    if ((old & 0x40) != 0 && (g_playerEntity.weaponAimFlags & 0xa0) != 0) {
+        // neutral -> aimed: quick-fire forward (0x00458a8f: ADD DL,AL)
+        g_playerEntity.action_state = 8;
+        g_playerEntity.attackAnim = (unsigned char)
+            ((((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir) * 3 + 5);
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            g_playerEntity.attackAnim = (unsigned char)
+                (((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 5);
+            weapon_special_frame_update(1, 1);
+        }
+        g_playerEntity.weaponAimFlags &= 0xfe;
+        return;
+    }
+    if ((old & 0xa0) != 0 && (g_playerEntity.weaponAimFlags & 0x40) != 0) {
+        // aimed -> neutral: reversed recover
+        unsigned char oldDir = (old >> 5 & 1) * 2 + (old >> 7 & 1);
+        g_playerEntity.action_state = 8;
+        g_playerEntity.weaponAimFlags |= 1;
+        g_playerEntity.attackAnim = (unsigned char)(oldDir * 3 + 5);
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            g_playerEntity.attackAnim = (unsigned char)(((old >> 4) & 2) + (old >> 7 & 1) + 5);
+            weapon_special_frame_update(1, 1);
+        }
+        return;
+    }
+    if (((g_playerEntity.weaponAimFlags ^ old) & 0xa0) == 0) {
+        // fire held, no direction change: keep the fire motion going
+        Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            weapon_special_frame_update(1, 1);
+        }
+        if ((g_PlayerDpadHeld & 0x40) == 0) {
+            g_playerEntity.action_behavior = 0x13;
+            g_playerEntity.action_state = 0;
+            return;
+        }
+        if ((g_PlayerDpadHeld & 2) != 0) {
+            g_playerEntity.directionAngle += 0x20;
+            return;
+        }
+        if ((g_PlayerDpadHeld & 8) != 0) {
+            g_playerEntity.directionAngle -= 0x20;
+            return;
+        }
+    } else {
+        // direction changed: quick-fire in the new direction
+        // (0x00458b6d: ADD AL,CL - direction term adds)
+        g_playerEntity.action_state = 8;
+        g_playerEntity.weaponAimFlags &= 0xfe;
+        g_playerEntity.attackAnim = (unsigned char)
+            ((((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir) * 3 + 5);
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            g_playerEntity.attackAnim = (unsigned char)
+                (((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 5);
+            return;
+        }
+    }
+}
+
 // 0x00458080 - auto-aim fire dispatcher (state table at 0x004c0d28).
-// States 0 (raise) and 1 (fire) are transcribed; 2-5 and 7 are the recoil/
-// end animations and 6 the special-weapon fire, still to do.
+// Full state machine: 0 raise -> 1 fire -> 2 back-to-hold (empty click);
+// 3/4 re-raise; 5/6 hold-fire loop (continuous fire while held, weapon 6 and
+// specials enter at 3 directly from the hold input); 7 empty; 8/9 reversed
+// recover after a direction-change quick-fire; 10 loops back to 5.
 static void player_behavior_14_autoaim(void)
 {
     switch (g_playerEntity.action_state) {
@@ -3894,6 +4130,76 @@ static void player_behavior_14_autoaim(void)
         return;
     case 1:
         player_behavior_14_autoaim_fire();
+        return;
+    case 2:
+        // fire motion done: back to the hold; click if the slot is empty
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+        if (*(char*)((unsigned char*)g_ItemSlotsPointer + g_EquippedItemId * 2 - 1) == 0) {
+            Play3DSnd(1, 9, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        }
+        return;
+    case 3: {
+        // re-raise after the fire motion: arm the raise pose, then play it
+        // (0x0045862f: ADD AL,CL - same direction-term fix as the raise)
+        char dir = (char)(g_playerEntity.weaponAimFlags >> 7);
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.action_state = 4;
+        g_playerEntity.attackAnim = (unsigned char)
+            ((((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 2) * 3);
+        if (g_playerEntity.equippedWeaponId > 0x6e) {
+            g_playerEntity.attackAnim = (unsigned char)
+                (((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 5);
+            weapon_special_frame_update(1, 1);
+        }
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.move_speed_current = 1;
+        player_behavior_14_autoaim_raise2();
+        return;
+    }
+    case 4:
+        player_behavior_14_autoaim_raise2();
+        return;
+    case 5: {
+        // arm the fire-again motion (normal: motion 0xe; special: dir+5)
+        // (0x004586ea: ADD AL,CL - direction term adds, as everywhere)
+        char dir = (char)(g_playerEntity.weaponAimFlags >> 7);
+        g_playerEntity.action_state = 6;
+        g_playerEntity.unk_bf = 0;
+        if (g_playerEntity.equippedWeaponId < 0x6f) {
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.attackAnim = (unsigned char)
+                (((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 0xe);
+        } else {
+            g_playerEntity.attackAnim = (unsigned char)
+                (((g_playerEntity.weaponAimFlags & 0x20) >> 4) + dir + 5);
+        }
+        g_playerEntity.unk_8c = 3;
+        player_behavior_14_autoaim_holdfire();
+        return;
+    }
+    case 6:
+        player_behavior_14_autoaim_holdfire();
+        return;
+    case 7:
+        return;                       // empty in the original
+    case 8:
+        // arm the reversed recover: frame 0, then play the fire motion backward
+        g_playerEntity.action_state = 9;
+        if (g_playerEntity.equippedWeaponId < 0x6f) {
+            g_playerEntity.animation_frame_id = 0;
+        }
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.unk_8c = 3;
+        Play3DSnd(1, 6, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        player_behavior_14_autoaim_reverse();
+        return;
+    case 9:
+        player_behavior_14_autoaim_reverse();
+        return;
+    case 10:
+        g_playerEntity.action_state = 5;
         return;
     default:
         player_state_report_missing("auto-aim fire state (0x004c0d28)");
@@ -4322,6 +4628,17 @@ static void player_ctrl_frame2(void)
 // ============================================================================
 static void player_ctrl_frame3(void)
 {
+    static int lastBehavior = -1;
+    if ((int)g_playerEntity.action_behavior != lastBehavior) {
+        lastBehavior = (int)g_playerEntity.action_behavior;
+        dbg_printf("[aim] frame3 behavior 0x%02x state %u weapon %u animFrame %u jmd0=%08x jmd1=%08x\n",
+                   (unsigned int)g_playerEntity.action_behavior,
+                   (unsigned int)g_playerEntity.action_state,
+                   (unsigned int)g_playerEntity.equippedWeaponId,
+                   (unsigned int)g_playerEntity.animation_frame_id,
+                   (unsigned int)g_playerEntity.jointMoveData0,
+                   (unsigned int)g_playerEntity.jointMoveData1);
+    }
     switch (g_playerEntity.action_behavior) {
     case 0x12:
         player_behavior_12_gun_aim();
@@ -5019,6 +5336,16 @@ void update_player_anim(void)
     ENTITY = (Entity*)&g_playerEntity;
 
     // 0x00494da1: only run the state machine when input/messages allow it
+    if ((g_message_flags & 1) == 0 && g_playerEntity.animFrameId >= 3) {
+        static int lastBlockedMsg = -1;
+        if ((int)g_message_flags != lastBlockedMsg) {
+            lastBlockedMsg = (int)g_message_flags;
+            dbg_printf("[aim] update_player_anim BLOCKED (g_message_flags=%04x) at animFrameId=%u behavior=0x%02x\n",
+                       (unsigned int)g_message_flags,
+                       (unsigned int)g_playerEntity.animFrameId,
+                       (unsigned int)g_playerEntity.action_behavior);
+        }
+    }
     if ((g_message_flags & 1) != 0) {
         // The original is an unmasked, unbounded CALL through the table. Bound it
         // to the real 10 entries instead of masking with 0x0f, which used to fold

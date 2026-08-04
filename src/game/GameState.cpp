@@ -1155,8 +1155,6 @@ void LoadAttractModePlayerData(void) { }
 // (0x0047eb90) - Restore game state from bio card on load
 void empty_0047eb90(int param) { }
 
-// (0x0045fa80) - Load shoot direction effect sprite data
-void load_shoot_direction_data(void) { }
 
 // (0x0045a6d0) - Play title screen selection SFX
 void title_select_sfx(void) { }
@@ -1706,7 +1704,6 @@ void FUN_0040c560(int param)
 
 // Global stubs
 unsigned long g_gameTimerSnapshot = 0;            // 0x00be9844
-unsigned char g_equippedItemId = 0;               // 0x00be9849
 // ============================================================================
 // g_ScdAnimRemap (0x004bec80)
 // Animation remap table for SCD event state-1 opcode 0x89 (set animation frame).

@@ -5,3 +5,5 @@ assets/
 bin/
 obj/
 *.BMP
+*.jpg
+*.png

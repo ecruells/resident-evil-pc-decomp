@@ -530,7 +530,6 @@ extern unsigned char* g_firstItemSlotPointer;          // 0x00be63a0 [.gwipe]
 extern int           g_totalHeldItems;                 // 0x00be63a4 [.gwipe]
 extern DWORD         g_heItemsX2Less1;                 // 0x00be63a8 [.gwipe]
 extern unsigned char g_itemSlotIndices[8];             // 0x00be63b0 [.gwipe]
-extern unsigned char g_equippedItemId;                 // 0x00be0e32
 
 // Item image texture V lookup table (indexed by item ID, BSS at 0x00d21ccf)
 extern unsigned char DAT_00d21ccf[256];                // 0x00d21ccf
@@ -1123,11 +1122,11 @@ typedef struct {
 } WeaponFxEntry;
 
 extern unsigned int   g_weaponSpecialFrameWindows[24]; // 0x004c0cc0 - per-(character,motion) frame windows for special weapons
-extern unsigned char  g_weaponFireEndFrame[10];        // 0x004c0d58 - auto-aim fire end frame, weapons 2..11
-extern WeaponFireData g_weaponFireData[10];            // 0x004c0d68
-extern WeaponFxEntry  g_weaponFireBillboard[10];       // 0x004c0dd8 - muzzle billboard + ammo frame
-extern WeaponFxEntry  g_weaponMuzzleFlash[10];         // 0x004c0e68 - big muzzle flash
-extern WeaponFxEntry  g_weaponFlash2[10];              // 0x004c0ef8 - second flash
+extern unsigned char  g_weaponFireEndFrame[16];        // 0x004c0d58 - auto-aim fire end frame, 16 bytes (special path reads [id-99])
+extern WeaponFireData g_weaponFireData[14];            // 0x004c0d68 - 14 entries (specials at 12/13)
+extern WeaponFxEntry  g_weaponFireBillboard[14];       // 0x004c0dd8 - muzzle billboard + ammo frame, 14 entries
+extern WeaponFxEntry  g_weaponMuzzleFlash[14];         // 0x004c0e68 - big muzzle flash, 14 entries
+extern WeaponFxEntry  g_weaponFlash2[14];              // 0x004c0ef8 - second flash, 14 entries
 extern unsigned int   g_weaponFireIntervals[3];        // 0x004c0f84 - special fire intervals
 extern short          g_aimHeightTable[12];            // 0x004c0fc0 - aim heights, 2 chars x 3 pairs (normal/gun/special)
 extern unsigned char  g_aimReticleEnabled;             // 0x004c062c - 1 = aim reticle scan is live
@@ -1161,7 +1160,7 @@ extern WORD  g_padEdgeDetectedWord;                    // 0x00be05b4 - edge-dete
 
 
 // 0x00bf0b1c - per-type animation data pointers
-extern BYTE         g_effectAnimData[1700];             
+extern DWORD        g_effectAnimData[425];              // 0x00bf0b1c - per-type effect animation pointers (DWORD array; a BYTE declaration truncated every pointer write to its low byte)
 
 // Model/animation buffers
 extern BYTE         g_entityModelBuffer[52224];      // 0x00bf11c0

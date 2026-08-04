@@ -9,10 +9,13 @@ advance - 1.
 
 Image base mapping: file offset = VA - 0x400000 (PE image base 0x400000).
 """
+import os
 import struct
 from capstone import Cs, CS_ARCH_X86, CS_MODE_32
 
-EXE = r"./assets/usa/ResidentEvil.exe"
+SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+PROJECT_DIR = os.path.dirname(SCRIPT_DIR)
+EXE = os.path.join(PROJECT_DIR, 'assets', 'ResidentEvil.exe')
 IMAGE_BASE = 0x400000
 TABLE_VA = 0x4c1110
 GSCO = 0x00bf0800  # g_ScdOpcodes

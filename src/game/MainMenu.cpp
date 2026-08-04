@@ -557,7 +557,15 @@ LAB_00463a53:
                 // Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
             }
 
-            // 0x00463c35: Handle weapon equip/unequip
+            // 0x00463c35: Handle weapon equip/unequip.
+            // Original disassembly: mode 0 with the used-item flag set only
+            // special-cases g_usedItemId 0x1d/0x1e (unequip) and 0x4d (equip
+            // 0x0b); EVERY other case - including the plain pause-menu equip,
+            // where the flag is not set - falls through to
+            // menu_update_equipped_weapon(). Modes 1 and 2 call it too; only
+            // modes > 2 skip. The previous port missed the mode-0 fallthrough,
+            // so a weapon equipped from the pause menu never reached
+            // equippedWeaponId.
             if (DAT_00ae9f10 == 0) {
                 if (((DAT_00ae9f13 & 0x80) != 0) && (0x1C < g_usedItemId)) {
                     if (g_usedItemId < 0x1F) {
@@ -566,11 +574,13 @@ LAB_00463a53:
                     } else if (g_usedItemId == 0x4D) {
                         g_playerEntity.equippedWeaponId = 0x0B;
                         DAT_00ae9f1e = 0xFF;
+                    } else {
+                        menu_update_equipped_weapon();
                     }
+                } else {
+                    menu_update_equipped_weapon();
                 }
-            } else if (DAT_00ae9f10 == 1 || DAT_00ae9f10 > 2) {
-                // Skip weapon update
-            } else {
+            } else if (DAT_00ae9f10 <= 2) {
                 menu_update_equipped_weapon();
             }
 

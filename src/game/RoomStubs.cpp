@@ -128,7 +128,7 @@ static const EffSpriteTexConfig g_EffectSpriteTexConfig[] = {
 // animation data pointers relative to the RDT base.
 // Returns the index of the last valid entry (or 8 if all valid).
 // ============================================================================
-static unsigned char load_effect_sprite_data(unsigned char* effectAnimIndex, unsigned char* effectAnimData, void* rdtBase, unsigned char startSlot)
+unsigned char load_effect_sprite_data(unsigned char* effectAnimIndex, unsigned char* effectAnimData, void* rdtBase, unsigned char startSlot)
 {
     unsigned char lastValid = 8;
     unsigned char i = 0;
@@ -157,7 +157,7 @@ static unsigned char load_effect_sprite_data(unsigned char* effectAnimIndex, uns
 // FUN_0047bc80 (0x0047bc80) - Set up effect sprite texture pages
 // Assigns VRAM positions for each effect sprite's texture data.
 // ============================================================================
-static void setup_effect_sprite_textures(unsigned char startSlot)
+void setup_effect_sprite_textures(unsigned char startSlot)
 {
     unsigned char texY;
     short texX;
@@ -256,6 +256,51 @@ static void load_effect_sprites(void)
 
     STAGE_ID_00ac9cf0 = (unsigned int)g_stageId;
     ROOM_ID_00ac9cf4 = (unsigned int)g_roomId;
+}
+
+// ============================================================================
+// load_shoot_direction_data (0x0045fa80)
+// Loads the GLOBAL weapon-FX sprite file core00.esp/.etm into effect sprite
+// slots 0-7 (the "shoot direction" sprites: muzzle flashes, fire billboards,
+// lock-on fan, sparks). Runs once at InitializeGame; the per-room RDT effect
+// table covers slots 8-15. With this a stub, the weapon FX types (5, 8, 9,
+// 0xb, 0xc, 0xe, 0x11, 0) stayed 0xffffffff in every room and every muzzle
+// flash / fire billboard was skipped as "not loaded for this room".
+// ============================================================================
+void load_shoot_direction_data(void)
+{
+    g_freeEffectSlots = 0x40;
+
+    // 0x0045fa90: invalidate the whole sprite table and the 16 index slots
+    for (int i = 0; i < 16; i++) g_abEffSpriteIndexTable[i] = 0xff;
+    for (int i = 0; i < 0x32; i++) {
+        g_effectSpriteInfo[i] = 0xffffffff;
+        g_effectAnimData[i] = 0xffffffff;
+    }
+
+    // 0x0045fb31: load core00.esp; its index table is at the file start and its
+    // animation-data offsets hang off the file END, read backward (the same
+    // layout load_effect_sprite_data consumes for the room RDT).
+    char path[256];
+    sprintf(path, GAME_DATA_ROOT "data\\core00.esp");
+    unsigned char* espBase = (unsigned char*)g_loadDataDestPointer;
+    unsigned int size = LoadFile(path, espBase, 0x20);
+    unsigned char* espEnd = espBase + (size & 0xfffffffc) + ((size & 3) ? 4 : 0) - 4;
+    g_loadDataDestPointer = espEnd;
+    unsigned char lastValid = load_effect_sprite_data(espBase, espEnd, espBase, 0);
+
+    // 0x0045fc0f: load core00.etm; its trailing dwords are per-sprite image
+    // offsets relative to the etm buffer.
+    g_loadDataDestPointer = g_DataBuffer;
+    sprintf(path, GAME_DATA_ROOT "data\\core00.etm");
+    size = LoadFile(path, g_DataBuffer, 0x20);
+    unsigned char* etmEnd = (unsigned char*)g_DataBuffer + (size & 0xfffffffc)
+                          + ((size & 3) ? 4 : 0);
+    for (unsigned char i = 0; i < lastValid; i++) {
+        DAT_00ac9cd0[i] = (int)g_DataBuffer + *(int*)(etmEnd - 4 - i * 4);
+    }
+
+    setup_effect_sprite_textures(0);
 }
 
 // ============================================================================

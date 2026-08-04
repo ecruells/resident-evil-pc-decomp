@@ -974,14 +974,17 @@ unsigned int  g_weaponSpecialFrameWindows[24] = {
     0,  5, 13, 29,  0,  5, 13, 29,
 };
 
-// 0x004c0d58 - Auto-aim fire end frames, one byte per weapon 2..11
-// (weapons 4-9 share 0x0d, the "release after end frame" check).
-unsigned char g_weaponFireEndFrame[10] = {
+// 0x004c0d58 - Auto-aim fire end frames, 16 bytes (weapons 2..11 then the
+// special-weapon entries 12/13; the "release after end frame" check reads
+// [weaponId - 99] for specials, so the table must be 16 wide).
+unsigned char g_weaponFireEndFrame[16] = {
     0x08, 0x18, 0x0c, 0x0c, 0x00, 0x0d, 0x0d, 0x0d, 0x12, 0x08,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-// 0x004c0d68 - Per-weapon auto-aim fire data, 8 bytes each, weapons 2..11
-WeaponFireData g_weaponFireData[10] = {
+// 0x004c0d68 - Per-weapon auto-aim fire data, 8 bytes each, 14 entries
+// (weapons 2..11, then the special entries 12/13 indexed as [id - 99]).
+WeaponFireData g_weaponFireData[14] = {
     {  2,   5,  7,  8, 0 },  // weapon 2: handgun
     {  3,   5,  7,  8, 0 },  // weapon 3: shotgun
     {  4,   5,  7,  8, 0 },  // weapon 4: python
@@ -992,11 +995,15 @@ WeaponFireData g_weaponFireData[10] = {
     {  9,   2,  7,  8, 0 },  // weapon 9
     { 10,   5,  7,  8, 0 },  // weapon 10: special
     {  0,   0,  0,  0, 0 },  // weapon 11: unused
+    {  0,   0,  0,  0, 0 },
+    {  0,   0,  0,  0, 0 },
+    {  2,   5,  7,  8, 0 },  // special weapon 0x6f
+    {  2,   5,  7,  8, 0 },  // special weapon 0x70
 };
 
-// 0x004c0dd8 - Muzzle billboard params, 10 bytes each, weapons 2..11. The b0
+// 0x004c0dd8 - Muzzle billboard params, 10 bytes each, 14 entries. The b0
 // byte is also the ammo-decrement / first billboard frame.
-WeaponFxEntry g_weaponFireBillboard[10] = {
+WeaponFxEntry g_weaponFireBillboard[14] = {
     {  1, 17,  0, 0,   110,   540,     0 },  // weapon 2
     {  1, 17,  1, 0,   640,  1110,     0 },  // weapon 3
     {  1, 17,  2, 0,   160,   610,     0 },  // weapon 4
@@ -1007,10 +1014,14 @@ WeaponFxEntry g_weaponFireBillboard[10] = {
     {  2,  8,  7, 0,   400,   660,     0 },  // weapon 9
     {  1, 11,  9, 0,  -190,  1020,    90 },  // weapon 10
     {  1, 11,  9, 0,  -190,  1020,   -60 },  // weapon 11
+    {  1, 11,  9, 0,   -60,  1040,    90 },  // weapon 12
+    {  1, 11,  9, 0,   -60,  1040,   -60 },  // weapon 13
+    {  1, 17,  0, 0,   110,   540,     0 },  // special weapon 0x6f
+    {  1, 17,  0, 0,   600,  1370,     0 },  // special weapon 0x70
 };
 
-// 0x004c0e68 - Big muzzle-flash billboard params, weapons 2..11
-WeaponFxEntry g_weaponMuzzleFlash[10] = {
+// 0x004c0e68 - Big muzzle-flash billboard params, 14 entries
+WeaponFxEntry g_weaponMuzzleFlash[14] = {
     {  3,  5,  0, 0,   370, -2870,  -220 },  // weapon 2
     { 25,  5,  9, 0,   360, -2050,  -440 },  // weapon 3
     { 99,  0,  0, 0,     0,     0,     0 },  // weapon 4 (frame 99 = never)
@@ -1021,10 +1032,14 @@ WeaponFxEntry g_weaponMuzzleFlash[10] = {
     { 99,  0,  0, 0,     0,     0,     0 },  // weapon 9
     {  2,  9, 11, 0,  1400, -2800,  -300 },  // weapon 10
     {  0,  0,  0, 0,     0,     0,     0 },  // weapon 11
+    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 12
+    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 13
+    {  3,  5,  0, 0,   250, -1900,  -250 },  // special weapon 0x6f
+    {  3,  5,  0, 0,   250, -1900,  -250 },  // special weapon 0x70
 };
 
-// 0x004c0ef8 - Second muzzle-flash billboard params, weapons 2..11
-WeaponFxEntry g_weaponFlash2[10] = {
+// 0x004c0ef8 - Second muzzle-flash billboard params, 14 entries
+WeaponFxEntry g_weaponFlash2[14] = {
     {  2,  9, 11, 0,   110,   500,     0 },  // weapon 2
     {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 3
     {  2,  9, 11, 0,   160,   610,     0 },  // weapon 4
@@ -1035,6 +1050,10 @@ WeaponFxEntry g_weaponFlash2[10] = {
     {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 9
     {  2,  8,  2, 0,   430,  -830,    90 },  // weapon 10
     {  2,  8,  2, 0,   430,  -830,   -60 },  // weapon 11
+    {  2,  8,  2, 0,   570,  -810,    90 },  // weapon 12
+    {  2,  8,  2, 0,   570,  -810,   -60 },  // weapon 13
+    {  2,  9, 11, 0,   110,   500,     0 },  // special weapon 0x6f
+    {  2,  9, 11, 0,   640,  1500,     0 },  // special weapon 0x70
 };
 
 // 0x004c0f84 - Special-weapon fire intervals (frame % interval == 0 fires)
@@ -1624,7 +1643,7 @@ unsigned int   ROOM_ID_00ac9cf4 = 0;           // 0x00ac9cf4
 DWORD   g_effectSpriteInfo[50] = {};
 
 // 0x00bf0b1c - Effect animation data (immediately follows g_effectSpriteInfo[50])
-BYTE    g_effectAnimData[1700] = {};
+DWORD   g_effectAnimData[425] = {};   // 0x00bf0b1c - per-type effect animation pointers (DWORD array, 1700 bytes)
 
 BYTE    g_entityModelBuffer[52224] = {};    // 0x00bf11c0
 BYTE    g_entityModelBuffer2[56320] = {};   // 0x00bfddc0
