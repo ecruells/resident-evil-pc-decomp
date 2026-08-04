@@ -1344,7 +1344,7 @@ void FUN_0048c020(int param);                         // 0x0048c020 - entity wea
 void FUN_004844b0(void);                              // 0x004844b0 - menu cleanup sub
 void FUN_00470a40(void);                              // 0x00470a40 - texture cleanup
 void FUN_0047d0e0(void);                              // 0x0047d0e0 - effect cleanup
-void FUN_00462940(void);                              // 0x00462940 - room camera restore
+void RestoreRoomCamera(void);                         // 0x00462940 - re-apply RDT room camera after menu
 void FUN_0040ac80(int idx, void* lightData);          // 0x0040ac80 - set light data
 void setBackColor(unsigned short r, unsigned short g, unsigned short b); // 0x0040ada0
 void empty_40ae40(int param);                         // 0x0040ae40

@@ -130,7 +130,6 @@ extern void empty_00470a20(void);
 extern void FUN_004844b0(void);
 extern void FUN_00470a40(void);
 extern void FUN_0047d0e0(void);
-extern void FUN_00462940(void);
 extern void FUN_0040ac80(int idx, void* lightData);
 extern void FUN_00484420(void* src, void* dst);
 extern int draw_texture(TextureDesc* tex, unsigned short depth);
@@ -640,7 +639,7 @@ static void menu_restore_game_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 0);
     CenterScreenOrigin();
     menu_update_fading_rect();
-    FUN_00462940();
+    RestoreRoomCamera();
     // 0x00463e4a: FUN_0040ac80(i, g_RdtPointer->lights + i). The RDT light array
     // is at +0x0C with a 0x14 stride (Ghidra RDT: LIGHT[3] at offset 12,
     // sizeof(LIGHT) == 20). An earlier revision used base +0x30 and stride 0x2C

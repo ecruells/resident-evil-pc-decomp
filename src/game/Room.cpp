@@ -42,6 +42,24 @@ void cut_set(void) // 0x004628c0
 }
 
 // ============================================================================
+// RestoreRoomCamera (0x00462940)
+// Restore the room texture bank and camera after the main menu closes.
+// The menu's fixed menu camera (MATRIX_00d22680) is written into
+// g_RoomCameraData on open; this re-applies the RDT camera record the same
+// way cut_set does. Skips the camera when the cutscene flag is set, and does
+// nothing when no bank was saved (menu never opened a bank-swapping view).
+// ============================================================================
+void RestoreRoomCamera(void) // 0x00462940
+{
+    if ((unsigned char)g_SavedTextureBankID != 0) {
+        *(unsigned short*)&g_TextureBankID = g_SavedTextureBankID;
+        if ((g_main_state_flags & 0x04000000) == 0) {
+            Room_SetupCamera();
+        }
+    }
+}
+
+// ============================================================================
 // is_entity_in_switch_zone (0x00462d90)
 // Point-in-quadrilateral test: is `position` inside `zone`?
 //

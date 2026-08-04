@@ -462,9 +462,6 @@ void FUN_00470a40(void) { }
 // (0x0047d0e0) - Effect cleanup sub-function
 void FUN_0047d0e0(void) { }
 
-// (0x00462940) - Room camera restore after menu
-void FUN_00462940(void) { }
-
 // (0x0040ac80) - Set light data by index
 // Normalizes the light direction (light position) into g_lightMatrix row idx
 // (12-bit fixed, Y negated) and stores the light color as 0..1 floats in
