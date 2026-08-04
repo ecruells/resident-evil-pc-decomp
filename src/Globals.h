@@ -1072,8 +1072,44 @@ extern unsigned int  g_deathAnimationFlag;             // 0x00be0dd8
 extern unsigned int  g_animFrameIdSave;                // 0x00be0dfc - temp save for animation_frame_id
 extern int           g_entityJointPosX;                // 0x00be0e18 - joint position X during render (DAT_00be0e18)
 extern int           g_playerDisplacement;             // 0x00be0de0 - joint displacement for animation
+extern int           g_weaponHitEnemyType;             // 0x00be0de4 - enemy type snapshot for the post-hit callbacks
 extern void*         g_tempVar;                        // 0x00be0df8 - temp pointer for joint processing
 extern void*         g_playerAnimFunctions[52];        // 0x00bebbd8
+
+// ----------------------------------------------------------------------------
+// Player aim/fire data tables (ROM .data, dumped from the original exe)
+// ----------------------------------------------------------------------------
+// 0x004c0d68 - per-weapon fire data, 8 bytes each, weapons 2..11
+typedef struct {
+    unsigned int  weaponId;    // +0x00: weapon id passed to apply_weapon_damage
+    unsigned char fireFrame;   // +0x04: animation frame the damage + sound fire on
+    unsigned char sfx1;        // +0x05: first fire sound (bank 1)
+    unsigned char sfx2;        // +0x06: second fire sound
+    unsigned char pad;         // +0x07
+} WeaponFireData;
+
+// 0x004c0dd8 / 0x004c0e68 / 0x004c0ef8 - billboard entries, 10 bytes each,
+// weapons 2..11. The three tables share the same layout.
+typedef struct {
+    unsigned char b0;          // +0x00: ammo-decrement / first frame (0x004c0dd8 only)
+    unsigned char type;        // +0x01: billboard type
+    unsigned char data;        // +0x02: billboard data
+    unsigned char b3;          // +0x03: 0x00
+    short         x;           // +0x04: billboard position offset
+    short         y;           // +0x06
+    short         z;           // +0x08
+} WeaponFxEntry;
+
+extern unsigned int   g_weaponSpecialFrameWindows[24]; // 0x004c0cc0 - per-(character,motion) frame windows for special weapons
+extern unsigned char  g_weaponFireEndFrame[10];        // 0x004c0d58 - auto-aim fire end frame, weapons 2..11
+extern WeaponFireData g_weaponFireData[10];            // 0x004c0d68
+extern WeaponFxEntry  g_weaponFireBillboard[10];       // 0x004c0dd8 - muzzle billboard + ammo frame
+extern WeaponFxEntry  g_weaponMuzzleFlash[10];         // 0x004c0e68 - big muzzle flash
+extern WeaponFxEntry  g_weaponFlash2[10];              // 0x004c0ef8 - second flash
+extern unsigned int   g_weaponFireIntervals[3];        // 0x004c0f84 - special fire intervals
+extern short          g_aimHeightTable[12];            // 0x004c0fc0 - aim heights, 2 chars x 3 pairs (normal/gun/special)
+extern unsigned char  g_aimReticleEnabled;             // 0x004c062c - 1 = aim reticle scan is live
+extern char           g_weaponSpecialFireCountdown;    // 0x008e1c68 - special-weapon fire frame countdown
 
 // PS1 GTE fixed-point pipe matrix globals
 extern int g_fixedPointPipe_matrix_m00;
