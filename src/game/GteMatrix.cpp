@@ -10,6 +10,7 @@
 #include "../Globals.h"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <windows.h>
 
 // ============================================================================
@@ -1058,3 +1059,87 @@ int VectorNormal(VECTOR* v0, VECTOR* v1)
 
     return (int)lenSq;
 }
+
+// (0x0040ac80) - Set light data by index
+// Normalizes the light direction (light position) into g_lightMatrix row idx
+// (12-bit fixed, Y negated) and stores the light color as 0..1 floats in
+// g_d3dLightData[idx*12 + 6..8] (+ 1.0f at [9]). Input light data layout:
+//   int x, y, z;  byte r, g, b  (offsets 0xC, 0xD, 0xE)
+void FUN_0040ac80(int idx, void* lightData)
+{
+    int* p = (int*)lightData;
+    double x = (double)p[0];
+    double y = (double)p[1];
+    double z = (double)p[2];
+
+    // Same normalize-to-4096 as VectorNormal (0x0040a5c0, GteMatrix.cpp), inlined
+    double len = sqrt(x * x + y * y + z * z);
+    if (len < 1.0) len = 1.0;
+    int nx = (int)(x / len * 4096.0);
+    int ny = (int)(y / len * 4096.0);
+    int nz = (int)(z / len * 4096.0);
+
+    g_lightMatrix.m[idx][0] = (short)nx;
+    g_lightMatrix.m[idx][1] = (short)-ny;
+    g_lightMatrix.m[idx][2] = (short)nz;
+    g_lightMatrix.t[idx] = 0;
+
+    unsigned char* c = (unsigned char*)lightData;
+    float* lightColor = (float*)&g_d3dLightData[idx * 12 + 6];
+    for (int i = 0; i < 3; i++) {
+        unsigned char v = c[0xC + i];
+        if (v > 0x7F) v = 0x80;
+        lightColor[i] = (float)v * 0.0078125f; // 1/128
+    }
+    g_d3dLightData[idx * 12 + 9] = 0x3F800000; // 1.0f
+}
+
+// (0x00482e20) - Set light matrix for entity rendering
+// Transforms light direction vectors through camera matrix and stores
+// in D3D light data buffer for the rendering pipeline.
+void SetLightMatrix(MATRIX* m) {
+    // The original copies 32 bytes (8 iterations × 4 bytes) from the input matrix
+    // to a local buffer, then iterates 3 light directions from it.
+    // The buffer must be at least 32 bytes (the loop writes 8 DWORDs).
+    MATRIX srcCopy;
+    memcpy(&srcCopy, m, sizeof(MATRIX));
+
+    int lightIndex = 0;
+    DWORD* pLight = g_d3dLightData;
+    // The original iterates 3 times over SVECTORs at 6-byte offsets starting from srcCopy
+    short* pVec = &srcCopy.m[0][0];
+
+    for (int light = 0; light < 3; light++) {
+        SVECTOR vec;
+        vec.x = pVec[0];
+        vec.y = pVec[1];
+        vec.z = pVec[2];
+        vec.pad = 0;
+
+        ApplyMatrixSV((MATRIX*)&g_RoomCameraData, &vec, &vec);
+
+        pLight[0] = 2;  // directional light type
+        pLight[2] = lightIndex;
+        lightIndex++;
+        float* pF = (float*)&pLight[3];
+        pF[0] = (float)(int)vec.x * 0.00024414063f;
+        pF[1] = (float)(int)vec.y * 0.00024414063f;
+        pF[2] = (float)(int)vec.z * 0.00024414063f;
+        pLight[9] = 0x3f800000; // 1.0f
+        pLight[10] = 0;
+        pLight += 0xC;
+        pVec += 3; // advance by 6 bytes (3 shorts)
+    }
+
+    g_d3dLightFlags |= 1;
+    g_d3dAmbientColor = ((unsigned int)g_green_color << 8) |
+                        ((unsigned int)g_red_color << 16) |
+                        (unsigned int)g_blue_color;
+}
+
+// (0x00482df0) - Copy rotation+translation matrix to GTE state buffer
+void SetRotAndTransMatrix(MATRIX* m) {
+    memcpy(&g_gteRotTransMatrix, m, sizeof(MATRIX));
+    g_gteRotTransMatrix.t[1] = -g_gteRotTransMatrix.t[1];
+}
+

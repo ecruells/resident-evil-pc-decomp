@@ -13,6 +13,8 @@ extern BYTE  g_entityModelBuffer[0xCC00];      // 0x00bf11c0
 extern DWORD g_animObjectBuffer[0x680];        // 0x00c133c0
 extern DWORD DAT_004d2bd8;                     // 0x004d2bd8 - special model flag
 extern DWORD DAT_004d2bf4;                     // 0x004d2bf4 - TMD processing flag
+extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);         // TmdAnimation.cpp
+extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2); // TmdAnimation.cpp
 extern DWORD g_tmdAsyncData;                   // 0x008fc424 - TMD async data
 extern DWORD DAT_004c1a2c;                     // 0x004c1a2c
 extern DWORD DAT_00ae9f04;                     // 0x00ae9f04
@@ -662,3 +664,48 @@ void set_player_animations_functions(void)
     g_playerAnimFunctions[34]  = (void*)player_anim_dispatch_4b1a90;     // 0x0045c460 @ offset 0x88
     Task_sleep(1);
 }
+
+// (0x0048b9e0) - Set up joint animation structures for an entity
+// Iterates through all joints, initializes animation slots, and creates
+// animation objects. Used by main_menu before Joint_move to set up the
+// player model's joint data from the EMD animation header.
+void SetupJointStructures(void* buf)
+{
+    unsigned int* paramBuf = (unsigned int*)buf;
+    unsigned char jointIdx = 0;
+    JointStruct* joint = ENTITY->jointsStructs;
+    void* modelLoadBuffer = (void*)ENTITY->modelLoadBuffer;
+    unsigned char count = ENTITY->jointCount;
+
+    if (count == 0) return;
+
+    do {
+        // Link animation slot data for this joint
+        SetAnimSlot((AnimSlot*)modelLoadBuffer, (int)&joint->anim_field, jointIdx);
+
+        // Initialize joint fields
+        joint->index = jointIdx;
+        joint->flags = 3;
+        joint->data_ptr = &joint->scale_flag;
+        joint->field_1c = 0;
+        joint->scale_flag = 1;
+        joint->anim_object = NULL;
+        joint->field_02 = 0;
+        joint->anim_field = 0;
+
+        // Create animation object in the buffer
+        paramBuf = CreateAnimObject((int)&joint->anim_field, paramBuf);
+
+        // Special case: entity ID 0x29 disables certain joints
+        if (ENTITY->id == 0x29) {
+            switch (jointIdx) {
+            case 4: case 5: case 7: case 8:
+                joint->flags = 0;
+            }
+        }
+
+        joint++;
+        jointIdx++;
+    } while (jointIdx < count);
+}
+

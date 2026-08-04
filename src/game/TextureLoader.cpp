@@ -1077,3 +1077,10 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
     }
 
 }
+
+// LoadPSXImage - thin wrapper around PSXTexture::Store
+void LoadPSXImage(PSXTexture* tex, void* buf, int mode)
+{
+    tex->Store((int*)buf, mode);
+}
+

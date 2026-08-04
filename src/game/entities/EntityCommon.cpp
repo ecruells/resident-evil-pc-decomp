@@ -14,6 +14,7 @@
 // All original addresses from Ghidra.
 // ============================================================================
 #include "EntityCommon.h"
+#include "../../Globals.h"
 #include <cstring>
 
 // ============================================================================
@@ -832,3 +833,58 @@ void Matrix_MulMatrix(MATRIX* a, MATRIX* b) { }
 //   entity_add_fade_sprite           @ 0x00456810 - FadeSprite.cpp
 //   BillboardSetColor                @ 0x00456710 - PlayerAnimations.cpp
 // ---------------------------------------------------------------------------
+
+// (0x0048f0f0) - Update all enemy entities per-frame
+// Iterates through g_EnemiesList, calls the per-type update function from
+// enemies_update_functions_tbl for each active entity, and performs lighting
+// checks when the entity is in a camera switch zone with joint animation active.
+void update_entities(void)
+{
+    // 0x0048f0f0-0x0048f102: Set current entity pointer to start of list
+    ENTITY = g_EnemiesList;
+    int em_counter = 0;
+
+    // 0x0048f104-0x0048f10f: Only process if there are active enemies
+    if (g_enemy_count == 0) {
+        return;
+    }
+
+    do {
+        // 0x0048f10f: Safety guard - max 30 entities (array size)
+        if (em_counter > 29) {
+            return;
+        }
+
+        // 0x0048f114-0x0048f12b: Only update active entities (status_flags bit 0)
+        if ((ENTITY->status_flags & 0x01) != 0) {
+            // 0x0048f12b: Call per-type update function from dispatch table
+            void* updateFunc = enemies_update_functions_tbl[ENTITY->id];
+            if (updateFunc != NULL) {
+                ((void(*)())updateFunc)();
+            }
+
+            // 0x0048f131-0x0048f197: Lighting check when joint animation is active
+            // Original: if ((g_main_state_flags & 1) != 0 && FUN_0048bd00(...) != 0)
+            // then recalculate entity lighting via FUN_0048bda0().
+            // This handles dynamic lighting when the entity's weapon/hand joint
+            // moves in front of a camera light source.
+            if ((g_main_state_flags & 0x00000001) != 0) {
+                unsigned char lightCheck = FUN_0048bd00(
+                    (void*)((int)g_RdtPointer[1].lights + (unsigned int)g_roomCameraId * 44 - 4),
+                    ((unsigned char)(g_main_state_flags >> 1)) & 1,
+                    (int)ENTITY->scaMatrixData.localMatrix.t);
+                if (lightCheck != 0) {
+                    FUN_0048bda0();
+                }
+            }
+
+            // 0x0048f197: Increment processed entity counter
+            em_counter = em_counter + 1;
+        }
+
+        // 0x0048f19a: Advance to next entity (sizeof(Entity) = 0x18C)
+        ENTITY = (Entity*)((char*)ENTITY + sizeof(Entity));
+
+    } while (em_counter < (int)(unsigned int)g_enemy_count);
+}
+

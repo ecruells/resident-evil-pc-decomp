@@ -554,3 +554,79 @@ void texture_queue_reset(void) {
         p += 10;
     }
 }
+
+// (0x00470c60) - Queue EKG line primitive (primary line)
+// Builds a line primitive from the 16-byte EKG line struct and inserts it
+// into the ordering table with OT depth `param_2`. The original wrote the
+// primitive into the DAT_008e3e60 render buffer and called the
+// CMarniDirect3D vtable[10] entry (SetTexture == OT_InsertPrimitive); the
+// port submits the same line into the sprite command queue instead.
+// Returns 1 when submitted, 0 when the per-frame primitive cap is reached.
+int FUN_00470c60(void* prim, int depth)
+{
+    if (g_renderPrimCount >= 0x28) return 0;
+
+    unsigned char* p = (unsigned char*)prim;
+    unsigned short depthOut = (unsigned short)depth;
+
+    // Software-renderer modes offset the OT depth by 0x28.
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (pD3D && (pD3D->m_deviceType == 5 || pD3D->m_deviceType == 7)) {
+        depthOut = depthOut + 0x28;
+    }
+
+    short x0 = *(short*)(p + 4);
+    short y0 = *(short*)(p + 6);
+    short x1 = *(short*)(p + 8);
+    short y1 = *(short*)(p + 10);
+    float r = (float)p[0xC] * 0.00390625f;
+    float g = (float)p[0xD] * 0.00390625f;
+    float b = (float)p[0xE] * 0.00390625f;
+
+    if (g_nFadeInverted != 0) {
+        if (g_MaxFadeValue < (int)depthOut) depthOut = (unsigned short)g_MaxFadeValue;
+        depthOut = (unsigned short)(g_MaxFadeValue - (int)depthOut);
+    }
+
+    if ((g_RenderDisableFlags & 0x10) == 0) {
+        SubmitLine(x0, y0, x1, y1, depthOut, r, g, b, 1.0f);
+        g_renderPrimCount++;
+    }
+    return 1;
+}
+
+// (0x00470e60) - Queue EKG line primitive (secondary line with gradient)
+// Identical to FUN_00470c60 but the line struct carries a second color
+// endpoint at bytes 0xF-0x11 (the gradient target computed by FUN_00438800).
+int FUN_00470e60(void* prim, int depth)
+{
+    if (g_renderPrimCount >= 0x28) return 0;
+
+    unsigned char* p = (unsigned char*)prim;
+    unsigned short depthOut = (unsigned short)depth;
+
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (pD3D && (pD3D->m_deviceType == 5 || pD3D->m_deviceType == 7)) {
+        depthOut = depthOut + 0x28;
+    }
+
+    short x0 = *(short*)(p + 4);
+    short y0 = *(short*)(p + 6);
+    short x1 = *(short*)(p + 8);
+    short y1 = *(short*)(p + 10);
+    float r = (float)p[0xC] * 0.00390625f;
+    float g = (float)p[0xD] * 0.00390625f;
+    float b = (float)p[0xE] * 0.00390625f;
+
+    if (g_nFadeInverted != 0) {
+        if (g_MaxFadeValue < (int)depthOut) depthOut = (unsigned short)g_MaxFadeValue;
+        depthOut = (unsigned short)(g_MaxFadeValue - (int)depthOut);
+    }
+
+    if ((g_RenderDisableFlags & 0x10) == 0) {
+        SubmitLine(x0, y0, x1, y1, depthOut, r, g, b, 1.0f);
+        g_renderPrimCount++;
+    }
+    return 1;
+}
+

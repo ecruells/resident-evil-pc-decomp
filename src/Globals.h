@@ -1346,6 +1346,11 @@ void FUN_00470a40(void);                              // 0x00470a40 - texture cl
 void FUN_0047d0e0(void);                              // 0x0047d0e0 - effect cleanup
 void RestoreRoomCamera(void);                         // 0x00462940 - re-apply RDT room camera after menu
 void FUN_0040ac80(int idx, void* lightData);          // 0x0040ac80 - set light data
+void SetLightMatrix(MATRIX* m);                       // 0x00482e20 - entity light matrix to D3D
+void SetRotAndTransMatrix(MATRIX* m);                 // 0x00482df0 - set GTE rot+trans matrix
+void FUN_00483250(int p0, int p1, int p2, int p3, int p4, int p5, void* p6); // 0x00483250 - entity sprite render helper
+int  FUN_00470c60(void* prim, int depth);             // 0x00470c60 - queue EKG primary line
+int  FUN_00470e60(void* prim, int depth);             // 0x00470e60 - queue EKG gradient line
 void setBackColor(unsigned short r, unsigned short g, unsigned short b); // 0x0040ada0
 void empty_40ae40(int param);                         // 0x0040ae40
 void update_entities(void);                           // 0x0048f0f0

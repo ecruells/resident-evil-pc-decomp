@@ -450,3 +450,16 @@ void check_menus_state(void)
     // 0x00481655: Cleanup (tail call to empty_00412380)
     empty_00412380();
 }
+
+// UpdateDemoTimer (0x00429ce0) - increments demo idle timer and resets when threshold reached
+void UpdateDemoTimer(void) {
+  if ((g_main_state_flags2 & 0x10000000) != 0 &&
+      (g_message_flags & 0x200) != 0 &&
+      g_DemoTimerCur != 0) {
+    g_DemoTimerCur++;
+    if ((int)(g_DemoTimerMax - 1) <= (int)(unsigned short)g_DemoTimerCur) {
+      g_DemoTimerCur = 0;
+    }
+  }
+}
+

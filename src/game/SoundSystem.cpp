@@ -1382,3 +1382,7 @@ void Room_LoadEnemySoundBanks(void) {
         // silently returns.
     } while (piVar7 < (int*)&g_emSndBanks[96]);
 }
+
+// (0x0047f870) - 3-param play_sfx overload (mode parameter)
+void play_sfx(int bank, int soundId, int mode) { play_sfx(bank, soundId); }
+

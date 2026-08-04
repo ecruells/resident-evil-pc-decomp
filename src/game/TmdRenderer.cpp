@@ -28,6 +28,13 @@
 #include "../marni/Marni3DObject.h"
 #include <cstdlib>
 #include <cstring>
+
+// Forward declarations for dependencies defined elsewhere
+extern unsigned int AsyncCreateTmdObject(unsigned int param1, unsigned int param2, unsigned int param3);
+extern void FUN_00486df0(void* spriteData);                 // sprite render mode (EngineStubs.cpp)
+extern void FUN_004896c0(void* joint, short p1, short p2, int p3); // 0x004896c0 (EngineStubs.cpp)
+extern void FUN_0048a210(void* joint);                      // 0x0048a210 (EngineStubs.cpp)
+extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData); // 0x00462d90 (Room.cpp)
 #include <algorithm>
 #include <cmath>
 #include "../DebugPrint.h"
@@ -368,3 +375,306 @@ void FlushTmdObjects(void)
 
     g_tmdQueueCount = 0;
 }
+
+// (0x00481660) - Update entity lighting from RDT point lights
+// Recomputes the 3 D3D lights based on the entity's distance to each RDT
+// light. Lights with lightType == 0 are point lights with radial falloff
+// (direction = light->entity, color attenuated by distance); the others are
+// used as-is (directional).
+void update_entity_lighting(VECTOR* entityPos)
+{
+    if (g_RdtPointer == NULL) return;
+
+    for (int i = 0; i < 3; i++) {
+        RDT_Light* light = &g_RdtPointer->lights[i];
+        if (light->lightType == 0) {
+            struct { int x, y, z; unsigned char r, g, b; } pointLight;
+            pointLight.x = entityPos->x - light->pos_x;
+            pointLight.y = entityPos->y - light->pos_y;
+            pointLight.z = entityPos->z - light->pos_z;
+
+            int atten = (int)(unsigned short)light->radius -
+                        SquareRoot0(pointLight.z * pointLight.z +
+                                    pointLight.x * pointLight.x);
+            if (atten < 0) atten = 0;
+
+            if ((unsigned short)light->radius == 0) {
+                pointLight.r = pointLight.g = pointLight.b = 0;
+            }
+            else {
+                pointLight.r = (unsigned char)((light->red   * atten) / (int)(unsigned short)light->radius);
+                pointLight.g = (unsigned char)((light->green * atten) / (int)(unsigned short)light->radius);
+                pointLight.b = (unsigned char)((light->blue  * atten) / (int)(unsigned short)light->radius);
+            }
+            FUN_0040ac80(i, &pointLight);
+        }
+        else {
+            FUN_0040ac80(i, light);
+        }
+    }
+}
+
+// (0x0048c350) - Render entity joints with lighting (in-game entity renderer)
+// Per-joint loop: computes camera-space matrices, sets light/rot matrices,
+// and queues each visible joint's TMD object for rendering. Skipped for
+// entity types 0x0D/0x12 with sub-type 1 (they render elsewhere).
+void calc_entity_lighting(Entity* ent)
+{
+    int param_1 = (int)ent;
+    unsigned char* entBytes = (unsigned char*)ENTITY;
+
+    if (((entBytes[1] == 0x0D) || (entBytes[1] == 0x12)) && (entBytes[2] == 1)) {
+        return;
+    }
+
+    g_animFrameIdSave = (unsigned int)((*(unsigned char*)(param_1 + 3) & 0x7f) == 0);
+
+    unsigned char jointIdx = *(char*)(param_1 + 0x8d) - 1;
+    MATRIX* pJoint = (MATRIX*)((unsigned int)jointIdx * 0x7c + *(int*)(param_1 + 0x98));
+
+    update_entity_lighting((VECTOR*)(param_1 + 0x34));
+
+    do {
+        short jointFlags = pJoint->m[0][0];
+
+        if ((entBytes[1] == 0x0D) || (entBytes[1] == 0x12)) {
+            update_entity_lighting((VECTOR*)(pJoint[2].t + 1));
+        }
+
+        if ((jointFlags & 4) != 0) {
+            g_svecScratch.x = 0;
+            g_svecScratch.z = 0;
+            g_svecScratch.y = 0x1e;
+            pJoint->m[0][2] = -0x14;
+            pJoint->m[1][1] = 0;
+            pJoint->m[1][0] = 200;
+            FUN_004896c0(pJoint, (short)0xffdd, (short)0xff9c, 1);
+        }
+
+        if ((jointFlags & 1) == 0) {
+            if ((jointFlags & 0x20) != 0) {
+                FUN_0048a210(pJoint);
+            }
+        }
+        else {
+            MATRIX localMatrix;
+            ApplyLVAndMul0Matrix(&g_RoomCameraData, pJoint[2].m[0] + 2, &localMatrix);
+
+            // Copy g_lightMatrix to g_matrixScratch
+            MATRIX* src = &g_lightMatrix;
+            MATRIX* dst = &g_matrixScratch;
+            for (int i = 8; i != 0; i--) {
+                *(unsigned int*)dst->m[0] = *(unsigned int*)src->m[0];
+                src = (MATRIX*)(src->m[0] + 2);
+                dst = (MATRIX*)(dst->m[0] + 2);
+            }
+
+            if (g_animFrameIdSave == 0) {
+                if ((jointFlags & 0x74) != 0) goto checkSwitchZone;
+doRender:
+                // Original skips a specific hunter in stage 6 / room 0xC / camera 3
+                if (((entBytes[1] != 18) || (g_stageId != 6)) ||
+                    ((g_roomId != 0x0C) || (g_roomCameraId != 3))) {
+                    g_entityJointPosX = pJoint->t[0];
+                    SetLightMatrix(&g_matrixScratch);
+                    SetRotAndTransMatrix(&localMatrix);
+                    FUN_00483250(0, 0, 0, pJoint->t[1], 0, 4,
+                        (BYTE*)&g_spriteAnimSlots[2] + (unsigned int)g_spriteAnimActive * 0x14);
+                }
+            }
+            else if ((jointFlags & 0x74) != 0) {
+checkSwitchZone:
+                if (is_entity_in_switch_zone((VECTOR*)(pJoint[2].t + 1), g_CurrentRdtDataTypePtr) != 0) {
+                    goto doRender;
+                }
+            }
+        }
+
+        pJoint = (MATRIX*)(pJoint[-4].m[0] + 2);
+        bool done = (jointIdx == 0);
+        jointIdx--;
+        if (!done) continue;
+        return;
+    } while (true);
+}
+
+
+// (0x00483250) - Entity sprite rendering helper
+// Forwards joint sprite data and depth shift to the TMD renderer.
+void FUN_00483250(int p0, int p1, int p2, int p3, int p4, int p5, void* p6)
+{
+    // Assembly: MOV EAX,[ESP+0x18]; MOV ECX,[ESP+0x10]; PUSH EAX; PUSH ECX; CALL FUN_00483080
+    FUN_00483080((void*)p3, p5);
+}
+
+// (0x0048cc50) - Build view matrix from eye/target positions
+static unsigned int FUN_0048cc50(float* eyeTarget, float* eyePos, float* outMatrix)
+{
+    float dx = eyePos[0] - eyeTarget[0];
+    float dy = eyePos[1] - eyeTarget[1];
+    float dz = eyePos[2] - eyeTarget[2];
+    float len = sqrtf(dx * dx + dy * dy + dz * dz);
+    if (len == 0.0f) len = 1.0f;
+    float invLen = 1.0f / len;
+    float ny = -(dy * invLen);
+    float horiz = sqrtf(1.0f - ny * ny);
+    float nx, nz;
+    if (horiz == 0.0f) {
+        nx = 0.0f;
+        nz = 1.0f;
+    } else {
+        nx = -((dx * invLen) / horiz);
+        nz = (dz * invLen) / horiz;
+    }
+    outMatrix[0] = nz;      outMatrix[4] = 0.0f;  outMatrix[8]  = nx;
+    outMatrix[1] = -(nx * ny); outMatrix[5] = horiz; outMatrix[9]  = nz * ny;
+    outMatrix[2] = -(nx * horiz); outMatrix[6] = -ny; outMatrix[10] = nz * horiz;
+    outMatrix[12] = outMatrix[0] * dx + outMatrix[8] * dz;
+    outMatrix[13] = outMatrix[1] * dx + outMatrix[5] * dy + outMatrix[9] * dz;
+    outMatrix[14] = outMatrix[2] * dx + outMatrix[6] * dy + outMatrix[10] * dz;
+    outMatrix[3] = 0.0f; outMatrix[7] = 0.0f; outMatrix[11] = 0.0f; outMatrix[15] = 1.0f;
+    return 1;
+}
+
+// (0x0048c730) - 4x4 matrix multiply (rotation part only, 3x3)
+static void FUN_0048c730(float* a, float* b, float* out)
+{
+    out[0]  = a[0]*b[0] + a[1]*b[4] + a[2]*b[8];
+    out[1]  = a[0]*b[1] + a[1]*b[5] + a[2]*b[9];
+    out[2]  = a[0]*b[2] + a[1]*b[6] + a[2]*b[10];
+    out[4]  = a[4]*b[0] + a[5]*b[4] + a[6]*b[8];
+    out[5]  = a[4]*b[1] + a[5]*b[5] + a[6]*b[9];
+    out[6]  = a[4]*b[2] + a[5]*b[6] + a[6]*b[10];
+    out[8]  = a[8]*b[0] + a[9]*b[4] + a[10]*b[8];
+    out[9]  = a[8]*b[1] + a[9]*b[5] + a[10]*b[9];
+    out[10] = a[8]*b[2] + a[9]*b[6] + a[10]*b[10];
+}
+
+// (0x0048c820) - Transform translation vector by rotation matrix
+static void FUN_0048c820(float* translation, float* rotMatrix)
+{
+    float x = translation[0], y = translation[1], z = translation[2];
+    translation[0] = rotMatrix[0]*x + rotMatrix[4]*y + rotMatrix[8]*z;
+    translation[1] = rotMatrix[1]*x + rotMatrix[5]*y + rotMatrix[9]*z;
+    translation[2] = rotMatrix[2]*x + rotMatrix[6]*y + rotMatrix[10]*z;
+}
+
+// (0x00486190) - Camera/projection matrix setup
+// Builds view matrix from camera parameters and composites with the model matrix.
+// The original builds the two input vectors as
+//   from = (0, 0, -g_sceneRenderParam)
+//   to   = (0xA0 - subpixelX, subpixelY - 0x78, 0)
+// so the direction handed to FUN_0048cc50 (to - from) has a POSITIVE Z of
+// g_sceneRenderParam. An earlier revision folded -g_sceneRenderParam into `to`
+// and left `from` at the origin, which negated the Z axis (an extra 180 degree
+// yaw) and only happened to look right while the subpixel offset was exactly
+// the screen centre.
+static void FUN_00486190(float* modelMatrix)
+{
+    float from[3];
+    from[0] = 0.0f;
+    from[1] = 0.0f;
+    from[2] = (float)-g_sceneRenderParam;
+
+    float to[3];
+    to[0] = (float)(0xA0 - g_SubpixelOffsetX);
+    to[1] = (float)(g_SubpixelOffsetY + (-0x78));
+    to[2] = 0.0f;
+
+    float viewMatrix[16];
+    FUN_0048cc50(from, to, viewMatrix);
+    FUN_0048c730(modelMatrix, viewMatrix, modelMatrix);
+    FUN_0048c820(modelMatrix + 12, viewMatrix);
+}
+
+// (0x00482fa0) - Copy light data to TMD render object and insert into ordering table
+static void FUN_00482fa0(void* spriteData, int depthShift)
+{
+    if (spriteData == NULL || g_gteRotTransMatrix.t[2] < 0) return;
+
+    int depth = g_gteRotTransMatrix.t[2] >> (depthShift & 0x1F);
+    int* data = (int*)spriteData;
+    float* lightDst = (float*)((unsigned char*)data + 0x24);
+    DWORD* pLight = g_d3dLightData;
+
+    for (int i = 0; i < 3; i++) {
+        memcpy(lightDst, pLight, 12 * sizeof(DWORD));
+        if (data[6] != 0) {
+            lightDst[6] = (float)((data[6] & 0xFF0000) >> 16);
+            lightDst[7] = (float)((data[6] >> 8) & 0xFF);
+            lightDst[8] = (float)(data[6] & 0xFF);
+        }
+        OT_InsertPrimitive(lightDst, depth);
+        pLight += 12;
+        lightDst += 12;
+    }
+}
+
+// (0x00483080) - Main TMD entity render function
+// Reads GTE state buffers, creates TMD object, builds transform matrix, renders
+void FUN_00483080(void* spriteData, int depthShift)
+{
+    int depthField = g_gteRotTransMatrix.t[2];
+    if (spriteData == NULL || depthField < 0) {
+        return;
+    }
+
+    int depth = depthField >> (depthShift & 0x1F);
+    int* data = (int*)spriteData;
+
+    FUN_00482fa0(spriteData, depthShift);
+
+    // data[1] is the minimum CLUT depth of the animation slot (FindMinClutDepth)
+    // and doubles as the texture bank id; zero means the object carries no
+    // textured primitives and is not rendered.
+    if (data[1] == 0) {
+        return;
+    }
+
+    if (data[4] == 1) {
+        FUN_00486df0(spriteData);
+        return;
+    }
+
+    unsigned int tmdObj = AsyncCreateTmdObject(data[1], data[0], (unsigned int)spriteData);
+    data[8] = tmdObj;
+    if (tmdObj == 0) {
+        return;
+    }
+
+    // Build 4x4 transform matrix from GTE rotation/translation buffer.
+    // Column layout, matching the original store order at 0x004830ef:
+    // GTE row 0 (m[0][0..2]) lands in M[0], M[4], M[8], so the consumer reads
+    // a transformed X as M[0]*x + M[4]*y + M[8]*z. An earlier revision wrote
+    // m[0][1] to M[1] etc., i.e. the transposed (inverse) rotation.
+    float transformMatrix[16];
+    float scale = 0.00024414063f; // 1/4096
+
+    transformMatrix[0]  = (float)g_gteRotTransMatrix.m[0][0] * scale;
+    transformMatrix[4]  = (float)g_gteRotTransMatrix.m[0][1] * scale;
+    transformMatrix[8]  = (float)g_gteRotTransMatrix.m[0][2] * scale;
+    transformMatrix[1]  = (float)g_gteRotTransMatrix.m[1][0] * scale;
+    transformMatrix[5]  = (float)g_gteRotTransMatrix.m[1][1] * scale;
+    transformMatrix[9]  = (float)g_gteRotTransMatrix.m[1][2] * scale;
+    transformMatrix[2]  = (float)g_gteRotTransMatrix.m[2][0] * scale;
+    transformMatrix[6]  = (float)g_gteRotTransMatrix.m[2][1] * scale;
+    transformMatrix[10] = (float)g_gteRotTransMatrix.m[2][2] * scale;
+    transformMatrix[12] = (float)g_gteRotTransMatrix.t[0];
+    transformMatrix[13] = (float)g_gteRotTransMatrix.t[1];
+    transformMatrix[14] = (float)depthField;
+    transformMatrix[3]  = 0.0f;
+    transformMatrix[7]  = 0.0f;
+    transformMatrix[11] = 0.0f;
+    transformMatrix[15] = 1.0f;
+
+    FUN_00486190(transformMatrix);
+
+    // Call CMarniDirect3DTMD::Transform(ctx, depth, matrix, doubleBuffer=0)
+    // Original: Direct3DTMD_Transform(g_pMarniDirect3D, iVar2, &local_40, 0)
+    // (ECX = [spriteData+0x20] = the TMD object handle; depth is the OT depth,
+    // NOT the matrix — an earlier revision passed the matrix as arg 2, which
+    // left every object with a garbage depth and no stored transform).
+    CMarniDirect3DTMD* tmd = (CMarniDirect3DTMD*)(void*)tmdObj;
+    tmd->Transform(g_pMarniDirect3D, (void*)(size_t)depth, transformMatrix, 0);
+}
+
