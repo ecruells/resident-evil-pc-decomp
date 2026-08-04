@@ -157,6 +157,11 @@ public:
     // Draw a solid-color rectangle. Was MarniDrawRect.
     void DrawRect(int x, int y, int w, int h, DWORD color);
 
+    // Draw a solid-color line segment between two points (thickness in
+    // pixels). Used by the in-game menu EKG health bar (FUN_00470c60).
+    void DrawLine(float x0, float y0, float x1, float y1,
+                  float thickness, DWORD color);
+
     // Draw a batch of textured triangles with per-vertex tint.
     // verts: triCount*3 vertices, each 8 floats in QuadVertex layout:
     //   { x, y (screen px, Y-down), u, v, r, g, b, a (0..1) }.
@@ -165,6 +170,16 @@ public:
     void DrawTriangles(const float* verts, int triCount, MarniHandle tex,
                        MarniSampler sampler = MARNI_SAMPLER_POINT,
                        MarniBlend  blend   = MARNI_BLEND_ALPHA);
+
+    // Depth-buffered variant of DrawTriangles for 3D models: 9 floats per
+    // vertex, { x, y (screen px, Y-down), z (normalised [0,1] depth), u, v,
+    // r, g, b, a }. Writes and tests the depth buffer (LESS_EQUAL) so faces of
+    // the same model resolve correctly whatever order they arrive in, then
+    // restores the depth-disabled state the 2D path assumes. The depth buffer
+    // is cleared once per frame by Clear(). Max 1024 triangles per call.
+    void DrawTriangles3D(const float* verts, int triCount, MarniHandle tex,
+                         MarniSampler sampler = MARNI_SAMPLER_POINT,
+                         MarniBlend  blend   = MARNI_BLEND_ALPHA);
 
     // ----------------------------------------------------------------------
     // Backbuffer readback (used by CMarniBits::SaveBitmapToFile, the original

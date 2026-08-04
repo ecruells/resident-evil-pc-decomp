@@ -602,6 +602,143 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
 }
 
 // ============================================================================
+// AddSprite_Ex (0x0046f280)
+// Scaled-sprite variant of display_texture, used by the map screen for the
+// zoom in/out animation. Same page-search core as display_texture, plus:
+//   - when scaleX/scaleY (fix16.12) are both 0x1000 (1.0), positions are
+//     relative to g_ScreenOffsetX/Y (screen space, pivot not scaled);
+//   - otherwise the quad is scaled about pivotX/pivotY with fix16.12 math
+//     and placed relative to g_SubpixelOffsetX/Y (PS1 subpixel space).
+// ============================================================================
+int AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageCount)
+{
+    if ((MAX_SPRITE_COMMANDS - 1) < g_SpriteQueueCount) return 0;
+
+    static const int s_TexScale[4] = { 4, 2, 1, 1 };
+    int scale = s_TexScale[(texture->flags >> 24) & 3];
+
+    // VRAM-space texture position (from depth/tpage code, texU, texV)
+    unsigned int vAdd = 0;
+    unsigned int p    = texture->depth;
+    if (p > 16) { vAdd = 256; p -= 16; }
+    int texUWords = (int)(p * 0x40u + texture->texU / scale);
+    int texVAbs   = (int)(vAdd + texture->texV);
+
+    // Search page descriptors — original scans up to pageCount (max 0x2E)
+    int shiftedSlot = slot + 0xF;
+    if (shiftedSlot < 0 || shiftedSlot >= 256) return 0;
+
+    int foundSlot    = -1;
+    int foundOriginX = 0, foundOriginY = 0;
+    int foundDepth   = 0;
+
+    for (int i = 0; i < pageCount; i++) {
+        int cur = shiftedSlot + i;
+        if (cur >= 256) break;
+        if (g_TexturePageSRV[cur] == NULL) continue;
+
+        short oX  = g_TexturePageOriginX[cur];
+        short oY  = g_TexturePageOriginY[cur];
+        short d   = g_TexturePageDepth[cur];
+        int   bpp = g_TexturePageBpp[cur];
+        if (bpp <= 0) bpp = 16;
+        int bw = bpp == 4 ? 4 : bpp == 8 ? 2 : 1;
+
+        int pX = (int)(d & 15) * 0x40;
+        int pY = (int)(d / 16) * 0x100;
+
+        int pageW = g_TexturePageWidth[cur]  / bw;
+        int pageH = g_TexturePageHeight[cur];
+        int pageL = oX + pX, pageR = pageL + pageW;
+        int pageT = oY + pY, pageB = pageT + pageH;
+
+        int texR  = texUWords + texture->width / scale;
+        int texB  = texVAbs   + texture->height;
+
+        if (pageL <= texUWords && texR <= pageR &&
+            pageT <= texVAbs   && texB <= pageB) {
+            foundSlot   = cur;
+            foundOriginX = oX;
+            foundOriginY = oY;
+            foundDepth   = d;
+            break;
+        }
+    }
+    if (foundSlot < 0) return 0;
+
+    int clutIdx = (int)texture->printClutTint - g_TexturePageClutBase[foundSlot];
+    if (clutIdx < 0 || clutIdx > 7) return 0;
+    if (clutIdx == 8) clutIdx = 1;
+
+    // UV computation (page-relative PIXEL units):
+    int depthOfs = ((int)texture->depth - foundDepth) * scale * 0x40;
+    int su0 = (int)texture->texU - foundOriginX * scale + depthOfs;
+    int sv0 = (int)texture->texV - foundOriginY;
+    int su1 = su0 + texture->width  - 1;
+    int sv1 = sv0 + texture->height - 1;
+
+    // 0x0046f2dd: unscaled sprites use the screen offset; scaled sprites
+    // (map zoom) use the subpixel offset.
+    bool scaled = (texture->scaleX != 0x1000) || (texture->scaleY != 0x1000);
+    short sx = (short)(texture->screenX + (scaled ? (short)g_SubpixelOffsetX : (short)g_ScreenOffsetX));
+    short sy = (short)(texture->screenY + (scaled ? (short)g_SubpixelOffsetY : (short)g_ScreenOffsetY));
+
+    TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
+    cmd->type = 10;
+
+    unsigned int flags; BuildSpriteRenderFlags(texture->flags, &flags);
+    int variant = GetTextureVariant(texture->flags);
+    cmd->unk1c = (float)(variant ? (flags | 8) : flags);
+
+    cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
+    cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
+    cmd->b = (float)texture->colorMulB * g_ColorScaleFactor;
+
+    if (variant == 0) {
+        cmd->texturePage = 0;
+    } else {
+        static const int s_VariantBlend[5] = { 0, 0x80, 0x80, 0, 0x80 };
+        cmd->texturePage = (int)((float)s_VariantBlend[variant] * 0.00390625f);
+    }
+
+    // 0x0046f36a: fix16.12 scale about the pivot point, rounding like the
+    // original ((x + ((x >> 0x1f) & 0xfff)) >> 0xc).
+    if (scaled) {
+        int ix = (int)texture->pivotX * (int)texture->scaleX;
+        cmd->x0 = sx - (short)((ix + (ix >> 0x1f & 0xfff)) >> 0xc);
+        int iy = (int)texture->pivotY * (int)texture->scaleY;
+        cmd->y0 = sy - (short)((iy + (iy >> 0x1f & 0xfff)) >> 0xc);
+        ix = ((int)texture->width - (int)texture->pivotX) * (int)texture->scaleX;
+        cmd->x1 = (short)((ix + (ix >> 0x1f & 0xfff)) >> 0xc) + sx - 1;
+        iy = ((int)texture->height - (int)texture->pivotY) * (int)texture->scaleY;
+        cmd->y1 = (short)((iy + (iy >> 0x1f & 0xfff)) >> 0xc) + sy - 1;
+    } else {
+        cmd->x0 = sx - texture->pivotX;
+        cmd->y0 = sy - texture->pivotY;
+        cmd->x1 = (texture->width  - texture->pivotX) + sx - 1;
+        cmd->y1 = (texture->height - texture->pivotY) + sy - 1;
+    }
+    cmd->depthSort = (unsigned int)depth * 0x10 + 500;
+
+    cmd->u0 = (unsigned short)(su0 >= 0 ? su0 : 0);
+    cmd->v0 = (unsigned short)(sv0 >= 0 ? sv0 : 0);
+    cmd->u1 = (unsigned short)(su1 >= 0 ? su1 : 0);
+    cmd->v1 = (unsigned short)(sv1 >= 0 ? sv1 : 0);
+    cmd->extraFlags = foundSlot;
+
+    // Fade inversion + enqueue
+    unsigned short fadeVal = depth;
+    if (g_nFadeInverted) {
+        if ((int)fadeVal > g_MaxFadeValue) fadeVal = (unsigned short)g_MaxFadeValue;
+        fadeVal = (unsigned short)(g_MaxFadeValue - fadeVal);
+    }
+    if (fadeVal > 0xFFF) fadeVal = 0xFFF;
+
+    if ((g_RenderDisableFlags & 0x21) == 0) g_SpriteQueueCount++;
+    return 1;
+}
+
+// ============================================================================
 // display_image (0x00470770)
 // Loads raw 16-bit PS1 pixel data and creates a D3D11 texture + SRV.
 // ============================================================================
@@ -728,16 +865,19 @@ void ApplyShakeAndRebuildSprites() {
 
 // ============================================================================
 // FUN_00455140 (0x00455140) - Item name lookup
-// Returns a pointer to the item name string. If the item is not yet examined,
-// returns the generic "???" name instead.
-// TODO: Wire up to the real item name tables (0x004bf0a0, 0x004bf260, 0x004bd823)
-// ============================================================================
-static unsigned char* message_item_name_lookup(unsigned char itemId)
+// Returns a pointer to the item name string (RE1 font encoding). If the item
+// has not been examined yet (its game flag is clear), the generic name for
+// its category is returned instead (e.g. "MANSION KEY").
+unsigned char* message_item_name_lookup(unsigned char itemId)
 {
-    // Stub: return a placeholder string for now
-    static unsigned char unknownName[] = "???";
-    (void)itemId;
-    return unknownName;
+    unsigned char bVar2 = itemId - 1;
+    unsigned char* puVar3 = (unsigned char*)g_ItemNamePointers[bVar2];
+    if ((bVar2 < 0x4d) && ((bVar2 = g_ItemImageLookupTable[(unsigned int)bVar2 * 4 + 6], (bVar2 & 0x80) == 0))) {
+        if (Flg_ck((int)g_gameFlags_bc, (unsigned int)bVar2) == 0) {
+            puVar3 = (unsigned char*)g_UnknownItemNamePointers[bVar2];
+        }
+    }
+    return puVar3;
 }
 
 // ============================================================================

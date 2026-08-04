@@ -495,10 +495,13 @@ int CMarniDirect3DTMD::Create(void* d3dContext, void* materialContext, void* par
     // Clean up any existing objects first
     Destroy(d3dContext);
 
-    // Validate flags: m_flag4C4 must be set and d3dContext+0x348 must be non-zero
-    int* ctxFields = (int*)d3dContext;
-    if (m_flag4C4 == 0 || ctxFields[0x348 / 4] == 0) {
-        // Original: printf(&DAT_004b4684, "MarniSystem Direct3DTMD::Create")
+    // Validate flags: m_flag4C4 must be set and the D3D context must be ready.
+    // The original read d3dContext+0x348 ("context ready"); the port's
+    // CMarniDirect3D keeps that flag at m_isInitialized (+0x3C) instead.
+    // Port's CMarniDirect3D readiness flag lives at +0x3C (m_isInitialized);
+    // the original used +0x348.
+    int ctxReady = *(int*)((BYTE*)d3dContext + 0x3C);
+    if (m_flag4C4 == 0 || ctxReady == 0) {
         m_initialized = 0;
         return 0;
     }
@@ -638,8 +641,9 @@ int CMarniDirect3DTMD::Transform(void* d3dContext, void* depth, void* matrix, in
         return 0;
     }
 
-    // Check context activity flag at offset 0x348
-    if (ctxFields[0x348 / 4] == 0) {
+    // Check context readiness: the original used +0x348; the port's
+    // CMarniDirect3D keeps it at +0x3C (m_isInitialized).
+    if (*(int*)((BYTE*)d3dContext + 0x3C) == 0) {
         // Original: printf("MarniSystem Direct3DTMD::Trans: context not ready")
         return 0;
     }

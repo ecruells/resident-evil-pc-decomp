@@ -99,6 +99,48 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
 }
 
 // ============================================================================
+// set_item_description_message (0x00455730)
+// The item viewer's own message setter: shows the examine description of the
+// item whose 3D model is on screen. Unlike set_message_display() the index is
+// a plain index into g_ItemDescriptions (itemId - 1) - no 0x40 table-select
+// bit, no RDT lookup - the speed-up flag is always on, and the text is placed
+// at the item viewer's line (0xba) instead of the room dialogue line.
+//
+// descIndex: index into g_ItemDescriptions (item id - 1)
+// pauseGame: flags to clear in g_message_flags while the text is up
+//
+// Returns: 0 = message display started, 1 = rejected (already displaying)
+// ============================================================================
+unsigned int set_item_description_message(unsigned short descIndex, unsigned short pauseGame)
+{
+    if ((g_menu_choice_id & 0x80) != 0) {
+        return 1;
+    }
+
+    // The original indexes the table unchecked; the entries past the last item
+    // are the zero padding that follows it, so an out-of-range id would set a
+    // NULL g_MessagePtr and fault in UpdateMessageDisplay. Refuse instead.
+    if (descIndex >= (sizeof(g_ItemDescriptions) / sizeof(g_ItemDescriptions[0])) ||
+        g_ItemDescriptions[descIndex] == NULL) {
+        return 1;
+    }
+
+    g_menu_choice_id = 0x80;
+
+    g_messageFlagsBackup = g_message_flags;
+    g_PauseGameInMsgFlag = pauseGame;
+    g_message_flags = g_message_flags & ~pauseGame;
+
+    g_MessageStateCounter = 0;
+    g_MessageSpeedUpFlag = 0x80;
+    g_lastScanCodeOrMsgID = (DWORD)descIndex;
+    g_MessagePtr = g_ItemDescriptions[descIndex];
+    g_MessageScreenY = 0xba - (short)g_ScreenOffsetY;
+
+    return 0;
+}
+
+// ============================================================================
 // display_game_loading_message (0x00481930)
 // Task function: displays the appropriate loading message based on game state.
 // Runs as a parallel task during InitializeGame.

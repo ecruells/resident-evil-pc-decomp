@@ -358,6 +358,11 @@ AddSprite supports:
 
 All font rendering uses a single font texture atlas (`fontus.tim`, loaded into `m_pFontSRV`). The atlas contains glyphs in multiple layouts for different font sizes.
 
+> **Text encoding:** game text is not ASCII — it is an index-based encoding
+> into the 8×14 font region. The `STR()` compile-time encoder and the encoded
+> string tables (item names, global messages, item descriptions) are documented
+> in [TEXT_ENCODING.md](TEXT_ENCODING.md).
+
 ### PrintText8x14 (0x00455520)
 
 8×14 pixel mono-spaced font. Characters laid out **18 per row** by raw ASCII value.

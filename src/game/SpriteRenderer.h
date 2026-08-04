@@ -49,12 +49,18 @@ extern int   g_DepthSortOverride;
 extern float g_ColorScaleFactor;
 extern int   g_nFadeInverted;
 
+// Per-frame count of line primitives submitted (DAT_004c2d10). The original
+// capped EKG line submissions at 40 per frame (OT capacity).
+extern int   g_renderPrimCount;
+
 void BuildSpriteRenderFlags(unsigned int textureFlags, unsigned int* outFlags);
 int  GetTextureVariant(unsigned int textureFlags);
 void SpriteQueue_Reset(void);
 void FlushSpriteCommands(void);
 
 int draw_texture(TextureDesc* texture, unsigned short depth);
+int SubmitLine(short x0, short y0, short x1, short y1, unsigned short depth,
+               float r, float g, float b, float alpha);
 int AddSprite(TextureDesc* texture, short depth, int tpage, int fade);
 int AddTintSprite(TextureDesc* texture, unsigned short fade);
 int AddFadePoly(unsigned short alpha, int tpage, int u, int v, int clut, unsigned char* rgb,

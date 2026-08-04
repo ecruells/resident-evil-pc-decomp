@@ -48,9 +48,22 @@
 // downwards.
 // ============================================================================
 #define TMD_NEAR_Z          (1.0f)    // cull verts with vz <= this (behind/near)
+#define TMD_FAR_Z      (131072.0f)    // depth-buffer range; every scene z fits
 #define TMD_MAX_QUEUE       2048
-#define TMD_MAX_TRIS_FLUSH  1024      // MarniDX::DrawTriangles per-call cap
+#define TMD_MAX_TRIS_FLUSH  1024      // MarniDX::DrawTriangles3D per-call cap
 #define TMD_MAX_TRIS_COLLECT 8192     // per-frame triangle pool for the depth sort
+
+// View-space Z -> normalised [0,1] depth for the depth buffer. Linear: a D24
+// buffer over TMD_FAR_Z still resolves better than a hundredth of a world unit,
+// and a linear ramp keeps distant room geometry from collapsing into one value
+// the way a 1/z ramp would.
+static inline float TmdDepthNdc(float vz)
+{
+    float d = (vz - TMD_NEAR_Z) * (1.0f / (TMD_FAR_Z - TMD_NEAR_Z));
+    if (d < 0.0f) d = 0.0f;
+    if (d > 1.0f) d = 1.0f;
+    return d;
+}
 
 struct TmdDrawEntry {
     BYTE* slot;        // owning CMarniDirect3DTMD slot in g_tmdObjectBuffer
@@ -66,7 +79,7 @@ static int          g_tmdQueueCount = 0;
 // Per-frame triangle pool. Triangles from every queued object are gathered here
 // and submitted only after a global depth sort (see FlushTmdObjects).
 struct TmdTri {
-    float v[24];   // 3 vertices x {x, y, u, v, r, g, b, a}
+    float v[27];   // 3 vertices x {x, y, z, u, v, r, g, b, a}
     float depth;   // mean view-space Z (larger = farther)
     DWORD tex;
 };
@@ -305,12 +318,15 @@ void FlushTmdObjects(void)
                     const float* v0 = vbuf + i0 * 11;
                     const float* v1 = vbuf + i1 * 11;
                     const float* v2 = vbuf + i2 * 11;
-                    o[0]  = x0; o[1]  = y0; o[2]  = v0[9];  o[3]  = v0[10];
-                    o[4]  = cr[i0]; o[5]  = cg[i0]; o[6]  = cb[i0]; o[7]  = 1.0f;
-                    o[8]  = x1; o[9]  = y1; o[10] = v1[9];  o[11] = v1[10];
-                    o[12] = cr[i1]; o[13] = cg[i1]; o[14] = cb[i1]; o[15] = 1.0f;
-                    o[16] = x2; o[17] = y2; o[18] = v2[9];  o[19] = v2[10];
-                    o[20] = cr[i2]; o[21] = cg[i2]; o[22] = cb[i2]; o[23] = 1.0f;
+                    o[0]  = x0; o[1]  = y0; o[2]  = TmdDepthNdc(vzArr[i0]);
+                    o[3]  = v0[9];  o[4]  = v0[10];
+                    o[5]  = cr[i0]; o[6]  = cg[i0]; o[7]  = cb[i0]; o[8]  = 1.0f;
+                    o[9]  = x1; o[10] = y1; o[11] = TmdDepthNdc(vzArr[i1]);
+                    o[12] = v1[9];  o[13] = v1[10];
+                    o[14] = cr[i1]; o[15] = cg[i1]; o[16] = cb[i1]; o[17] = 1.0f;
+                    o[18] = x2; o[19] = y2; o[20] = TmdDepthNdc(vzArr[i2]);
+                    o[21] = v2[9];  o[22] = v2[10];
+                    o[23] = cr[i2]; o[24] = cg[i2]; o[25] = cb[i2]; o[26] = 1.0f;
                     t3->depth = (vzArr[i0] + vzArr[i1] + vzArr[i2]) * (1.0f / 3.0f);
                     t3->tex   = tex;
                     g_tmdTriOrder[collected] = collected;
@@ -321,30 +337,32 @@ void FlushTmdObjects(void)
             free(sx); free(cr); free(clipped);
         }
 
-        // Depth-sort every collected triangle, far to near, then submit in that
-        // order, merging adjacent runs that share a texture.
+        // The depth buffer resolves which face wins, so the sort is no longer
+        // load-bearing for opaque geometry - it stays because it keeps the
+        // alpha-blended triangles blending back-to-front and it groups runs of
+        // one texture together, which halves the draw calls.
         std::sort(g_tmdTriOrder, g_tmdTriOrder + collected, [](int a, int b) {
             return g_tmdTris[a].depth > g_tmdTris[b].depth;
         });
 
-        static float triVerts[TMD_MAX_TRIS_FLUSH * 3 * 8];
+        static float triVerts[TMD_MAX_TRIS_FLUSH * 3 * 9];
         int   triCount = 0;
         DWORD triTex   = 0;
 
         for (int k = 0; k < collected; k++) {
             const TmdTri* t3 = &g_tmdTris[g_tmdTriOrder[k]];
             if ((triCount > 0 && t3->tex != triTex) || triCount >= TMD_MAX_TRIS_FLUSH) {
-                Marni_DX()->DrawTriangles(triVerts, triCount, (MarniHandle)triTex,
-                                          MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
+                Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
+                                            MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
                 triCount = 0;
             }
             triTex = t3->tex;
-            memcpy(triVerts + triCount * 24, t3->v, sizeof(t3->v));
+            memcpy(triVerts + triCount * 27, t3->v, sizeof(t3->v));
             triCount++;
         }
         if (triCount > 0) {
-            Marni_DX()->DrawTriangles(triVerts, triCount, (MarniHandle)triTex,
-                                      MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
+            Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
+                                        MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
         }
     }
 

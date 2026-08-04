@@ -22,6 +22,7 @@ int g_MaxFadeValue           = 4095;
 int g_DepthSortOverride      = 0;
 float g_ColorScaleFactor     = 2.0f / 255.0f;
 int g_nFadeInverted          = 0;   // 0x004c333c
+int g_renderPrimCount        = 0;   // 0x004c2d10
 
 // Page width factors indexed by flags bits 22-23 (0x004c2d78)
 static const int g_PageWidthFactor[4] = { 1, 2, 4, 8 };
@@ -54,6 +55,7 @@ int GetTextureVariant(unsigned int textureFlags) {
 void SpriteQueue_Reset(void) {
     g_SpriteQueueCount = 0;
     g_OTIndex = 0;
+    g_renderPrimCount = 0;
 }
 
 // ============================================================================
@@ -89,6 +91,32 @@ void FlushSpriteCommands(void) {
 
     for (int i = 0; i < g_SpriteQueueCount; i++) {
         TextureDraw* cmd = &g_SpriteCommandBuffer[i];
+
+        // Line primitives (type 11): used by the menu EKG health bar.
+        // The original FUN_00470c60 built a line primitive and inserted it
+        // into the ordering table with depthSort = depth*16 + 500, exactly
+        // like draw_texture, so it participates in the same OT sort.
+        if (cmd->type == 11) {
+            float sx0 = (float)cmd->x0 * scaleX;
+            float sy0 = (float)cmd->y0 * scaleY;
+            float sx1 = (float)cmd->x1 * scaleX;
+            float sy1 = (float)cmd->y1 * scaleY;
+
+            int cr = (int)(cmd->r * 255.0f);
+            int cg = (int)(cmd->g * 255.0f);
+            int cb = (int)(cmd->b * 255.0f);
+            if (cr > 255) cr = 255; if (cr < 0) cr = 0;
+            if (cg > 255) cg = 255; if (cg < 0) cg = 0;
+            if (cb > 255) cb = 255; if (cb < 0) cb = 0;
+            float alpha = cmd->unk1c;
+            if (alpha < 0.0f) alpha = 0.0f;
+            if (alpha > 1.0f) alpha = 1.0f;
+            int ca = (int)(alpha * 255.0f);
+            if (ca > 255) ca = 255; if (ca < 0) ca = 0;
+            DWORD color = ((DWORD)ca << 24) | ((DWORD)cr << 16) | ((DWORD)cg << 8) | (DWORD)cb;
+            MarniDrawLine(sx0, sy0, sx1, sy1, 1.0f, color);
+            continue;
+        }
         if (cmd->type != 10) continue;
 
         float x = (float)cmd->x0 * scaleX;
@@ -206,6 +234,39 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
     cmd->v1 = cmd->v0 + texture->height - 1;
 
     cmd->extraFlags = 0;
+
+    g_SpriteQueueCount++;
+    return 1;
+}
+
+// ============================================================================
+// SubmitLine (0x00470c60 helper)
+// Queues a 1px line primitive (type 11) into the sprite command buffer.
+// Coordinates are in PS1 game space (with screen offset applied by the
+// caller, matching how draw_texture handles screenX/screenY).
+// ============================================================================
+int SubmitLine(short x0, short y0, short x1, short y1, unsigned short depth,
+               float r, float g, float b, float alpha)
+{
+    if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return 0;
+
+    TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
+    cmd->type = 11;
+    cmd->x0 = x0;
+    cmd->y0 = y0;
+    cmd->x1 = x1;
+    cmd->y1 = y1;
+    cmd->depthSort = (unsigned int)depth * 16 + 500;
+    cmd->unk1c = alpha;
+    cmd->r = r;
+    cmd->g = g;
+    cmd->b = b;
+    cmd->texturePage = 0;
+    cmd->extraFlags = 0;
+    cmd->u0 = 0;
+    cmd->v0 = 0;
+    cmd->u1 = 0;
+    cmd->v1 = 0;
 
     g_SpriteQueueCount++;
     return 1;

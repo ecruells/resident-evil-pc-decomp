@@ -332,6 +332,7 @@ extern unsigned char  g_MessageStateCounter;           // 0x00bf0a16
 extern short          g_MessageScreenY;                // 0x00bf0a1a
 extern unsigned char  g_MessageSpeedUpFlag;            // 0x00bf0a17
 extern unsigned char* global_messages[64];             // 0x004bfc58
+extern unsigned char* g_ItemDescriptions[79];          // 0x004c6160 - examine text, index = itemId - 1
 extern unsigned char* g_MessageCurrentPtr;             // 0x00bf0a20 - current position in message text
 extern unsigned char* g_MessageSavedPtr;               // 0x00bf0a24 - saved ptr for item name returns
 extern unsigned char  g_MessageCharDelay;              // 0x00bf0a29 - base delay between characters
@@ -488,7 +489,7 @@ extern int           g_SpecialB1;                      // 0x00be961f [.gwipe]
 
 extern BioCardLayout g_BioCard;                        // 0x00be9620 [.gwipe end marker]
 
-extern const unsigned char g_StageRoomFlagOffset[5];   // 0x004d31e0 - per-stage room flag base offsets
+extern const unsigned char g_StageRoomFlagOffset[6];   // 0x004d31e0 - per-stage room flag base offsets
 extern unsigned char g_ItemSlotsIndexes[16];           // 0x00be9a3c
 extern DWORD         g_ItemSlotsBitmask;               // 0x00d22734
 extern unsigned char g_defaultItemSlot;                // 0x00be41e0 [.gwipe start marker]
@@ -697,6 +698,26 @@ extern unsigned char g_EkgPrimaryLine[16];             // 0x00be1198
 // Secondary EKG line primitive (24 bytes): used by menu_draw_health_bar
 // Extended with gradient color endpoints at offsets 15-17
 extern unsigned char g_EkgSecondaryLine[24];           // 0x00be1184
+
+// Menu item data tables (defined in MenuData.cpp, extracted from the original
+// binary .rdata section). The item name strings (originally one flat 984-byte
+// block at 0x004becc8) are STR()-encoded per name in MenuData.cpp; the pointer
+// tables below reference them.
+extern const unsigned char* g_ItemNamePointers[77];    // 0x004bf0a0 (indexed by itemId-1)
+extern const unsigned char* g_UnknownItemNamePointers[16]; // 0x004bf260
+extern const unsigned char g_ItemModelFileNames[75][8]; // 0x004bd348 (75 x 8-byte names)
+extern const unsigned char g_ItemModelFileNameING[8];  // 0x004bd5a0
+extern const unsigned char g_ItemModelFileNameMINI[8]; // 0x004bd5a8
+extern const unsigned char* g_ItemCombinePtrs[35];     // 0x004bd768
+extern const unsigned char g_ItemCombineData[440];     // 0x004bd5b0
+extern const unsigned char g_ItemMaxQty[448];          // 0x004bd81c
+extern const unsigned char g_ItemImageTypeTable[32];   // 0x004bd7f8
+extern const unsigned char g_ItemModelExtIVM[8];       // 0x004c29a0 ".ivm"
+extern const unsigned char g_ItemModelDir[24];         // 0x004c29a8 "./usa/item_m2/"
+extern const unsigned char g_ItemMixPixPath[32];       // 0x004b10d4
+extern const unsigned char g_ItemHealTable[96];        // 0x004bd927 (indexed by itemId)
+extern const unsigned char g_ItemExamineCombos[48];    // 0x004bd988
+extern const unsigned char g_ItemExamineTypes[48];     // 0x004bd9b8
 
 // ============================================================================
 // SECTION 12: Title screen & attract demo
@@ -1253,6 +1274,7 @@ void clear_textures(void);
 void LoadImage(int srcData, int srcSlot, int dstSlot, short format, short x, short y, short width, short height, int mode);
 void LoadItemImage(int item_id, int image_index, int img_buffer);
 int  display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount);
+int  AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageCount); // 0x0046f280
 int  AddTintSprite(TextureDesc* texture, unsigned short brightness);
 
 // --- Misc game helpers ---
@@ -1316,7 +1338,8 @@ void set_fading(int type, int counter);               // 0x0047b980
 int  cmd_0x4c(void);                                  // 0x00460b80 - stop sound banks
 void display_die_screen(void);                        // 0x004... - death screen display
 void FUN_0047eb60(void);                              // 0x0047eb60 - post-death cleanup
-unsigned int set_message_display(unsigned short msgId, unsigned short flags); // 0x004...
+unsigned int set_message_display(unsigned short msgId, unsigned short flags); // 0x00455670
+unsigned int set_item_description_message(unsigned short descIndex, unsigned short pauseGame); // 0x00455730
 
 // --- System checks / installation ---
 DWORD GetFreeDiskSpaceMB(LPCSTR lpPath);

@@ -332,22 +332,31 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
     int storeResult = psxTex.Store((int*)imageBuffer, 1);
     if (storeResult == 0) return;
 
-    WORD* texDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + slotOffset);
-    texDesc[0] = posX;
-    texDesc[1] = posY;
-    *(short*)(texDesc + 2) = (short)psxTex.m_WidthPixels;
-    *(short*)(texDesc + 3) = (short)psxTex.m_Height;
-    texDesc[4] = 0;
-    texDesc[5] = pageOffset + 0x1E0;
-    texDesc[6] = 0;
-    texDesc[7] = (short)textureCount;
-    texDesc[8] = texId;
+    // The port's g_VideoDriverArray_838 is a small fragment of the original's
+    // ~393KB descriptor table (0x008ed838..0x008f7890), so slot offsets beyond
+    // the array land in unrelated .bss globals. The map screen's slots 0x1C-0x1F
+    // hit the SCD event table area and corrupt it (menu textures broke, palette
+    // changed). The render path reads page state from the g_TexturePage* arrays
+    // below, never from this descriptor, so skipping the out-of-range write is
+    // safe and the low slots (0-6, used by LoadImage/TitleScreen) keep it.
+    if ((unsigned int)slotOffset + 0x24 <= (unsigned int)sizeof(g_VideoDriverArray_838)) {
+        WORD* texDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + slotOffset);
+        texDesc[0] = posX;
+        texDesc[1] = posY;
+        *(short*)(texDesc + 2) = (short)psxTex.m_WidthPixels;
+        *(short*)(texDesc + 3) = (short)psxTex.m_Height;
+        texDesc[4] = 0;
+        texDesc[5] = pageOffset + 0x1E0;
+        texDesc[6] = 0;
+        texDesc[7] = (short)textureCount;
+        texDesc[8] = texId;
 
-    BYTE bpp = *(BYTE*)((BYTE*)&g_VideoDriverArray_FA + texCheckOffset);
-    if (bpp == 4)
-        texDesc[2] = (short)(((int)texDesc[2] + ((int)texDesc[2] >> 31 & 3)) >> 2);
-    else if (bpp == 8)
-        texDesc[2] = texDesc[2] / 2;
+        BYTE bpp = *(BYTE*)((BYTE*)&g_VideoDriverArray_FA + texCheckOffset);
+        if (bpp == 4)
+            texDesc[2] = (short)(((int)texDesc[2] + ((int)texDesc[2] >> 31 & 3)) >> 2);
+        else if (bpp == 8)
+            texDesc[2] = texDesc[2] / 2;
+    }
 
     int pageIndex = 0;
     int pageCount = *(int*)((BYTE*)&g_VideoDriverArray_810 + texCheckOffset);
@@ -391,13 +400,16 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             // reddish surfaces came out blue. Every other conversion in the
             // tree already uses this layout. PS1 CLUT index 0 is the
             // transparent colour key, so alpha=0 for index 0 (matches
-            // RebuildTextureSRV).
+            // RebuildTextureSRV). Bit 15 (STP) marks semi-transparent
+            // colours: the map screen's textures (Map_blue grid, floor maps)
+            // carry it on their fills, and rendering those opaque made the
+            // grid solid instead of the PS1's 50% transparency.
             for (int c = 0; c < numClutEntries; c++) {
                 WORD clr = clut[c];
                 DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
+                DWORD a = (c == 0) ? 0x00 : ((clr & 0x8000) ? 0x80 : 0xFF);
                 DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
-                DWORD a = (c == 0) ? 0x00 : 0xFF;
                 // R8G8B8A8_UNORM wants R in the lowest byte
                 clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
             }

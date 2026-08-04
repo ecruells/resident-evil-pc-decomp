@@ -127,6 +127,8 @@ void  UpdateVideoPlayback(void);
 void  MarniPresent(void);             // -> vtable[4] Present
 void  MarniClear(void);               // -> vtable[3] Clear
 void  MarniDrawRect(int x, int y, int w, int h, DWORD color);
+void  MarniDrawLine(float x0, float y0, float x1, float y1,
+                    float thickness, DWORD color);
 void  MarniDrawSprite(float x, float y, float w, float h,
                       float u0, float v0, float u1, float v1,
                       DWORD color, MarniHandle tex);

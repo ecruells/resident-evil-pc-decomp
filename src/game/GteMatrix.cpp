@@ -557,6 +557,12 @@ void ApplyLVAndMulMatrix(MATRIX* m0, MATRIX* m1)
 // Euler angle to rotation matrix helper.
 // Computes a 9-element rotation matrix from 3 angles (param_1, param_2, param_3)
 // and stores the result in param_4[0..8] (3x3 row-major, 4.12 fixed-point).
+//
+// The (int) casts on the rounded shifts are load-bearing: Ghidra renders the
+// sign-correction mask with a U suffix, which makes the addition unsigned and
+// turns the following >> into a LOGICAL shift, so any negative product comes
+// out as a huge positive. Currently only reachable via camera roll, which every
+// shipped RDT leaves at 0 - see the note on MatrixToCamera.
 // ============================================================================
 void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x004403c0
 {
@@ -568,7 +574,7 @@ void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x0044
     int tmp = ((c_sum - c_dif) / 2) * s1;
     c_sum = GteCos(sum23);
     c_dif = GteCos(dif23);
-    param_4[0] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (c_dif + c_sum) / 2;
+    param_4[0] = ((int)(tmp + ((tmp >> 0x1f) & 0x3fff)) >> 0xe) + (c_dif + c_sum) / 2;
 
     int ss1p3 = GteSin(param_3 + param_1);
     int sm1p3 = GteSin(param_1 - param_3);
@@ -582,7 +588,7 @@ void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x0044
     tmp = ((s_sum12 - s_dif12) / 2) * s3;
     int s_dif23 = GteSin(dif23);
     int s_sum23b = GteSin(sum23);
-    param_4[2] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (s_sum23b + s_dif23) / 2;
+    param_4[2] = ((int)(tmp + ((tmp >> 0x1f) & 0x3fff)) >> 0xe) + (s_sum23b + s_dif23) / 2;
 
     int c_sum12 = GteCos(sum12);
     int c_dif12 = GteCos(dif12);
@@ -590,7 +596,7 @@ void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x0044
     tmp = ((c_sum12 - c_dif12) / 2) * c3;
     s_dif23 = GteSin(dif23);
     s_sum23b = GteSin(sum23);
-    param_4[3] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (s_dif23 - s_sum23b) / 2;
+    param_4[3] = ((int)(tmp + ((tmp >> 0x1f) & 0x3fff)) >> 0xe) + (s_dif23 - s_sum23b) / 2;
 
     int cp1p3 = GteCos(param_3 + param_1);
     int cm1p3 = GteCos(param_1 - param_3);
@@ -602,7 +608,7 @@ void FUN_004403c0(int param_1, int param_2, int param_3, int* param_4) // 0x0044
     tmp = ((s_sum12 - s_dif12) / 2) * c3;
     int c_sum23b = GteCos(sum23);
     int c_dif23 = GteCos(dif23);
-    param_4[5] = ((tmp + (tmp >> 0x1f & 0x3fffU)) >> 0xe) + (c_sum23b - c_dif23) / 2;
+    param_4[5] = ((int)(tmp + ((tmp >> 0x1f) & 0x3fff)) >> 0xe) + (c_sum23b - c_dif23) / 2;
 
     int sm1m2 = GteSin(param_1 - param_2);
     int sp1p2 = GteSin(sum12);

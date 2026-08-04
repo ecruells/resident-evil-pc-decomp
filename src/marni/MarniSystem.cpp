@@ -557,6 +557,14 @@ void MarniDrawRect(int x, int y, int w, int h, DWORD color)
     pD3D->m_pDX->DrawRect(x, y, w, h, color);
 }
 
+void MarniDrawLine(float x0, float y0, float x1, float y1,
+                   float thickness, DWORD color)
+{
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (!pD3D || !pD3D->m_isInitialized) return;
+    pD3D->m_pDX->DrawLine(x0, y0, x1, y1, thickness, color);
+}
+
 void MarniDrawSprite(float x, float y, float w, float h,
                      float u0, float v0, float u1, float v1,
                      DWORD color, MarniHandle tex)

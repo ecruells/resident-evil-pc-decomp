@@ -3,6 +3,11 @@
 // ============================================================================
 // STR — PrintFormattedText compile-time string encoder
 //
+// Encodes readable ASCII strings into the RE1 8x14 font encoding at compile
+// time. Full reference (character table, escapes, terminators, message-stream
+// tags, and the encoded string tables in MenuData.cpp / Globals.cpp):
+//   docs/TEXT_ENCODING.md
+//
 // Usage:
 //   static constexpr auto s_pftHello = STR("HELLO WORLD");
 //   PrintFormattedText(x, y, color, s_pftHello);
@@ -26,6 +31,7 @@
 //   \n  0x02  newline          \p  0x03  page break (next char = delay operand)
 //   \s  0x04  set char delay   \i  0x05  item-name placeholder
 //   \c  0x08  yes/no prompt    \q  0x0A  square glyph
+//   \o  0x78  opening double quote (plain " is the closing form, 0x19)
 //   \d        auto-dismiss: the next char is encoded and written AFTER the
 //             0x01 terminator, making the message clear itself after that many
 //             frames instead of waiting for a button press. Omit it and the
@@ -111,6 +117,7 @@ struct Encoded {
                     case 'i': bytes[out++] = 0x05; i++; continue;
                     case 'c': bytes[out++] = 0x08; i++; continue;
                     case 'q': bytes[out++] = 0x0A; i++; continue;
+                    case 'o': bytes[out++] = 0x78; i++; continue;
                     case 'd':
                         // Auto-dismiss delay. Emits nothing here; the NEXT
                         // character is encoded (same operand convention as \p)

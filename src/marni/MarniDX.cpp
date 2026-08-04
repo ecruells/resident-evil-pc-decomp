@@ -48,6 +48,26 @@ VS_OUTPUT main(VS_INPUT input)
 }
 )";
 
+// 3D model VS: same screen-space ortho for x/y, but the vertex carries a
+// pre-normalised [0,1] depth that goes straight into NDC z so the depth buffer
+// can resolve the model. The original leaned on a real Z-buffer for this
+// ("MarniSystem Direct3D::MD3DCreateZBuffer"); a per-triangle painter sort
+// cannot, and made faces pop in and out as a model turned.
+static const char* g_Model3DVS_Source = R"(
+cbuffer SpriteCB : register(b0) { row_major float4x4 g_MVP; };
+struct VS_INPUT  { float3 pos:POSITION; float2 tex:TEXCOORD0; float4 col:COLOR0; };
+struct VS_OUTPUT { float4 pos:SV_Position; float2 tex:TEXCOORD0; float4 col:COLOR0; };
+VS_OUTPUT main(VS_INPUT input)
+{
+    VS_OUTPUT o;
+    float4 p = mul(float4(input.pos.x, input.pos.y, 0.0f, 1.0f), g_MVP);
+    o.pos = float4(p.xy, input.pos.z, 1.0f);
+    o.tex = input.tex;
+    o.col = input.col;
+    return o;
+}
+)";
+
 static const char* g_QuadPS_Source = R"(
 Texture2D    g_Texture : register(t0);
 SamplerState g_Sampler  : register(s0);
@@ -62,6 +82,13 @@ struct QuadVertex {
     float x, y;         // screen position
     float u, v;         // texture coords
     float r, g, b, a;   // tint color 0..1
+};
+
+// Depth-buffered variant used by the TMD model path.
+struct Model3DVertex {
+    float x, y, z;      // screen position + normalised [0,1] depth
+    float u, v;
+    float r, g, b, a;
 };
 
 struct SpriteConstantBuffer {
@@ -102,6 +129,7 @@ struct MarniDX::Impl {
     ID3D11SamplerState*      sampLinear    = nullptr;
     ID3D11SamplerState*      sampPoint     = nullptr;
     ID3D11DepthStencilState* depthDisabled = nullptr;
+    ID3D11DepthStencilState* depthEnabled  = nullptr;
 
     // shaders / buffers
     ID3D11VertexShader*      quadVS        = nullptr;
@@ -109,6 +137,11 @@ struct MarniDX::Impl {
     ID3D11InputLayout*       quadLayout    = nullptr;
     ID3D11Buffer*            quadVB        = nullptr;
     ID3D11Buffer*            spriteCB      = nullptr;
+
+    // depth-buffered 3D model pipeline (shares quadPS and spriteCB)
+    ID3D11VertexShader*      model3DVS     = nullptr;
+    ID3D11InputLayout*       model3DLayout = nullptr;
+    ID3D11Buffer*            model3DVB     = nullptr;
 
     // fallback white 1x1 texture + SRV (handle index 1 reserved)
     ID3D11Texture2D*         whiteTex      = nullptr;
@@ -225,6 +258,40 @@ static bool CompileShaders(ID3D11Device* dev,
     return SUCCEEDED(hr);
 }
 
+// Compile the depth-buffered model VS + its input layout. Reuses the quad PS,
+// whose PS_INPUT signature is identical.
+static bool CompileModel3DShader(ID3D11Device* dev,
+                                 ID3D11VertexShader** outVS,
+                                 ID3D11InputLayout**  outLayout)
+{
+    ID3DBlob* vsBlob = nullptr;
+    ID3DBlob* errBlob = nullptr;
+
+    HRESULT hr = D3DCompile(g_Model3DVS_Source, strlen(g_Model3DVS_Source),
+        "Model3DVS", nullptr, nullptr, "main", "vs_4_0",
+        D3DCOMPILE_ENABLE_STRICTNESS, 0, &vsBlob, &errBlob);
+    if (FAILED(hr)) {
+        if (errBlob) { OutputDebugStringA("[MarniDX] model VS compile: ");
+            OutputDebugStringA((char*)errBlob->GetBufferPointer());
+            OutputDebugStringA("\n"); errBlob->Release(); }
+        return false;
+    }
+
+    hr = dev->CreateVertexShader(vsBlob->GetBufferPointer(),
+        vsBlob->GetBufferSize(), nullptr, outVS);
+    if (FAILED(hr)) { vsBlob->Release(); return false; }
+
+    D3D11_INPUT_ELEMENT_DESC layout[] = {
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+    };
+    hr = dev->CreateInputLayout(layout, 3, vsBlob->GetBufferPointer(),
+        vsBlob->GetBufferSize(), outLayout);
+    vsBlob->Release();
+    return SUCCEEDED(hr);
+}
+
 // Convert host bpp (4/8/16/24/32) to a contiguous RGBA8 (one DWORD/pixel)
 // buffer suitable for DXGI_FORMAT_R8G8B8A8_UNORM upload.
 // Returns a heap-allocated array (caller frees via free) or nullptr.
@@ -338,6 +405,10 @@ void MarniDX::Impl::ReleaseAllState()
     if (blendDisabled) { blendDisabled->Release(); blendDisabled = nullptr; }
     if (sampLinear)    { sampLinear->Release();    sampLinear    = nullptr; }
     if (sampPoint)     { sampPoint->Release();     sampPoint     = nullptr; }
+    if (model3DLayout) { model3DLayout->Release(); model3DLayout = nullptr; }
+    if (model3DVS)     { model3DVS->Release();     model3DVS     = nullptr; }
+    if (model3DVB)     { model3DVB->Release();     model3DVB     = nullptr; }
+    if (depthEnabled)  { depthEnabled->Release();  depthEnabled  = nullptr; }
     if (depthDisabled) { depthDisabled->Release(); depthDisabled = nullptr; }
     if (depthStencilView){ depthStencilView->Release(); depthStencilView = nullptr; }
     if (depthStencil)    { depthStencil->Release();     depthStencil     = nullptr; }
@@ -477,9 +548,23 @@ BOOL MarniDX::Create(HWND hWnd, int width, int height, BOOL fullScreen,
         p->ReleaseAllState(); return FALSE;
     }
 
+    // depth enabled (3D models) - the 2D layers neither test nor write, so
+    // enabling it here only affects the TMD path.
+    D3D11_DEPTH_STENCIL_DESC de = {};
+    de.DepthEnable    = TRUE;
+    de.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
+    de.DepthFunc      = D3D11_COMPARISON_LESS_EQUAL;
+    if (FAILED(p->device->CreateDepthStencilState(&de, &p->depthEnabled))) {
+        p->ReleaseAllState(); return FALSE;
+    }
+
     // shaders
     if (!CompileShaders(p->device, &p->quadVS, &p->quadPS, &p->quadLayout)) {
         OutputDebugStringA("[MarniDX] shader compile failed\n");
+        p->ReleaseAllState(); return FALSE;
+    }
+    if (!CompileModel3DShader(p->device, &p->model3DVS, &p->model3DLayout)) {
+        OutputDebugStringA("[MarniDX] model shader compile failed\n");
         p->ReleaseAllState(); return FALSE;
     }
 
@@ -490,6 +575,16 @@ BOOL MarniDX::Create(HWND hWnd, int width, int height, BOOL fullScreen,
     vb.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
     vb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
     if (FAILED(p->device->CreateBuffer(&vb, nullptr, &p->quadVB))) {
+        p->ReleaseAllState(); return FALSE;
+    }
+
+    // 3D model vertex buffer (3 verts/tri * 1024 triangles per call)
+    D3D11_BUFFER_DESC mvb = {};
+    mvb.Usage          = D3D11_USAGE_DYNAMIC;
+    mvb.ByteWidth      = sizeof(Model3DVertex) * 3 * 1024;
+    mvb.BindFlags      = D3D11_BIND_VERTEX_BUFFER;
+    mvb.CPUAccessFlags = D3D11_CPU_ACCESS_WRITE;
+    if (FAILED(p->device->CreateBuffer(&mvb, nullptr, &p->model3DVB))) {
         p->ReleaseAllState(); return FALSE;
     }
 
@@ -571,6 +666,11 @@ int MarniDX::ChangeDisplayMode(DWORD newW, DWORD newH, BOOL fullScreen)
 
     p->context->OMSetRenderTargets(0, nullptr, nullptr);
     if (p->rtv) { p->rtv->Release(); p->rtv = nullptr; }
+    // The depth surface has to be resized with the render target: D3D11 rejects
+    // a depth view whose dimensions differ from the colour view, which would
+    // silently leave the 3D models with no depth buffer after a resize.
+    if (p->depthStencilView) { p->depthStencilView->Release(); p->depthStencilView = nullptr; }
+    if (p->depthStencil)     { p->depthStencil->Release();     p->depthStencil     = nullptr; }
 
     HRESULT hr = p->swapChain->ResizeBuffers(2, newW, newH,
         DXGI_FORMAT_R8G8B8A8_UNORM, 0);
@@ -583,6 +683,18 @@ int MarniDX::ChangeDisplayMode(DWORD newW, DWORD newH, BOOL fullScreen)
         p->device->CreateRenderTargetView(bb, nullptr, &p->rtv);
         bb->Release();
     }
+
+    D3D11_TEXTURE2D_DESC ds = {};
+    ds.Width            = newW;  ds.Height = newH;
+    ds.MipLevels        = 1;     ds.ArraySize = 1;
+    ds.Format           = DXGI_FORMAT_D24_UNORM_S8_UINT;
+    ds.SampleDesc.Count = 1;
+    ds.Usage            = D3D11_USAGE_DEFAULT;
+    ds.BindFlags        = D3D11_BIND_DEPTH_STENCIL;
+    if (SUCCEEDED(p->device->CreateTexture2D(&ds, nullptr, &p->depthStencil)))
+        p->device->CreateDepthStencilView(p->depthStencil, nullptr,
+                                          &p->depthStencilView);
+
     D3D11_VIEWPORT vp = {};
     vp.Width = (float)newW; vp.Height = (float)newH; vp.MaxDepth = 1.0f;
     p->context->RSSetViewports(1, &vp);
@@ -993,6 +1105,66 @@ void MarniDX::DrawTriangles(const float* verts, int triCount, MarniHandle tex,
     p->context->Draw((UINT)(triCount * 3), 0);
 }
 
+void MarniDX::DrawTriangles3D(const float* verts, int triCount, MarniHandle tex,
+                              MarniSampler sampler, MarniBlend blend)
+{
+    Impl* p = m_pImpl;
+    if (!p || !p->ready || !verts || triCount <= 0) return;
+    if (triCount > 1024) triCount = 1024;
+    if (!p->context || !p->model3DVB || !p->spriteCB || !p->model3DVS
+        || !p->quadPS || !p->model3DLayout) return;
+
+    D3D11_MAPPED_SUBRESOURCE m = {};
+    if (FAILED(p->context->Map(p->model3DVB, 0, D3D11_MAP_WRITE_DISCARD, 0, &m)))
+        return;
+    memcpy(m.pData, verts, sizeof(Model3DVertex) * 3 * (size_t)triCount);
+    p->context->Unmap(p->model3DVB, 0);
+
+    SpriteConstantBuffer cb;
+    BuildOrthoMatrix(&cb.mvp[0][0], 0.0f, (float)p->width,
+                                   (float)p->height, 0.0f);
+    D3D11_MAPPED_SUBRESOURCE cm = {};
+    if (SUCCEEDED(p->context->Map(p->spriteCB, 0, D3D11_MAP_WRITE_DISCARD, 0, &cm))) {
+        memcpy(cm.pData, &cb, sizeof(cb));
+        p->context->Unmap(p->spriteCB, 0);
+    }
+
+    UINT stride = sizeof(Model3DVertex), offset = 0;
+    p->context->IASetVertexBuffers(0, 1, &p->model3DVB, &stride, &offset);
+    p->context->IASetInputLayout(p->model3DLayout);
+    p->context->IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
+    p->context->VSSetShader(p->model3DVS, nullptr, 0);
+    p->context->VSSetConstantBuffers(0, 1, &p->spriteCB);
+    p->context->PSSetShader(p->quadPS, nullptr, 0);
+
+    ID3D11ShaderResourceView* srv = nullptr;
+    if ((int)tex > 0 && (int)tex < MARNI_MAX_TEXTURES)
+        srv = p->slots[tex].srv;
+    if (!srv) srv = p->whiteSRV;
+    if (!srv) return;
+    p->context->PSSetShaderResources(0, 1, &srv);
+
+    ID3D11SamplerState* s = (sampler == MARNI_SAMPLER_POINT) ? p->sampPoint : p->sampLinear;
+    if (!s) s = p->sampLinear;
+    p->context->PSSetSamplers(0, 1, &s);
+
+    ID3D11BlendState* bs = p->blendAlpha;
+    if (blend == MARNI_BLEND_ADD)       bs = p->blendAdd;
+    else if (blend == MARNI_BLEND_DISABLE) bs = p->blendDisabled;
+    if (!bs) bs = p->blendAlpha;
+    float bf[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+    p->context->OMSetBlendState(bs, bf, 0xFFFFFFFFu);
+
+    if (p->depthEnabled)
+        p->context->OMSetDepthStencilState(p->depthEnabled, 0);
+
+    p->context->Draw((UINT)(triCount * 3), 0);
+
+    // Leave the pipeline in the 2D state the rest of the renderer expects.
+    if (p->depthDisabled)
+        p->context->OMSetDepthStencilState(p->depthDisabled, 0);
+}
+
 void MarniDX::DrawRect(int x, int y, int w, int h, DWORD color)
 {
     Impl* p = m_pImpl;
@@ -1012,6 +1184,45 @@ void MarniDX::DrawRect(int x, int y, int w, int h, DWORD color)
         { x1, y1, 1.0f, 1.0f, r, g, b, a },
     };
     // rects use the white texture; encode via NULL handle -> white fallback.
+    DrawQuadInternal(p, verts, MARNI_NULL_HANDLE,
+                     MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
+}
+
+void MarniDX::DrawLine(float x0, float y0, float x1, float y1,
+                       float thickness, DWORD color)
+{
+    Impl* p = m_pImpl;
+    if (!p || !p->ready) return;
+
+    float r = ((color >> 16) & 0xFF) / 255.0f;
+    float g = ((color >> 8)  & 0xFF) / 255.0f;
+    float b = ( color        & 0xFF) / 255.0f;
+    float a = ((color >> 24) & 0xFF) / 255.0f;
+
+    // Thicken the segment with a quad perpendicular to its direction.
+    float dx = x1 - x0;
+    float dy = y1 - y0;
+    float len = sqrtf(dx * dx + dy * dy);
+    float nx, ny;
+    if (len < 0.001f) {
+        nx = 1.0f;
+        ny = 0.0f;
+    } else {
+        nx = -dy / len;
+        ny =  dx / len;
+    }
+    float hw = thickness * 0.5f;
+    float ox = nx * hw;
+    float oy = ny * hw;
+
+    QuadVertex verts[6] = {
+        { x0 - ox, y0 - oy, 0.0f, 0.0f, r, g, b, a },
+        { x1 - ox, y1 - oy, 1.0f, 0.0f, r, g, b, a },
+        { x0 + ox, y0 + oy, 0.0f, 1.0f, r, g, b, a },
+        { x0 + ox, y0 + oy, 0.0f, 1.0f, r, g, b, a },
+        { x1 - ox, y1 - oy, 1.0f, 0.0f, r, g, b, a },
+        { x1 + ox, y1 + oy, 1.0f, 1.0f, r, g, b, a },
+    };
     DrawQuadInternal(p, verts, MARNI_NULL_HANDLE,
                      MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
 }
