@@ -236,9 +236,14 @@ unsigned int Flg_ck(int baseAddr, unsigned int bitIndex)
 // Uses the currently selected item (e.g., ink ribbon, key, weapon).
 // Consumes the item from inventory and handles related game state.
 // ============================================================================
+// NOTE: the original reads/writes g_ItemSlotsPointer (0x00d22768) directly and
+// has no NULL guard. The port previously used g_firstItemSlotPointer (a .gwipe
+// save-overlay global that is never assigned) and bailed when it was NULL -
+// which silently made door-key consumption a no-op. Fixed to the original's
+// pointer; the guard was the dead-pointer crutch, not part of the original.
 void use_room_action_item(void)
 {
-    if (g_firstItemSlotPointer == NULL) return;
+    unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
 
     g_usedItemId = g_selectedItemId;
 
@@ -247,15 +252,15 @@ void use_room_action_item(void)
 
     // Find the item in inventory
     unsigned char index = 0;
-    unsigned char itemId = g_firstItemSlotPointer[0];
+    unsigned char itemId = slots[0];
     while (itemId != g_selectedItemId) {
         index++;
-        itemId = g_firstItemSlotPointer[index * 2];
+        itemId = slots[index * 2];
     }
 
     // If item is a weapon (ID < 0x0B): unequip and remove
     if (g_selectedItemId < 0x0B) {
-        g_firstItemSlotPointer[index * 2] = 0;
+        slots[index * 2] = 0;
         if ((unsigned int)g_EquippedItemId - (unsigned int)index == 1) {
             g_EquippedItemId = 0;
         }
@@ -264,17 +269,17 @@ void use_room_action_item(void)
     }
 
     // For consumable items: decrement quantity
-    unsigned char quantity = g_firstItemSlotPointer[index * 2 + 1];
+    unsigned char quantity = slots[index * 2 + 1];
     if (quantity != 0) {
-        g_firstItemSlotPointer[index * 2 + 1] = quantity - 1;
-        if (g_firstItemSlotPointer[index * 2 + 1] == 0) {
+        slots[index * 2 + 1] = quantity - 1;
+        if (slots[index * 2 + 1] == 0) {
             // Item depleted
             if (g_selectedItemId > 0x32 && g_selectedItemId < 0x3D) {
                 // Key item depleted — display drop message
                 g_main_state_flags |= 0x2000;
                 return;
             }
-            g_firstItemSlotPointer[index * 2] = 0;
+            slots[index * 2] = 0;
             rearrange_item_slots();
         }
     }

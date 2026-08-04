@@ -708,6 +708,17 @@ DWORD g_VideoDriverArray_03c[64] = {};
 DWORD g_VideoDriverArray_04c[64] = {};
 unsigned char g_eventItemUsedFlag = 0;   // 0x00be9615
 int g_pendingDoorRecord = 0;             // 0x00bebcbc
+unsigned char g_typewriter_state = 0;    // 0x00be9616
+unsigned char g_itembox_state = 0;       // 0x00be9617
+unsigned char g_desk_check_state = 0;    // 0x00be9618
+unsigned short g_short_itembox_open_timer = 0; // 0x004d6eac
+void* g_itembox_cover_pointer = NULL;    // 0x004d6eb0
+unsigned int g_typewriter_id = 0;        // 0x004d6eb8
+short g_counter_increase = 0;            // 0x004d6ebc
+unsigned char g_ItemSlotIndices[8] = {}; // 0x00d21cd0
+unsigned int DAT_00ae9ef0 = 0;           // 0x00ae9ef0
+unsigned int DAT_00d226e8 = 0;           // 0x00d226e8
+unsigned char DAT_00be63c8[0x80] = {};   // 0x00be63c8
 unsigned char g_nextRoomDoorType = 0;    // 0x00be0bc8
 unsigned char g_nextRoomSfxId = 0;       // 0x00be0bc1
 unsigned char g_nextRoom_be05b7 = 0;     // 0x00be05b7
@@ -1227,25 +1238,26 @@ __declspec(allocate(".gwipe$9620")) BioCardLayout g_BioCard = {};
 //   STR_START (0x02) = line break/newline
 //   STR_L2    (0x03) = page break / section separator
 //   STR_R2    (0x04) = line spacing / formatting marker
-//   STR_L1    (0x05) = dynamic item name placeholder
+//   \i        (05 01 06 00 05 00) = dynamic item name placeholder (CLUT 1,
+//              tag 6 arg 0 = selected item, CLUT 0 - see PrintText.h)
 //   STR_CIR   (0x08) = Circle button glyph
 //   STR_SQR   (0x0A) = Square button glyph
 // ============================================================================
 
-// [0] 0x004BF3D8 - Item pickup prompt
-static constexpr auto s_gm00 = STR("Will you take\\nthe \\i");
+// [0] 0x004BF3D8 - Item pickup prompt (yes/no + Square glyph hint)
+static constexpr auto s_gm00 = STR("Will you take\\nthe \\i?\\c\\n\\q ");
 // [1] 0x004BF3F7 - Item obtained
-static constexpr auto s_gm01 = STR("You got the \\i");
+static constexpr auto s_gm01 = STR("You got the \\i.");
 // [2] 0x004BF40C - Inventory full
 static constexpr auto s_gm02 = STR("You can't carry any more\\nitems.");
 // [3] 0x004BF42D - Item used
-static constexpr auto s_gm03 = STR("You have used\\nthe \\i");
-// [4] 0x004BF448 - Item discard prompt
-static constexpr auto s_gm04 = STR("Will you put down the\\n\\i");
-// [5] 0x004BF46B - Item use prompt
-static constexpr auto s_gm05 = STR("Will you use\\nthe \\i");
-// [6] 0x004BF489 - Dynamic item name only
-static constexpr auto s_gm06 = STR("\\i");
+static constexpr auto s_gm03 = STR("You have used\\nthe \\i.");
+// [4] 0x004BF448 - Item discard prompt (auto-dismiss 1 after the choice)
+static constexpr auto s_gm04 = STR("Will you put down the\\n\\i?\\c\\n\\q\\d\\x01");
+// [5] 0x004BF46B - Item use prompt (auto-dismiss 1 after the choice)
+static constexpr auto s_gm05 = STR("Will you use\\nthe \\i?\\c\\n\\q\\d\\x01");
+// [6] 0x004BF489 - Picked up the item (msg 0xc6; auto-dismiss 1)
+static constexpr auto s_gm06 = STR("\\i\\nhas been filed.\\p \\d\\x01");
 // [7] 0x004BF4A3 - Key discard confirmation
 static constexpr auto s_gm07 = STR("This key is useless now.\\nDiscard?\\c\\n\\q\\n");
 // [8] 0x004BF4CA - Door locked, sword carving
@@ -1257,7 +1269,7 @@ static constexpr auto s_gm10 = STR("\\nIt's locked.\\p\\nA carving of a shield."
 // [11] 0x004BF53E - Door locked, helmet carving
 static constexpr auto s_gm11 = STR("\\nIt's locked.\\p\\nA carving of a helmet.");
 // [12] 0x004BF566 - Door tightly locked with plate
-static constexpr auto s_gm12 = STR("The door is tightly\\nlocked.\\pThere's a plate on right\\nhand side.");
+static constexpr auto s_gm12 = STR("The door is tightly\\nlocked.\\p There's a plate on right\\nhand side.");
 // [13] 0x004BF5A8 - Door locked, says Closet
 static constexpr auto s_gm13 = STR("\\nIt's locked.\\p\\nThe door says \"Closet\".");
 // [14] 0x004BF5D1 - Door locked, plate says 002
@@ -1265,9 +1277,9 @@ static constexpr auto s_gm14 = STR("\\nIt's locked.\\p\\nThe plate says 002.");
 // [15] 0x004BF5F6 - Door locked, plate says 003
 static constexpr auto s_gm15 = STR("\\nIt's locked.\\p\\nThe plate says 003.");
 // [16] 0x004BF61B - Door locked, says Control Room
-static constexpr auto s_gm16 = STR("\\nIt's locked.\\pThe door says\\n\"Control Room\".");
+static constexpr auto s_gm16 = STR("\\nIt's locked.\\p The door says\\n\\oControl Room\".");
 // [17] 0x004BF649 - Power Room door locked
-static constexpr auto s_gm17 = STR("\\n\"Power Room\"\\pThe door is tightly\\nlocked.");
+static constexpr auto s_gm17 = STR("\\n\\oPower Room\"\\p The door is tightly\\nlocked.");
 // [18] 0x004BF675 - Generic locked
 static constexpr auto s_gm18 = STR("\\nIt's locked.");
 // [19] 0x004BF684 - Locked from inside
@@ -1275,7 +1287,7 @@ static constexpr auto s_gm19 = STR("\\nIt's locked from inside.");
 // [20] 0x004BF69F - Unlocked
 static constexpr auto s_gm20 = STR("\\nYou unlocked it.");
 // [21] 0x004BF6B2 - Locked, use lockpick
-static constexpr auto s_gm21 = STR("\\nIt's locked.\\pUse the lockpick to open\\nthe door.");
+static constexpr auto s_gm21 = STR("\\nIt's locked.\\p Use the lockpick to open\\nthe door.");
 // [22] 0x004BF6E5 - Hurry message
 static constexpr auto s_gm22 = STR("\\nI've got to hurry!");
 // [23] 0x004BF6FA - No time to check

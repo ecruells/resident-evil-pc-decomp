@@ -1657,3 +1657,118 @@ If the original reads the same four values, the placement is correct and the
 difference is in the renderer, not the game logic. If it reads something else, some
 writer we have not found adjusts the position and that trace names the frame it
 happens on.
+
+### Seventeenth run: room actions by the action/confirm key
+
+All 18 `room_check_actions` handlers are now transcribed and wired, the action-key
+entry points are implemented, and the per-frame interaction state machines replaced
+the four empty stubs that used to sit in EngineStubs.cpp. Build passes.
+
+**What landed (each with its original address):**
+
+- Action-key probes: `check_action_object` (`0x0041c150`) — the event-table scan that
+  only fires entries with flag bit `0x80` set (the ones `update_player_position`
+  deliberately skips, i.e. objects/items rather than doors); `check_climb_object`
+  (`0x00474930`) + `ChkPlReachEntity` (`0x00474a20`) — the crate/climb-object scan of
+  `g_itemboxes_covers_table` with the ±299/4096 angle window; `door_transition_update`
+  (`0x00495d70`).
+- Handlers `room_check_actions[2..0x11]`: `display_msg_room_action`, `include_key`,
+  `set_key_flag`, `check_door_side` (the Z-axis sibling of `check_door`), `flag_bank_set`
+  (10-way flag-bank bit set/clear), `open_itembox`, `create_room_event`,
+  `room_action_noop10`, `room_action_effect`, `set_stairs_zone`, `set_room_event_flag`,
+  `check_desk`, `pickup_key_event`, `check_typewriter`, `stairs_height_update`.
+- Interaction animations under animFrameId 1/2: `player_behavior_0c_interact`
+  (`0x00495e00`), `player_behavior_0b_ladder` (`0x00496480`, 8-state climb with the
+  byte-indexed step-sound table at `0x004d45cc`), `player_behavior_10_push`
+  (`0x00457230`), plus the empty `0x09`/`0x0e`/`0x0f` slots.
+- Per-frame state machines: `check_desk_state` (`0x0041bc90`), `check_itembox_state`
+  (`0x0041c240`, lid animation), `check_typewriter_state` (`0x0041c330`, save flow),
+  `check_event_item_usage` (`0x0041c490`), `room_event_item_pickup` (`0x00451700`,
+  the actual inventory add — stacking, 0xfa cap, slot-index bookkeeping),
+  `memset_` (`0x0047cf60`).
+
+**Fixes to pre-existing port code:**
+
+- `use_room_action_item` (`0x004631f0`, SaveLoadScreen.cpp) read `g_firstItemSlotPointer`
+  — a `.gwipe` overlay global that is never assigned — and bailed on NULL, so key
+  consumption was a silent no-op. Now uses `g_ItemSlotsPointer` like the original.
+- `check_desk`'s desks-table writes go *through* the pointer
+  (`MOV EAX,[ECX*4+0xd21360]; OR byte ptr [EAX],1`), not at the table base — the
+  byte-flag lives on the desk omodel, byte 0. Same for `pickup_key_event` /
+  `check_desk_state` case 4.
+
+**Untouched / known limits:**
+
+- `check_and_display_interactive_screen` (`0x0042a030`, lab slides / passcode panels)
+  is still a stub — a separate subsystem gated by PlayerFlags bit 0x20, not the
+  action-key flow.
+- `set_screen_effect_struct` (`0x004567d0`) writes the effect struct at `0x00be63c8`,
+  whose consumer (`0x00456a10`) is not ported — inert by design until it is.
+- The `[zone]` / `[door]` diagnostics in `update_player_position` and `door_try_enter`
+  still print; they were left in place for this test round.
+
+### Eighteenth run: crash fix + pickup/itembox softlock fixes
+
+**The door crash** — `cmd_em_set` passed `(char)g_ScdOpcodes[3]` sign-extended to
+`Flg_ck`. The original's assembly is `MOV CL, AL` (zero-extend); the Ghidra
+decompiler rendered it as `*(char*)` and the port transcribed the signed cast.
+Rooms whose enemy entries use event-flag ids 0x80-0xFE computed a ~33MB byte
+offset in Flg_ck and faulted. Fixed with `(unsigned char)`. This is the reverse
+of the "Ghidra's U suffix" trap: MOVZX rendered as signed char.
+
+**The pickup softlock** — `menu_update_status_screen` (0x00482910) was an empty
+stub returning 0, so main_menu state 8 (the "you got the item" screen, entered
+when msf bit 0x100 is set after a key/desk pickup) spun forever. Implemented
+the whole chain: pickup_fade_update (0x00482800, the overlay rect ramp),
+pickup_mark_seen (0x00482be0), pickup_list_advance/init/input (0x00482250/90/b0),
+pickup_screen_render (0x004823a0, the slide-in list with the arror.tim /
+filem_lX.pix / file000.tim loads), pickup_load_texture/unpack_list
+(0x00482710/c0), pickup_screen_init_table (0x00482c50), pickup_item_seen
+(0x00488680), plus the DAT_004d2a08 key-item list, the DAT_004d2620 counts and
+the four static TextureDescs at 0x004d2888/2988/29ac/29d0 (byte-transcribed).
+
+**The itembox softlock** — `menu_itembox_interaction` (0x004941f0) was an empty
+stub returning 0, so main_menu state 3 never exited. Implemented the full
+storage screen: player-row / 48-slot grid cursors, confirm swaps via
+g_itemboxSlots, L1/R1 paging with the SUBMENU_STATE_ID slide, plus
+itembox_refresh_item (0x00420b80), itembox_draw_cursor (0x00420a70) and
+itembox_draw_slot_icon (0x00443040, x=(slot&1)*20, y=((slot&~1)<<4)+0x50 per
+the disassembly).
+
+**Still open** — the "menu opens in map mode" report. The map display state
+machine (mode 5, msf 0x200) was traced against the original and matches; no
+hang found in states 0-8 (the zoom state 6 waits for MAP_HL_STATE==1 which
+nothing sets - in the ORIGINAL too - and the menu state 3 exits on zoom==6
+regardless, so it is a cosmetic wait, not a hang). If the report persists, the
+next step is the [MENU]/[MAP] ODS output to see which state actually stalls.
+
+### Nineteenth run: map-mode root cause + map display fix
+
+**The "pickup opens the menu in map mode" trigger — a port transcription bug,
+not the original design (corrected 2026-08-04).** The trigger is real: the
+dining room's event 9 runs `room_action slot=6 act=0x4`, i.e.
+`set_key_flag(&entry[6])`, and with entry+2 == 0 `set_key_flag` raises an msf
+bit that main_menu consumes as a menu mode. But the bit is **0x800** — the
+original disassembly is `OR dword ptr [0x00be41c0], 0x800` at 0x0041b6b0, i.e.
+menu mode 3/4, the ITEM VIEWER (3D model + description). The port had written
+`0x200` (menu mode 5, the map display) — that is why a pickup opened the menu
+on the map tab. Fixed in `set_key_flag` (PlayerAnimations.cpp). A byte-level
+scan of every `OR [0x00be41c0], imm` in the original shows 0x200 is never set
+anywhere; 0x800 is raised by set_key_flag, check_desk_state case 5 and
+player_behavior_0c_interact (all three already correct in the port except the
+first). The "map display is the record-less fallback" conclusion above was
+built on the same wrong 0x200 value and is invalid. Decoded with
+a proper SCD walker built from the port's opcode lengths; the hall items
+(slots 11-15) use act=0x02 display_msg and set no msf bits at all.
+
+**The map display corruption — found from the user's ODS log.** The log's
+`[MAP] zoom0 slot0xd r=0 | zoom1 slot0xf r=1` showed zoom0's AddSprite_Ex
+rejected while zoom1/2 passed. AddSprite_Ex (Rendering.cpp:613) rejects a
+sprite when `printClutTint - pageClutBase` is out of range: page 0x1C (zoom0's
+page, clut base 0) vs the desc's printClutTint 0x1ff -> clutIdx 511 -> return 0
+-> the map sprite never drew, leaving a broken-looking display the menu could
+not be read from. zoom1/2 matched page 0x1E (clut 0x1ff). Fixed g_MapZoomDesc[0]
+printClutTint to 0 to match its page; the zoom-in/park/cancel/zoom-out/close
+state machine (verified against the original, including the "highlight wait"
+that is a cosmetic no-op in the original too) then completes and the menu
+closes with menu_restore_game_state clearing msf 0x100-0x8000.

@@ -2625,8 +2625,15 @@ static TextureDesc g_MapSprites[8] = {
 // animated by map_display_animate). The map01..09 TIMs are 128x128 (8bpp
 // width field is in 16-bit words), so the original 0x80/0x50/0x50 widths and
 // 0x50 pivots are correct for the PC textures.
+// zoom0 uses slot 0xd -> page 0x1C, whose CLUT base is 0x1E0 + pageOffset.
+// The display loads pass pageOffset 0x1f -> clut base 0x1ff for the LATER
+// pages, but the first loads land on pages whose CLUT base reads back 0
+// (the map TIMs' CLUT is consumed into the texture itself), so the original
+// desc clut 0x1ff made AddSprite_Ex reject zoom0 (clutIdx 511 out of range)
+// and the map never drew - the [MAP] log showed r=0 for zoom0. The desc is
+// retargeted to the page's actual CLUT base (0) so the map sprite is accepted.
 static TextureDesc g_MapZoomDesc[3] = {
-    { 0x51000000, 16, 0, 128, 100, 0x15, 0x00, 0x88, 0, 0x1ff, 0x80, 0x80, 0x80, 0, 80, 50, 0x1000, 0x1000 },
+    { 0x51000000, 16, 0, 128, 100, 0x15, 0x00, 0x88, 0, 0x000, 0x80, 0x80, 0x80, 0, 80, 50, 0x1000, 0x1000 },
     { 0x41000000, 0, 0, 80, 104, 0x15, 0x00, 0x88, 0, 0x1ff, 0x80, 0x80, 0x80, 0, 80, 52, 0x1000, 0x1000 },
     { 0x41000000, 0, 0, 80, 104, 0x15, 0x00, 0x88, 0, 0x1ff, 0x80, 0x80, 0x80, 0, 0, 52, 0x1000, 0x1000 }
 };
@@ -3506,17 +3513,799 @@ static void menu_init_map_display(void)
     map_build_area_mask(&DAT_00ac9890[0]);
 }
 
-// (0x004828f0) - Initialize status screen display
-static void menu_init_status_screen(void) { }
+// ============================================================================
+// Pickup-message screen (main_menu state 8, msf bit 0x100)
+//
+// This is the "you got the item" screen that follows a key/desk pickup: the
+// item list slides in with the picked item highlighted, the player confirms,
+// the message 0xc6 ("Picked up the X") plays, and the entry is consumed.
+// Previously menu_update_status_screen returned 0 forever, so state 8 spun in
+// an infinite loop and the game softlocked after any pickup.
+//
+// State block DAT_00ac98b0 (0x14 bytes):
+//   +0  state (0=fade in, 1=list)      +1  substate
+//   +2  render state (FUN_004823a0)    +3  spare
+//   +4  item slot byte (i>>3)          +5  item slot bit (i&7)
+//   +6  list cursor                    +7  character (0/1)
+//   +8  pickup-complete flag           +9  list-active flag
+//   +0xc slide position (short)        +0xe slide2 position (short)
+//   +0x10 "no more items" flag         +0x11 blink phase byte
+//   +0x12 blink counter                +0x13 button-hold counter
+// ============================================================================
 
-// (0x00482910) - Update status screen (returns non-zero when complete)
-static int menu_update_status_screen(void) { return 0; }
+// 0x004d2a08 - per-character key-item list (16 entries each; 0xfe = "seen"
+// marker, 0xff = empty). Initialized by pickup_screen_init_table. The port
+// also declares a const DAT_004d2a08 at line 175; this is the writable
+// runtime copy the screen mutates (the original's is in .data and modified).
+static unsigned char g_pickupKeyItemList[32] = {};
+static const unsigned char g_keyItemListInit[32] = {
+    /* Chris */ 0x0f, 0x02, 0xfe, 0x03, 0x05, 0x06, 0x07, 0x08,
+                0x09, 0x0a, 0x0c, 0x0d, 0x0e, 0xff, 0xff, 0xff,
+    /* Jill  */ 0x0f, 0x02, 0xfe, 0x03, 0x04, 0x05, 0x06, 0x07,
+                0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0xff,
+};
+// DAT_00ac98b0 (0x20 bytes) is declared at line 1101 as the save-file dialog
+// state block; the pickup screen reuses the same original address range.
+static unsigned char DAT_004d2a34;              // pickup fade ramp (rect r/g/b)
+static unsigned char DAT_004d2a35;
+static unsigned char DAT_004d2a36;
+static unsigned char DAT_004d2a38;              // arrow texture loaded flag
 
-// (0x00482b80) - Reset status screen state
-static void menu_reset_status_state(void) { }
+// 0x004d2a28 - fullscreen fade rect (r/g/b animated by FUN_00482800)
+static RectDrawDesc g_pickupFadeRect = { 0x60, 0, 0, 0x140, 0xf0, 0, 0, 0 };
 
-// (0x004941f0) - Item box interaction (browse, swap, store items)
-static int menu_itembox_interaction(void) { return 0; }
+// 0x004d2620 - per-item stack counts for the list navigation. The original
+// reads it unguarded by the item id (0xfe/0xff ids hit the following .data,
+// which is mostly zero - reproduced by the zero padding).
+static const unsigned char g_itemMaxCounts[0x28] = {
+    4, 6, 11, 4, 2, 6, 7, 7, 10, 5, 5, 4, 3, 3, 3, 4, 8, 8,
+    24, 52, 32, 20, 64, 40, 16, 0, 16, 16, 32, 32, 32, 32,
+    64, 1, 0, 1, 128, 0, 104, 0,
+};
+
+// 0x004d2648 - texture-page offsets for the arrow/file loads (stride 0xc)
+static const unsigned int g_pickupPageOffsets[8] = {
+    0x1c, 0x01c00140, 0x00080010, 0x1c, 0x01000140, 0x00c00080, 0x1d, 0,
+};
+
+// 0x004d2350 - per-list-item background files (filem_l0.pix .. filem_x0.pix,
+// fixed 0x2a-byte entries as the original indexes them)
+static const char g_filemPixNames[13][0x2a] = {
+    ".\\usa\\item_m2\\filem_l0.pix",
+    ".\\usa\\item_m2\\filem_m0.pix",
+    ".\\usa\\item_m2\\filem_n0.pix",
+    ".\\usa\\item_m2\\filem_o0.pix",
+    ".\\usa\\item_m2\\filem_p0.pix",
+    ".\\usa\\item_m2\\filem_q0.pix",
+    ".\\usa\\item_m2\\filem_r0.pix",
+    ".\\usa\\item_m2\\filem_s0.pix",
+    ".\\usa\\item_m2\\filem_t0.pix",
+    ".\\usa\\item_m2\\filem_u0.pix",
+    ".\\usa\\item_m2\\filem_v0.pix",
+    ".\\usa\\item_m2\\filem_w0.pix",
+    ".\\usa\\item_m2\\filem_x0.pix",
+};
+
+// Static TextureDescs for the list screen, transcribed byte-for-byte from
+// 0x004d2888 / 0x004d2988 / 0x004d29ac / 0x004d29d0.
+static unsigned char DAT_004d2888[0x20] = {
+    0x00,0x00,0x00,0x00, 0x18,0x00,0x18,0x00, 0x00,0x01,0xc0,0x00,
+    0x15,0x00,0x00,0x00, 0x00,0x00,0xfd,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+static unsigned char DAT_004d2988[0x20] = {
+    0x00,0x00,0x00,0x00, 0x51,0x30,0x00,0x30, 0x00,0xd0,0x00,0x78,
+    0x00,0x15,0x00,0x00, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+static unsigned char DAT_004d29ac[0x24] = {
+    0x00,0x00,0x00,0x00, 0x51,0x30,0x00,0xa8, 0x00,0x30,0x00,0x18,
+    0x00,0x15,0x00,0xd0, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+static unsigned char DAT_004d29d0[0x20] = {
+    0x00,0x00,0x00,0x00, 0x51,0x60,0x00,0xa8, 0x00,0x30,0x00,0x18,
+    0x00,0x15,0x00,0xd0, 0x18,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+
+// 0x00482c50 - initialize the key-item list table
+static void pickup_screen_init_table(void)
+{
+    for (int i = 0; i < 32; i++) g_pickupKeyItemList[i] = g_keyItemListInit[i];
+}
+
+// 0x00488680 - has the room-item flag for this list entry been raised?
+// 0xfe/0xff entries are "not applicable" and report 0.
+static int pickup_item_seen(unsigned char entry)
+{
+    if (entry == 0xff) return 0;
+    if (entry == 0xfe) return 0;
+    return Flg_ck((int)g_RoomFlags, entry + 0x82);
+}
+
+// 0x00482800 - pickup fade ramp: steps the overlay brightness by 0x20 per
+// call toward 0xff (mode 0) or 0 (mode 1); mode 2/3 jump instantly. Returns
+// 0xffffffff when the ramp reaches its target. DAT_004d2a34-36 ARE the fade
+// rect's r/g/b fields, so this doubles as the overlay draw.
+static int pickup_fade_update(int mode)
+{
+    unsigned int result = 0;
+    switch (mode) {
+    case 0:
+        result = 0;
+        {
+            unsigned int v = (unsigned int)DAT_004d2a34;
+            DAT_004d2a34 = (unsigned char)(v + 0x20);
+            DAT_004d2a35 = DAT_004d2a34;
+            DAT_004d2a36 = DAT_004d2a34;
+            if (0xfe < v + 0x20) {
+                result = 0xffffffff;
+                DAT_004d2a36 = 0xff;
+                DAT_004d2a35 = 0xff;
+                DAT_004d2a34 = 0xff;
+            }
+        }
+        break;
+    case 1:
+        result = 0;
+        {
+            unsigned int v = (unsigned int)DAT_004d2a34;
+            DAT_004d2a34 = (unsigned char)(v - 0x20);
+            DAT_004d2a35 = DAT_004d2a34;
+            DAT_004d2a36 = DAT_004d2a34;
+            if ((int)(v - 0x20) < 1) {
+                DAT_004d2a36 = 0;
+                DAT_004d2a35 = 0;
+                DAT_004d2a34 = 0;
+                result = 0xffffffff;
+            }
+        }
+        break;
+    case 2:
+        DAT_004d2a36 = 0xff;
+        DAT_004d2a35 = 0xff;
+        DAT_004d2a34 = 0xff;
+        break;
+    case 3:
+        DAT_004d2a36 = 0;
+        DAT_004d2a35 = 0;
+        DAT_004d2a34 = 0;
+        break;
+    }
+    g_pickupFadeRect.r = DAT_004d2a34;
+    g_pickupFadeRect.g = DAT_004d2a35;
+    g_pickupFadeRect.b = DAT_004d2a36;
+    draw_rect(&g_pickupFadeRect, 3, 1);
+    return (int)result;
+}
+
+// 0x00482be0 - mark the picked item "seen" in the key-item list: the first
+// 0xfe entry whose room flag is already raised becomes 0 (Chris/Jill half
+// selected by state[7]).
+static void pickup_mark_seen(unsigned char* state)
+{
+    for (int i = 0; i < 0x10; i++) {
+        unsigned char entry = g_pickupKeyItemList[i + state[7] * 0x10];
+        if (entry == 0xfe) {
+            int seen = pickup_item_seen(0);
+            if (seen != 0) {
+                g_pickupKeyItemList[i + state[7] * 0x10] = 0;
+                return;
+            }
+            seen = pickup_item_seen(1);
+            if (seen != 0) {
+                g_pickupKeyItemList[i + state[7] * 0x10] = 1;
+                return;
+            }
+        }
+    }
+}
+
+// 0x00482710 - load a pickup-screen texture file and page it in. mode 0 loads
+// the file only; mode 1/2 additionally LoadTexturePage with the page offset at
+// g_pickupPageOffsets[mode*0xc/4] (0x1c / 0x1d).
+static void pickup_load_texture(const char* path, unsigned int texId, int mode)
+{
+    if (SUBMENU_STATE_ID != texId) {
+        SUBMENU_STATE_ID = (unsigned char)texId;
+        empty_483510();
+        LoadFile(path, g_bgPakLoadBuffer, 0x20);
+        if (mode == 0) {
+            DAT_004d2a38 = 0;
+        } else if (mode != 1) {
+            LoadTexturePage(g_bgPakLoadBuffer, 0x15,
+                            (short)g_pickupPageOffsets[(mode * 0xc) / 4],
+                            0xe, 0, 0, 0, 0);
+            DAT_004d2a38 = 1;
+            return;
+        } else {
+            LoadTexturePage(g_bgPakLoadBuffer, 0x15,
+                            (short)g_pickupPageOffsets[0xc / 4],
+                            0xd, 0, 0, 0, 0);
+        }
+    }
+}
+
+// 0x004827c0 - unpack the item-list PAK file and page it in
+static void pickup_unpack_list(int index)
+{
+    unpack_pakfile_(g_bgPakLoadBuffer + *(int*)(g_bgPakLoadBuffer + index * 4),
+                    (void*)((int)g_TimImageBuffer__bitmap + 0x10000));
+    LoadTexturePage(g_bgPakLoadBuffer, 0x15, (short)g_pickupPageOffsets[6],
+                    0xe, 0, 0, 0, 0);
+}
+
+// 0x004823a0 - the list renderer state machine (defined below)
+static void pickup_screen_render(unsigned char* state);
+
+// 0x00482290 - pickup list init: cursor to 0, clear the no-more flag, run the
+// renderer from state 0 (loads the arrow texture)
+static void pickup_list_init(unsigned char* state)
+{
+    state[6] = 0;
+    state[0x10] = 0;
+    pickup_screen_render(state);
+}
+
+// 0x004822b0 - pickup list input: up/down moves the cursor through the item
+// list; confirm selects (b9=1, render state 5/8 slide-out) or, at the last
+// item, raises the no-more flag (c0=1) so the caller can finish.
+static void pickup_list_input(unsigned char* state)
+{
+    unsigned char count = g_itemMaxCounts[g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]]];
+    if (state[9] != 0) goto pickup_input_draw;
+
+    unsigned char* hold = &state[0x13];
+    if (((unsigned short)g_button_pressed_id & 0xa000) == 0) {
+        *hold = 0;
+    } else {
+        *hold = *hold + 1;
+    }
+    if ((((unsigned short)g_PlayerPadHeld & 0x2000) != 0) ||
+        ((((unsigned short)g_button_pressed_id & 0x2000) != 0 && (0x14 < *hold)))) {
+        if ((int)state[6] + 1U < (unsigned int)count) {
+            state[9] = 1;
+            state[2] = 5;
+            play_sfx(3, 8, 0);
+        } else {
+            if (state[0x10] != 0) goto pickup_input_mark;
+            state[0x10] = 1;
+            play_sfx(3, 4, 0);
+        }
+    }
+pickup_input_mark:
+    if ((((unsigned short)g_PlayerPadHeld & 0x8000) != 0) ||
+        ((((unsigned short)g_button_pressed_id & 0x8000) != 0 && (0x14 < *hold)))) {
+        if (state[0x10] == 1) {
+            state[0x10] = 0;
+            play_sfx(3, 4, 0);
+        } else {
+            if ((int)state[6] - 1 < 0) {
+                state[6] = 0;
+                goto pickup_input_draw;
+            }
+            state[9] = 1;
+            state[2] = 8;
+            play_sfx(3, 8, 0);
+        }
+    }
+pickup_input_draw:
+    pickup_screen_render(state);
+}
+
+// 0x00482250 - pickup list advance: first call initializes (b1 0->1), then
+// runs the input each frame. Also forces the fade overlay to full black so
+// the list renders over it.
+static void pickup_list_advance(unsigned char* state)
+{
+    pickup_fade_update(2);
+    if (state[1] == 0) {
+        pickup_list_init(state);
+        state[1] = state[1] + 1;
+        return;
+    }
+    if (state[1] != 1) {
+        return;
+    }
+    pickup_list_input(state);
+}
+
+// 0x00482b80 - reset the pickup-message state block
+static void menu_reset_status_state(void)
+{
+    pickup_screen_init_table();
+    for (int i = 0; i < 0x14; i++) DAT_00ac98b0[i] = 0;
+}
+
+// 0x004828f0 - initialize the status/pickup screen
+static void menu_init_status_screen(void)
+{
+    pickup_screen_init_table();
+    menu_reset_status_state();
+    DAT_00ac98b0[9] = 1;
+}
+
+// 0x00482910 - update the pickup-message screen; returns non-zero (0xffffffff)
+// when the pickup completes and the menu can close.
+static int menu_update_status_screen(void)
+{
+    unsigned char* state = DAT_00ac98b0;
+
+    if (state[0] == 0) {
+        if ((state[1] == 0) && (pickup_fade_update(0) != 0)) {
+            state[0] = 1;
+            state[7] = (((unsigned char*)&g_main_state_flags)[2] & 0x80) != 0;
+            unsigned char itemId = *(unsigned char*)(*(unsigned char**)((int)g_room_event_index + 8) + 8);
+            unsigned char uVar3 = itemId - 0x5f;
+            map_set_room_flag(uVar3);
+            pickup_mark_seen(state);
+            play_sfx(3, 6, 0);
+            for (unsigned int i = 0; i < 0x10; i++) {
+                if (g_pickupKeyItemList[i + state[7] * 0x10] == uVar3) {
+                    state[4] = (unsigned char)(i >> 3);
+                    state[5] = (unsigned char)(i & 7);
+                    state[6] = 0;
+                    state[9] = 1;
+                    state[0x10] = 0;
+                }
+            }
+        }
+        if (state[1] == 1) {
+            if (pickup_fade_update(1) != 0) {
+                state[8] = 1;
+            }
+            if (state[3] == 2) {
+                g_playerEntity.animationId = 1;
+                g_playerEntity.animFrameId = 0;
+                g_playerEntity.action_behavior = 0;
+                g_playerEntity.action_state = 0;
+                g_playerEntity.unk_8c = 0;
+                g_playerEntity.animation_frame_id = 0;
+                g_playerEntity.unk_bf = 0;
+                g_playerEntity.attackAnim = 0;
+                Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
+                state[3] = 0;
+                g_selectedItemId = *(unsigned char*)(*(unsigned char**)((int)g_room_event_index + 8) + 8);
+                set_message_display(0xc6, 0);
+            }
+        }
+    } else if ((state[0] == 1) && (pickup_list_advance(state), state[9] == 0)) {
+        if ((dpad_pressed_byte1() & 0x80) != 0) {
+            state[2] = 0xd;
+            state[9] = 1;
+            play_sfx(3, 5, 0);
+        }
+        if (((dpad_pressed_byte1() & 0x40) != 0) && (state[0x10] == 1)) {
+            state[2] = 0xd;
+            state[9] = 1;
+            play_sfx(3, 5, 0);
+        }
+    }
+
+    if ((state[8] == 1) && ((g_menu_choice_id & 0x80) == 0)) {
+        // Pickup complete: consume the entry and clear its flags.
+        unsigned char* evt = (unsigned char*)g_room_event_index;
+        unsigned char* record = *(unsigned char**)(evt + 8);
+        ((unsigned char*)g_desks_pointers_table[record[10]])[0] = 0;
+        *evt = 0;
+        FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
+        DAT_00be9833 = record[8];
+        state[8] = 0;
+        return 0xffffffff;
+    }
+    return 0;
+}
+
+// 0x004823a0 - pickup list renderer state machine: loads the list textures,
+// slides the list in/out per the cursor, and draws the item name strip.
+static void pickup_screen_render(unsigned char* state)
+{
+    switch (state[2]) {
+    case 0:
+        pickup_load_texture(".\\usa\\item_m2\\arror.tim", 0x96, 1);
+        *(unsigned short*)(state + 0xc) = 0x128;
+        state[9] = 1;
+        state[2] = 1;
+        *(unsigned short*)(state + 0xe) = 0;
+        // fall through
+    case 1:
+        LoadFile((const char*)&g_filemPixNames[g_pickupKeyItemList[((int)state[1] + state[7] * 2) * 8 + state[5]]],
+                 g_bgPakLoadBuffer, 0x20);
+        state[2] = 2;
+        return;
+    case 2:
+        pickup_unpack_list((int)state[6]);
+        *(unsigned short*)(state + 0xc) = 0x128;
+        state[2] = 3;
+        *(unsigned short*)(state + 0xe) = 300;
+        // fall through
+    case 3:
+        {
+            short sVar5 = *(short*)(state + 0xe) / 2;
+            short sVar4 = *(short*)(state + 0xc) - sVar5;
+            *(short*)(state + 0xe) = sVar5;
+            *(short*)(state + 0xc) = sVar4;
+            if (sVar4 < 1) {
+                *(unsigned short*)(state + 0xc) = 0;
+                *(unsigned short*)(state + 0xe) = 1;
+                state[2] = state[2] + 1;
+            }
+        }
+        break;
+    case 4:
+        state[9] = 0;
+        break;
+    case 5:
+        *(unsigned short*)(state + 0xc) = 0;
+        *(unsigned short*)(state + 0xe) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 6:
+        {
+            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xe);
+            *(short*)(state + 0xc) = sVar5;
+            *(short*)(state + 0xe) = *(short*)(state + 0xe) * 2;
+            if (sVar5 < -0x127) {
+                state[2] = state[2] + 1;
+                state[6] = state[6] + 1;
+            }
+        }
+        break;
+    case 7:
+        state[2] = 2;
+        break;
+    case 8:
+        *(unsigned short*)(state + 0xc) = 0;
+        *(unsigned short*)(state + 0xe) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 9:
+        {
+            short sVar5 = *(short*)(state + 0xc) + *(short*)(state + 0xe);
+            *(short*)(state + 0xc) = sVar5;
+            *(short*)(state + 0xe) = *(short*)(state + 0xe) * 2;
+            if (0x127 < sVar5) {
+                state[2] = state[2] + 1;
+                state[6] = state[6] - 1;
+            }
+        }
+        break;
+    case 0x0a:
+        state[2] = state[2] + 1;
+        break;
+    case 0x0b:
+        pickup_unpack_list((int)state[6]);
+        *(unsigned short*)(state + 0xc) = 0xfed8;
+        state[2] = state[2] + 1;
+        *(unsigned short*)(state + 0xe) = 300;
+        // fall through
+    case 0x0c:
+        {
+            short sVar5 = *(short*)(state + 0xe) / 2;
+            short sVar4 = *(short*)(state + 0xc) + sVar5;
+            *(short*)(state + 0xe) = sVar5;
+            *(short*)(state + 0xc) = sVar4;
+            if (-1 < sVar4) {
+                state[2] = 4;
+                *(unsigned short*)(state + 0xc) = 0;
+            }
+        }
+        break;
+    case 0x0d:
+        *(unsigned short*)(state + 0xc) = 0;
+        *(unsigned short*)(state + 0xe) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 0x0e:
+        {
+            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xe);
+            *(short*)(state + 0xc) = sVar5;
+            *(short*)(state + 0xe) = *(short*)(state + 0xe) * 2;
+            if (!(-0x128 < sVar5)) {
+                state[2] = state[2] + 1;
+            }
+        }
+        break;
+    case 0x0f:
+    case 0x10:
+        state[2] = state[2] + 1;
+        break;
+    case 0x11:
+        pickup_load_texture(".\\usa\\item_m2\\file000.tim" + (int)state[1] * 0x24,
+                            state[1] + 0x90, 0);
+        state[2] = state[2] + 1;
+        break;
+    case 0x12:
+        // b0=0, b1=1, b2=1, b3=2 - the "done" handoff to menu_update_status_screen
+        *(unsigned int*)state = 0x02010100;
+        break;
+    }
+
+    // Item-name strip position follows the slide
+    *(short*)(DAT_004d2888 + 4) = *(short*)(state + 0xc) + 0x18;
+    *(short*)(DAT_004d2888 + 6) = *(short*)(state + 0xe) + 0x18;
+    display_texture((TextureDesc*)DAT_004d2888, 0, 0xe, 1);
+
+    if (state[2] == 4) {
+        unsigned char blink = state[0x12] + 1;
+        state[0x12] = blink;
+        state[0x11] = ((blink & 0x30) == 0);
+        if (state[4] == 1) {
+            state[0x12] = 0;
+            state[0x11] = 1;
+        }
+        DAT_004d2988[0xe] = (unsigned char)(state[0x11] << 3);
+        DAT_004d29ac[0xe] = (unsigned char)(state[0x11] * 8 + 0x10);
+        if (state[6] != 0) {
+            display_texture((TextureDesc*)DAT_004d2988, 0, 0xd, 1);
+        }
+        display_texture((TextureDesc*)DAT_004d29ac, 0, 0xd, 1);
+        if ((unsigned int)g_itemMaxCounts[g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]]] -
+            (unsigned int)state[6] == 1) {
+            if (state[4] == 1) {
+                DAT_004d29d0[0x14] = 0x50;
+            } else {
+                DAT_004d29d0[0x14] = 0x20;
+            }
+            DAT_004d29d0[0x15] = DAT_004d29d0[0x14];
+            DAT_004d29d0[0x16] = DAT_004d29d0[0x14];
+            draw_texture((TextureDesc*)DAT_004d29d0, 1);
+        }
+    }
+}
+
+// ============================================================================
+// Item box storage screen (main_menu mode 2, state 3) - FUN_004941f0
+//
+// Two cursors: the player inventory row (DAT_00ae9f23, the shared menu
+// cursor) and the 48-slot box grid (DAT_00ae9f24). Confirm swaps the item
+// between the two; L1/R1 page the grid with a slide animation. Previously
+// this was an empty stub returning 0, so state 3 never exited and the box
+// softlocked after opening.
+// ============================================================================
+
+// 0x00420b80 - refresh the displayed item from the player cursor slot
+static void itembox_refresh_item(void)
+{
+    unsigned char slot = (DAT_00ae9f23 >> 1) - 4;
+    if (slot < g_TotalHeldItems) {
+        DAT_00ae9f1b = *((unsigned char*)g_ItemSlotsPointer + (unsigned int)slot * 2);
+        return;
+    }
+    DAT_00ae9f1b = 0;
+}
+
+// 0x00420a70 - draw the menu cursor frame at the current cursor position
+static void itembox_draw_cursor(void)
+{
+    g_TextureDesc.flags = 0x40;
+    g_TextureDesc.depth = 0x1c;
+    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.printClutTint = 0x1e4;
+    g_TextureDesc.screenX = *(short*)(g_MenuFrameDataBlock + DAT_00ae9f23 + 0x148);
+    g_TextureDesc.screenY = *(short*)(g_MenuFrameDataBlock + DAT_00ae9f23 + 0x149);
+    if ((DAT_00ae9f23 & 0xf8) != 0) {
+        g_TextureDesc.width = 0x28;
+        g_TextureDesc.texU = 0x80;
+        g_TextureDesc.texV = 0xe0;
+        g_TextureDesc.height = 0x1e;
+        if ((DAT_00ae9f18 & 0x20) == 0) {
+            g_TextureDesc.texU = 0xa8;
+        }
+        g_rect.x = 0xce;
+        if ((DAT_00ae9f19 & 2) == 0) {
+            g_TextureDesc.screenY = g_TextureDesc.screenY + 0x1e;
+        }
+        draw_texture(&g_TextureDesc, 5);
+        g_TextureDesc.texV = 0x90;
+        return;
+    }
+    g_TextureDesc.width = 0x30;
+    g_TextureDesc.texU = 0;
+    g_TextureDesc.texV = 0x50;
+    g_TextureDesc.height = 0x10;
+    if (g_MainMenuState == 3) {
+        g_TextureDesc.screenX = *(short*)(g_MenuFrameDataBlock + (DAT_00ae9f23 | 2) + 0x148);
+    }
+    draw_texture(&g_TextureDesc, 0x19);
+    g_TextureDesc.texV = 0x98;
+}
+
+// 0x00443040 - draw an item icon into the box grid from the shared item image.
+// The original places each row of 8 as a 2x4 mini-grid: x = (slot&1)*20,
+// y = ((slot&~1)<<4) + 0x50 (verified against the disassembly).
+static void itembox_draw_slot_icon(int imgType, int slot)
+{
+    LoadImage((int)g_TimImageBuffer__bitmap + imgType * 0x4b0, 0xc, slot + 0xf, 1,
+              (short)((slot & 1) * 0x14), (short)(((slot & 0xfe) << 4) + 0x50),
+              0x14, 0x1e, 1);
+}
+
+// 0x004941f0 - item box interaction; returns non-zero when the menu closes
+static int menu_itembox_interaction(void)
+{
+    if ((pad_held_byte1() & 8) != 0) {
+        play_sfx(3, 5, 0);
+        return 1;
+    }
+    switch (DAT_00ae9f20) {
+    case 0:
+        DAT_00ae9f20 = 1;
+        DAT_00ae9f24 = 0;
+        DAT_00ae9f18 = 0;
+        itembox_refresh_item();
+        // fall through
+    case 1:
+        if ((dpad_pressed_byte1() & 0x80) != 0) {
+            play_sfx(3, 5, 0);
+            return 1;
+        }
+        if ((dpad_pressed_byte1() & 0x40) != 0) {
+            play_sfx(3, 6, 0);
+            if ((DAT_00ae9f23 & 0xf8) == 0) {
+                return 1;
+            }
+            DAT_00ae9f20 = 2;
+            DAT_00ae9f26 = 0x0f;
+            DAT_00ae9f21 = 0;
+            DAT_00ae9f18 = 0;
+            DAT_00ae9f27 = 0;
+            DAT_00ae9f28 = 0;
+        } else {
+            if ((pad_held_byte1() & 0xf0) == 0) {
+                DAT_00ae9f18 = DAT_00ae9f18 - 1;
+            } else {
+                if (((pad_held_byte1() & 0xa0) != 0) && ((DAT_00ae9f23 & 0xf8) != 0)) {
+                    DAT_00ae9f23 = DAT_00ae9f23 ^ 2;
+                }
+                if ((pad_held_byte1() & 0x10) == 0) {
+                    if ((pad_held_byte1() & 0x40) != 0) {
+                        DAT_00ae9f23 = DAT_00ae9f23 + 4;
+                        if ((unsigned int)g_totalInventorySlots * 2 + 6 < (unsigned int)DAT_00ae9f23) {
+                            DAT_00ae9f23 = (DAT_00ae9f23 & 2) | 4;
+                        }
+                    }
+                } else {
+                    DAT_00ae9f23 = DAT_00ae9f23 - 4;
+                    if ((DAT_00ae9f23 & 0xfc) == 0) {
+                        DAT_00ae9f23 = (DAT_00ae9f23 & 2) | (g_totalInventorySlots * 2 + 4);
+                    }
+                }
+                itembox_refresh_item();
+                DAT_00ae9f18 = 0;
+                play_sfx(3, 4, 0);
+            }
+        }
+        break;
+    case 2:
+        if ((dpad_pressed_byte1() & 0x80) != 0) {
+            DAT_00ae9f20 = 1;
+            play_sfx(3, 5, 0);
+            break;
+        }
+        if ((dpad_pressed_byte1() & 0x40) != 0) {
+            if (g_itemboxSlots[DAT_00ae9f24].Id != 0 || DAT_00ae9f1b != 0) {
+                DAT_00ae9f20 = 1;
+                play_sfx(3, 6, 0);
+                unsigned char slot = (DAT_00ae9f23 >> 1) - 4;
+                unsigned int playerIdx = (unsigned int)slot;
+                if ((unsigned int)g_EquippedItemId - playerIdx == 1) {
+                    g_EquippedItemId = 0;
+                }
+                unsigned int boxIdx = (unsigned int)DAT_00ae9f24;
+                unsigned char boxItem = g_itemboxSlots[boxIdx].Id;
+                unsigned char boxQty = g_itemboxSlots[boxIdx].qty;
+                unsigned char* playerSlot = (unsigned char*)g_ItemSlotsPointer + playerIdx * 2;
+                g_itemboxSlots[boxIdx].Id = playerSlot[0];
+                g_itemboxSlots[boxIdx].qty = playerSlot[1];
+                playerSlot[0] = boxItem;
+                playerSlot[1] = boxQty;
+                if (g_TotalHeldItems <= slot) {
+                    unsigned char freeIdx = 0;
+                    if ((g_ItemSlotsBitmask & 1) != 0) {
+                        do {
+                            freeIdx++;
+                        } while ((g_ItemSlotsBitmask & (1u << (freeIdx & 0x1f))) != 0);
+                    }
+                    g_ItemSlotIndices[playerIdx] = freeIdx;
+                    g_ItemSlotsBitmask |= 1u << (freeIdx & 0x1f);
+                }
+                if ((boxItem != 0) && (boxItem < 0x6f)) {
+                    LoadItemImage((int)g_ItemImageLookupTable[(unsigned int)boxItem * 4] - 1,
+                                  (int)g_ItemSlotIndices[playerIdx], (int)g_TimImageBuffer__bitmap);
+                }
+                rearrange_item_slots();
+                itembox_refresh_item();
+                unsigned char newBoxItem = g_itemboxSlots[DAT_00ae9f24].Id;
+                if ((newBoxItem != 0) && (newBoxItem < 0x6f)) {
+                    itembox_draw_slot_icon((int)g_ItemImageLookupTable[(unsigned int)newBoxItem * 4] - 1,
+                                           DAT_00ae9f24 & 7);
+                }
+            }
+            break;
+        }
+        if (((pad_held_byte1() & 0x50) == 0) && (DAT_00ae9f28 == 0)) break;
+        if (((unsigned short)g_button_pressed_id & 0x5000) == 0) {
+            DAT_00ae9f26 = 0x0f;
+            DAT_00ae9f27 = 0;
+            break;
+        }
+        DAT_00ae9f20 = 3;
+        DAT_00ae9f28 = 1;
+        play_sfx(2, 0x21, 0);
+        if (((unsigned short)g_button_pressed_id & 0x1000) == 0) {
+            // R1 (or next page): slide forward
+            SUBMENU_STATE_ID = 0;
+            DAT_00ae9f1c = 1;
+            unsigned char next = DAT_00ae9f24 + 1;
+            if (next == 0x30) {
+                next = 0;
+            }
+            unsigned char itemId = g_itemboxSlots[next].Id;
+            DAT_00ae9f24 = next;
+            if ((itemId != 0) && (itemId < 0x6f)) {
+                itembox_draw_slot_icon((int)g_ItemImageLookupTable[(unsigned int)itemId * 4] - 1,
+                                       next & 7);
+            }
+        } else {
+            // L1: slide back
+            SUBMENU_STATE_ID = 0x0f;
+            DAT_00ae9f1c = -1;
+            if (DAT_00ae9f24 == 0) {
+                DAT_00ae9f24 = 0x2f;
+            } else {
+                DAT_00ae9f24 = DAT_00ae9f24 - 1;
+            }
+            unsigned char itemId = g_itemboxSlots[DAT_00ae9f24].Id;
+            if ((itemId != 0) && (itemId < 0x6f)) {
+                itembox_draw_slot_icon((int)g_ItemImageLookupTable[(unsigned int)itemId * 4] - 1,
+                                       DAT_00ae9f24 & 7);
+            }
+        }
+        if (((unsigned short)(DAT_00ae9f27 & (g_button_pressed_id >> 8)) != 0) &&
+            (DAT_00ae9f26 == 0)) {
+            if (DAT_00ae9f1c < 1) {
+                DAT_00ae9f1c = -3;
+            } else {
+                DAT_00ae9f1c = 3;
+            }
+        }
+        // fall through
+    case 3:
+        if ((unsigned short)(DAT_00ae9f27 & (g_button_pressed_id >> 8)) == 0) {
+            DAT_00ae9f26 = 0x0f;
+            if (((unsigned short)g_button_pressed_id & 0x5000) == 0) {
+                DAT_00ae9f27 = 0;
+            } else if (((unsigned short)g_button_pressed_id & 0x1000) == 0) {
+                DAT_00ae9f27 = 0x40;
+            } else {
+                DAT_00ae9f27 = 0x10;
+            }
+        } else if (DAT_00ae9f26 != 0) {
+            DAT_00ae9f26 = DAT_00ae9f26 - 1;
+        }
+        SUBMENU_STATE_ID = SUBMENU_STATE_ID + DAT_00ae9f1c;
+        if (SUBMENU_STATE_ID == 0x0f) {
+            SUBMENU_STATE_ID = 0;
+        }
+        if (SUBMENU_STATE_ID == 0) {
+            DAT_00ae9f20 = 2;
+            if (0 < DAT_00ae9f1c) {
+                if (DAT_00ae9f24 == 0x2f) {
+                    DAT_00ae9f24 = 0;
+                } else {
+                    DAT_00ae9f24 = DAT_00ae9f24 + 1;
+                }
+            }
+            DAT_00ae9f1c = 0;
+        }
+        break;
+    }
+    itembox_draw_cursor();
+    FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    return 0;
+}
 
 // (0x00494730) - Load item box menu textures
 static void loadMenuAssets(void) { }

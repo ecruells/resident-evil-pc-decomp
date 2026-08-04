@@ -2,6 +2,7 @@
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
 #include <cstdio>
+#include <cstdlib>
 #include "../DebugPrint.h"
 
 // ============================================================================
@@ -1510,33 +1511,193 @@ static void player_state_01_control(void)
 // animationId they were previously mislabelled with.
 // ----------------------------------------------------------------------------
 // ----------------------------------------------------------------------------
-// Helpers the control state reaches for. Each is a real function in the original
-// and still to be transcribed; they report by address so the log names whichever
-// one the player is actually asking for.
+// Helpers the control state reaches for.
 //
 // CORRECTION: 0x00474930 is NOT a door check, despite feeding action_behavior 10.
 // It walks g_itemboxes_covers_table through ChkPlReachEntity and an angle window,
 // so behaviour 10 is "climb over / push object". Doors do not come through here at
 // all - check_door sets unk_03 |= 0x20 and the branch on that bit in
 // player_input_to_behavior selects action_behavior 0x11 instead.
-//
-// Still to transcribe; it needs ChkPlReachEntity, which the port does not have yet.
 // ----------------------------------------------------------------------------
-static int player_check_climb_object(void)       // 0x00474930
+
+// ============================================================================
+// ChkPlReachEntity (0x00474a20)
+// Returns 1 if the player, after walking 470 units straight ahead, would still be
+// inside the entity's bounding box. Side-effect: zeroes the failing axis in
+// g_svecScratch so the caller can decide which direction to slide the player.
+//
+// The bbox test uses the unsigned trick: (probeX - entX + extX) as uint must be
+// <= 2*extX, which fails both for probes far left (negative wraps to huge) and
+// far right (exceeds 2*extX) while accepting everything within the box.
+// ============================================================================
+int ChkPlReachEntity(int obj)
 {
-    player_state_report_missing("0x00474930 check climb/push object");
+    g_svecScratch.x = 470;
+    g_svecScratch.z = 0;
+    MovePlayerXZ(g_playerEntity.directionAngle, &g_svecScratch, &g_svecScratch);
+    g_svecScratch.x = g_svecScratch.x + (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+    g_svecScratch.z = g_svecScratch.z + (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+
+    short extX = *(short*)(obj + 0x8a);
+    short extZ = *(short*)(obj + 0x8e);
+
+    if ((unsigned int)(extX * 2) < (unsigned int)((int)(*(int*)(obj + 0x34) - extX) + g_svecScratch.x)) {
+        return 0;
+    }
+    if ((unsigned int)(extZ * 2) < (unsigned int)((int)(*(int*)(obj + 0x3c) - extZ) + g_svecScratch.z)) {
+        return 0;
+    }
+    if (abs(g_svecScratch.z) < abs(g_svecScratch.x)) {
+        g_svecScratch.z = 0;
+    } else {
+        g_svecScratch.x = 0;
+    }
+    return 1;
+}
+
+// 16-bit truncating absolute value, as in the original's (ushort) arithmetic.
+static unsigned short abs16(int d)
+{
+    unsigned short sign = (unsigned short)(d >> 0x1f);
+    return (unsigned short)(((unsigned short)d ^ sign) - sign);
+}
+
+// Defined with update_player_position below; the action probes need it first.
+static int is_point_in_action_zone(VECTOR* pos, unsigned short* zone); // 0x0041b3c0
+
+// ============================================================================
+// check_climb_object (0x00474930)
+// Action-key probe for climbable/pushable room objects (crates, boxes). Walks
+// g_itemboxes_covers_table from g_omodelCount-1 down to 0, keeping the first
+// object whose first byte has flag 0x40 (climbable), that ChkPlReachEntity
+// accepts, and whose facing angle is within ~26 degrees (299/4096) of the
+// player's, on either wrap-around side.
+//
+// With msf bit 7 (0x80) already raised (mid-climb), it instead verifies the
+// player still faces the remembered object - drifting away cancels, staying
+// clears the bit and raises unk_03 bit 0x10. The tail picks attackDirection
+// (side) from the facing, which player_input_to_behavior turns into
+// action_behavior 10.
+// ============================================================================
+int check_climb_object(void)
+{
+    if ((g_main_state_flags & 0x80) == 0) {
+        void** p = &g_itemboxes_covers_table[(unsigned char)g_omodelCount];
+        unsigned char* obj;
+        do {
+            // Original compares the raw byte address against &table + 1; on a
+            // pointer-aligned walk that is exactly "scanned past element 0".
+            if ((char*)p < (char*)g_itemboxes_covers_table + 1) {
+                return 0;
+            }
+            obj = (unsigned char*)p[-1];
+            p--;
+
+            if ((obj[0] & 0x40) == 0) continue;
+            if (ChkPlReachEntity((int)obj) == 0) continue;
+
+            int angleDiff = ((unsigned int)g_playerEntity.directionAngle + 0x800U & 0xfff) -
+                            (int)*(short*)(obj + 0x74);
+            unsigned short diff = abs16(angleDiff);
+            if (299 < diff && diff < 0xed5) continue;
+
+            g_main_state_flags |= 0x80;
+            g_playerEntity.unk_03 &= 0xef;
+            DAT_00ae9ef0 = (unsigned int)obj;
+            break;
+        } while (true);
+    } else {
+        // Mid-climb: cancel when the player has turned away from the object.
+        int angleDiff = (int)g_playerEntity.directionAngle -
+                        (int)*(short*)(DAT_00ae9ef0 + 0x74);
+        unsigned short diff = abs16(angleDiff);
+        if (299 < diff && diff < 0xed5) {
+            return 0;
+        }
+        g_main_state_flags &= ~0x80;
+        g_playerEntity.unk_03 |= 0x10;
+    }
+
+    if ((((unsigned int)g_playerEntity.directionAngle + 0x200U) & 0x800) == 0) {
+        g_playerEntity.attackDirection = 0xffff;    // -1
+    } else {
+        g_playerEntity.attackDirection = 1;
+    }
+    return 1;
+}
+
+// ============================================================================
+// check_action_object (0x0041c150)
+// The action-key probe of the room item/door event table. Runs the same reach
+// probe as update_player_position, but only fires entries whose flag byte has
+// BOTH bit 0 (mask bit, game_loop mask 1) and bit 0x80 set - the entries
+// update_player_position deliberately skips (it requires 0x80 clear). That is
+// the split: doors probe every frame, objects/items only on the action press.
+//
+// Unlike update_player_position it returns the first matching handler's result
+// immediately - set_key_flag / set_room_event_flag return 1 when the entry's +2
+// field is nonzero, and that nonzero is what makes player_input_to_behavior
+// select the action_behavior 0xc interaction animation.
+// ============================================================================
+int check_action_object(void)
+{
+    g_svecScratch.x = 600;
+    g_svecScratch.z = 0;
+    MovePlayerXZ(g_playerEntity.directionAngle, &g_svecScratch, &g_svecScratch);
+    g_playerPosScratch.x = g_svecScratch.x + g_playerEntity.scaMatrixData.localMatrix.t[0];
+    g_playerPosScratch.z = g_svecScratch.z + g_playerEntity.scaMatrixData.localMatrix.t[2];
+
+    unsigned char* entry = g_RoomItemEventTable;
+    if ((unsigned char*)g_RoomItemEventTable - 1 < (unsigned char*)g_RoomItemEventHead) {
+        char index = 0;
+        do {
+            if (*entry != 0) {
+                unsigned char flags = entry[1];
+                if ((flags & 1) != 0 && (flags & 0x80) != 0) {
+                    if ((flags & 0x40) == 0) {
+                        if (is_point_in_action_zone((VECTOR*)&g_playerPosScratch,
+                                                    *(unsigned short**)(entry + 8)) != 0) {
+                            DAT_00be9830 = (unsigned char)(index + 1);
+                            return ((int(*)(unsigned char*))room_check_actions[*entry])(entry);
+                        }
+                    } else {
+                        if (is_point_in_action_zone((VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t,
+                                                    *(unsigned short**)(entry + 8)) != 0) {
+                            DAT_00be9831 = (unsigned char)(index + 1);
+                            return ((int(*)(unsigned char*))room_check_actions[*entry])(entry);
+                        }
+                    }
+                }
+            }
+            entry += 12;
+            index++;
+        } while (entry <= (unsigned char*)g_RoomItemEventHead);
+    }
     return 0;
 }
 
-static int player_check_action_object(void)      // 0x0041c150
+// ============================================================================
+// door_transition_update (0x00495d70)
+// Runs while msf bit 7 (0x80) is raised - the player is inside the door/climb
+// transition. All it does is let the walk-back (behavior 4/5) override the
+// locked-in action while the animation is playing; everything else is ignored.
+// ============================================================================
+void door_transition_update(void)
 {
-    player_state_report_missing("0x0041c150 check action object");
-    return 0;
-}
-
-static void player_door_transition_update(void)  // 0x00495d70
-{
-    player_state_report_missing("0x00495d70 door transition update");
+    switch (g_PlayerDpadHeld & 0xf) {
+    case 2:   // back
+        if (g_playerEntity.action_behavior != 4) {
+            g_playerEntity.action_state = 0;
+        }
+        g_playerEntity.action_behavior = 4;
+        return;
+    case 8:   // left
+        if (g_playerEntity.action_behavior != 5) {
+            g_playerEntity.action_state = 0;
+        }
+        g_playerEntity.action_behavior = 5;
+        return;
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -2121,7 +2282,7 @@ static void player_input_to_behavior(void)
 
         // 0x004956c9: is there a door in front of the player? Sets msf bit 7,
         // which the door animation reads to pick its variant.
-        if (player_check_climb_object() != 0) {
+        if (check_climb_object() != 0) {
             g_main_state_flags |= 0x80;
             g_message_flags &= 0xffbf;
             g_playerEntity.action_behavior = 10;
@@ -2132,7 +2293,7 @@ static void player_input_to_behavior(void)
         }
 
         // 0x004956f8: an examinable/usable object instead
-        if (player_check_action_object() != 0) {
+        if (check_action_object() != 0) {
             g_playerEntity.healthStatusFlags |= 0x80;
             g_message_flags &= 0xffbf;
             g_playerEntity.action_behavior = 0xc;
@@ -2160,7 +2321,7 @@ static void player_input_to_behavior(void)
 
     // 0x0049578d: already inside a door transition
     if ((g_main_state_flags & 0x80) != 0) {
-        player_door_transition_update();
+        door_transition_update();
         return;
     }
 
@@ -2379,7 +2540,7 @@ static void player_behavior_0d_run(void)
 
     // 0x00496134: the action button still works while running.
     if ((g_PlayerDpadPressed & 0x80) != 0) {
-        if (player_check_climb_object() != 0) {
+        if (check_climb_object() != 0) {
             g_playerEntity.isBeingAttackedFlag = 0x80;
             g_main_state_flags |= 0x80;
             g_message_flags &= 0xffbf;
@@ -2388,7 +2549,7 @@ static void player_behavior_0d_run(void)
             g_playerEntity.animFrameId     = 1;
             return;
         }
-        if (player_check_action_object() != 0) {
+        if (check_action_object() != 0) {
             g_playerEntity.animFrameId     = 1;
             g_message_flags &= 0xffbf;
             g_playerEntity.action_behavior = 0xc;
@@ -2513,6 +2674,326 @@ static void player_behavior_0d_run(void)
 }
 
 // ============================================================================
+// Action-key interaction behaviors (0x00495e00 - 0x00496480)
+//
+// These run under animFrameId 1/2 once player_input_to_behavior has locked the
+// player into an interaction. 0x0c is the generic "use/examine object" reach
+// animation; 0x0b is the full ladder climb (walk up, turn, climb, descend);
+// 0x10 is the push/climb-over object animation.
+// ============================================================================
+
+// 0x004d45cc - ladder step-sound frames, one byte per step. The original reads
+// this UNBOUNDED (a byte-indexed CMP); the meaningful entries are 12, 29, 39,
+// then 80, 100, 130, ... and the tail is zero-padded so a late read matches
+// nothing, exactly like the surrounding .data does.
+static const unsigned char g_ladderStepFrames[64] = {
+    0x0c, 0x1d, 0x27, 0x00, 0x50, 0x64, 0x82, 0x64,
+    0x6b, 0x68, 0x00, 0x64, 0x64, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x64, 0x64, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+// 0x004567d0 - write the screen-distortion effect struct at 0x00be63c8. The
+// consumer (0x00456a10 camera scroll) is not ported yet, so this only writes
+// the struct; the effect stays inert until that function lands.
+static void set_screen_effect_struct(int effect, unsigned short p2, short p3,
+                                     unsigned short p4, short p5)
+{
+    *(short*)(effect + 0x58) = -p3;
+    *(unsigned short*)(effect + 0x5c) = p4;
+    *(unsigned short*)(effect + 0x60) = p2;
+    *(unsigned short*)(effect + 0x64) = p4;
+    *(short*)(effect + 0x68) = -p3;
+    *(short*)(effect + 0x6c) = -p5;
+    *(unsigned short*)(effect + 0x70) = p2;
+    *(short*)(effect + 0x74) = -p5;
+}
+
+// ============================================================================
+// player_behavior_0c_interact (0x00495e00) — action_behavior 0x0c
+// The generic object interaction animation (attackAnim 4). Plays the reach
+// animation; when it completes, raises msf 0x100 for entry id 0x0d
+// (set_room_event_flag) or msf 0x800 for anything else — those bits gate the
+// message system into the follow-up prompt. Then the state sits in 2 until the
+// frame machinery re-enters and releases back to idle.
+// ============================================================================
+static void player_behavior_0c_interact(void)
+{
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.attackAnim = 4;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.action_state = 1;
+    } else if (g_playerEntity.action_state == 1) {
+        if (Joint_move(0, g_playerEntity.jointMoveData0,
+                       g_playerEntity.jointMoveData1, 0x400) != 0) {
+            if (*(char*)g_room_event_index == 0x0d) {
+                g_main_state_flags |= 0x100;
+            } else {
+                g_main_state_flags |= 0x800;
+            }
+            g_playerEntity.action_state = 2;
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.attackAnim = 0;
+            ((unsigned char*)&g_message_flags)[0] |= 0x40;
+            g_playerEntity.healthStatusFlags &= 0x7f;
+            g_playerEntity.unk_8c = 0;
+        }
+    } else if (g_playerEntity.action_state == 2) {
+        Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
+        g_playerEntity.animFrameId = 0;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+    }
+}
+
+// ============================================================================
+// player_behavior_10_push (0x00457230) — action_behavior 0x10
+// Push / climb-over animation (attackAnim 0x30). Walks the player forward while
+// msf bit 6 (0x40, the forced-push flag) stays raised, plays a grunt on frame 1
+// whose sound id depends on the pushed object's id byte, then releases control.
+// ============================================================================
+static void player_behavior_10_push(void)
+{
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.attackAnim = 0x30;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        // fall through
+    case 1:
+        if (Joint_move(0, g_playerEntity.jointMoveData2,
+                       g_playerEntity.jointMoveData3, 0x400) != 0) {
+            g_playerEntity.unk_bf = 0;
+            g_playerEntity.action_state = 2;
+            g_playerEntity.unk_8c = 3;
+            g_playerEntity.move_speed_current = 0;
+            g_playerEntity.attackAnim++;
+        }
+        break;
+    case 2:
+        Joint_move(0, g_playerEntity.jointMoveData2,
+                   g_playerEntity.jointMoveData3, 0x400);
+        if (g_playerEntity.animation_frame_id < 0x10) {
+            g_playerEntity.move_speed_current = 0x32;
+            Add_speedXZ(0);
+        }
+        if (((unsigned char)g_main_state_flags & 0x40) == 0) {
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.unk_bf = 0;
+            g_playerEntity.move_speed_current = 0;
+            g_playerEntity.attackAnim++;
+            g_playerEntity.action_state = 3;
+            g_playerEntity.unk_8c = 3;
+        }
+        if (g_playerEntity.animation_frame_id == 1) {
+            // object id byte bit 0x40 picks the grunt variant (0x16/0x17)
+            unsigned char sndId = (unsigned char)(
+                0x17 - ((*(unsigned char*)(DAT_00ae9ef0 + 1) & 0x40) == 0));
+            Play3DSnd(2, sndId, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+            return;
+        }
+        break;
+    case 3:
+        if (Joint_move(0, g_playerEntity.jointMoveData2,
+                       g_playerEntity.jointMoveData3, 0x400) != 0) {
+            ((unsigned char*)&g_message_flags)[0] |= 0x40;
+            g_playerEntity.animationId = 1;
+            g_playerEntity.animFrameId = 0;
+            g_playerEntity.action_behavior = 0;
+            g_playerEntity.action_state = 0;
+            return;
+        }
+        break;
+    }
+}
+
+// ============================================================================
+// player_behavior_0b_ladder (0x00496480) — action_behavior 0x0b
+// The ladder climb, selected when the player presses action inside a ladder
+// zone (msf bit 4 set by set_stairs_zone). Eight states: walk up to the ladder
+// (0/1), turn to face it (2), start the climb animation (3), climb with
+// step-sounds and a camera effect (4), descend setup and walk back (5-7), then
+// release control (8). unk_03 bit 0x10 selects the ladder variant (0x35 anim)
+// over the plain stairs/doors one (0x33).
+// ============================================================================
+extern void entity_rotate_toward_target(VECTOR* pos, unsigned short angleStep); // 0x004899b0
+
+static void player_behavior_0b_ladder(void)
+{
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.action_state = 1;
+        g_playerEntity.move_speed_current = 0x5d;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 2;
+        g_playerEntity.unk_8c = 3;
+        // fall through
+    case 1:
+        {
+            VECTOR target;
+            target.x = (int)g_playerEntity.unk_c6;   // ladder base X
+            target.z = (int)g_playerEntity.unk_c8;   // ladder base Z
+            target.y = 0;
+            entity_rotate_toward_target(&target, 0x40);
+            Joint_move(0, g_playerEntity.jointMoveData0,
+                       g_playerEntity.jointMoveData1, 0x200);
+            Add_speedXZ(0);
+            int dx = g_playerEntity.scaMatrixData.localMatrix.t[0] - (int)g_playerEntity.unk_c6;
+            int dz = g_playerEntity.scaMatrixData.localMatrix.t[2] - (int)g_playerEntity.unk_c8;
+            if (SquareRoot0(dz * dz + dx * dx) < 900) {
+                g_playerEntity.action_state = 2;
+                return;
+            }
+        }
+        break;
+    case 2:
+        Joint_move(0, g_playerEntity.jointMoveData0,
+                   g_playerEntity.jointMoveData1, 0x200);
+        // Rotate the remaining angle difference (masked to 0x3fc) onto 0.
+        {
+            unsigned int turn;
+            if ((g_playerEntity.directionAngle & 0x400U) == 0) {
+                turn = (g_playerEntity.directionAngle & 0x3fcU) >> 2;
+            } else {
+                turn = (unsigned int)-((g_playerEntity.directionAngle & 0x3fcU) >> 2);
+            }
+            g_playerEntity.directionAngle =
+                (short)((unsigned int)g_playerEntity.directionAngle + turn);
+            if ((g_playerEntity.directionAngle & 0x3e0U) == 0) {
+                g_playerEntity.action_state = 3;
+                return;
+            }
+        }
+        break;
+    case 3:
+        g_playerEntity.attackAnim = 0x33;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+            g_playerEntity.attackAnim = 0x35;
+        }
+        g_playerEntity.action_state = 4;
+        g_playerEntity.move_speed_current = 0;
+        g_playerEntity.unk_8c = 3;
+        set_screen_effect_struct((int)DAT_00be63c8, 800, 700, 700, 700);
+        // fall through
+    case 4:
+        {
+            unsigned char sndId = 0x2d;
+            if ((g_playerEntity.unk_03 & 0x10) == 0) {
+                // step-sound frames on the plain climb
+                if (g_ladderStepFrames[g_playerEntity.move_speed_current] ==
+                    g_playerEntity.animation_frame_id) {
+                    Play3DSnd(2, 0x23, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+                    g_playerEntity.move_speed_current++;
+                }
+                if (g_playerEntity.animation_frame_id != 0x32) {
+                    goto ladder_step_done;
+                }
+                sndId = 0x2d;
+            } else {
+                // ladder variant: reposition on frame 0x0f, grunt at 0x1a
+                if ((g_playerEntity.animation_frame_id == 0x0f) &&
+                    ((g_playerEntity.unk_03 & 0x10) != 0)) {
+                    g_playerDisplacement = 0xfffff8f8;
+                    g_playerEntity.unk_8e = 0xa8c;
+                    if (0x800 < g_playerEntity.directionAngle) {
+                        g_playerDisplacement = 0x708;
+                    }
+                    g_playerEntity.pushVelocity.z += (short)g_playerDisplacement;
+                }
+                if (g_playerEntity.animation_frame_id != 0x1a) {
+                    goto ladder_step_done;
+                }
+                sndId = 0x17;
+            }
+            Play3DSnd(2, sndId, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+ladder_step_done:
+            g_playerEntity.action_state += Joint_move(
+                0, g_playerEntity.jointMoveData2, g_playerEntity.jointMoveData3, 0x400);
+            return;
+        }
+    case 5:
+        // Descend: step back down the ladder, then walk away.
+        g_playerEntity.move_speed_current = 0;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.unk_8c = 0;
+        g_playerEntity.attackAnim++;
+        Joint_move(0, g_playerEntity.jointMoveData2,
+                   g_playerEntity.jointMoveData3, 0x400);
+        g_scaled_down_dist = -1000;
+        if (0x800 < g_playerEntity.directionAngle) {
+            g_scaled_down_dist = 1000;
+        }
+        g_playerEntity.scaMatrixData.localMatrix.t[1] = 0;
+        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+            g_scaled_down_dist = -2000;
+            if (0x800 < g_playerEntity.directionAngle) {
+                g_scaled_down_dist = 2000;
+            }
+            g_playerEntity.scaMatrixData.localMatrix.t[1] = 0xa8c;
+        }
+        g_playerEntity.position.x = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+        g_playerEntity.position.y = (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+        g_playerEntity.scaMatrixData.localMatrix.t[2] += g_scaled_down_dist;
+        g_playerEntity.position.z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+        set_screen_effect_struct((int)DAT_00be63c8, 500, 500, 700, 700);
+        g_playerEntity.pushVelocity.x = 0;
+        g_playerEntity.unk_8e = (unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+        g_playerEntity.pushVelocity.z = 0;
+        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+            g_playerEntity.action_state = 8;
+            return;
+        }
+        // fall through
+    case 6:
+        g_playerEntity.action_state = 7;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.move_speed_current = 0x3c;
+        g_playerEntity.attackAnim = 2;
+        g_playerEntity.flags |= 4;
+        g_playerEntity.attackDirection = 0xf;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        break;
+    case 7:
+        if (g_playerEntity.animation_frame_id == 8) {
+            PlayEntitySnd(0);
+        }
+        Joint_move(0, g_playerEntity.jointMoveData0,
+                   g_playerEntity.jointMoveData1, 0x400);
+        Add_speedXZ(0);
+        if (g_playerEntity.attackDirection == 0) {
+            g_playerEntity.action_state = 8;
+            g_playerEntity.flags &= 0xfb;
+            PlayEntitySnd(0);
+            return;
+        }
+        g_playerEntity.attackDirection--;
+        break;
+    case 8:
+        g_playerEntity.unk_03 &= 0xef;
+        g_main_state_flags &= ~0x10;
+        ((unsigned char*)&g_message_flags)[0] |= 0x40;
+        g_playerEntity.isBeingAttackedFlag = 0;
+        g_playerEntity.animationId = 1;
+        g_playerEntity.animFrameId = 0;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+        return;
+    }
+}
+
+// ============================================================================
 // player_ctrl_frame1 (0x00495520) — animFrameId 1
 // A bare table dispatch on action_behavior:
 //   00495522: MOV AL,[0x00be636a]                  ; action_behavior
@@ -2523,12 +3004,27 @@ static void player_behavior_0d_run(void)
 static void player_ctrl_frame1(void)
 {
     switch (g_playerEntity.action_behavior) {
+    case 0x09:                       // 0x004d4590 -> 0x00495df0 (empty in the original)
+        return;
+    case 0x0a:                       // 0x004d4594 -> 0x00457390
+    case 0x11:                       // 0x004d45b0 -> 0x00457390
+    case 0x13:                       // 0x004d45b8 -> 0x00457390
+        player_door_open_sequence();
+        return;
+    case 0x0b:                       // 0x004d4598 -> 0x00496480
+        player_behavior_0b_ladder();
+        return;
+    case 0x0c:                       // 0x004d459c -> 0x00495e00
+        player_behavior_0c_interact();
+        return;
     case 0x0d:                       // 0x004d45a0 -> 0x00496110
         player_behavior_0d_run();
         return;
-    case 10:                         // 0x004d4594 -> 0x00457390
-    case 0x11:                       // 0x004d45b0 -> 0x00457390
-        player_door_open_sequence();
+    case 0x0e:                       // 0x004d45a4 -> 0x00496470 (empty in the original)
+    case 0x0f:                       // 0x004d45a8 -> 0x00496470 (empty in the original)
+        return;
+    case 0x10:                       // 0x004d45ac -> 0x00457230
+        player_behavior_10_push();
         return;
     default:
         player_state_report_missing("action_behavior under animFrameId 1 (0x004d456c)");
@@ -3782,17 +4278,16 @@ static void player_ctrl_frame2(void)
         player_ctrl_behavior_run();
         return;
     case 9:
-        player_state_report_missing("action_behavior 9 under animFrameId 2 (0x00495df0)");
-        return;
+        return;                       // 0x00495df0 - empty in the original
     case 10:          // door transition
     case 0x11:
         player_door_open_sequence();
         return;
-    case 0x0b:
-        player_state_report_missing("action_behavior 0x0b under animFrameId 2 (0x00496480)");
+    case 0x0b:                        // ladder climb
+        player_behavior_0b_ladder();
         return;
-    case 0x0c:
-        player_state_report_missing("action_behavior 0x0c under animFrameId 2 (0x00495e00)");
+    case 0x0c:                        // object interaction
+        player_behavior_0c_interact();
         return;
     case 0x0d:
         player_behavior_0d_run();
@@ -3809,8 +4304,8 @@ static void player_ctrl_frame2(void)
         ApplyMatrixSV(&g_matrixScratch, &g_svecScratch, &g_playerEntity.speed);
         player_behavior_0d_run();
         return;
-    case 0x10:
-        player_state_report_missing("action_behavior 0x10 under animFrameId 2 (0x00457230)");
+    case 0x10:                        // push / climb-over object
+        player_behavior_10_push();
         return;
     default:
         player_state_report_missing("action_behavior under animFrameId 2");
@@ -4820,6 +5315,394 @@ int check_door(unsigned char* entry)
 
     ENTITY->has_enter_switch_zone |= 0x20;
     g_main_state_flags2 |= 0x400000;
+    return 0;
+}
+
+// ============================================================================
+// Remaining room_check_actions handlers (0x0041b630 - 0x0041bf90)
+//
+// Each takes the 12-byte g_RoomItemEventTable entry. Entries without flag 0x80
+// are probed every frame by update_player_position; entries WITH flag 0x80 only
+// by check_action_object on the action-key press. Handlers return 0 when they
+// acted; set_key_flag and set_room_event_flag return 1 when their +2 field is
+// nonzero, which is what selects the action_behavior 0x0c interaction animation.
+// ============================================================================
+
+extern void ScdEventEntry_Create(unsigned int slot, int scriptIndex);  // RoomEvents.cpp 0x0041d650
+
+// ============================================================================
+// display_msg_room_action (0x0041b630) — room_check_actions[2]
+// Shows the message whose id and pause flag live in the entry at +2/+4.
+// ============================================================================
+int display_msg_room_action(unsigned char* entry)
+{
+    set_message_display(*(unsigned short*)(entry + 2), *(unsigned short*)(entry + 4));
+    return 0;
+}
+
+// ============================================================================
+// include_key (0x0041b650) — room_check_actions[3]
+// "You got the key" prompt. Skips the prompt when the equipped item already is
+// the key the record needs (record+8 = item id); otherwise arms the event and
+// shows message 0xc1 so the follow-up (message action 10) picks it up.
+// ============================================================================
+int include_key(unsigned char* entry)
+{
+    if (g_EquippedItemId != 0 &&
+        ((unsigned char*)g_ItemSlotsPointer)[-2 + (unsigned int)g_EquippedItemId * 2] ==
+            *(unsigned char*)(*(unsigned char**)(entry + 8) + 8)) {
+        return 0;
+    }
+    g_room_event_index = entry;
+    set_message_display(0xc1, 0xff);
+    return 0;
+}
+
+// ============================================================================
+// set_key_flag (0x0041b6a0) — room_check_actions[4]
+// Raises msf bit 11 (0x800) when the entry's +2 field is 0; otherwise returns 1,
+// which routes the player into the 0x0c reach animation. g_pRoomEventIndex is
+// armed either way so the animation completion can branch on the entry id.
+//
+// msf 0x800 is menu mode 3/4 (the item viewer: 3D model + description). The
+// original disassembly is `OR dword ptr [0x00be41c0], 0x800` — a previous
+// revision wrote 0x200 (mode 5, the map display), which is why a pickup opened
+// the menu on the map tab instead of the item model.
+// ============================================================================
+int set_key_flag(unsigned char* entry)
+{
+    g_room_event_index = entry;
+    if (*(unsigned short*)(entry + 2) == 0) {
+        g_main_state_flags |= 0x800;
+        return 0;
+    }
+    return 1;
+}
+
+// ============================================================================
+// check_door_side (0x0041b790) — room_check_actions[6]
+// The Z-axis sibling of check_door: records the approach side for doors whose
+// zone spans the Z axis (check_door splits on X). Same flag protocol -
+// unk_03 bits 0x20/0x10 (0x60 here) and msf2 0x400000 feed the door animation.
+// ============================================================================
+int check_door_side(unsigned char* entry)
+{
+    unsigned char* ent = (unsigned char*)ENTITY;
+    short*         appr = (short*)(ent + 0xC4);   // PlayerEntity::attackDirection
+    unsigned char* afid = ent + 0x85;             // PlayerEntity::animFrameId
+
+    unsigned short* record = *(unsigned short**)(entry + 8);
+    int playerZ = ENTITY->scaMatrixData.localMatrix.t[2];
+    short angle  = (short)ENTITY->angle;
+
+    bool sideResolved = false;
+
+    if ((playerZ - (int)record[1]) < (int)(unsigned int)(record[3] >> 1)) {
+        if ((((int)angle + 0x800) & 0x800) == 0) {
+            *appr = 1;
+            sideResolved = true;
+        }
+    } else {
+        // Original reads the high byte of the angle word (directionAngle + 1)
+        // and tests bit 3 (= angle bit 0x800).
+        if ((*(unsigned char*)(ent + 0x75) & 8) == 0) {
+            *appr = -1;
+            sideResolved = true;
+        }
+    }
+
+    if (sideResolved) {
+        *afid = 0;
+        g_message_flags &= 0xffbf;
+        ENTITY->has_enter_switch_zone &= 0xef;
+        if (((*appr >> 1) ^ *(unsigned short*)(entry + 2)) & 1) {
+            ENTITY->has_enter_switch_zone |= 0x10;
+        }
+    }
+
+    ENTITY->has_enter_switch_zone |= 0x60;
+    g_main_state_flags2 |= 0x400000;
+    return 0;
+}
+
+// ============================================================================
+// flag_bank_set (0x0041b850) — room_check_actions[7]
+// Sets or clears one bit of a selected flag bank. Entry +2 selects the bank
+// (0=Player, 1=Player3, 2=Locks, 3=RoomEvent, 4=Sys, 5=main_state_flags,
+// 6=message_flags, 7=roomItems, 8=Room, 9=DAT_00d213a0), +4 the bit index
+// (MSB-first: bit 0 is 0x80000000), +6 nonzero = set, zero = clear.
+// ============================================================================
+int flag_bank_set(unsigned char* entry)
+{
+    unsigned int* pFlags;
+    switch (*(unsigned short*)(entry + 2)) {
+    case 0:  pFlags = (unsigned int*)&g_PlayerFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 1:  pFlags = (unsigned int*)&g_PlayerFlags3[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 2:  pFlags = (unsigned int*)&g_LocksFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 3:  pFlags = (unsigned int*)&g_RoomEventFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 4:  pFlags = (unsigned int*)&g_SysFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 5:  pFlags = (unsigned int*)&g_main_state_flags; break;
+    case 6:  pFlags = (unsigned int*)&g_message_flags; break;
+    case 7:  pFlags = (unsigned int*)&g_roomItemsFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 8:  pFlags = (unsigned int*)&g_RoomFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    default: pFlags = (unsigned int*)&DAT_00d213a0[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    }
+
+    unsigned char bit = (unsigned char)*(unsigned short*)(entry + 4);
+    if (*(unsigned short*)(entry + 6) == 0) {
+        *pFlags &= ~(0x80000000U >> (bit & 0x1f));
+    } else {
+        *pFlags |= 0x80000000U >> (bit & 0x1f);
+    }
+    return 0;
+}
+
+// ============================================================================
+// open_itembox (0x0041b990) — room_check_actions[8]
+// Starts the itembox interaction: gates on the box not already opening, the
+// player not being attacked, no menu state (msf byte 1) and the message system
+// being ready, then raises g_itembox_state 1 (the lid opens - check_itembox_state
+// animates it) and silences the message lines so the box menu can take over.
+// ============================================================================
+int open_itembox(unsigned char* entry)
+{
+    if ((g_itembox_state == 0) &&
+        (g_playerEntity.isBeingAttackedFlag == 0) &&
+        (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
+        ((unsigned short)g_message_flags & 0x40) != 0) {
+        g_itembox_state = 1;
+        g_message_flags = (unsigned short)g_message_flags & 0xffba;
+        play_sfx(2, 0x20, 0);
+        g_room_event_index = entry;
+    }
+    return 0;
+}
+
+// ============================================================================
+// create_room_event (0x0041b9e0) — room_check_actions[9]
+// Spawns an SCD event script slot from the entry's +2/+4 fields.
+// ============================================================================
+int create_room_event(unsigned char* entry)
+{
+    ScdEventEntry_Create(*(unsigned char*)(entry + 2), *(unsigned char*)(entry + 4));
+    return 0;
+}
+
+// ============================================================================
+// room_action_noop10 (0x0041ba00) — room_check_actions[0x0A]
+// Literally `return 0` - a reserved slot in the original.
+// ============================================================================
+int room_action_noop10(unsigned char* entry)
+{
+    (void)entry;
+    return 0;
+}
+
+// ============================================================================
+// room_action_effect (0x0041ba10) — room_check_actions[0x0B]
+// While the player is moving (move_speed_current > 0) and the render frame is
+// the non-blank one, spawns a dust billboard under the player and cycles its
+// position through the six-entry tables at 0x004b9310/0x004b9328. Also raises
+// msf2 bit 0 (the "cannot die" guard) for the duration.
+// ============================================================================
+int room_action_effect(unsigned char* entry)
+{
+    (void)entry;
+    static int g_roomActionEffectIndex = 0;   // 0x004b9308
+    static const int g_roomActionEffectX[6] = {0, -346, -346, 0, 346, 346};
+    static const int g_roomActionEffectZ[6] = {-400, 346, -346, 346, 200, 346};
+
+    g_main_state_flags2 |= 1;
+    if ((0 < g_playerEntity.move_speed_current) && (g_spriteAnimActive != 0)) {
+        VECTOR pos;
+        pos.x = g_roomActionEffectX[g_roomActionEffectIndex];
+        pos.y = (int)DAT_00d226e8 - g_playerEntity.scaMatrixData.localMatrix.t[1];
+        pos.z = g_roomActionEffectZ[g_roomActionEffectIndex];
+        Effect_CreateBillboard(0x17, 8, 0, &g_playerEntity.scaMatrixData.localMatrix, &pos, 0);
+        g_roomActionEffectIndex = (g_roomActionEffectIndex + 1) % 6;
+    }
+    return 0;
+}
+
+// ============================================================================
+// set_stairs_zone (0x0041baa0) — room_check_actions[0x0C]
+// Marks the player as inside a stairs/ladder zone: unk_03 bit 0x20 (in zone,
+// plus 0x10 for the ladder variant when +2 != 0), latches the ladder base
+// position into unk_c6/unk_c8, toggles the entry's +2 flag byte (so the next
+// zone hit flips it back) and raises msf bit 4 (ladder mode). The +2 toggle is
+// what distinguishes the two ends of a two-way ladder.
+// ============================================================================
+int set_stairs_zone(unsigned char* entry)
+{
+    unsigned char prev = g_playerEntity.unk_03;
+    g_playerEntity.unk_03 |= 0x20;
+    if (*(unsigned short*)(entry + 2) != 0) {
+        g_playerEntity.unk_03 = prev | 0x30;
+    }
+    g_playerEntity.unk_c6 = *(unsigned short*)(entry + 4);
+    g_playerEntity.unk_c8 = *(unsigned short*)(entry + 6);
+    *(unsigned char*)(entry + 2) ^= 1;
+    g_main_state_flags |= 0x10;
+    return 0;
+}
+
+// ============================================================================
+// set_room_event_flag (0x0041bae0) — room_check_actions[0x0D]
+// Same shape as set_key_flag but for msf bit 8 (0x100). Returns 1 when the
+// entry's +2 field is nonzero, selecting the 0x0c interaction animation whose
+// completion re-raises 0x100 for this entry id.
+// ============================================================================
+int set_room_event_flag(unsigned char* entry)
+{
+    g_room_event_index = entry;
+    if (*(unsigned short*)(entry + 2) == 0) {
+        g_main_state_flags |= 0x100;
+        return 0;
+    }
+    return 1;
+}
+
+// ============================================================================
+// check_desk (0x0041bb10) — room_check_actions[0x0E]
+// The desk interaction. Gates on the desk flow idle and the message system
+// ready, then:
+//   - the roomItems flag named by entry[deskIdx].field6 must be SET (the desk
+//     still has something to give)
+//   - Jill (id&3 == 3) gets turned away (message 0xd7)
+//   - a locked desk (LocksFlags bit at entry+2 clear) needs the small key
+//     (0x3d) or Jill's lockpick (PlayerFlags bit 0x7c) - otherwise "locked"
+//     (0xd8); with the key it arms the desk-open state (g_desk_check_state 1)
+//   - an unlocked desk swings open: mark the desk model opened (byte 0 of
+//     g_desks_pointers_table[entry[deskIdx].field4] |= 1), cut to the desk
+//     camera (entry+6), and run the camera-zone walk to the new cut.
+// ============================================================================
+int check_desk(unsigned char* deskId)
+{
+    if ((g_desk_check_state == 0) &&
+        (g_playerEntity.isBeingAttackedFlag == 0) &&
+        (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
+        ((unsigned short)g_message_flags & 0x40) != 0) {
+        unsigned short deskIdx = *(unsigned short*)(deskId + 4);
+        // The flag index and desk-slot index live in the +6/+4 fields of the
+        // event-table entry at index deskIdx (ITEMS_FLAGS = g_RoomItemEventTable+6).
+        unsigned short itemFlagIdx = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 6 + (unsigned int)deskIdx * 0xc);
+        if (Flg_ck((int)g_roomItemsFlags, itemFlagIdx) != 0) {
+            if ((g_playerEntity.id & 3) == 3) {
+                set_message_display(0xd7, 0xff);
+                return 0;
+            }
+            if (Flg_ck((int)g_LocksFlags, *(unsigned short*)(deskId + 2)) == 0) {
+                if ((get_item_slot(0x3d) < 0) && (Flg_ck((int)g_PlayerFlags, 0x7c) == 0)) {
+                    set_message_display(0xd8, 0xff);
+                    return 0;
+                }
+                g_room_event_index = deskId;
+                g_desk_check_state = 1;
+                return 0;
+            }
+            // Desk already unlocked: swing the lid open and cut to its camera.
+            g_room_event_index = deskId;
+            unsigned short deskSlot = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 4 + (unsigned int)deskIdx * 0xc);
+            ((unsigned char*)g_desks_pointers_table[deskSlot])[0] |= 1;
+            play_sfx(2, 0x24, 0);
+            g_cutId = g_roomCameraId;
+            g_roomCameraId = *(unsigned char*)(deskId + 6);
+            g_desk_check_state = 35;
+            // Walk the camera-zone list to the new camera (same as cmd_current_cut_set).
+            unsigned short camId = *(unsigned short*)((char*)g_RdtPointer->cam_switch_zones + 2);
+            unsigned int zonePtr = (unsigned int)g_RdtPointer->cam_switch_zones;
+            while (camId != g_roomCameraId) {
+                g_CurrentRdtDataTypePtr = (void*)(zonePtr + 0x14);
+                camId = *(unsigned short*)(zonePtr + 0x16);
+                zonePtr = (unsigned int)g_CurrentRdtDataTypePtr;
+            }
+            g_message_flags = (unsigned short)g_message_flags & 0xffba;
+            g_CurrentRdtDataTypePtr = (void*)zonePtr;
+            StMask(0, 0);
+        }
+    }
+    return 0;
+}
+
+// 0x004885a0 - mark an item id "seen" in the RoomFlags bank.
+static void set_room_item_seen_flag(int itemIdMinus4e)
+{
+    Flg_on((int)g_RoomFlags, itemIdMinus4e + 0x7c);
+}
+
+// ============================================================================
+// pickup_key_event (0x0041be70) — room_check_actions[0x0F]
+// Direct key pickup: deactivates the entry, clears the desk-opened flag on the
+// desk model byte 0, clears the roomItems flag at record+0x14, marks the item
+// "seen" in RoomFlags (bit 0x7c + itemId - 0x4e) and records the item id in
+// DAT_00be9833 for the message system.
+// ============================================================================
+int pickup_key_event(unsigned char* entry)
+{
+    *entry = 0;
+    ((unsigned char*)g_desks_pointers_table[*(unsigned short*)(entry + 4)])[0] = 0;
+    FUN_00473f10((int*)&g_roomItemsFlags, *(unsigned char*)(*(unsigned char**)(entry + 8) + 0x14));
+    set_room_item_seen_flag(*(unsigned char*)(*(unsigned char**)(entry + 8) + 8) - 0x4e);
+    DAT_00be9833 = *(unsigned char*)(*(unsigned char**)(entry + 8) + 8);
+    return 0;
+}
+
+// ============================================================================
+// check_typewriter (0x0041bed0) — room_check_actions[0x10]
+// The save-point interaction. With the typewriter idle and the message system
+// ready: an ink ribbon (item 0x2f) in the inventory starts the save flow
+// (g_typewriter_state 1, ribbon slot remembered at entry+2); Chris (ids 1/5)
+// may save without a ribbon until PlayerFlags bit 0x7b is set; otherwise the
+// "no ink ribbon" message (0xde) plays.
+// ============================================================================
+int check_typewriter(unsigned char* entry)
+{
+    if ((g_typewriter_state == 0) &&
+        (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
+        ((unsigned short)g_message_flags & 0x40) != 0) {
+        int ribbonSlot = get_item_slot(0x2f);
+        if (ribbonSlot >= 0) {
+            g_room_event_index = entry;
+            *(unsigned short*)(entry + 2) = (unsigned short)ribbonSlot;
+            g_typewriter_state = 1;
+            g_message_flags = (unsigned short)g_message_flags & 0xffba;
+            return 0;
+        }
+        if ((g_playerEntity.id == 1) || (g_playerEntity.id == 5)) {
+            if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+                g_room_event_index = entry;
+                *(unsigned short*)(entry + 2) = (unsigned short)ribbonSlot;
+                g_typewriter_state = 1;
+                g_message_flags = (unsigned short)g_message_flags & 0xffba;
+                return 0;
+            }
+        }
+        set_message_display(0xde, 0xff);
+        g_typewriter_state = 0;
+    }
+    return 0;
+}
+
+// ============================================================================
+// stairs_height_update (0x0041bf90) — room_check_actions[0x11]
+// Sets the player's height on stairs. Entry +2 selects which edge of the zone
+// (+4 length, +6 step) the height ramps from; the player's Y and unk_8e are
+// set to (distance/stepCount + 1) * step so walking the zone climbs smoothly.
+// ============================================================================
+int stairs_height_update(unsigned char* entry)
+{
+    unsigned short* zone = *(unsigned short**)(entry + 8);
+    int local4;
+    switch (*(unsigned short*)(entry + 2)) {
+    case 0:  local4 = g_playerEntity.scaMatrixData.localMatrix.t[0] - (unsigned int)zone[0]; break;
+    case 1:  local4 = ((unsigned int)zone[2] + (unsigned int)zone[0]) - g_playerEntity.scaMatrixData.localMatrix.t[0]; break;
+    case 2:  local4 = g_playerEntity.scaMatrixData.localMatrix.t[2] - (unsigned int)zone[1]; break;
+    default: local4 = ((unsigned int)zone[1] + (unsigned int)zone[3]) - g_playerEntity.scaMatrixData.localMatrix.t[2]; break;
+    }
+    int step = ((short)(local4 / (int)(unsigned int)*(unsigned short*)(entry + 4)) + 1) *
+               (int)*(short*)(entry + 6);
+    g_playerEntity.scaMatrixData.localMatrix.t[1] = step;
+    g_playerEntity.unk_8e = (unsigned short)step;
     return 0;
 }
 

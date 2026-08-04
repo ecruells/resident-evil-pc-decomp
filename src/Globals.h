@@ -396,6 +396,28 @@ extern int           g_displayDebugSaveMenu;           // 0x004d4680 - debug sav
 extern int           g_debugSaveMenuFlag;              // 0x004d4684 - debug save menu state flag
 extern int           DAT_004d228c;                     // 0x004d228c - menu processing active flag
 
+// Room interaction state (0x00be9616-0x00be9618, adjacent to g_eventItemUsedFlag)
+extern unsigned char g_typewriter_state;               // 0x00be9616 - typewriter save-flow state machine
+extern unsigned char g_itembox_state;                  // 0x00be9617 - itembox lid animation state (0-4)
+extern unsigned char g_desk_check_state;               // 0x00be9618 - desk open/lock state machine (0-5, 35=camera)
+
+// Itembox/desk animation scratch in .data (0x004d6eac-0x004d6ebc)
+extern unsigned short g_short_itembox_open_timer;      // 0x004d6eac - lid travel accumulator
+extern void*         g_itembox_cover_pointer;          // 0x004d6eb0 - omodel of the itembox lid being animated
+extern unsigned int  g_typewriter_id;                  // 0x004d6eb8 - save-slot id the typewriter targets
+extern short         g_counter_increase;               // 0x004d6ebc - lid travel step (reversed on overflow)
+
+// Inventory bookkeeping
+extern unsigned char g_ItemSlotIndices[8];             // 0x00d21cd0 - held-item index -> physical slot order
+
+// Climb-object scratch (0x00ae9ef0, next to g_omodelCount)
+extern unsigned int  DAT_00ae9ef0;                     // 0x00ae9ef0 - omodel of the climb/push object in reach
+// Dead constant read by room_check_actions[0x0B] (0x00d226e8, past g_itemboxes_covers_table)
+extern unsigned int  DAT_00d226e8;                     // 0x00d226e8 - always 0, never written
+// Screen-distortion effect struct (0x00be63c8) - FUN_004567d0 writes it; the
+// consumer (0x00456a10 camera scroll) is not ported yet, so it is inert.
+extern unsigned char DAT_00be63c8[0x80];               // 0x00be63c8
+
 // Game session state
 extern int           DAT_00d91bc8;                     // 0x00d91bc8
 extern DWORD         g_gameSessionInitFlag;            // 0x00d213b0
@@ -1359,6 +1381,28 @@ void update_player_position(PlayerEntity* ent, int a);// 0x0041c060
 int  check_door(unsigned char* entry);              // 0x0041b6d0 room_check_actions[5]
 int  no_room_action(unsigned char* entry);          // 0x0041c050 room_check_actions[0]
 int  door_try_enter(unsigned char* entry);           // 0x0041b400 room_check_actions[1]
+int  display_msg_room_action(unsigned char* entry);  // 0x0041b630 room_check_actions[2]
+int  include_key(unsigned char* entry);              // 0x0041b650 room_check_actions[3]
+int  set_key_flag(unsigned char* entry);             // 0x0041b6a0 room_check_actions[4]
+int  check_door_side(unsigned char* entry);          // 0x0041b790 room_check_actions[6]
+int  flag_bank_set(unsigned char* entry);            // 0x0041b850 room_check_actions[7]
+int  open_itembox(unsigned char* entry);             // 0x0041b990 room_check_actions[8]
+int  create_room_event(unsigned char* entry);        // 0x0041b9e0 room_check_actions[9]
+int  room_action_noop10(unsigned char* entry);       // 0x0041ba00 room_check_actions[0x0A]
+int  room_action_effect(unsigned char* entry);       // 0x0041ba10 room_check_actions[0x0B]
+int  set_stairs_zone(unsigned char* entry);          // 0x0041baa0 room_check_actions[0x0C]
+int  set_room_event_flag(unsigned char* entry);      // 0x0041bae0 room_check_actions[0x0D]
+int  check_desk(unsigned char* entry);               // 0x0041bb10 room_check_actions[0x0E]
+int  pickup_key_event(unsigned char* entry);         // 0x0041be70 room_check_actions[0x0F]
+int  check_typewriter(unsigned char* entry);         // 0x0041bed0 room_check_actions[0x10]
+int  stairs_height_update(unsigned char* entry);     // 0x0041bf90 room_check_actions[0x11]
+int  check_action_object(void);                      // 0x0041c150 - action-key probe of the event table
+void memset_(unsigned int* dst, int dwordCount);     // 0x0047cf60 - zero N dwords
+int  check_climb_object(void);                       // 0x00474930 - action-key climb/push probe
+int  ChkPlReachEntity(int obj);                      // 0x00474a20
+void door_transition_update(void);                   // 0x00495d70
+void room_event_item_pickup(void);                   // 0x00451700
+void use_room_action_item(void);                     // 0x004631f0
 void DrawFadeSpr(void);                               // 0x00456d30
 void update_sounds(void);                             // 0x00474090
 void room_camera_and_lighting_update(void);           // 0x00473ff0
@@ -1461,6 +1505,7 @@ void RoomSpr_SetInactive(char id);  // 0x00476130
 void use_room_action_item(void);
 void rearrange_item_slots(void);
 unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
+void         FUN_00473f10(int* baseAddr, unsigned int bitIndex);  // 0x00473f10 - clear a bit flag
 
 // --- Game state / character setup ---
 void SetupCharacterData(void);

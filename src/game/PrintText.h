@@ -29,13 +29,28 @@
 //
 // Escapes:
 //   \n  0x02  newline          \p  0x03  page break (next char = delay operand)
-//   \s  0x04  set char delay   \i  0x05  item-name placeholder
+//   \s  0x04  set char delay   \i  0x05 01 06 00 05 00  item-name placeholder
 //   \c  0x08  yes/no prompt    \q  0x0A  square glyph
 //   \o  0x78  opening double quote (plain " is the closing form, 0x19)
+//   \xNN      raw hex byte (for message-stream tags the named escapes cannot
+//             express, e.g. the CLUT brackets around a literal item name)
 //   \d        auto-dismiss: the next char is encoded and written AFTER the
 //             0x01 terminator, making the message clear itself after that many
 //             frames instead of waiting for a button press. Omit it and the
 //             terminator is followed by 0, which is the wait-for-input form.
+//             \d\xNN writes the raw byte NN instead of an encoded char.
+//
+// NOTE on \i: the message system (UpdateMessageDisplay, 0x004557b0) has no
+// single-byte "item name" code. The original message bytes (e.g. "You got the
+// \i" at 0x004bf3f7) are 05 01 06 00 05 00: CLUT colour 1, then tag 06 with
+// arg 0 (= use g_selectedItemId), then CLUT colour 0. A bare 0x05 would be
+// read as a CLUT tag, swallow the following 0x01 terminator, and run the
+// renderer into the next message's memory — the "all possible messages at
+// once" symptom.
+//
+// NOTE on \p: the char right after \p in the source IS the delay operand. The
+// original room/global texts use operand 0 ("\p " in source); a letter like
+// "\pWill" makes the page break wait (0x33 << 1) frames instead of 0.
 // ============================================================================
 
 // --- 8x14 controller symbol constants (direct font indices) ---
@@ -68,6 +83,14 @@
 
 namespace pft_detail {
 
+constexpr int pft_hex(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
 constexpr unsigned char encodeChar(unsigned char c)
 {
     // Raw control bytes pass through unchanged:
@@ -99,7 +122,9 @@ constexpr unsigned char encodeChar(unsigned char c)
 
 template <int N>
 struct Encoded {
-    unsigned char bytes[N];
+    // Sized for worst-case expansion: \i is 2 source chars -> 6 bytes (3x),
+    // plus the 0x01 terminator and the optional auto-dismiss operand.
+    unsigned char bytes[N * 3 + 2];
 
     constexpr Encoded() : bytes{} {}
 
@@ -114,15 +139,44 @@ struct Encoded {
                     case 'n': bytes[out++] = 0x02; i++; continue;
                     case 'p': bytes[out++] = 0x03; i++; continue;
                     case 's': bytes[out++] = 0x04; i++; continue;
-                    case 'i': bytes[out++] = 0x05; i++; continue;
+                    case 'i':
+                        // Message-stream item-name sequence (see the header note):
+                        // CLUT 1, name tag (arg 0 = selected item), CLUT 0.
+                        bytes[out++] = 0x05; bytes[out++] = 0x01;
+                        bytes[out++] = 0x06; bytes[out++] = 0x00;
+                        bytes[out++] = 0x05; bytes[out++] = 0x00;
+                        i++; continue;
                     case 'c': bytes[out++] = 0x08; i++; continue;
                     case 'q': bytes[out++] = 0x0A; i++; continue;
                     case 'o': bytes[out++] = 0x78; i++; continue;
+                    case 'x':
+                        // \xNN - raw hex byte (see the header note).
+                        if (i + 3 < N) {
+                            int hi = pft_hex(str[i + 2]);
+                            int lo = pft_hex(str[i + 3]);
+                            if (hi >= 0 && lo >= 0) {
+                                bytes[out++] = (unsigned char)((hi << 4) | lo);
+                                i += 3;
+                                continue;
+                            }
+                        }
+                        break;
                     case 'd':
-                        // Auto-dismiss delay. Emits nothing here; the NEXT
-                        // character is encoded (same operand convention as \p)
-                        // and written after the 0x01 terminator. See the note
-                        // on the terminator below.
+                        // Auto-dismiss delay. Emits nothing here; the operand
+                        // (\xNN raw, or an encoded char, same convention as
+                        // \p) is written after the 0x01 terminator. See the
+                        // note on the terminator below.
+                        if (i + 5 < N && str[i + 2] == '\\' && str[i + 3] == 'x') {
+                            int hi = pft_hex(str[i + 4]);
+                            int lo = pft_hex(str[i + 5]);
+                            if (hi >= 0 && lo >= 0) {
+                                dismissDelay = (unsigned char)((hi << 4) | lo);
+                                i += 5;
+                                continue;
+                            }
+                            i++;
+                            continue;
+                        }
                         if (i + 2 < N - 1) {
                             dismissDelay = encodeChar((unsigned char)str[i + 2]);
                             i += 2;

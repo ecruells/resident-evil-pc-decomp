@@ -1393,6 +1393,20 @@ void FUN_00473f10(int* baseAddr, unsigned int bitIndex)
 }
 
 // ============================================================================
+// memset_ (0x0047cf60) - Zero N dwords
+// The original's 2-arg helper (distinct from _memset): writes 0 over
+// `dwordCount` consecutive dwords. Used by room_event_item_pickup to clear an
+// effect slot (0x21 dwords = one 0x84-byte Effect).
+// ============================================================================
+void memset_(unsigned int* dst, int dwordCount)
+{
+    for (; dwordCount != 0; dwordCount--) {
+        *dst = 0;
+        dst++;
+    }
+}
+
+// ============================================================================
 // FUN_0047cf80 (0x0047cf80) - Free every effect slot matching selected criteria
 // param1 is a criteria MASK; each set bit enables one comparison, and a slot is
 // freed only when every enabled comparison matches (the original builds an
@@ -1947,17 +1961,298 @@ void room_transition_load(void)
 // Task_sleep(1), StMask(0,0) - not a fade.
 // Blocked on g_eventItemUsedFlag, which the port does not declare yet.
 void* room_check_actions[ROOM_CHECK_ACTION_COUNT] = {
-    /* 0x00 */ (void*)no_room_action,   // 0x0041c050 - returns 0, does nothing
-    /* 0x01 */ (void*)door_try_enter,   // 0x0041b400
-    /* 0x02 */ nullptr,                 // 0x0041b630 display_msg
-    /* 0x03 */ nullptr,                 // 0x0041b650 include_key
-    /* 0x04 */ nullptr,                 // 0x0041b6a0 set_key_flag
-    /* 0x05 */ (void*)check_door,       // 0x0041b6d0
-    /* rest */ nullptr,
+    /* 0x00 */ (void*)no_room_action,        // 0x0041c050 - returns 0, does nothing
+    /* 0x01 */ (void*)door_try_enter,        // 0x0041b400
+    /* 0x02 */ (void*)display_msg_room_action, // 0x0041b630
+    /* 0x03 */ (void*)include_key,           // 0x0041b650
+    /* 0x04 */ (void*)set_key_flag,          // 0x0041b6a0
+    /* 0x05 */ (void*)check_door,            // 0x0041b6d0
+    /* 0x06 */ (void*)check_door_side,       // 0x0041b790
+    /* 0x07 */ (void*)flag_bank_set,         // 0x0041b850
+    /* 0x08 */ (void*)open_itembox,          // 0x0041b990
+    /* 0x09 */ (void*)create_room_event,     // 0x0041b9e0
+    /* 0x0A */ (void*)room_action_noop10,    // 0x0041ba00
+    /* 0x0B */ (void*)room_action_effect,    // 0x0041ba10
+    /* 0x0C */ (void*)set_stairs_zone,       // 0x0041baa0
+    /* 0x0D */ (void*)set_room_event_flag,   // 0x0041bae0
+    /* 0x0E */ (void*)check_desk,            // 0x0041bb10
+    /* 0x0F */ (void*)pickup_key_event,      // 0x0041be70
+    /* 0x10 */ (void*)check_typewriter,      // 0x0041bed0
+    /* 0x11 */ (void*)stairs_height_update,  // 0x0041bf90
+    /* 0x12 */ nullptr,                      // NULL in the original
+    /* 0x13 */ nullptr,                      // NULL in the original
 };
 
-// (0x00451700) - Room event item pickup action
-void room_event_item_pickup(void) { }
+// ============================================================================
+// room_event_item_pickup (0x00451700)
+// Adds the armed room event's item to the inventory. Called by the message
+// system (handle_message_post_action, message action 10/0) after the pickup
+// prompt is dismissed.
+//
+// Reads the record at g_room_event_index+8: +8 = item id, +9 = quantity,
+// +0x14 = roomItems flag index, +10 = desk slot. The entry itself is
+// deactivated (first byte 0) and the desk's opened flag cleared.
+//
+// Stackable items (ids 0x0b-0x12 and 0x2f) merge into an existing slot first:
+// up to the character's slot count ((4 - (id&3)!=1) * 2 - Chris 8, Jill 6),
+// capping a slot at 0xfa and spilling the overflow into a new slot. A fresh
+// slot records the first free index in g_ItemSlotIndices and raises its bit in
+// g_ItemSlotsBitmask, then the menu images are rebuilt.
+// ============================================================================
+void room_event_item_pickup(void)
+{
+    unsigned char* evt = (unsigned char*)g_room_event_index;
+    unsigned char* record = *(unsigned char**)(evt + 8);
+
+    *evt = 0;                                     // deactivate the event entry
+    ((unsigned char*)g_desks_pointers_table[record[10]])[0] = 0;
+    if (*(short*)((char*)g_desks_pointers_table[record[10]] + 0x86) != 0) {
+        g_freeEffectSlots++;
+        // The original indexes the pool in DWORDs (stride 4), clearing 0x21
+        // dwords = exactly one 0x84-byte effect slot.
+        memset_((unsigned int*)g_effectPool +
+                *(unsigned short*)((char*)g_desks_pointers_table[record[10]] + 0x86),
+                0x21);
+    }
+    FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
+
+    DAT_00be9833 = record[8];
+    unsigned char itemId = record[8];
+    unsigned char quantity = record[9];
+    if (itemId == 0x2f) {                         // '/': ammo pickup always yields 3
+        quantity = 3;
+    }
+
+    if (((10 < g_selectedItemId) && (g_selectedItemId < 0x13)) ||
+        (g_selectedItemId == 0x2f)) {
+        // Stackable: merge into an existing slot of the same item id.
+        unsigned char slotCount = (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2);
+        unsigned char idx = 0;
+        while (slotCount != 0) {
+            unsigned char* slot = (unsigned char*)g_ItemSlotsPointer + (unsigned int)idx * 2;
+            if (slot[0] == itemId) {
+                unsigned short merged = (unsigned short)(slot[1] + (unsigned short)quantity);
+                if (merged < 0xfb) {
+                    slot[1] = (unsigned char)merged;
+                    return;
+                }
+                if (g_TotalHeldItems < slotCount) {
+                    quantity = (unsigned char)(merged + 6);
+                    slot[1] = 0xfa;
+                    break;
+                }
+            }
+            slotCount--;
+            idx++;
+        }
+    }
+
+    // New slot.
+    ((unsigned char*)g_ItemSlotsPointer)[(unsigned int)g_TotalHeldItems * 2] = itemId;
+    ((unsigned char*)g_ItemSlotsPointer)[1 + (unsigned int)g_TotalHeldItems * 2] = quantity;
+
+    unsigned char freeIdx = 0;
+    if ((g_ItemSlotsBitmask & 1) != 0) {
+        do {
+            freeIdx++;
+        } while ((g_ItemSlotsBitmask & (1u << (freeIdx & 0x1f))) != 0);
+    }
+    unsigned int held = (unsigned int)g_TotalHeldItems;
+    g_TotalHeldItems++;
+    g_ItemSlotIndices[held] = freeIdx;
+    g_ItemSlotsBitmask |= 1u << (freeIdx & 0x1f);
+    LoadHeldItemsImages();
+    StMask(0, 1);
+}
+
+// ============================================================================
+// check_event_item_usage (0x0041c490)
+// Per-frame: after a door or desk consumed a key item (g_eventItemUsedFlag
+// raised by door_try_enter / use_room_action_item), once the prompt message
+// is dismissed, physically remove the item from the inventory.
+// ============================================================================
+void check_event_item_usage(void)
+{
+    if ((g_eventItemUsedFlag == 1) && ((g_menu_choice_id & 0x80) == 0)) {
+        use_room_action_item();
+        g_eventItemUsedFlag = 0;
+    }
+}
+
+// use_room_action_item (0x004631f0) is implemented in SaveLoadScreen.cpp.
+
+// ============================================================================
+// check_itembox_state (0x0041c240)
+// Per-frame itembox lid animation. State 1 arms the travel accumulator and
+// latches the lid omodel (g_itemboxes_covers_table[entry+4]); states 2/3
+// rotate the lid open past -199 then let it settle back; state 4 (the box
+// menu closed) resets. The lid angle lives at omodel+0x76, the step at
+// g_counter_increase (reversed at the -199 stop so the lid eases back).
+// ============================================================================
+void check_itembox_state(void)
+{
+    switch (g_itembox_state) {
+    case 1:
+        g_short_itembox_open_timer = 1;
+        g_counter_increase = 1;
+        g_itembox_state = 2;
+        g_itembox_cover_pointer =
+            g_itemboxes_covers_table[*(unsigned short*)((char*)g_room_event_index + 4)];
+        // fall through
+    case 2:
+        *(short*)((char*)g_itembox_cover_pointer + 0x76) -= g_short_itembox_open_timer;
+        g_short_itembox_open_timer = (unsigned short)(g_short_itembox_open_timer + g_counter_increase);
+        if (*(short*)((char*)g_itembox_cover_pointer + 0x76) < -199) {
+            g_itembox_state = 3;
+            g_counter_increase = -g_counter_increase;
+        }
+        break;
+    case 3:
+        *(short*)((char*)g_itembox_cover_pointer + 0x76) -= g_short_itembox_open_timer;
+        g_short_itembox_open_timer = (unsigned short)(g_short_itembox_open_timer + g_counter_increase);
+        if (g_short_itembox_open_timer < 1) {
+            // Lid settled: the box menu may open.
+            g_main_state_flags |= 0x1000;
+            g_message_flags = 0xffff;
+            g_itembox_state = 4;
+            return;
+        }
+        break;
+    case 4:
+        g_itembox_state = 0;
+        *(short*)((char*)g_itembox_cover_pointer + 0x76) = 0;
+        return;
+    }
+}
+
+// ============================================================================
+// check_desk_state (0x0041bc90)
+// Per-frame desk flow. States:
+//   1/2  - desk is locked: prompt to use the small key (0x3d) or lockpick (0x31)
+//   3    - key prompt answered: yes unlocks (LocksFlags bit at entry+2, "key
+//          turned" message 0xc3), no just closes
+//   4    - desk menu closed: restore the room camera, clear the opened flag
+//   5    - open the take-item menu over the desk, re-arm the entry
+//   35   - desk camera pan (counts down one per frame through `default`)
+// Stage 3 room 10 (Chris's study) resets the flow until PlayerFlags bit 0x7b.
+// ============================================================================
+void check_desk_state(void)
+{
+    if ((g_stageId == 3) && (g_roomId == 0xa) && ((g_playerEntity.id & 3) == 1) &&
+        (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)) {
+        g_desk_check_state = 0;
+    }
+
+    switch (g_desk_check_state) {
+    case 0:
+        break;
+    case 1:
+    case 2:
+        // The original stores get_item_slot's result in a write-only scratch
+        // global (has_desk_key @ 0x004d6eb4); the call itself is kept for its
+        // g_pCurrentItemSlot side effect.
+        (void)get_item_slot(0x3d);
+        g_selectedItemId = Flg_ck((int)g_PlayerFlags, 0x7c) ? 0x31 : 0x3d;
+        set_message_display(0xd9, 0xff);
+        g_desk_check_state = 3;
+        return;
+    case 3:
+        if ((g_menu_choice_id & 0x80) == 0) {
+            if ((g_menu_choice_id & 1) == 0) {
+                // "Yes": unlock and show the key-turned message.
+                Flg_on((int)g_LocksFlags, *(unsigned short*)((char*)g_room_event_index + 2));
+                play_sfx(2, 0x26, 0);
+                g_selectedItemId = Flg_ck((int)g_PlayerFlags, 0x7c) ? 0x31 : 0x3d;
+                set_message_display(0xc3, 0xff);
+            }
+            g_desk_check_state = 0;
+            return;
+        }
+        break;
+    case 4:
+        display_room_camera_bg();
+        g_desk_check_state = 0;
+        ((unsigned char*)g_desks_pointers_table[*(unsigned short*)((char*)g_room_event_index + 4)])[0] &=
+            0xfe;
+        return;
+    case 5:
+        // Open the take-item menu; the entry re-arms to the desk's item entry.
+        g_main_state_flags |= 0x800;
+        ((unsigned char*)&g_message_flags)[0] |= 0x45;
+        g_desk_check_state = 4;
+        g_roomCameraId = g_cutId;
+        g_room_event_index =
+            &g_RoomItemEventTable[*(unsigned short*)((char*)g_room_event_index + 4) * 12];
+        return;
+    case 35:
+        StMask(0, 1);
+        display_room_camera_bg();
+        // fall through
+    default:
+        // Counts the desk camera pan down to 0 (35 -> 0).
+        g_desk_check_state--;
+        break;
+    }
+}
+
+// ============================================================================
+// check_typewriter_state (0x0041c330)
+// Per-frame save-point flow. State 1 prompts "use ink ribbon?" (223) or, for
+// Chris before PlayerFlags bit 0x7b, "save your progress?" (224); state 2
+// waits for the choice - no closes, yes fades out; state 3 calls
+// LoadSaveGameState with the ribbon slot (entry+2); state 4 waits for the
+// fade back in and closes.
+// ============================================================================
+void check_typewriter_state(void)
+{
+    switch (g_typewriter_state) {
+    case 1:
+        g_typewriter_id = *(unsigned short*)((char*)g_room_event_index + 2);
+        if (((g_playerEntity.id == 1) || (g_playerEntity.id == 5)) &&
+            (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)) {
+            set_message_display(224, 0xff);   // "Will you save your progress?"
+        } else {
+            set_message_display(223, 0xff);   // "Will you use the INK RIBBON?"
+        }
+        g_typewriter_state = 2;
+        return;
+    case 2:
+        if ((g_menu_choice_id & 0x80) == 0) {
+            if ((g_menu_choice_id & 1) != 0) {
+                g_typewriter_state = 0;
+                ((unsigned char*)&g_message_flags)[0] |= 0x45;
+                return;
+            }
+            // "Yes": fade out and load the save screen.
+            g_fade_type_id = 2;
+            g_fading_counter = 0x1000;
+            fade_update();
+            g_typewriter_state = 3;
+            return;
+        }
+        break;
+    case 3:
+        if ((short)g_fading_state < 0) {
+            LoadSaveGameState(0, (int)g_loadDataDestPointer, (int)g_typewriter_id + 1, 2, 0);
+            g_loadSaveStateFlag = 0;
+            cut_set();
+            g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x80000000;
+            StMask(1, 0);
+            g_fade_type_id = 2;
+            g_fading_counter = 0xf000;
+            fade_update();
+            g_typewriter_state = 4;
+            return;
+        }
+        break;
+    case 4:
+        if ((short)g_fading_state < 0) {
+            g_typewriter_state = 0;
+            ((unsigned char*)&g_message_flags)[0] |= 0x45;
+        }
+        break;
+    }
+}
 
 // (0x0047f960) - Lab slides: stop sound slot
 void lab_slides_stop_snd(short slot) { }

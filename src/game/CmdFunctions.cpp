@@ -776,7 +776,12 @@ int cmd_em_set(void)
     dbg_printf("ENEMY SET START %s\n", "enemy_set");
 
     if ((char)g_ScdOpcodes[3] != -1) {
-        if (Flg_ck((int)g_RoomEventFlags, (char)g_ScdOpcodes[3]) != 0) {
+        // The original ZERO-extends the flag byte (MOV CL,AL / MOVZX), so a
+        // flag id >= 0x80 is a valid small bit index. The Ghidra decompiler
+        // rendered the argument as `*(char*)`, and the signed cast made
+        // Flg_ck compute a ~33MB byte offset -> access violation on rooms
+        // whose enemy entries use flags 0x80-0xFE.
+        if (Flg_ck((int)g_RoomEventFlags, (unsigned char)g_ScdOpcodes[3]) != 0) {
             g_ScdOpcodes += 0x16;
             dbg_printf("ENEMY SET END %s\n", "enemy_set");
             return 1;

@@ -121,18 +121,6 @@ void FUN_0047eb60(void) { }
 // (0x0042a030) - Check and display interactive screen (item pickup, etc.)
 void check_and_display_interactive_screen(void) { }
 
-// (0x0041bc90) - Check desk/lock interaction state
-void check_desk_state(void) { }
-
-// (0x0041c240) - Check item box interaction state
-void check_itembox_state(void) { }
-
-// (0x0041c330) - Check typewriter (save point) interaction state
-void check_typewriter_state(void) { }
-
-// (0x0041c490) - Check event item usage state
-void check_event_item_usage(void) { }
-
 // ---------------------------------------------------------------------------
 // MainMenu.cpp dependency stubs (pending full decompilation)
 // ---------------------------------------------------------------------------

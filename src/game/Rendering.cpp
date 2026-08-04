@@ -1469,7 +1469,10 @@ msg_skip_char:
                 }
                 AddTintSprite(&g_TextureDesc, fade);
             }
-            sprintf(PRINT_TEXT_BUFFER, "Yes No");
+            // Original string at 0x004c0618 is "Yes  No" (TWO spaces): the
+            // selection arrow is drawn at 0xd0/0xf8, so "No" must start at
+            // 0x100 — with one space the "N" lands at 0xf8 and covers the arrow.
+            sprintf(PRINT_TEXT_BUFFER, "Yes  No");
             PrintText8x14(216, g_ScreenOffsetY + g_MessageScreenY + 16, 0, 0);
             message_render_chars();
             return;
