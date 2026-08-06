@@ -634,7 +634,16 @@ void SetupCharacterData(void)
     }
     LoadEquippedWeaponAnimation(
         g_playerEntity.equippedWeaponId, 0xe, (unsigned int)g_animationBuffer, (unsigned int)&g_animObjectBuffer);
+
+    // The original copies the position into the matrix translation here
+    // (0x0049508e: t[0] = position.x, t[2] = position.z, t[1] = 0) — this was
+    // missing from the port. Without it the matrix keeps InitScaMatrix's zero
+    // translation, and the first-frame player_state_init sync (position = t[0])
+    // overwrites the position set by the save load with (0,0).
+    g_playerEntity.scaMatrixData.localMatrix.t[0] = (long)g_playerEntity.position.x;
+    g_playerEntity.scaMatrixData.localMatrix.t[2] = (long)g_playerEntity.position.z;
     g_playerEntity.unk_8e = 0;
+    g_playerEntity.scaMatrixData.localMatrix.t[1] = 0;
     g_playerEntity.jointsStructs[1].rotDeltaX = 0;
     g_playerEntity.jointsStructs[1].rotDeltaY = 0;
     g_playerEntity.jointsStructs[1].rotDeltaZ = 0x10;

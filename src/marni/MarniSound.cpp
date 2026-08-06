@@ -304,9 +304,9 @@ int DirectSound::NewDirectSoundBuffer(DWORD* wavBlk)
     }
 
     char dbg[256];
-    sprintf(dbg, "[DEBUG] NewDirectSoundBuffer: wavBlk=%p (bank offset=0x%X)\n",
-            wavBlk, (DWORD)((BYTE*)wavBlk - (BYTE*)this));
-    OutputDebugStringA(dbg);
+    // sprintf(dbg, "[DEBUG] NewDirectSoundBuffer: wavBlk=%p (bank offset=0x%X)\n",
+    //         wavBlk, (DWORD)((BYTE*)wavBlk - (BYTE*)this));
+    // OutputDebugStringA(dbg);
 
     // Set a flag at bank+0x91C (original code writes to wavBlk[0x247])
     wavBlk[0x247] = 1;
@@ -317,8 +317,8 @@ int DirectSound::NewDirectSoundBuffer(DWORD* wavBlk)
     int bank = ((BYTE*)wavBlk - (BYTE*)this) / 0xA2C;
     BANK_DSBUF(bank) = DS_STUB_BUF;
 
-    sprintf(dbg, "[DEBUG] NewDirectSoundBuffer OK: bank=%d, DS_BUF=%p\n", bank, DS_STUB_BUF);
-    OutputDebugStringA(dbg);
+    // sprintf(dbg, "[DEBUG] NewDirectSoundBuffer OK: bank=%d, DS_BUF=%p\n", bank, DS_STUB_BUF);
+    // OutputDebugStringA(dbg);
 
     return 1;
 }
@@ -531,13 +531,9 @@ int DirectSound::CreateSound(const char* wavName)
     }
 
     char dbg[256];
-    sprintf(dbg, "[DEBUG] CreateSound: '%s' -> bank %d\n", wavName, bank);
-    OutputDebugStringA(dbg);
 
     const char* actualPath = wavName;
 
-    sprintf(dbg, "[DEBUG]   resolved path: '%s'\n", actualPath);
-    OutputDebugStringA(dbg);
 
     HANDLE hFile = CreateFileA(actualPath, GENERIC_READ, FILE_SHARE_READ, NULL,
                                OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);
@@ -548,8 +544,6 @@ int DirectSound::CreateSound(const char* wavName)
     }
 
     DWORD fileSize = GetFileSize(hFile, NULL);
-    sprintf(dbg, "[DEBUG]   fileSize=%lu bytes\n", fileSize);
-    OutputDebugStringA(dbg);
 
     BYTE* wavData = (BYTE*)malloc(fileSize);
     if (wavData == NULL) { CloseHandle(hFile); return 0; }
@@ -595,10 +589,6 @@ int DirectSound::CreateSound(const char* wavName)
         free(wavData); return 0;
     }
 
-    sprintf(dbg, "[DEBUG]   WAV OK: %lu Hz, %d ch, %d bit, %lu bytes PCM\n",
-            sampleRate, channels, bitsPerSample, dataSize);
-    OutputDebugStringA(dbg);
-
     BANK_WAV_PTR(bank) = wavData;
     BANK_DATA_SZ(bank) = dataSize;
     BANK_PCM_PTR(bank) = pcmData;
@@ -642,10 +632,6 @@ int DirectSound::CreateSound(const char* wavName)
     nameDest[nameLen] = '\0';
 
     m_bankSlots[bank - 1] = (int)BANK_BASE(bank);
-
-    sprintf(dbg, "[DEBUG] CreateSound OK: bank=%d, slot=%p, wav=%p\n",
-            bank, (void*)m_bankSlots[bank - 1], (void*)wavData);
-    OutputDebugStringA(dbg);
 
     return bank;
 }
@@ -691,8 +677,8 @@ int loadSndBankFromWav(const char* path)
     // Callers build the path with GAME_DATA_ROOT, so it is already correct for the
     // build configuration - nothing to rewrite here.
     char dbg[256];
-    sprintf(dbg, "[DEBUG] loadSndBankFromWav: '%s' (sync, g_pDS=%p)\n", path, g_pDirectSound);
-    OutputDebugStringA(dbg);
+    // sprintf(dbg, "[DEBUG] loadSndBankFromWav: '%s' (sync, g_pDS=%p)\n", path, g_pDirectSound);
+    // OutputDebugStringA(dbg);
 
     if (g_pDirectSound != NULL && *(int*)((BYTE*)g_pDirectSound + 0x10) != 0) {
         // Call CreateSound synchronously — the original ExecAsync was an empty
@@ -700,8 +686,8 @@ int loadSndBankFromWav(const char* path)
         // callback slot on each call, so batch loading via LoadSoundBank
         // would lose all but the last callback.
         g_sndload_bank_index = g_pDirectSound->CreateSound(path);
-        sprintf(dbg, "[DEBUG] loadSndBankFromWav -> bank %d\n", g_sndload_bank_index);
-        OutputDebugStringA(dbg);
+        // sprintf(dbg, "[DEBUG] loadSndBankFromWav -> bank %d\n", g_sndload_bank_index);
+        // OutputDebugStringA(dbg);
     } else {
         OutputDebugStringA("[DEBUG] loadSndBankFromWav: g_pDirectSound NOT READY\n");
         g_sndload_bank_index = 0;

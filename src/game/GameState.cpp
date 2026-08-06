@@ -760,8 +760,10 @@ void SetInitialItems(void)
         // chris items
         ITEM_KNIFE,             0,
         ITEM_FIRST_AID_SPRAY,   1,
-        ITEM_NONE,              0,
-        ITEM_NONE,              0,
+        ITEM_BERETTA,          127,
+        ITEM_SHOTGUN,           127,
+        ITEM_BAZOOKA_EXPLOSIVE,    255,
+        ITEM_COLT_PYTHON_MAG,   127,
         // jill items
         ITEM_KNIFE,             0,
         ITEM_BERETTA,          15,

@@ -220,7 +220,11 @@ extern DWORD g_PlayerPadHeldPrev;                      // 0x004bae30
 extern DWORD g_PadBtnWord;                             // 0x00ac4018
 extern int   g_NumControllers;                         // 0x00ac7b58
 extern int   g_JoyWarnPrinted;                         // 0x004b1958
-extern const DWORD g_JoyRemapTbl[2][32];               // 0x004b1858 - PC joystick → PSX button remap
+// NOT const: the original's table at 0x004b1858 is mutable .data — the save
+// screen's load path restores it from the save file (memcpy into it).
+extern DWORD g_JoyRemapTbl[2][32];                     // 0x004b1858 - PC joystick → PSX button remap
+extern unsigned int g_joyRemapBackupKey[32];           // 0x004d3f58 - joy remap backup (keyboard)
+extern unsigned int g_joyRemapBackupJoy[32];           // 0x004d3fd8 - joy remap backup (joystick)
 extern BOOL  g_DisablePad;                             // 0x004bcb3c
 
 // Pad remap tables and dpad globals (used by PlayerPad_Update)

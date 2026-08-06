@@ -27,6 +27,16 @@
 #define GAME_DATA_ROOT      ".\\usa\\"
 #endif
 
+// Save directory root. The original builds save paths as "%ssavedat%d.dat"
+// with the literal "SAVE\\" (CWD-relative, so "SAVE\savedat1.dat"). In
+// development the save folder lives under the asset tree so saves travel
+// with the project (assets/save, matching the original game's SAVE folder).
+#ifdef _DEBUG
+#define GAME_SAVE_ROOT      ".\\assets\\save\\"
+#else
+#define GAME_SAVE_ROOT      "SAVE\\"
+#endif
+
 // Length of the root, excluding the terminator.
 #define GAME_DATA_ROOT_LEN  (sizeof(GAME_DATA_ROOT) - 1)
 

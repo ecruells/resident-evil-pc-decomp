@@ -217,7 +217,8 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
 //   0xF8 nn - 14x14 controller symbol (nn indexes into font region 3)
 //   0xF9 nn - 8x14 character with depth=31 (nn = encoding byte)
 //   0xFA nn - 8x14 character with depth=31, row offset +14
-//   0xFB    - No-op (advance cursor only)
+//   0xFB    - True no-op (no glyph, no advance). The original strings pad
+//             every glyph with 0xFB spacers; it must not move the cursor.
 //   0xFF    - Half-space advance (4 pixels instead of 8)
 //
 // color:  upper 4 bits = brightness/fade (0=default 2)
@@ -293,11 +294,17 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
             }
 
             case 0xFB:
-                break;
+                // True no-op: skip without advancing (matches the original's
+                // `case 0xfb: break;` — no cursor move, no glyph).
+                data++;
+                chr = *data;
+                continue;
 
             case 0xFF:
                 g_TextureDesc.screenX += 4;
-                break;
+                data++;
+                chr = *data;
+                continue;
 
             default:
                 chr = chr / 18 + 2;

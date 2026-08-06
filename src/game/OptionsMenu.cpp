@@ -247,9 +247,10 @@ static int    s_optAcceptKeyVK;       // 0x00bcb41c
 static int    s_optIdleAnimTrigger;   // 0x00bcb420
 static int    s_optUnknown424;        // 0x00bcb424
 
-// Joystick remap backup tables
-static unsigned int s_joyRemapBackupKey[32];  // 0x004d3f58
-static unsigned int s_joyRemapBackupJoy[32];  // 0x004d3fd8
+// Joystick remap backup tables — shared with the save screen (see Globals.h),
+// the original has a single pair of buffers at 0x004d3f58 / 0x004d3fd8.
+#define s_joyRemapBackupKey g_joyRemapBackupKey
+#define s_joyRemapBackupJoy g_joyRemapBackupJoy
 
 // Sound config sensitivity indices
 static int    s_optSensitivityIdx[9]; // 0x008e1c38

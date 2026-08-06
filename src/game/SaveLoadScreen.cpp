@@ -1,9 +1,11 @@
 // SaveLoadScreen.cpp - Save/Load game state screen
 // Decompiled from Ghidra at 0x00493310
-// Dependencies: FileWrite(0x004122a0), FUN_004120c0, FUN_0040b700,
-//               FUN_00494000, FUN_00493fa0, InitInputKeyBindings(0x00497c20),
+// Dependencies: FileWrite(0x004122a0), ReadSaveFile(0x004120c0),
+//               EnsureDirectoryExists(0x0040b700), GetSaveLocationIndex(0x00494000),
+//               DrawSaveCursor(0x00493fa0), InitInputKeyBindings(0x00497c20),
 //               Flg_ck(0x00473f40), use_room_action_item(0x004631f0),
-//               rearrange_item_slots(0x00451510)
+//               rearrange_item_slots(0x00451510), cut_set(0x004628c0),
+//               StMask(0x00497690), Task_sleep(0x004201e0), Task_chain(0x00420210)
 #include "../Globals.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
@@ -17,28 +19,19 @@ extern void logos_state(void);
 extern void title_state(void);
 extern void game_start(void);
 
-// // Save slot info structure — matches the 20-byte entries on the original stack
-// struct SaveSlotInfo {
-//     int previewF7b;     // +0x00 byte from save file at offset 0xF7B
-//     int previewF78;     // +0x04 byte from save file at offset 0xF78
-//     int stageId;        // +0x08 byte from save file at offset 0xF50
-//     int roomId;         // +0x0C byte from save file at offset 0xF51
-//     int hasData;        // +0x10 flag: 1 = file exists, 0 = no file
-// };
-
-enum SaveMenuMode
-{
-    MENU_LOAD = 0,
-    MENU_SAVE = 2
-};
-
+// ============================================================================
+// Save slot info — matches the original's 20-byte stack entries.
+// Field order is load order: charId(+0), count(+4), stage(+8), room(+0xc),
+// hasData(+0x10). The byte offsets are into the save file (the file's first
+// 0x800 bytes are the g_BioCard block, 1:1 with memory).
+// ============================================================================
 typedef struct SaveSlotInfo
 {
-    uint32_t characterId;
-    uint32_t stageId;
-    uint32_t savesCount;
-    uint32_t roomId;
-    uint32_t hasData;
+    uint32_t characterId;   // +0x00  file[0x22B]  (g_BioCard.selectedCharactedId)
+    uint32_t savesCount;    // +0x04  file[0x228]  (g_BioCard.savesCounter)
+    uint32_t stageId;       // +0x08  file[0x200]  (g_BioCard.stageId)
+    uint32_t roomId;        // +0x0C  file[0x201]  (g_BioCard.roomId)
+    uint32_t hasData;       // +0x10  file exists flag
 } SaveSlotInfo;
 
 typedef enum {
@@ -51,35 +44,98 @@ typedef enum {
     STATE_PERFORM_SAVE = 6,         // write save file
     STATE_SAVE_ANIM_STEP1 = 7,
     STATE_SAVE_ANIM_STEP2 = 8,
-    STATE_ERROR_MSG = 9             // unused? default state
+    STATE_ERROR_MSG = 9             // "NOT ENOUGH FREE SPACE"
 } MenuState;
 
-// Save file constants
-#define SAVE_SLOT_COUNT         8
+// Save file constants (the file is 0xA82 = 2690 bytes)
+#define SAVE_SLOT_COUNT      8
+#define SAVE_FILE_SIZE       0xA82
+// The original's 0x800 "block" is one contiguous region (0xbe9620..0xbe9e20)
+// holding g_BioCard plus the input-config globals that follow it. The port
+// models those as separate globals, so the copies below are sized per global
+// instead of one 0x800 memcpy (g_BioCard is only sizeof(BioCardLayout)).
+#define SAVE_BLOCK_SIZE      0x800   // original block region size (for gating)
+#define OFFSET_STAGE_ID      0x200
+#define OFFSET_ROOM_ID       0x201
+#define OFFSET_SAVES_COUNT   0x228
+#define OFFSET_CHARACTER_ID  0x22B
+#define OFFSET_PAD_REMAP     0x41C   // 32 bytes  (g_padRemapSubTable3)
+#define OFFSET_CONTROLLER_CFG 0x43C  // 1 byte   (g_controllerConfig)
+#define OFFSET_KEY_BINDINGS  0x800   // 32 bytes  (g_keyBindingData)
+#define OFFSET_JOY_REMAP     0x820   // 256 bytes (g_JoyRemapTbl)
+#define OFFSET_JOY_BACKUP    0x8A0   // 128 bytes (g_joyRemapBackupJoy)
+#define OFFSET_ROOM_BGM      0x920   // 224 bytes (g_roomBgmState)
+#define OFFSET_SIDEWINDER    0xA00   // 1 byte
+#define OFFSET_LANG_BYTE     0xA01   // 1 byte  (DAT_004d6444)
+#define OFFSET_KEY_BACKUP    0xA02   // 128 bytes (g_joyRemapBackupKey)
 
 // ============================================================================
-// PrintFormattedText encoded data — compile-time encoded via STR() macro
+// PrintFormattedText encoded data — byte-identical to the original tables.
 // Decode with: python tools/decode_re1.py <address>
-// Encoding: see PrintText.h for supported characters
+// Encoding: 0xFB = no-op spacer, 0x00 = space, 0x01 = end, 'A' = 0x1D,
+//           '0' = 0x0C, '\\' = 0x38, '-' = 0x3B.
+// The name entries are 11 bytes ("CHRIS" with a 0xFB after every glyph) and
+// the location entries are 40 bytes (text + 0x00 space padding) because the
+// save animation copies fixed 10/39-byte slices straight out of them.
 // ============================================================================
 
 // --- Character names (indexed by characterId & 3) ---
 
-static constexpr auto s_pftChrisName   = STR("CHRIS");       // DAT_004d40f8
-static constexpr auto s_pftJillName    = STR("JILL");         // DAT_004d4108
+static const unsigned char s_pftChrisName[16] = {   // DAT_004d40f8
+    0x1F, 0xFB, 0x24, 0xFB, 0x2E, 0xFB, 0x25, 0xFB, 0x2F, 0xFB, 0x01
+};
+static const unsigned char s_pftJillName[16] = {    // DAT_004d4108
+    0x26, 0xFB, 0x25, 0xFB, 0x28, 0xFB, 0x28, 0xFB, 0x00, 0xFB, 0x01
+};
 static const unsigned char* s_pftCharNameTable[] = {
     s_pftChrisName, s_pftJillName
 };
 
 // --- Location names (indexed by GetSaveLocationIndex) ---
 
-static constexpr auto s_pftLocRoom1F      = STR(" M.Room 1F ");    // DAT_004d41a0
-static constexpr auto s_pftLocHall1F      = STR(" M.Hall 1F ");    // DAT_004d41c8
-static constexpr auto s_pftLocCourtyard   = STR(" Courtyard ");    // DAT_004d41f0
-static constexpr auto s_pftLocGuardhouse  = STR(" Guardhouse");    // DAT_004d4218
-static constexpr auto s_pftLocLaboratory  = STR(" Laboratory");    // DAT_004d4240
-static constexpr auto s_pftLocStoreroom   = STR(" M.Storeroom ");  // DAT_004d4268
-static constexpr auto s_pftLocCourtyard2  = STR(" Courtyard ");    // DAT_004d4290
+static const unsigned char s_pftLocRoom1F[40] = {     // DAT_004d41a0 " M.Room 1F"
+    0x00, 0xFB, 0x00, 0xFB, 0x29, 0xFB, 0x79, 0xFB, 0x2E, 0xFB, 0x4B, 0xFB,
+    0x4B, 0xFB, 0x49, 0xFB, 0x00, 0xFB, 0x0D, 0xFB, 0x22, 0xFB, 0x00, 0xFB,
+    0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
+    0x00, 0xFB, 0x01, 0x00
+};
+static const unsigned char s_pftLocHall1F[40] = {     // DAT_004d41c8 " M.Hall 1F"
+    0x00, 0xFB, 0x00, 0xFB, 0x29, 0xFB, 0x79, 0xFB, 0x24, 0xFB, 0x3D, 0xFB,
+    0x48, 0xFB, 0x48, 0xFB, 0x00, 0xFB, 0x0D, 0xFB, 0x22, 0xFB, 0x00, 0xFB,
+    0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
+    0x00, 0xFB, 0x01, 0x00
+};
+static const unsigned char s_pftLocCourtyard[40] = {  // DAT_004d41f0 " Courtyard Room B1"
+    0x00, 0xFB, 0x00, 0xFB, 0x1F, 0xFB, 0x4B, 0xFB, 0x51, 0xFB, 0x4E, 0xFB,
+    0x50, 0xFB, 0x55, 0xFB, 0x3D, 0xFB, 0x4E, 0xFB, 0x40, 0xFB, 0x00, 0xFB,
+    0x2E, 0xFB, 0x4B, 0xFB, 0x4B, 0xFB, 0x49, 0xFB, 0x00, 0xFB, 0x1E, 0xFB,
+    0x0D, 0xFB, 0x01, 0x00
+};
+static const unsigned char s_pftLocGuardhouse[40] = { // DAT_004d4218 " Guardhouse 1F"
+    0x00, 0xFB, 0x00, 0xFB, 0x23, 0xFB, 0x51, 0xFB, 0x3D, 0xFB, 0x4E, 0xFB,
+    0x40, 0xFB, 0x44, 0xFB, 0x4B, 0xFB, 0x51, 0xFB, 0x4F, 0xFB, 0x41, 0xFB,
+    0x00, 0xFB, 0x0D, 0xFB, 0x22, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
+    0x00, 0xFB, 0x01, 0x00
+};
+static const unsigned char s_pftLocLaboratory[40] = { // DAT_004d4240 " Laboratory B3"
+    0x00, 0xFB, 0x00, 0xFB, 0x28, 0xFB, 0x3D, 0xFB, 0x3E, 0xFB, 0x4B, 0xFB,
+    0x4E, 0xFB, 0x3D, 0xFB, 0x50, 0xFB, 0x4B, 0xFB, 0x4E, 0xFB, 0x55, 0xFB,
+    0x00, 0xFB, 0x1E, 0xFB, 0x0F, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
+    0x00, 0xFB, 0x01, 0x00
+};
+static const unsigned char s_pftLocStoreroom[40] = {  // DAT_004d4268 " M.Storeroom 1F"
+    0x00, 0xFB, 0x00, 0xFB, 0x29, 0xFB, 0x79, 0xFB, 0x2F, 0xFB, 0x50, 0xFB,
+    0x4B, 0xFB, 0x4E, 0xFB, 0x41, 0xFB, 0x4E, 0xFB, 0x4B, 0xFB, 0x4B, 0xFB,
+    0x49, 0xFB, 0x00, 0xFB, 0x0D, 0x22, 0xFB, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
+    0x00, 0xFB, 0x01, 0x00
+};
+static const unsigned char s_pftLocCourtyard2[40] = { // DAT_004d4290 " Courtyard Path B1"
+    0x00, 0xFB, 0x00, 0xFB, 0x1F, 0xFB, 0x4B, 0xFB, 0x51, 0xFB, 0x4E, 0xFB,
+    0x50, 0xFB, 0x55, 0xFB, 0x3D, 0xFB, 0x4E, 0xFB, 0x40, 0xFB, 0x00, 0xFB,
+    0x2C, 0xFB, 0x3D, 0xFB, 0x50, 0xFB, 0x44, 0xFB, 0x00, 0xFB, 0x1E, 0xFB,
+    0x0D, 0xFB, 0x01, 0x00
+};
+// Pointer table at 0x004d42b8
 static const unsigned char* s_pftLocNameTable[] = {
     s_pftLocRoom1F, s_pftLocHall1F, s_pftLocCourtyard,
     s_pftLocGuardhouse, s_pftLocLaboratory, s_pftLocStoreroom,
@@ -339,15 +395,21 @@ void rearrange_item_slots(void)
 //
 // Main save/load screen state machine.
 // Parameters:
-//   mode          — 0 = save mode, 1 = load mode
-//   flags         — display/behavior flags (0x80180000 for load from title)
-//   useInkRibbon  — non-zero to consume ink ribbon when saving
-//   exitMode      — controls exit behavior (0 = in-game, 1 = from title)
-//   cutsceneReset — controls cut_set/StMask on exit (0 = do reset)
+//   mode          — 0 = save mode, 1 = load mode. Controls the exit behavior
+//                   (0 returns in-game, anything else chains to title_state)
+//                   and the slot-selection state (state = mode + 3).
+//   flags         — unused by the screen itself; passed through to the
+//                   slot-select play_sfx bank (always a non-bank value, so
+//                   that call is silent in the original).
+//   useInkRibbon  — non-zero to consume ink ribbon when saving; also the
+//                   play_sfx bank for the cursor-move sounds.
+//   exitMode      — play_sfx bank for the confirm/cancel/animation sounds
+//                   (2 from the typewriter, 1 from the title screen).
+//   cutsceneReset — controls cut_set/StMask on exit (0 = do reset).
 //
 // Called from:
-//   title_state:  LoadSaveGameState(1, 0x80180000, 0, 1, 0)  — Load Game
-//   in-game save: LoadSaveGameState(0, 0x80180000, 1, 0, 0)  — Save Game
+//   title_state:        LoadSaveGameState(1, 0x80180000, 0, 1, 0)  — Load Game
+//   check_typewriter:   LoadSaveGameState(0, flags, ribbon+1, 2, 0) — Save Game
 // ============================================================================
 void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int cutsceneReset)
 {
@@ -355,14 +417,17 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
     SaveSlotInfo save_slots[SAVE_SLOT_COUNT + 1];
     MenuState state = STATE_INIT;
     int selected_slot = 0;              // current cursor position (0..7 = slots, 8 = exit)
-    int confirm_choice = 0;             // 0 = yes, 1 = no (for confirmation dialog)
+    int confirm_choice = 0;             // 0 = YES, 1 = NO (confirmation dialog)
     int blink_timer = 5;
-    int blink_state = 0;                // 0 = invisible, 1 = visible
+    int blink_state = 0;                // 0 = cursor visible, 1 = invisible
     int input_delay = 0;
-    int anim_counter = 0;               // v39
-    int anim_timer = 5;                 // v41
+    int anim_counter = 0;               // reveal length counter
+    int anim_timer = 5;                 // reveal pause between steps
 
-    char saveBuffer[2692];
+    char saveBuffer[SAVE_FILE_SIZE + 8];    // slot-scan / load buffer
+    char fileBuffer[SAVE_FILE_SIZE + 8];    // save-assembly buffer
+    char displayStr[64];                    // save-animation reveal string (57 bytes)
+    char animBuf[64];                       // reveal buffer (terminated at anim_counter)
 
     // Set save/load active flag
     g_loadSaveStateFlag = 1;
@@ -386,7 +451,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
 
             for (int slotIndex = 0; slotIndex < 9; slotIndex++)
             {
-                sprintf(g_saveFileName, ".\\savedat%d.dat", slotIndex + 1);
+                sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slotIndex + 1);
                 FILE* fp = fopen(g_saveFileName, "r");
                 if (fp == NULL) {
                     save_slots[slotIndex].hasData = 0;
@@ -394,10 +459,10 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                     ReadSaveFile(g_saveFileName, saveBuffer);
 
                     save_slots[slotIndex].hasData       = 1;
-                    save_slots[slotIndex].savesCount    = saveBuffer[512];
-                    save_slots[slotIndex].roomId        = saveBuffer[513];
-                    save_slots[slotIndex].stageId       = saveBuffer[552];
-                    save_slots[slotIndex].characterId   = saveBuffer[555];
+                    save_slots[slotIndex].characterId   = saveBuffer[OFFSET_CHARACTER_ID];
+                    save_slots[slotIndex].savesCount    = saveBuffer[OFFSET_SAVES_COUNT];
+                    save_slots[slotIndex].stageId       = saveBuffer[OFFSET_STAGE_ID];
+                    save_slots[slotIndex].roomId        = saveBuffer[OFFSET_ROOM_ID];
 
                     fclose(fp);
                 }
@@ -425,7 +490,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 input_delay = 6;
                 if (--selected_slot < 0) selected_slot = 8;
                 state = STATE_INPUT_DELAY;
-                play_sfx(SFX_BANKS, 30);
+                play_sfx(useInkRibbon, 30);
             }
 
             // Down pressed (use g_RawPadHeld for continuous held detection)
@@ -435,7 +500,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 input_delay = 6;
                 if (++selected_slot > 8) selected_slot = 0;
                 state = STATE_INPUT_DELAY;
-                play_sfx(SFX_BANKS, 30);
+                play_sfx(useInkRibbon, 30);
             }
 
             // SideWinder pad check
@@ -445,11 +510,11 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
             }
 
             // PAD_CROSS pressed (confirm) or SideWinder start
-            if ((g_PlayerDpadPressed & 0x4000) != 0 || sidewinderBtn != 0) {
+            if (((g_PlayerDpadPressed & 0x4000) != 0) || (sidewinderBtn != 0)) {
                 if (selected_slot == SAVE_SLOT_COUNT) {
                     // Exit option selected
-                    play_sfx(SFX_BANKS, 29);
-                    if (!exitMode) {
+                    play_sfx(exitMode, 29);
+                    if (mode == 0) {
                         // In-game: return to gameplay
                         if (!cutsceneReset) {
                             cut_set();
@@ -464,17 +529,18 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                     Task_chain((void*)title_state);
                 } else {
                     // Non-exit slot selected → go to mode-specific state
-                    play_sfx(SFX_BANKS, 31);
-                    state = (exitMode == 0) ? STATE_SAVE_SLOT_SELECTED : STATE_LOAD_SLOT_SELECTED;
+                    // (original: state = mode + 3 → 3 = save, 4 = load)
+                    play_sfx(exitMode, 31);
+                    state = (MenuState)(mode + 3);
                 }
             }
 
             // (cancel/back)
             if ((g_PlayerDpadPressed & 0x8000) != 0) {
 
-                play_sfx(SFX_BANKS, 29);
+                play_sfx(exitMode, 29);
 
-                if (!exitMode) {
+                if (mode == 0) {
                     // In-game: return to gameplay
                     if (!cutsceneReset) {
                         cut_set();
@@ -503,8 +569,12 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 input_delay = 0;
             }
 
-            if (--input_delay <= 0)
+            // Original tests the old value, then decrements; on old==0 → idle
+            if (input_delay == 0) {
                 state = STATE_IDLE;
+            } else {
+                input_delay--;
+            }
 
             // still blink (matches original: test old value before decrement)
             if (blink_timer == 0) {
@@ -538,41 +608,54 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // ================================================================
         case STATE_LOAD_SLOT_SELECTED:
         {
-            // if (save_slots[selected_slot].exists) {
-            //     // Load the game
-            //     sprintf(savedat_path, "%ssavedat%d.dat", aSave, selected_slot + 1);
-            //     sub_40B700(aSave);
-            //     int file_size = sub_4120C0(savedat_path, file_buffer);
-            //     if (file_size <= 2048) {
-            //         sub_412340(byte_BE9620, file_buffer, 2048);
-            //     } else {
-            //         sub_412340(byte_BE9620, file_buffer, 2048);
-            //         sub_412340(asc_4D4730, small_buf1, 32);
-            //         sub_412340(byte_4B1858, small_buf2, 256);
-            //         sub_497C20();
-            //         if (file_size > 2336) {
-            //             sub_412340(byte_BE995C, small_buf4, 224);
-            //             if (file_size > 2560) {
-            //                 sub_412340(&byte_AC8BB8, &byte1_buf, 1);
-            //                 sub_412340(&byte_4D6444, &byte2_buf, 1);
-            //                 if (file_size > 2562) {
-            //                     sub_412340(byte_4D3F58, small_buf5, 128);
-            //                     sub_412340(byte_4D3FD8, small_buf3, 128);
-            //                     const char* selected_lang = byte_AC8BB8 ? byte_4D3FD8 : byte_4D3F58;
-            //                     sub_412340(&dword_4B18D8, selected_lang, 128);
-            //                 }
-            //             }
-            //         }
-            //     }
-            //     g_main_state_flags |= 0x10000000;
-            //     byte_BE62E5 = byte_BE984B;
-            //     if (byte_BE984B & 3)
-            //         g_main_state_flags |= 0x800000;
-            //     dword_4D4678 = 0;
-            //     return;
-            // } else {
-            //     state = STATE_IDLE;  // empty slot – go back
-            // }
+            if (save_slots[selected_slot].hasData) {
+                sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, selected_slot + 1);
+                EnsureDirectoryExists(GAME_SAVE_ROOT);
+                int fileSize = ReadSaveFile(g_saveFileName, fileBuffer);
+
+                // The block restore always runs; the extra areas past 0x800 are
+                // size-gated so older (smaller) save files still load. The
+                // original restores the block with one 0x800 memcpy; the port
+                // models that region as g_BioCard + the input-config globals,
+                // so each part is copied into its own global (the unmodeled
+                // tail 0x43D..0x800 is discarded).
+                memcpy(g_BioCardData, fileBuffer, sizeof(BioCardLayout));
+                memcpy(g_padRemapSubTable3, fileBuffer + OFFSET_PAD_REMAP,
+                       sizeof(g_padRemapSubTable3));
+                g_controllerConfig = fileBuffer[OFFSET_CONTROLLER_CFG];
+                if (fileSize > SAVE_BLOCK_SIZE) {
+                    memcpy(g_keyBindingData, fileBuffer + OFFSET_KEY_BINDINGS, 0x20);
+                    memcpy(g_JoyRemapTbl, fileBuffer + OFFSET_JOY_REMAP, 0x100);
+                    InitInputKeyBindings();
+                    if (fileSize > 0x920) {
+                        memcpy(g_roomBgmState, fileBuffer + OFFSET_ROOM_BGM, 0xE0);
+                        if (fileSize > 0xA00) {
+                            // file[0xA00] holds the saved sidewinder flag; the
+                            // original loads it into a dead stack local — the
+                            // language selection below re-checks the live flag.
+                            memcpy(&DAT_004d6444, fileBuffer + OFFSET_LANG_BYTE, 1);
+                            if (fileSize > 0xA02) {
+                                memcpy(g_joyRemapBackupKey, fileBuffer + OFFSET_KEY_BACKUP, 0x80);
+                                memcpy(g_joyRemapBackupJoy, fileBuffer + OFFSET_JOY_BACKUP, 0x80);
+                                memcpy(g_JoyRemapTbl[1],
+                                       g_isSideWinderConnected
+                                           ? g_joyRemapBackupJoy : g_joyRemapBackupKey,
+                                       0x80);
+                            }
+                        }
+                    }
+                }
+
+                g_main_state_flags |= 0x10000000;
+                g_playerEntityPointer.id = g_SelectedCharactedId;
+                if ((g_SelectedCharactedId & 3) != 0) {
+                    g_main_state_flags |= 0x800000;
+                }
+                g_loadSaveStateFlag = 0;
+                return;
+            }
+            // Empty slot – go back
+            state = STATE_IDLE;
             break;
         }
 
@@ -581,36 +664,47 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // ================================================================
         case STATE_CONFIRM_OVERWRITE:
         {
-            // sub_455190(49, 193, 1, unk_4D4170);  // "Overwrite?"
-            // sub_455190(118, 209, 0, unk_4D4190); // "Yes No"
-            // if (!(dword_BF0A04 & 0x5000))
-            //     input_delay = 0;
-            // if (input_delay) {
-            //     --input_delay;
-            // } else {
-            //     if (--blink_timer <= 0) {
-            //         blink_timer = 5;
-            //         blink_state = !blink_state;
-            //     }
-            //     if (dword_BF0A04 & 0x8000) {   // Move cursor left/right?
-            //         blink_state = 0;
-            //         blink_timer = 5;
-            //         input_delay = 6;
-            //         confirm_choice = 0;
-            //     }
-            //     if (dword_BF0A04 & 0x2000) {
-            //         blink_state = 0;
-            //         blink_timer = 5;
-            //         input_delay = 6;
-            //         confirm_choice = 1;
-            //     }
-            //     if (word_BE9842 & 0x4000) {    // Confirm
-            //         state = (confirm_choice == 0) ? STATE_PERFORM_SAVE : STATE_IDLE;
-            //     }
-            //     if ((int16_t)word_BE9842 < 0) { // Cancel
-            //         state = STATE_IDLE;
-            //     }
-            // }
+            PrintFormattedText(49, 193, 1, s_pftOverwritePrompt);
+            PrintFormattedText(118, 209, 0, s_pftYesNo);
+
+            // no direction held → reset delay
+            if ((g_RawPadHeld & 0x5000) == 0) {
+                input_delay = 0;
+            }
+
+            if (input_delay == 0) {
+                // blink cursor
+                if (blink_timer == 0) {
+                    blink_state = !blink_state;
+                    blink_timer = 5;
+                } else {
+                    blink_timer--;
+                }
+
+                // Left arrow → YES (0), right arrow → NO (1)
+                if ((g_RawPadHeld & 0x8000) != 0) {
+                    blink_state = 0;
+                    blink_timer = 5;
+                    input_delay = 6;
+                    confirm_choice = 0;
+                }
+                if ((g_RawPadHeld & 0x2000) != 0) {
+                    blink_state = 0;
+                    blink_timer = 5;
+                    input_delay = 6;
+                    confirm_choice = 1;
+                }
+                // Confirm: YES → perform save, NO → back to navigation
+                if ((g_PlayerDpadPressed & 0x4000) != 0) {
+                    state = (confirm_choice == 1) ? STATE_IDLE : STATE_PERFORM_SAVE;
+                }
+                // Cancel → back to navigation
+                if ((g_PlayerDpadPressed & 0x8000) != 0) {
+                    state = STATE_IDLE;
+                }
+            } else {
+                input_delay--;
+            }
             break;
         }
 
@@ -619,59 +713,79 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // ================================================================
         case STATE_PERFORM_SAVE:
         {
-            // {
-            //     sub_40B700(aSave);
-            //     strcpy(backup_path, aSave);
-            //     char* sep = strchr(backup_path, '\\');
-            //     if (sep) *sep = '\0';
-            //     // Fill save data into file_buffer (encrypt/compress)
-            //     // ... (original complex data preparation)
-            //     // After preparation:
-            //     sub_412340(file_buffer, byte_BE9620, 2048);
-            //     sub_412340(small_buf1, asc_4D4730, 32);
-            //     sub_412340(small_buf2, byte_4B1858, 256);
-            //     sub_412340(small_buf4, byte_BE995C, 224);
-            //     sub_412340(&byte1_buf, &byte_AC8BB8, 1);
-            //     sub_412340(&byte2_buf, &byte_4D6444, 1);
-            //     sub_412340(small_buf3, byte_4D3FD8, 128);
-            //     sub_412340(small_buf5, byte_4D3F58, 128);
-            //     // Add save slot specific data (date, difficulty, etc.)
-            //     {
-            //         int idx = 0;
-            //         const char* diff_str = off_4D4118[byte_BE984B & 3];
-            //         do {
-            //             backup_path[idx] = diff_str[idx];
-            //             idx++;
-            //         } while (idx < 10);
-            //         backup_path[10] = 56;
-            //         backup_path[11] = -5;
-            //         backup_path[13] = -5;
-            //         backup_path[12] = (byte_BE9848 / 10) + 12;
-            //         backup_path[15] = -5;
-            //         backup_path[16] = 56;
-            //         backup_path[17] = -5;
-            //         backup_path[14] = (byte_BE9848 % 10) + 12;
-            //         unsigned int time_index = (uint8_t)word_BE9820 % 5;
-            //         if (!time_index) {
-            //             if (HIBYTE(word_BE9820) == 6) time_index = 1;
-            //             if (!time_index && HIBYTE(word_BE9820) == 24) time_index = 5;
-            //         }
-            //         if (time_index == 2 && HIBYTE(word_BE9820) == 7) time_index = 6;
-            //         int k = 18;
-            //         const char* time_str = off_4D42B8[time_index];
-            //         do {
-            //             backup_path[k - 1] = time_str[k - 18];
-            //             k++;
-            //         } while (k < 57);
-            //         if (++byte_BE9848 >= 100) byte_BE9848 = 99;
-            //     }
-            //     // Write the save file
-            //     sprintf(savedat_path, "%ssavedat%d.dat", aSave, selected_slot + 1);
-            //     sub_4122A0(savedat_path, file_buffer, 0xA82);
-            //     // Start save animation
-            //     anim_counter = 2;
-            //     state = STATE_SAVE_ANIM_STEP1;
-            // }
+            EnsureDirectoryExists(GAME_SAVE_ROOT);
+            // (The original seeds the display string with a copy of the save
+            // directory and truncates at a backslash — dead, the reveal
+            // string is fully rebuilt below.)
+
+            // Consume the ink ribbon. Jill needs the ribbon flag (bit 0x7B),
+            // Chris always spends one when the typewriter offers it.
+            if ((useInkRibbon != 0) &&
+                (((g_playerEntityPointer.id & 3) != 1) ||
+                 (Flg_ck((int)g_PlayerFlags, 0x7b) != 0))) {
+                g_selectedItemId = 0x2F;   // ink ribbon
+                use_room_action_item();
+            }
+
+            // Snapshot the current player state into the save block
+            // (g_BioCard +0x22B..0x232).
+            g_PlayerPosXCopy         = (short)g_playerEntityPointer.scaMatrixData.localMatrix.t[0];
+            g_PlayerPosZCopy         = (short)g_playerEntityPointer.scaMatrixData.localMatrix.t[2];
+            g_SelectedCharactedId    = g_playerEntityPointer.id;
+            g_PlayerHealthStatusCopy = g_playerEntityPointer.healthStatusFlags;
+            g_PlayerDirAngleCopy     = g_playerEntityPointer.directionAngle;
+
+            sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, selected_slot + 1);
+
+            // Refresh the joystick-remap backup; the file stores both tables,
+            // and the sidewinder-dependent one receives the live bindings.
+            memcpy(g_isSideWinderConnected ? g_joyRemapBackupJoy : g_joyRemapBackupKey,
+                   g_JoyRemapTbl[1], 0x80);
+
+            // Assemble the save file (2690 bytes). The 0x820..0x91F region is
+            // written twice on purpose (joy remap, then the joy backup over
+            // its upper half) — same order as the original. The buffer is
+            // zeroed first so the block tail the port does not model
+            // (0x43D..0x800) stays deterministic instead of stack garbage.
+            memset(fileBuffer, 0, SAVE_FILE_SIZE);
+            memcpy(fileBuffer + 0x000, g_BioCardData, sizeof(BioCardLayout));
+            memcpy(fileBuffer + OFFSET_PAD_REMAP, g_padRemapSubTable3,
+                   sizeof(g_padRemapSubTable3));
+            fileBuffer[OFFSET_CONTROLLER_CFG] = g_controllerConfig;
+            memcpy(fileBuffer + OFFSET_KEY_BINDINGS, g_keyBindingData, 0x20);
+            memcpy(fileBuffer + OFFSET_JOY_REMAP, g_JoyRemapTbl, 0x100);
+            memcpy(fileBuffer + OFFSET_ROOM_BGM, g_roomBgmState, 0xE0);
+            fileBuffer[OFFSET_SIDEWINDER] = (char)g_isSideWinderConnected;
+            fileBuffer[OFFSET_LANG_BYTE]   = (char)DAT_004d6444;
+            memcpy(fileBuffer + OFFSET_JOY_BACKUP, g_joyRemapBackupJoy, 0x80);
+            memcpy(fileBuffer + OFFSET_KEY_BACKUP, g_joyRemapBackupKey, 0x80);
+            FileWrite(g_saveFileName, fileBuffer, SAVE_FILE_SIZE);
+
+            // Build the save-animation reveal string:
+            //   name (10) + "\" + count(2) + "\" (8) + location (39) = 57 bytes
+            const unsigned char* nameStr = s_pftCharNameTable[g_SelectedCharactedId & 3];
+            for (int i = 0; i < 10; i++) {
+                displayStr[i] = (char)nameStr[i];
+            }
+            displayStr[0x0A] = (char)0x38;   // '\'
+            displayStr[0x0B] = (char)0xFB;
+            displayStr[0x0C] = (char)((g_SavesCounter / 10) + 0x0C);
+            displayStr[0x0D] = (char)0xFB;
+            displayStr[0x0E] = (char)((g_SavesCounter % 10) + 0x0C);
+            displayStr[0x0F] = (char)0xFB;
+            displayStr[0x10] = (char)0x38;   // '\'
+            displayStr[0x11] = (char)0xFB;
+            int locIdx = GetSaveLocationIndex(g_stageId, g_roomId);
+            const unsigned char* locStr = s_pftLocNameTable[locIdx];
+            for (int i = 0x12; i < 0x39; i++) {
+                displayStr[i] = (char)locStr[i - 0x12];
+            }
+
+            g_SavesCounter = (g_SavesCounter + 1 >= 100) ? 99 : (unsigned char)(g_SavesCounter + 1);
+
+            // Start save animation
+            anim_counter = 2;
+            state = STATE_SAVE_ANIM_STEP1;
             break;
         }
 
@@ -682,18 +796,35 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // ================================================================
         case STATE_SAVE_ANIM_STEP1:
         {
-            // state = STATE_SAVE_ANIM_STEP2;
-            // {
-            //     int len = (anim_counter > 0) ? anim_counter : 0;
-            //     memcpy(save_anim_str, backup_path, len);
-            //     save_anim_str[len] = 1;
-            //     anim_counter += 2;
-            //     if (anim_counter <= 58) {
-            //         sub_455190(55, 16 * selected_slot + 45, 0, save_anim_str);
-            //         // The original played a sound if certain condition met.
-            //     }
-            //     // Fall through to drawing loop below
-            // }
+            state = STATE_SAVE_ANIM_STEP2;
+            anim_timer = 5;
+
+            // Copy the reveal prefix into the anim buffer
+            int copyLen = (anim_counter > 0) ? anim_counter : 0;
+            if (copyLen > 0) {
+                memcpy(animBuf, displayStr, copyLen);
+            }
+            animBuf[copyLen] = 1;           // STR terminator
+            anim_counter += 2;
+
+            if (anim_counter > 58) {
+                // Animation finished
+                if (!cutsceneReset) {
+                    cut_set();
+                    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+                    StMask(1, 0);
+                }
+                g_loadSaveStateFlag = 0;
+                return;
+            }
+
+            PrintFormattedText(55, (short)(16 * selected_slot + 45), 0, (unsigned char*)animBuf);
+
+            // "Typewriter" tick — plays for every revealed non-space char
+            // (the char two back from the copy end; spaces are 0x00).
+            if (animBuf[copyLen - 2] != 0) {
+                play_sfx(exitMode, 31);
+            }
             break;
         }
 
@@ -702,20 +833,14 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // ================================================================
         case STATE_SAVE_ANIM_STEP2:
         {
-            // sub_455190(55, 16 * selected_slot + 45, 0, save_anim_str);
-            // if (--anim_timer <= 0)
-            //     state = STATE_SAVE_ANIM_STEP1;
-            // if (anim_counter > 58) {
-            //     // Animation finished
-            //     if (!skip_cleanup) {
-            //         sub_4628C0();
-            //         g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
-            //         sub_497690(1, 0);
-            //     }
-            //     dword_4D4678 = 0;
-            //     return;
-            // }
-            // // Fall through to drawing loop
+            PrintFormattedText(55, (short)(16 * selected_slot + 45), 0, (unsigned char*)animBuf);
+
+            // Original tests the old value, then decrements; on old<=0 → step 1
+            if (anim_timer <= 0) {
+                state = STATE_SAVE_ANIM_STEP1;
+            } else {
+                anim_timer--;
+            }
             break;
         }
 
@@ -723,14 +848,14 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // State 9: Error messages — "NOT ENOUGH FREE SPACE" / "ON HARD DRIVE."
         // Shown when save fails. Waits for any button to return to navigation.
         // ================================================================
-        case 9:
+        case STATE_ERROR_MSG:
         {
             PrintFormattedText(49, 209, 0, s_pftNoFreeSpace);
             PrintFormattedText(49, 225, 0, s_pftOnHardDrive);
-            if (((g_PlayerPadHeld & 0x0) != 0) ||
-                ((g_PlayerPadPressed & 0x0) != 0)) {
-                g_PlayerPadHeld = 0;
-                g_PlayerPadPressed = 0;
+            if (((g_RawPadHeld & 0xF000) != 0) ||
+                ((g_PlayerDpadPressed & 0xC000) != 0)) {
+                g_RawPadHeld = 0;
+                g_PlayerDpadPressed = 0;
                 state = STATE_IDLE;
             }
             break;
@@ -787,14 +912,6 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
         // Result: "SAVE GAME" / "LOAD GAME"
         PrintFormattedText(124, 13, 0, s_pftHeaderTable[mode]);
         PrintFormattedText(124, 13, 0, s_pftGame);
-
-        // Confirmation dialog (state 5) — "OK TO OVERWRITE THE DATA?" + "YES NO"
-        if (state == 5) {
-            // Assembly: PUSH 0x4d4170, color=1, x=49, y=193
-            PrintFormattedText(49, 193, 1, s_pftOverwritePrompt);
-            // Assembly: PUSH 0x4d4190, color=0, x=118, y=209
-            PrintFormattedText(118, 209, 0, s_pftYesNo);
-        }
 
         // Draw cursor arrow(s) — matching assembly at 0x00493ca8
         // blinkToggle: 0=cursor visible, 1=cursor hidden (toggles every 5 frames)

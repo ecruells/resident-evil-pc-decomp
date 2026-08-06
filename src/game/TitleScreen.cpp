@@ -30,7 +30,7 @@ int check_save_files_exist(void)
 {
     char path[260];
     for (int i = 1; i <= 8; i++) {
-        sprintf(path, ".\\savedat%d.dat", i);
+        sprintf(path, "%ssavedat%d.dat", GAME_SAVE_ROOT, i);
         FILE* f = fopen(path, "rb");
         if (f != NULL) {
             fclose(f);

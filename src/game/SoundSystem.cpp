@@ -86,8 +86,6 @@ void LoadSoundBank(int sound_bank_id, void* buffer)
     }
 
     char dbg[256];
-    sprintf(dbg, "[DEBUG] LoadSoundBank: bank_id=%d, g_pDirectSound=%p\n", sound_bank_id, g_pDirectSound);
-    OutputDebugStringA(dbg);
 
     int iVar6 = 0;
     int* bankPtr = g_SfxBanks;
@@ -106,13 +104,7 @@ void LoadSoundBank(int sound_bank_id, void* buffer)
             char path[256];
             sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", filename);
 
-            sprintf(dbg, "[DEBUG] LoadSoundBank: loading '%s' ...\n", path);
-            OutputDebugStringA(dbg);
-
             int bank = loadSndBankFromWav(path);
-
-            sprintf(dbg, "[DEBUG] LoadSoundBank: -> handle=%d\n", bank);
-            OutputDebugStringA(dbg);
 
             bankPtr[0] = bank;
             if (bank != 0) {

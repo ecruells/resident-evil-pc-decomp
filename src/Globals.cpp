@@ -320,7 +320,7 @@ int   g_JoyWarnPrinted = 0;
 // 0x004b1858 - PC joystick bit → PSX button remap table (2 players x 32 entries)
 // Maps 32 keyboard/joystick button bits to PSX controller button codes.
 // Verified against original binary at 0x004b1858.
-const DWORD g_JoyRemapTbl[2][32] = {
+DWORD g_JoyRemapTbl[2][32] = {
     { // Player 1
         0x00001000, 0x00004000, 0x00008000, 0x00002000,
         0x00000020, 0x00000040, 0x00000002, 0x00000010,
@@ -342,6 +342,12 @@ const DWORD g_JoyRemapTbl[2][32] = {
         0x00000000, 0x00000000, 0x00000000, 0x00000000
     }
 };
+
+// 0x004d3f58 / 0x004d3fd8 - joystick remap backup tables.
+// Shared by the options menu (binding editor scratch) and the save screen
+// (the save file stores both tables; the load restores the active one).
+unsigned int g_joyRemapBackupKey[32] = {};   // 0x004d3f58
+unsigned int g_joyRemapBackupJoy[32] = {};   // 0x004d3fd8
 
 // Pad remap sub-tables (ROM data from 0x004bf2a0, 0x004bf2c0, 0x004bf2e0)
 // Each entry maps a PS1 button bitmask to a dpad output position
