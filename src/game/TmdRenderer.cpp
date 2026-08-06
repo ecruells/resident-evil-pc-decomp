@@ -80,8 +80,32 @@ struct TmdDrawEntry {
                        // reference - ordering is per-triangle, see FlushTmdObjects
 };
 
-static TmdDrawEntry g_tmdQueue[TMD_MAX_QUEUE];
-static int          g_tmdQueueCount = 0;
+// Lighting state AS OF QUEUE TIME, one record per queue slot. Unlike the
+// transform (which the caller writes after insertion, see TmdQueueObject) the
+// lights are already set when an object is queued: calc_entity_lighting calls
+// update_entity_lighting for the entity, then SetLightMatrix per joint, and only
+// then queues. On real hardware the driver latched the light state per
+// DrawPrimitive, so each entity kept its own lighting; reading the globals at
+// flush time instead shaded EVERY entity with whatever was set last - the
+// player, since the render loop draws enemies first and the player after. A
+// corpse lying still then appeared to be lit by a lamp the player was carrying.
+//
+// This lives on the heap rather than beside g_tmdQueue on purpose: 152KB of
+// extra .bss shifts every static that follows it, and this port has globals
+// whose addresses other code derives arithmetically. Keeping the fix out of
+// .bss keeps the layout byte-identical to before it.
+struct TmdLightState {
+    float dir[3][3];   // g_d3dLightData[i*12 + 3..5]
+    float col[3][3];   // g_d3dLightData[i*12 + 6..8]
+    DWORD ambient;     // g_d3dAmbientColor
+};
+
+// Pinned so the light-latch fix cannot silently grow the .bss footprint again.
+static_assert(sizeof(TmdDrawEntry) == 16, "TmdDrawEntry must stay 16 bytes");
+
+static TmdDrawEntry  g_tmdQueue[TMD_MAX_QUEUE];
+static int           g_tmdQueueCount = 0;
+static TmdLightState* g_tmdLight = NULL;   // TMD_MAX_QUEUE records, heap, never freed
 
 // Per-frame triangle pool. Triangles from every queued object are gathered here
 // and submitted only after a global depth sort (see FlushTmdObjects).
@@ -118,6 +142,11 @@ void TmdQueueObject(void* objData, int depth)
 {
     if (objData == NULL || g_tmdQueueCount >= TMD_MAX_QUEUE) return;
 
+    if (g_tmdLight == NULL) {
+        g_tmdLight = (TmdLightState*)calloc(TMD_MAX_QUEUE, sizeof(TmdLightState));
+        if (g_tmdLight == NULL) return;
+    }
+
     BYTE* p   = (BYTE*)objData;
     BYTE* buf = (BYTE*)g_tmdObjectBuffer;
     const int slotStride = 0x1594;
@@ -140,11 +169,22 @@ void TmdQueueObject(void* objData, int depth)
         return;
     }
 
-    TmdDrawEntry* e = &g_tmdQueue[g_tmdQueueCount++];
+    int idx = g_tmdQueueCount++;
+    TmdDrawEntry* e = &g_tmdQueue[idx];
     e->slot     = buf + (ptrdiff_t)slotIdx * slotStride;
     e->objData  = p;
     e->objIndex = objIndex;
     e->depth    = depth;
+
+    // Latch the light state for this object (see the note on TmdLightState).
+    TmdLightState* ls = &g_tmdLight[idx];
+    const float* lights = (const float*)g_d3dLightData;
+    for (int i = 0; i < 3; i++) {
+        const float* L = lights + i * 12;
+        ls->dir[i][0] = L[3]; ls->dir[i][1] = L[4]; ls->dir[i][2] = L[5];
+        ls->col[i][0] = L[6]; ls->col[i][1] = L[7]; ls->col[i][2] = L[8];
+    }
+    ls->ambient = g_d3dAmbientColor;
 }
 
 // ============================================================================
@@ -159,7 +199,7 @@ void TmdQueueObject(void* objData, int depth)
 // A previous revision negated X and Z here to cancel out an incorrect 180 degree
 // view flip in FUN_00486190.
 // ============================================================================
-static void TmdComputeLight(const float* n, const float* rot,
+static void TmdComputeLight(const TmdLightState* ls, const float* n, const float* rot,
                             float* outR, float* outG, float* outB)
 {
     // Normal into view space (rotation part of the objData matrix)
@@ -167,14 +207,19 @@ static void TmdComputeLight(const float* n, const float* rot,
     float ny = rot[1] * n[0] + rot[5] * n[1] + rot[9]  * n[2];
     float nz = rot[2] * n[0] + rot[6] * n[1] + rot[10] * n[2];
 
-    // Ambient from g_d3dAmbientColor (packed r<<16|g<<8|b, 0..255)
-    float r = (float)((g_d3dAmbientColor >> 16) & 0xFF) / 255.0f;
-    float g = (float)((g_d3dAmbientColor >> 8)  & 0xFF) / 255.0f;
-    float b = (float)( g_d3dAmbientColor        & 0xFF) / 255.0f;
+    // Ambient from the latched g_d3dAmbientColor (packed r<<16|g<<8|b, 0..255)
+    // - NOT the live global, see TmdLightState.
+    float r = (float)((ls->ambient >> 16) & 0xFF) / 255.0f;
+    float g = (float)((ls->ambient >> 8)  & 0xFF) / 255.0f;
+    float b = (float)( ls->ambient        & 0xFF) / 255.0f;
 
-    const float* lights = (const float*)g_d3dLightData;
     for (int i = 0; i < 3; i++) {
-        const float* L = lights + i * 12;
+        // L[3..5] = direction, L[6..8] = colour, from the latched copy.
+        const float L[9] = {
+            0.0f, 0.0f, 0.0f,
+            ls->dir[i][0], ls->dir[i][1], ls->dir[i][2],
+            ls->col[i][0], ls->col[i][1], ls->col[i][2],
+        };
         // SetLightMatrix writes pLight[0] = 2 (D3DLIGHT_DIRECTIONAL) and stores
         // the normalised light POSITION in the direction field, so [3..5] is a
         // D3D dvDirection: the direction the light travels. D3D's diffuse term
@@ -206,7 +251,7 @@ void FlushTmdObjects(void)
 {
     int queued = g_tmdQueueCount;
 
-    if (queued > 0 && Marni_DX() != NULL) {
+    if (queued > 0 && g_tmdLight != NULL && Marni_DX() != NULL) {
         float scaleX, scaleY;
         MarniGetRenderScale(&scaleX, &scaleY);
         float cx = (float)g_SubpixelOffsetX * scaleX;
@@ -223,6 +268,18 @@ void FlushTmdObjects(void)
 
         for (int i = 0; i < queued; i++) {
             TmdDrawEntry* e = &g_tmdQueue[i];
+
+            // TmdQueueObject only ever stores a slot inside g_tmdObjectBuffer,
+            // so a null slot means this record was never filled - i.e. the
+            // count outran the writes. Dereferencing it read address 4 and
+            // faulted; skip it and say so instead.
+            if (e->slot == NULL) {
+                dbg_printf("FlushTmdObjects: unfilled queue entry %d of %d "
+                           "(objData=%p objIndex=%d)\n",
+                           i, queued, (void*)e->objData, e->objIndex);
+                continue;
+            }
+
             CMarniViewport2* elem =
                 (CMarniViewport2*)(e->slot + e->objIndex * 0x4C);
 
@@ -282,7 +339,7 @@ void FlushTmdObjects(void)
                 // the first vertex's normal.
                 const float* n = vtx + 3;
                 if (n[0] == 0.0f && n[1] == 0.0f && n[2] == 0.0f) n = flatN;
-                TmdComputeLight(n, M, &cr[v], &cg[v], &cb[v]);
+                TmdComputeLight(&g_tmdLight[i], n, M, &cr[v], &cg[v], &cb[v]);
                 cr[v] *= vtx[6]; cg[v] *= vtx[7]; cb[v] *= vtx[8];
             }
 

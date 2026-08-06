@@ -6,6 +6,7 @@
 #include <cstdio>
 #include <cstring>
 #include "../system/AssetPath.h"
+#include "../DebugPrint.h"
 
 // Forward declarations for functions defined in other files
 extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
@@ -159,7 +160,38 @@ unsigned char load_effect_sprite_data(unsigned char* effectAnimIndex, unsigned c
 
 // ============================================================================
 // FUN_0047bc80 (0x0047bc80) - Set up effect sprite texture pages
-// Assigns VRAM positions for each effect sprite's texture data.
+//
+// Packs every declared effect sprite into 256-tall texture pages. `curU` is
+// misleadingly named: it is the V cursor down the page, advanced by the sprite's
+// V extent (header.field_0A) and wrapped at 0x100, and `texY` is the PAGE index
+// (it increments on each wrap). At 0x0047bdc6 the original then adds curU to
+// byte +1 of every one of the sprite's UV records - and byte +1 is texV
+// (effect_submit_sprite reads uv[0]=U, uv[1]=V, uv[2]/uv[3]=pivot). So a
+// sprite's UVs ship LOCAL to its own image and this turns them into
+// page-absolute coordinates.
+//
+// The two blocks reach the D3D11 renderer through different upload models, and
+// that is why the V offset applies to only one of them:
+//
+//   startSlot 0  (weapon FX, core00): load_shoot_direction_data uploads ONE SRV
+//                per sprite from that sprite's own core00.etm image
+//                (DAT_00ac9cd0[slot] -> SRV 3+slot). UVs stay local, so adding
+//                curU would push them off the sheet - that is the smoke bug an
+//                earlier pass hit when it added the offset unconditionally.
+//
+//   startSlot 8  (room): load_effect_sprites uploads one SRV per effspr TIM
+//                PAGE (up to 4 -> SRV 11..14), and several sprites SHARE a
+//                page. Here the sprite's page and its V offset both matter.
+//                Every effspr*.tim is 256x256, and rooms declare up to 7
+//                sprites against as few as 2 pages (ROOM1010 declares types
+//                3, 4, 32 against esp000 + esp201), so a per-sprite mapping is
+//                simply not available.
+//
+// The old code recorded `slot + startSlot` as the sheet for both blocks, so a
+// room's first declared sprite went to page 0 = esp000. esp000 is the GUNFIRE
+// sheet (glass, smoke, muzzle flash, sparks); the blood-splatter frames the
+// zombie head FX wants are on page 1 (esp001 / esp201). Both the page index and
+// the V offset come out of the running texY / curU cursors below.
 // ============================================================================
 void setup_effect_sprite_textures(unsigned char startSlot)
 {
@@ -188,6 +220,21 @@ void setup_effect_sprite_textures(unsigned char startSlot)
     DAT_00bf0a3c = texX;
     DAT_00bf0a40 = pageRow;
 
+    // texY IS the page index, biased by 0x18 - the same `texY - 0x18` the
+    // original uses as its texture id. It runs across BOTH blocks: the weapon
+    // pass starts it at 0x18 and the room pass resumes from where that left off.
+    //
+    // That bias is the whole answer to which effspr TIM a room sprite lands in.
+    // esp000 (page 0) holds exactly the eight core00-declared weapon FX sprites -
+    // glass, smoke, muzzle flash, sparks - stacked down its 256 rows, so the V
+    // cursor reaches ~256 by the end of the weapon pass and the FIRST room sprite
+    // wraps to page 1 at V=3. That is why esp001/esp201, the blood-splatter
+    // sheets, begin their first row at y=3.
+    //
+    // Measuring the page from the start of the room block instead put the zombie
+    // head FX on page 0 and it drew muzzle-flash frames.
+    const unsigned char PAGE_BIAS = 0x18;
+
     do {
         unsigned char spriteIdx = g_abEffSpriteIndexTable[slot + startSlot];
         if (spriteIdx == 0xFF) break;
@@ -213,17 +260,54 @@ void setup_effect_sprite_textures(unsigned char startSlot)
         unsigned short* spriteInfo = (unsigned short*)g_effectSpriteInfo[spriteIdx];
         spriteInfo[2] = curV * 0x40 + pageRow + 0x7810;
         *((unsigned char*)(spriteInfo + 3)) = texY;
-        // The D3D11 renderer resolves each effect sprite's texture by its sheet
-        // slot (0-7 weapon FX, 8-15 room), NOT by the depth-derived texture id,
-        // which several sheets share. Port-only bookkeeping.
-        g_effectSpriteSheetSlot[spriteIdx] = (unsigned char)(slot + startSlot);
 
-        // NOTE: the original adds curU to the v byte here because its VRAM
-        // pages stack the sheets; the port renders each sheet as its own SRV
-        // with sheet-relative UVs, so the addition is deliberately omitted -
-        // it pushed the v coordinates past the sheet height (the smoke's
-        // frames landed 0x40+ rows into a 112-tall sheet).
-        unsigned short* uvPtr = spriteInfo + spriteInfo[1] * 2 + 4;
+        // The D3D11 renderer resolves an effect sprite's texture through this
+        // table (see effect_submit_sprite), not through the depth-derived
+        // texture id. Port-only bookkeeping - see the header note for why the
+        // two blocks index it differently.
+        if (startSlot == 0) {
+            // Weapon FX: one SRV per sprite, UVs already local to it. Carry the
+            // page V separately - it is what picks the blend/colour band, and
+            // with a local v of 0 every weapon sprite fell into band 0
+            // (colorIdx 0 = 0xffffff), which is why blood came out grey.
+            g_effectSpriteSheetSlot[spriteIdx] = slot;
+            g_effectSpriteBandV[spriteIdx] = (unsigned char)curU;
+        } else {
+            // Room: one SRV per shared TIM page. load_effect_sprites only ever
+            // uploads 4 pages, but 8 of the 320 RDTs declare enough sprites to
+            // reach a 5th (ROOM5130 declares seven). Those used to resolve to
+            // SRV 15+, which belongs to the menu/item images - a real texture,
+            // so it drew a menu graphic instead of failing. Mark them unmapped
+            // (0xFF) so effect_submit_sprite skips them, and say so.
+            unsigned char page = (unsigned char)(texY - PAGE_BIAS);
+            if (page > 3) {
+                dbg_printf("[effspr] room sprite type %u wants page %u but only "
+                           "4 effspr pages are loaded - effect skipped\n",
+                           (unsigned int)spriteIdx, (unsigned int)page);
+                g_effectSpriteSheetSlot[spriteIdx] = 0xFF;
+            } else {
+                g_effectSpriteSheetSlot[spriteIdx] = (unsigned char)(startSlot + page);
+            }
+
+            // 0x0047bdb4-0x0047bdd1: uvPtr = spriteInfo + 8 + spriteInfo[1]*4,
+            // then `ADD byte ptr [EDI+1],BL` over spriteInfo[0] records of 4
+            // bytes - the V byte of each record gains this sprite's V offset in
+            // the page. Only meaningful for a shared page, hence room-only.
+            //
+            // Like the original this edits the RDT buffer in place, so it is
+            // only correct once per RDT load; the caller (the room effect init)
+            // runs load_effect_sprite_data immediately before it, which
+            // re-resolves these pointers into the freshly read RDT.
+            unsigned char* uvPtr =
+                (unsigned char*)(spriteInfo + spriteInfo[1] * 2 + 4);
+            unsigned int uvCount = spriteInfo[0];
+            unsigned char vAdd = (unsigned char)curU;
+            for (unsigned int u = 0; u < uvCount; u++) {
+                uvPtr[u * 4 + 1] = (unsigned char)(uvPtr[u * 4 + 1] + vAdd);
+            }
+            // Already absolute after the loop above, so no extra band bias.
+            g_effectSpriteBandV[spriteIdx] = 0;
+        }
 
         curU = curU + texW;
         slot = slot + 1;
@@ -363,6 +447,9 @@ void InitRoomEffSprite(void)
             g_effectSpriteInfo[spriteIdx] = 0xFFFFFFFF;
             g_effectAnimData[spriteIdx] = 0xFFFFFFFF;
             g_abEffSpriteIndexTable[idx + 8] = 0xFF;
+            // Port-only companion table - keep it in step so a departing room's
+            // sheet mapping cannot be reached from the next room.
+            g_effectSpriteSheetSlot[spriteIdx] = 0xFF;
         }
     } while (i < 8);
 

@@ -148,12 +148,21 @@ static unsigned char weapon_hit_detect_knife(short range, Entity* enemy)
     g_matrixScratch.t[1] = (int)offsets[pid * 3 + 1];
     g_matrixScratch.t[2] = (int)offsets[pid * 3 + 2];
 
-    SVECTOR knifePos;
+    // ApplyLVAndMul0Matrix writes a whole MATRIX, not an SVECTOR: the original
+    // reserves 32 bytes (SUB ESP,0x20), fills the first 12 with the offset pair
+    // above, and then hands that same buffer to 0x0040a1f0 as the output matrix
+    // (0x0043d6e5: LEA EAX,[ESP+0xc] -> PUSH EAX). Declaring the destination as
+    // an 8-byte SVECTOR let the call write 24 bytes past it - /GS caught it as
+    // "stack around the variable 'knifePos' was corrupted" the first time the
+    // knife swung - and the two reads below took the rotation instead of the
+    // translation.
+    MATRIX knifeMtx;
     ApplyLVAndMul0Matrix(&g_playerEntityPointer.jointsStructs[0xE].world,
-                         &g_matrixScratch, (SVECTOR*)&knifePos);
+                         &g_matrixScratch, &knifeMtx);
 
-    int dist_x = *(int*)&enemy->scaMatrixData.localMatrix.t[0] - (int)knifePos.x;
-    int dist_z = *(int*)&enemy->scaMatrixData.localMatrix.t[2] - (int)knifePos.z;
+    // 0x0043d721 / 0x0043d728 read the output's t[0] and t[2] (+0x14 / +0x1C).
+    int dist_x = *(int*)&enemy->scaMatrixData.localMatrix.t[0] - knifeMtx.t[0];
+    int dist_z = *(int*)&enemy->scaMatrixData.localMatrix.t[2] - knifeMtx.t[2];
 
     unsigned int effectiveRange = (unsigned int)*(short*)(*(int*)((char*)enemy + 4) + 10) + range;
     unsigned char enemyId = *(unsigned char*)((char*)enemy + 1);
@@ -253,12 +262,23 @@ static unsigned char weapon_hit_detect_gun(short range, Entity* enemy)
 // ============================================================================
 static unsigned char weapon_hit_detect_projectile(short range, Entity* enemy)
 {
-    int dist_x = *(int*)&enemy->scaMatrixData.localMatrix.t[0]
-               - (int)g_playerEntityPointer.scaMatrixData.localMatrix.t[0];
-    int dist_z = *(int*)&enemy->scaMatrixData.localMatrix.t[2]
-               - (int)g_playerEntityPointer.scaMatrixData.localMatrix.t[2];
+    // 0x0043d819 / 0x0043d824: the reference point is g_playerPosScratch
+    // (0x00be11b0 / 0x00be11b8), NOT the player entity. That is the whole point
+    // of this detector - the caller writes the PROJECTILE's position there and
+    // the hit is measured from it:
+    //
+    //   effect_behavior_flamethrower  (0x0040ed30) sets it to the flame's x/z
+    //   before apply_weapon_damage(6)
+    //
+    // Measuring from the player instead meant the flame's ~400-unit reach was
+    // tested against the distance from Chris, so a zombie standing inside the
+    // flame was always out of range and the flamethrower did nothing at all.
+    int dist_x = *(int*)&enemy->scaMatrixData.localMatrix.t[0] - g_playerPosScratch.x;
+    int dist_z = *(int*)&enemy->scaMatrixData.localMatrix.t[2] - g_playerPosScratch.z;
 
-    unsigned int effectiveRange = (unsigned int)*(short*)(*(int*)((char*)enemy + 4) + 10) + range;
+    // `XOR EDI,EDI; MOV DI, word [EAX+0xa]` - the radius is ZERO-extended.
+    unsigned int effectiveRange =
+        (unsigned int)*(unsigned short*)(*(int*)((char*)enemy + 4) + 10) + range;
 
     if (*(unsigned char*)((char*)enemy + 1) == 4)   // black tiger
         effectiveRange -= 1000;
@@ -801,9 +821,21 @@ static void enemy_hit_reaction_zombie(Entity* enemy)
             || ((g_scaled_down_dist == 3 || g_scaled_down_dist == 4)
                 && (g_playerEntityPointer.flags & 0x40) != 0)) {
             enemy->health = 0xfed4;    // -300: instant kill
+            // 0x0043d0c5-0x0043d10c: the original swaps ENTITY to the hit enemy
+            // for these three calls and restores it before the billboards.
+            // joint_setup_attack_effect reads ENTITY->id for the effect size and
+            // ENTITY->weaponJointsPtr - ENTITY->jointsStructs to reach the
+            // weapon-part joint, and Snd_em reads ENTITY for the sound bank and
+            // pan position. Left on the player, the sound came out of the
+            // player's bank at the player's position and the weapon-joint write
+            // landed at (playerWeaponJoints - playerJoints + zombieHead), i.e.
+            // outside the zombie entirely - the wrong head-explosion effects.
+            Entity* savedEntity = ENTITY;
+            ENTITY = enemy;
             Flg_on((int)g_RoomEventFlags, enemy->death_event_id);
             joint_setup_attack_effect((int)((char*)enemy->jointsStructs + 0xf8), 30, 2, 3);
             Snd_em(6);                 // head-explosion sound
+            ENTITY = savedEntity;
             g_playerPosScratch.x = 100;
             g_playerPosScratch.y = -600;
             g_playerPosScratch.z = 0;

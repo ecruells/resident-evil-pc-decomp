@@ -8,6 +8,14 @@ Every table listed here was read byte-for-byte out of the exe, and every functio
 address was confirmed against the jumptable that reaches it. Where the port
 deviates from the original on purpose, it says so inline.
 
+**Runtime status: playable and behaviour-verified as of 2026-08-06.** Chase,
+damage reactions, falldown/get-up, death, severed limbs, head explosion, enemy
+SFX and all weapon classes were tested in-game against the original. The defects
+that only a running build could expose are collected under
+[Found at runtime](#found-at-runtime-2026-08-06) — they are worth reading before
+porting the next enemy type, because most of them are patterns rather than
+one-offs.
+
 ---
 
 ## Read this first: the zombie has FOUR dispatch tables, and three of them overlap
@@ -71,7 +79,7 @@ update_entities (0x0048f0f0)
           │   ├─ SetEntityScaHitData / ResolveEntityScaCollision(player, ENTITY)
           │   ├─ HandleEnemyPlayerCollisions
           │   ├─ check_room_collision(pos, Sca_info+0x0A)
-          │   └─ if laying down: FUN_0047d6f0(±600 body ends)   ← STILL A STUB
+          │   └─ if laying down: FUN_0047d6f0(±600 body ends)   two-point push
           ├─ if *(u16*)0x174 != 0: blood_splatter_physics(joint+0xF8, 6)
           ├─ is_entity_in_switch_zone → has_enter_switch_zone
           └─ entity_add_fade_sprite ×2 (body, and hand joint if flagged)
@@ -266,7 +274,11 @@ So a zombie spawns with **17–99 HP**, not the 180–240 an earlier pass invent
 1. `state = 1`, `ignore_player_flag = action_behavior = action_state = 0`
 2. `Sca_info = g_pZombieScaInfo[0]`, swapped to `[1]` if `id == 1`
 3. Two shadow quads via `FUN_004565f0`, tinted through **`g_animFrameIdSave`**
-   (`0x00be0dfc`) — *not* `g_tempVar` (`0x00be0df8`)
+   (`0x00be0dfc`) — *not* `g_tempVar` (`0x00be0df8`). The tints are the
+   **immediates** `0x00FFFF50` (the 400×400 SCA quad) and `0x00808080` (the
+   700×900 body shadow); Ghidra prints both as `&DAT_00ffff50` / `&DAT_00808080`
+   because the values look like addresses, and taking the address of a
+   placeholder global feeds the quad a garbage RGB
 4. `health` from the table above
 5. `hit_threshold` from a 64-byte **stack** table, half selected by
    `Flg_ck(g_PlayerFlags, 0x7b)` (difficulty)
@@ -336,6 +348,22 @@ zombie_damage_behavior_tbl[action_behavior]()      ← unconditional, no bound
 
 `zombie_falldown` (`0x004368a0`) is **not** in this table. Its call site is still
 unidentified.
+
+**Entries 0–3 share a tail, and it is the single most damaging thing to get
+wrong.** `short_push_back` (`0x00436e76`) and `push_and_stagger` (`0x00436fdf`)
+both finish by storing the dword **`0x00030101`** at `+0x84` — state 1 (IDLE),
+ignore 1, behaviour 3, sub 0 — *not* state 3. Writing state 3 here sends every
+ordinary hit reaction into the death sequence: one handgun shot kills, and
+because `action_state` is left at 2 the corpse enters `zombie_dead_animation` at
+its hold state and never plays the fall, so it appears to die and freeze on the
+spot. `zombie_falldown` and `benddown_and_standup` end with the same dword, which
+is what makes the mistake easy to make in only some of the four places.
+
+Both also store the waypoint as **words** (`MOV word ptr [ECX+0x166]`), set
+`behavior_flags = 0` as a plain byte write when the low nibble is 5, and
+`push_and_stagger` selects its `Add_speedXZ` argument (`0x800` vs `0`) from the
+same `action_behavior == 2` test that picks animation 7 vs 6 — its frame gate is
+`animation_frame_id == 0x14`, an equality, and neither arm returns early.
 
 ### 3 · `zombie_die` @ 0x004340e0
 
@@ -566,20 +594,73 @@ as `action_behavior_00be0df0` in another; `CMP dword [0x00be0df0],0x2` at
 
 ---
 
+## Found at runtime (2026-08-06)
+
+Nine defects that reading the disassembly did not catch, in the order they were
+found. Each was confirmed against the original before fixing. The middle column
+is what the player actually sees — that mapping is the useful part, because the
+next enemy type will fail the same ways.
+
+| Symptom in game | Cause | Where |
+|---|---|---|
+| Zombies wander instead of closing on the player | `entity_update_wander_turn` read its steering waypoint from **bytes at `+0xB3`/`+0xB4`** (inside `pad_b0`, always 0, so every entity turned toward the room origin) instead of the sign-extended shorts at `+0x166`/`+0x168`; and its stuck threshold from a byte at `+0x61` instead of the signed word `move_speed_current` at `+0xC2` | `EntityCommon.cpp` |
+| One handgun shot kills, corpse freezes mid-air | `short_push_back` / `push_and_stagger` wrote `state = 3` instead of the dword `0x00030101` (see above) | `Zombie.cpp` |
+| Waypoint refreshes on the wrong frames | `entity_pathfind_update` rebuilt its state byte as `counter + 1`; the original is `INC byte`, which preserves the accumulated bit 5 (LOS-blocked) across frames 0–2 so it can be tested once on frame 3 | `EntityCommon.cpp` |
+| Head-explosion FX wrong; sound from the player's position | `enemy_hit_reaction_zombie` must swap `ENTITY` to the hit enemy for `Flg_on` / `joint_setup_attack_effect` / `Snd_em` and restore it before the billboards (`0x0043d0c5`–`0x0043d10c`). `joint_setup_attack_effect` reads `ENTITY->id` for the effect size and `weaponJointsPtr - jointsStructs` to reach the weapon joint, so on the player it wrote outside the zombie entirely | `WeaponDamage.cpp` |
+| No enemy SFX at all, though banks load | `Snd_em` read the bank-group nibble from **`entity+0x10`** — which `EntityModelLoader` fills with the low byte of `&ENTITY->scaMatrixData` — instead of `entity+0x161`, whose high nibble `cmd_em_set` fills from the SCD enemy record's byte `0x15`. `id + group*10` then ran past the 48-record table and `Snd_em` returned before touching it | `SoundSystem.cpp` |
+| Blown-off arm hangs in mid-air | `FUN_004896c0` (`0x004896c0`) was an empty stub. It is the severed-limb ballistic step and the **only** thing that integrates a detached joint's world translation — `rotate_entity` stops recomputing the matrix once `0x8`/`0x2` clear. See below | `GteMatrix.cpp` |
+| Fallen limb never gets its ground shadow | `blood_splatter_physics` wrote its resting height as −99; the original writes **−100**, and `zombie_update`'s limb-shadow test is `world.t[1] == -100` exactly | `EntityCommon.cpp` |
+| Knife crash (`/GS`: stack around `knifePos` corrupted) | `weapon_hit_detect_knife` handed an 8-byte `SVECTOR` to `ApplyLVAndMul0Matrix`, which writes a whole 32-byte `MATRIX`. The original reserves exactly `0x20` and reuses its offsets scratch as the output; distances come from that output's `t[0]`/`t[2]` | `WeaponDamage.cpp` |
+| Flamethrower, grenade launcher and rocket do nothing | `weapon_hit_detect_projectile` measured from the player entity. The original measures from **`g_playerPosScratch`** (`0x0043d819`/`0x0043d824`) — the caller stages the *projectile's* position there. That is the entire difference between this detector and the gun one | `WeaponDamage.cpp` |
+
+### Severed-limb physics — `FUN_004896c0` @ 0x004896c0
+
+`calc_entity_lighting` calls this once per frame for every joint whose flags carry
+`0x4`, having first reloaded the launch velocity into the joint's rotation
+SVECTOR: `rotation.x = -20`, `rotation.y = 200`, `rotation.z = 0`. Arguments are
+`(joint, gravity = -35, floorY = -100, siblingIdx = 1)`.
+
+| Joint offset | Field | Use |
+|---|---|---|
+| `+0x02` | `field_02` | Frame counter; reset to 3 on landing |
+| `+0x03` | `pad_03` | `0x80` = has touched the floor, `0x01` = at rest |
+| `+0x04` | `rotation` | The velocity SVECTOR (x, y, z) |
+| `+0x58/5C/60` | `world.t[0..2]` | X / Y / Z |
+
+`vy = (u16)field_02 * gravity + rotation.y`, all in 16 bits, then `Y -= vy`. Y is
+negative-up, so vy falling through zero is the arc. The tumble rotation's sign
+flips once `pad_03 & 0x80` is set, which is what settles the limb flat. First
+touch bounces to −350; the second snaps to exactly `floorY`.
+
+### Two patterns worth generalising
+
+**A shared scratch global can be the reference point, not just a temporary.**
+`weapon_hit_detect_projectile` is the clearest case: `g_playerPosScratch` carries
+the projectile position *into* the detector. Reading the "obvious" source instead
+compiles, runs, and silently never hits.
+
+**`ENTITY` is an implicit argument to most helpers.** Any helper reading
+`ENTITY->id`, `->angle`, `->jointsStructs` or `->weaponJointsPtr` needs `ENTITY`
+pointing at the right entity, and the original swaps it around narrow call
+groups. Check the save/restore pairs — they are load-bearing, and dropping one
+corrupts memory rather than merely misbehaving.
+
+---
+
 ## Still outstanding
 
-- **`FUN_0047d6f0` (`0x0047d6f0`) is a stub returning 0.** It is the two-point
-  boundary push a prone body needs: it runs `boundary_classify` +
-  `g_CollisionShapeHandlers` at both ends of the body and rolls position *and*
-  angle back from the backups at `+0x6c`/`+0x70`/`+0x7e` if either end stays
-  stuck. While it returns 0, a zombie on the floor has no body-length collision
-  and `zombie_dead_animation`'s get-back-up test always sees clear floor.
-- `entity+0x7e` is an **angle backup**, currently modelled as `speed.pad`.
+- `entity+0x7e` is an **angle backup**, modelled as `speed.pad`.
   `check_room_collision` uses the same `0x6c`/`0x70` position backups but never
   touches `0x7e`, because it does not revert rotation.
 - `zombie_falldown`'s call site is unidentified — it is not in the damage table.
 - Ghidra has `explode_leg_and_drop` mis-bounded as `0x00437050`–`0x0043743d`.
-- **Nothing here is verified at runtime.**
+- The zombie's ground shadow tint flips between two interleaved ramps every
+  frame (visible in the `[shadow]` trace in `FadeSprite.cpp`). A ground shadow
+  should hold a steady colour; something is writing the quad's colour dword each
+  frame. Not diagnosed.
+- `blendMode` from the effect band table is dropped in the sprite flush —
+  `MarniDrawSprite` takes only colour + SRV, so the PS1 semi-transparency modes
+  are not wired through. Blood splatter may want additive.
 
 ---
 
@@ -599,6 +680,18 @@ as `action_behavior_00be0df0` in another; `CMP dword [0x00be0df0],0x2` at
 7. **Distinguish the two timer idioms** above.
 8. **A stub with a different parameter list is an overload, not a duplicate.** It
    links fine and silently wins at every call site that sees the header.
+9. **An out-parameter's SIZE is part of the contract.** `ApplyLVAndMul0Matrix`
+   writes a 32-byte `MATRIX`; handing it an 8-byte `SVECTOR` smashed the stack the
+   first time the knife swung. Check what every other call site passes.
+10. **Confirm a value survives to its consumer before debating its source.** Three
+    rounds went into *which* colour the head-explosion FX picked while the tint was
+    being clamped to white downstream regardless. Trace the output end first.
+11. **`&DAT_00xxxxxx` is usually an immediate, not a pointer.** Colours, packed
+    RGB and masks whose value lands in the image range get rendered that way, and
+    `&placeholder` compiles cleanly while substituting garbage.
+12. **Resizing a static array reshuffles `.bss`** and moves where any unrelated
+    latent overrun lands. Prefer the heap for port-only buffers, and pin the size
+    of structs backing large statics with a `static_assert`.
 
 ---
 
@@ -610,6 +703,25 @@ entity's `id` selects `enemies_update_functions_tbl[id]` (**48** entries — ids
 `death_event_id` at `+0x163` is the `g_RoomEventFlags` bit raised on death.
 
 Script-driven zombies set `behavior_flags & 0x40` and run through state 8.
+
+### `entity+0x161` — the sound-bank group
+
+`cmd_em_set` (`0x004617d0`) packs three things into `entity+0x161`:
+
+```
+entity[0x161]  = scd[0x12] & 0x0F        ; the enemy slot index
+entity[0x161] |= scd[0x15] << 4          ; the SOUND BANK GROUP
+entity[0x161] |= 0x80  if scd[0x04] != 0
+```
+
+`Snd_em` (`0x0047fca0`) reads that high nibble: `id + ((x & 0x70) >> 4) * 10`
+indexes `g_emSndBanks` (`0x00ac99f0`, 48 records of 8 bytes), bailing out above
+47. The zombie's ten cues sit at records **0–9** — group 0 — in the per-room name
+table: `z_taore`, `z_ftL`, `z_ftR`, `z_kamu`, `z_osou`, `z_unaruA`, `z_head`,
+`z_Hkick`/`z_haki`, `z_Ugoron`/`z_sanj`, `z_unaruB`.
+
+`Snd_em` takes **one** argument even though call sites push two (`PUSH 0; PUSH 9`);
+the second is ignored and the caller cleans up 8 bytes.
 
 ---
 
@@ -639,7 +751,21 @@ Script-driven zombies set `behavior_flags & 0x40` and run through state 8.
 |---|---|---|---|---|
 | 0 | Knife | `weapon_hit_detect_knife` | `0x0043d690` | Distance from the weapon joint, per-enemy range offsets |
 | 1–4 | HG / Shotgun / Python / GL | `weapon_hit_detect_gun` | `0x0043d410` | 3D aim cone, near/far tiers, aim-up headshot cone |
-| 5–9 | Heavy | `weapon_hit_detect_projectile` | `0x0043d810` | Euclidean distance |
+| 5–9 | Heavy | `weapon_hit_detect_projectile` | `0x0043d810` | Euclidean distance **from `g_playerPosScratch`** |
+
+**The three detectors do not share a reference point.** The knife measures from
+the player's weapon joint (`joints[14].world` composed with a per-character
+offset, output into a full `MATRIX` whose `t[0]`/`t[2]` are the reach point). The
+gun cone measures from the player entity. The projectile detector measures from
+**`g_playerPosScratch`** (`0x00be11b0`/`0x00be11b8`), which the *caller* fills
+with the projectile's own position — `effect_behavior_flamethrower`
+(`0x0040ed30`, behaviour 37) before `apply_weapon_damage(6)`, and likewise the
+grenade shot and the rocket. It also zero-extends the enemy radius
+(`XOR EDI,EDI; MOV DI, word [EAX+0xa]`).
+
+> The flamethrower's damage does **not** come from the fire animation.
+> `g_weaponFireData[4]` really is `{6, 0, 0, 0}` in the exe — an all-zero row is
+> correct there. Do not "fix" it.
 
 ### Aim cone
 
@@ -697,3 +823,77 @@ All verified byte-for-byte against the exe when the aim/fire system landed
 = enemy id before the post-hit callback, which the callbacks and reactions
 read. The previous port stubs (`weapons_damage_table[30]` etc.) had the wrong
 layout and were removed.
+
+---
+
+## Effect sprite FX — how the head explosion reaches the screen
+
+> Source: `src/game/EffectSystem.cpp`, `src/game/RoomStubs.cpp`,
+> `src/game/SpriteRenderer.cpp`
+
+The head explosion spawns effect types **0** (blood puff, a core00 sprite) and
+**3** / **4** (gore splatter, room sprites) via `Effect_CreateBillboard`
+(`0x0047be30`). Getting them to look right needed four separate facts, none of
+which is visible from the zombie code.
+
+### Sprites pack DOWN a page, and `curU` is a V cursor
+
+In `setup_effect_sprite_textures` (`0x0047bc80`) the variable Ghidra suggests is
+"curU" is the **V cursor** down a 256-tall texture page, advanced by
+`header.field_0A` (the sprite's V extent) and wrapped at `0x100`. **`texY` is the
+page index** and increments on each wrap; `texY - 0x18` is the original's texture
+id. At `0x0047bdc6` it adds the cursor to byte **+1** of every one of the
+sprite's 4-byte UV records — and `effect_submit_sprite` reads
+`uv[0] = U, uv[1] = V, uv[2]/uv[3] = pivot`, so that is the V. Sprites ship with
+UVs local to their own image and this makes them page-absolute.
+
+`texY` runs across **both** blocks: the weapon pass starts it at `0x18`, and the
+room pass resumes from where that left off (`DAT_00bf0a3e` is written only by the
+startSlot-0 pass, so the room block's starting V is a game-wide constant the
+effspr TIMs are authored around). Measure the page from the absolute `0x18` bias,
+never from the start of the room block.
+
+The decisive evidence is in the sheets — convert them and look. **`esp000` is
+page 0 and holds exactly the eight core00 weapon FX sprites** (glass cracks,
+smoke, muzzle flash, sparks) stacked down its 256 rows, so the cursor reaches
+~256 by the end of the weapon pass and the first room sprite wraps to page 1 at
+V=3. That is why `esp001` / `esp201` / `esp202` begin their first sprite row at
+y=3. A per-block page index puts the gore on `esp000` and it draws muzzle flashes.
+
+Rooms declare up to 7 sprite types against as few as 2 pages (ROOM1010 declares
+3, 4, 32 against `esp000` + `esp201`), so sprite→sheet is the wrap count, never
+the declaration order. 8 of 320 RDTs need a 5th page and there is no SRV for it;
+those now log and skip.
+
+### The sprites are greyscale and tinted at draw time
+
+`effect_submit_sprite` scans `g_EffectBlendTable` for the first row whose
+`startV + len` exceeds the sprite's **page-absolute** V, and that row's
+`colorIdx` selects a record in `g_EffectColorRecords`. Which band table applies
+comes from `effect_depth_record()`: `texY - 0x18` indexes the room's four effspr
+entries, and the resulting effspr **file** index picks the rows. Those rows live
+behind the pointer in `g_EffectSpriteTexConfig` (`0x004c4f50`, 8 bytes/entry) —
+and that struct's "mode" field is really the **row count**:
+`TexturePage_Load(page, tim, rowCount, rows)`.
+
+`colorIdx 0` is `{ff,ff,ff}` (white); the blood tint is `colorIdx 4`,
+`{69,1e,0a}`; the gore bands resolve to 12/13, `{99,33,33}`. So a sprite that
+reports V=0 renders **white**. The port samples the weapon-FX block from
+per-sprite SRVs whose UVs stay sprite-local, so their page V is carried
+separately in `g_effectSpriteBandV` for the band scan only — the sampling
+coordinate is left alone.
+
+### The tint has to survive the sprite queue
+
+`TextureDraw::r/g/b` are a **0..1 multiplier** — `FlushSpriteCommands` does
+`(int)(cmd->r * 255.0f)` and clamps. `draw_texture` sets the convention:
+`colorMulR` alone (`0x80`, PS1-neutral) gives `128 * 2/255 = 1.004`. A 0..255
+per-effect tint therefore needs the same `/255`. Without it `SubmitEffectSprite`
+produced 153.6, clamped to white, and **every effect sprite rendered with its raw
+texture colour and no tint at all**. Because the gore frames are stored
+near-black, blood drew dark grey while sprites already warm in the sheet looked
+correct — which is why only *some* were wrong, and why fixing the band selection
+alone changed nothing on screen.
+
+> Order of investigation matters here: confirm the colour survives to the draw
+> call *before* reasoning about which colour was chosen.

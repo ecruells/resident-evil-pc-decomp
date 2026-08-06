@@ -324,11 +324,18 @@ void zombie_init(void)
     // The shadow tint goes in the scratch at 0x00be0dfc (g_animFrameIdSave),
     // which is the dword FUN_004565f0 copies into the quad header - NOT
     // g_tempVar at 0x00be0df8. Writing the wrong one left both shadows untinted.
-    g_animFrameIdSave = (unsigned int)&DAT_00ffff50;
+    //
+    // `MOV dword ptr [0x00be0dfc],0xffff50` (0x004335e5) and `...,0x808080`
+    // (0x00433626) are IMMEDIATE VALUES. Ghidra prints them as &DAT_00ffff50 /
+    // &DAT_00808080 because the numbers look like addresses, and taking the
+    // address of the port's placeholder globals fed the quad a garbage RGB
+    // instead - which is why a corpse's ground shadow ramped from a wrong dark
+    // tint into the bright 0xffff50 the death path sets.
+    g_animFrameIdSave = 0x00ffff50;
     FUN_004565f0(&g_svecScratch, *(SVECTOR**)&ENTITY->sca_data_ptr, 400, 400);
     ResetJointTransforms();
 
-    g_animFrameIdSave = (unsigned int)&DAT_00808080;
+    g_animFrameIdSave = 0x00808080;
     FUN_004565f0(&g_svecScratch, (SVECTOR*)&ENTITY->pushVelocity, 700, 900);
 
     // 0x004335f0-0x00433680: Calculate random health
@@ -2947,8 +2954,13 @@ void short_push_back(void)
         ENTITY->blend_counter = 3;
 
         if ((ENTITY->behavior_flags & ZOMBIE_FLAG_VOMITING) != 0) {
-            VECTOR bloodPos = { 100, -2620, 0, 0 };
-            Effect_CreateBillboard(0, 0, 0, (void*)&ENTITY->scaMatrixData.localMatrix, &bloodPos, 0);
+            // The original steers this through g_playerPosScratch (0x00be11b0),
+            // not a local: the clobber is shared with the weapon-hit path.
+            g_playerPosScratch.x = 100;
+            g_playerPosScratch.y = -2620;
+            g_playerPosScratch.z = 0;
+            Effect_CreateBillboard(0, 0, 0, (void*)&ENTITY->scaMatrixData.localMatrix,
+                                   &g_playerPosScratch, 0);
         }
 
         int jointPtr = (int)ENTITY->jointsStructs;
@@ -2958,8 +2970,11 @@ void short_push_back(void)
                 unsigned char randBit = (0x40 >> ((unsigned char)g_RandSeed & 7)) & 1;
                 if (randBit != 0) {
                     *jointFlag |= 12;  // disable and flag as severed
-                    VECTOR zeroPos = { 0, 0, 0, 0 };
-                    Effect_CreateBillboard(0, 0, 0, (void*)(jointPtr + 0x234), &zeroPos, 0);
+                    g_playerPosScratch.x = 0;
+                    g_playerPosScratch.y = 0;
+                    g_playerPosScratch.z = 0;
+                    Effect_CreateBillboard(0, 0, 0, (void*)(jointPtr + 0x234),
+                                           &g_playerPosScratch, 0);
                     Effect_CreateBillboard(0, 0, 0, (void*)0, (void*)(jointPtr + 0x248), 0);
                     *(unsigned char*)(jointPtr + 0x26C) |= 0x10;
                     JointApplyColorTint((JointStruct*)(jointPtr + 0x1F0), 0x30, 0x80820, &DAT_00606060);
@@ -2978,15 +2993,29 @@ void short_push_back(void)
     if (done != 0) {
         ENTITY->action_state++;
 
+        // 0x00436e61: the SCD-controlled zombie (0x40) keeps the incremented
+        // action_state and stays in state 8 - that is how zombie_scd_vomiting
+        // detects completion. Everyone else gets the dword store below.
         if ((ENTITY->behavior_flags & ZOMBIE_FLAG_VOMITING) == 0) {
+            // Plain store, not a masked clear (`MOV byte [EAX],0x0`).
             if ((ENTITY->behavior_flags & 0x0F) == ZOMBIE_BEH_5)
-                ENTITY->behavior_flags &= ~0x02;  // clear laying flag
-            ENTITY->state = ZOMBIE_STATE_DIE;
+                ENTITY->behavior_flags = 0;
+            // `MOV dword ptr [EAX+0x84],0x30101` at 0x00436e76 - state = 1
+            // (IDLE), ignore = 1, action_behavior = 3, action_state = 0.
+            // The old pass wrote state = 3 (DIE) and left action_behavior alone,
+            // so EVERY hit reaction ended in the death sequence: one handgun
+            // shot killed the zombie, and because action_state was still 2 the
+            // corpse skipped straight to zombie_dead_animation's hold state -
+            // it never played the fall, which is the "dies and freezes" bug.
+            ENTITY->state              = ZOMBIE_STATE_IDLE;
             ENTITY->ignore_player_flag = 1;
+            ENTITY->action_behavior    = 3;
+            ENTITY->action_state       = 0;
         }
 
-        ENTITY->player_pos_x = (unsigned char)(unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[0];
-        ENTITY->player_pos_z = (unsigned char)(unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+        // 16-bit waypoint stores (`MOV word ptr [ECX+0x166],AX`), not bytes.
+        ENTITY->player_pos_x = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+        ENTITY->player_pos_z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
         ENTITY->hit_state = 0;
     }
 
@@ -3011,7 +3040,17 @@ void short_push_back(void)
 // ============================================================================
 void push_and_stagger(void)
 {
-    ENTITY->animationId = (ENTITY->action_behavior == 2) ? 7 : 6;
+    // 0x00436f06-0x00436f2b: the side push (behaviour 2) also selects the 0x800
+    // speed argument for the Add_speedXZ at the end; the front push passes 0.
+    // The old pass hard-coded 0x800 on both, so a front shove slid the zombie.
+    unsigned short speedArg;
+    if (ENTITY->action_behavior == 2) {
+        ENTITY->animationId = 7;
+        speedArg = 0x800;
+    } else {
+        ENTITY->animationId = 6;
+        speedArg = 0;
+    }
     ENTITY->move_speed_current = 15;
 
     if (ENTITY->action_state == 0) {
@@ -3027,27 +3066,34 @@ void push_and_stagger(void)
         }
     }
 
+    // 0x00436fc0-0x0043703a. Both arms converge on the same tail; only the
+    // hit_state clear is conditional, and there is no early return.
     char done = Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 1024);
-    if (done == 0) {
+    if (done != 0) {
+        // Plain store (`MOV byte [EAX],0x0`), not a masked clear.
+        if ((ENTITY->behavior_flags & 0x0F) == ZOMBIE_BEH_5)
+            ENTITY->behavior_flags = 0;
+        // `MOV dword ptr [EAX+0x84],0x30101` at 0x00436fdf - state = 1 (IDLE),
+        // ignore = 1, action_behavior = 3, action_state = 0. The old pass wrote
+        // state = 3 (DIE), so a strong shove killed the zombie outright.
+        ENTITY->state              = ZOMBIE_STATE_IDLE;
+        ENTITY->ignore_player_flag = 1;
+        ENTITY->action_behavior    = 3;
+        ENTITY->action_state       = 0;
+        // 16-bit waypoint stores, not bytes.
+        ENTITY->player_pos_x = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+        ENTITY->player_pos_z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+        ENTITY->hit_state = 0;
+    } else {
         if (ENTITY->animation_frame_id < 5)
             ENTITY->move_speed_current = (unsigned short)(ENTITY->move_speed_current + 90);
-        if (ENTITY->animation_frame_id < 0x14) {
-            zombie_check_special_weapon();
-            Add_speedXZ(0x800);
-            return;
-        }
-    } else {
-        if ((ENTITY->behavior_flags & 0x0F) == ZOMBIE_BEH_5)
-            ENTITY->behavior_flags &= ~0x02;
-        ENTITY->state = ZOMBIE_STATE_DIE;
-        ENTITY->ignore_player_flag = 1;
-        ENTITY->player_pos_x = (unsigned char)(unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[0];
-        ENTITY->player_pos_z = (unsigned char)(unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+        // `CMP byte [EAX+0xbe],0x14; JNZ` - equality, not `< 0x14`.
+        if (ENTITY->animation_frame_id == 0x14)
+            ENTITY->hit_state = 0;
     }
 
-    ENTITY->hit_state = 0;
     zombie_check_special_weapon();
-    Add_speedXZ(0x800);
+    Add_speedXZ(speedArg);
 }
 
 // ============================================================================

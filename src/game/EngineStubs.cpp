@@ -154,9 +154,6 @@ void FUN_00443040(int imgType, int slot) { }
 
 // --- Entity render system stubs (entity animation/rendering) ---
 
-// (0x004896c0) - Entity motion/animation step
-void FUN_004896c0(void* joint, short p1, short p2, int p3) { }
-
 // (0x0048a210) - Entity path animation step
 void FUN_0048a210(void* joint) { }
 

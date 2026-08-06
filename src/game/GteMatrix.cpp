@@ -1143,3 +1143,87 @@ void SetRotAndTransMatrix(MATRIX* m) {
     g_gteRotTransMatrix.t[1] = -g_gteRotTransMatrix.t[1];
 }
 
+
+// ============================================================================
+// FUN_004896c0 (0x004896c0)
+// Severed-limb ballistic step. calc_entity_lighting calls this once per frame
+// for every joint whose flags carry 0x4 (blown off - see short_push_back and
+// explode_leg_and_drop), having first reloaded the launch velocity into the
+// joint's rotation SVECTOR: rotation.x = -20, rotation.y = 200, rotation.z = 0.
+// This is the ONLY thing that moves a detached joint: rotate_entity skips its
+// world matrix once 0x8/0x2 are cleared, so with this stubbed out the limb
+// simply hung in the air wherever it came off.
+//
+//   gravity     = -35   (added to rotation.y scaled by the frame counter)
+//   floorY      = -100  (the resting height, and what zombie_update's severed-
+//                        limb ground-shadow test compares world.t[1] against)
+//   siblingIdx  = 1     (joints away, for the "still near the stump?" gap test)
+//
+// Per-joint fields, all confirmed against the disassembly:
+//   +0x02 field_02   frame counter, reset to 3 on landing
+//   +0x03 pad_03     state: 0x80 = has touched the floor, 0x01 = at rest
+//   +0x04 rotation   the velocity SVECTOR (x, y, z)
+//   +0x58/5C/60      world.t[0..2] = X / Y / Z
+// Y is negative-up, so `Y -= vy` with vy falling through zero is the arc.
+// ============================================================================
+void FUN_004896c0(void* jointPtr, short gravity, short floorY, int siblingIdx)
+{
+    JointStruct* j = (JointStruct*)jointPtr;
+
+    int thisY  = j->world.t[1];
+    int otherY = *(int*)((char*)j + (unsigned int)(unsigned char)siblingIdx * 0x7C + 0x5C);
+    int floor  = (int)floorY;
+
+    // 0x004896e4: the gap is built in 16 bits and compared UNSIGNED against 400,
+    // so anything more than 200 units either side of the sibling joint tumbles.
+    unsigned short gap = (unsigned short)((short)otherY - (short)thisY + 200);
+
+    // Landed and settled: latch bit 0 and freeze.
+    if (thisY >= floor && (j->pad_03 & 0x80) != 0) {
+        j->pad_03 |= 1;
+        return;
+    }
+
+    if (gap > 400 || (j->pad_03 & 0x80) == 0) {
+        // Tumble: spin the limb's world matrix. The step flips sign once the
+        // limb has bounced (pad_03 & 0x80), which is what settles it flat.
+        unsigned short landed = (unsigned short)(j->pad_03 & 0x80);
+        SVECTOR spin;
+        spin.x = (short)((int)(0x20 - (int)landed) >> 1);   // SAR, so signed
+        spin.y = (short)((unsigned short)(0x40 - landed) * 2);
+        spin.z = 0;
+        spin.pad = 0;
+        RotMatrix(&spin, &g_matrixScratch);
+        MulMatrix(&j->world, &g_matrixScratch);
+    }
+
+    // Rotate the launch velocity into world space by the entity's yaw.
+    g_matrixScratch = g_identityMatrixData;
+    RotMatrixY((int)ENTITY->angle, &g_matrixScratch);
+    ApplyMatrixSV(&g_matrixScratch, &j->rotation, &j->rotation);
+
+    short vz = j->rotation.z;
+    j->world.t[0] += (int)j->rotation.x;
+
+    // 16-bit throughout: MOVZX counter, IMUL by gravity, ADD rotation.y.
+    short vy = (short)((unsigned short)j->field_02 * gravity + j->rotation.y);
+    int y = j->world.t[1];
+    j->rotation.y = vy;
+    j->world.t[2] += (int)vz;
+
+    y -= (int)vy;
+    j->world.t[1] = y;
+
+    if (y >= floor) {
+        // First touch bounces to -350; the second snaps exactly to floorY, which
+        // is the value zombie_update looks for before drawing the limb's shadow.
+        j->world.t[1] = -350;
+        if ((j->pad_03 & 0x80) != 0) {
+            j->world.t[1] = floor;
+        }
+        j->field_02 = 3;
+        j->pad_03 = 0x80;      // plain store, not an OR
+    }
+
+    j->field_02++;
+}

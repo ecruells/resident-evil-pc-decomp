@@ -1614,11 +1614,6 @@ unsigned char* g_ItemDescriptions[79] = {
 // 0x00606060 — joint animation constant data (referenced by JointApplyColorTint)
 DWORD DAT_00606060 = 0;
 
-// 0x00ffff50 — velocity decay reference data (referenced by BillboardSetColor)
-DWORD DAT_00ffff50 = 0;
-
-// 0x00808080 — color/intensity reference data (referenced by zombie_init for push velocity setup)
-DWORD DAT_00808080 = 0;
 
 // Effect sprite texture management state (FUN_0047bc80 / InitRoomEffSprite)
 unsigned char  DAT_00bf0a38 = 0;               // 0x00bf0a38
@@ -1631,6 +1626,7 @@ unsigned char  g_abEffSpriteIndexTable[16] = {};          // 0x00bf0a44
 // Effect sprite per-slot image data pointers
 int            DAT_00ac9cd0[8] = {};           // 0x00ac9cd0
 unsigned char  g_effectSpriteSheetSlot[50] = {};   // per-sprite SRV sheet slot (see Globals.h)
+unsigned char  g_effectSpriteBandV[50] = {};       // per-sprite page V offset (see Globals.h)
 
 // Entity joint animation copy base pointer
 int            DAT_00be0e00 = 0;               // 0x00be0e00

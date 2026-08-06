@@ -305,8 +305,14 @@ unsigned int entity_pathfind_update(void)
     unsigned char val = *state;
     unsigned char counter = val & 0x1F;
 
+    // Every advance in the original is `INC byte ptr [...]` on the WHOLE byte
+    // (0x0048adc9, 0x0048adab, 0x0048adc0, 0x0048ad97), not `counter + 1`.
+    // Bit 5 carries the "line of sight was blocked" result, OR-ed in on each of
+    // frames 0-2 and tested once on frame 3; rebuilding the byte from the
+    // counter dropped it every frame, so only the last frame's LOS result
+    // counted and the waypoint refreshed on the wrong frames.
     if (counter > 3) {
-        *state = counter + 1;
+        ++*state;
         if ((*state & 0x1F) > 0x0F)
             *state &= 0xC0;  // clamp counter
         return 2;
@@ -323,16 +329,16 @@ unsigned int entity_pathfind_update(void)
             // 16-bit stores - see the waypoint note in Entities.h.
             ENTITY->player_pos_x = (short)g_playerEntityPointer.scaMatrixData.localMatrix.t[0];
             ENTITY->player_pos_z = (short)g_playerEntityPointer.scaMatrixData.localMatrix.t[2];
-            *state = counter + 1;
+            ++*state;
             *state &= ~0x20;
             return 1;
         }
-        *state = counter + 1;
+        ++*state;
         *state &= ~0x20;
         return 0;
     }
 
-    *state = counter + 1;
+    ++*state;
     return 2;
 }
 
@@ -347,13 +353,17 @@ unsigned int entity_pathfind_update(void)
 unsigned int entity_update_wander_turn(unsigned int movement_dist, unsigned char* control_flags, unsigned char* turn_counter, unsigned short angle_step, unsigned char turn_limit)
 {
     unsigned short* entity_angle = (unsigned short*)&ENTITY->angle;
-    unsigned char* speedDiv = (unsigned char*)ENTITY + 0x61;  // speed_divider (inside scaMatrixData - struct layout gap)
+    // `MOVSX EAX, word ptr [EDX + 0xc2]` at 0x00489834 and 0x00489870: the
+    // threshold scales with move_speed_current, a SIGNED 16-bit field at 0xC2.
+    // The old code read an unsigned byte at 0x61 - inside scaMatrixData, i.e.
+    // matrix bytes - so the stuck-detection threshold was garbage.
+    short speedDiv = (short)ENTITY->move_speed_current;
 
     if ((*control_flags & 0x80) != 0) {
         *entity_angle = *entity_angle
             + (1 - (unsigned short)((*control_flags & 0x40) >> 5)) * angle_step;
 
-        int speedDiv3 = *speedDiv * 3;
+        int speedDiv3 = speedDiv * 3;
         int threshold = (speedDiv3 + (speedDiv3 >> 31 & 3)) >> 2;
 
         if ((unsigned int)threshold < movement_dist) {
@@ -367,7 +377,7 @@ unsigned int entity_update_wander_turn(unsigned int movement_dist, unsigned char
         return 1;
     }
 
-    if (movement_dist < (unsigned int)((*speedDiv * 2) / 3)) {
+    if (movement_dist < (unsigned int)((speedDiv * 2) / 3)) {
         unsigned char newCount = *turn_counter + 1;
         *turn_counter = newCount;
         if (turn_limit < newCount) {
@@ -381,9 +391,15 @@ unsigned int entity_update_wander_turn(unsigned int movement_dist, unsigned char
         *turn_counter = 0;
     }
 
-    short waypointAngle = getAngleTowardsTarget(
-        (int)*(unsigned char*)((char*)ENTITY + 0xB3),
-        (int)*(unsigned char*)((char*)ENTITY + 0xB4));
+    // 0x004898c2: `MOVSX ECX, word ptr [EAX + 0x168]` / `MOVSX EDX, word ptr
+    // [EAX + 0x166]` then `getAngleTowardsTarget(x, z)` - the movement WAYPOINT,
+    // as sign-extended shorts. The old code read unsigned bytes at 0xB3/0xB4,
+    // which are inside pad_b0 and therefore always zero: every entity that
+    // relies on this to steer turned toward the room origin instead of its
+    // waypoint. That is why zombies wandered instead of closing on the player -
+    // zombie_walk1 calls this every frame of the chase.
+    short waypointAngle = getAngleTowardsTarget((int)ENTITY->player_pos_x,
+                                               (int)ENTITY->player_pos_z);
     unsigned short targetAngle = (unsigned short)waypointAngle;
 
     if ((angle_step & 0x8000) != 0) {
@@ -642,7 +658,11 @@ void blood_splatter_physics(int jointData, short gravityStep)
     *(int*)(jointData + 0x5C) -= (int)accel;
 
     if (*(int*)(jointData + 0x5C) > -0x65) {
-        *(int*)(jointData + 0x5C) = -0x63;  // -99
+        // -100 (`MOV dword ptr [EBX+0x5c],0xffffff9c`), not -99. The resting
+        // height has to land on exactly -100: that is the value zombie_update
+        // compares world.t[1] against before it draws the part's ground shadow,
+        // and the first guard in this function uses it as the at-rest test.
+        *(int*)(jointData + 0x5C) = -100;
         *(unsigned char*)(jointData + 2) = 0;
         *(short*)(jointData + 6) = -accel;
         *(unsigned char*)(jointData + 3) += 1;

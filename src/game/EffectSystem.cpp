@@ -2534,11 +2534,23 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     if (rec >= 32) return;   // port-only: the original would read past the table
 
     // ---- blend entry scan: first entry with texV < startV + len ----
+    //
+    // The scan needs the sprite's PAGE-ABSOLUTE V. In the original every sprite
+    // is blitted into a shared page so its stored V already is absolute; the
+    // port samples the weapon-FX block from per-sprite SRVs, whose UVs stay
+    // sprite-local (v = 0 for the first row), so the page offset is carried in
+    // g_effectSpriteBandV and re-applied here. Without it every weapon sprite
+    // matched band 0 - colorIdx 0 is {0xff,0xff,0xff}, so blood rendered white.
+    // Room sprites share a page and already have the offset in their UV records,
+    // so their bias is 0. The sampling coordinate in g_TextureDesc is untouched.
+    unsigned int bandV = (unsigned int)(unsigned char)
+        (g_TextureDesc.texV + g_effectSpriteBandV[eff->effectType]);
+
     int i = 0;
     int count = g_EffectBlendCount[rec];
     const unsigned char* row = g_EffectBlendTable[g_EffectBlendStart[rec]];
     while (i < count) {
-        if ((unsigned int)g_TextureDesc.texV < (unsigned int)row[0] + (unsigned int)row[1]) break;
+        if (bandV < (unsigned int)row[0] + (unsigned int)row[1]) break;
         row += 4;
         i++;
     }

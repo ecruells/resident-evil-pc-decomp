@@ -338,10 +338,25 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
     int variant = GetTextureVariant(texture->flags);
     cmd->unk1c = (float)((variant != 0) ? (flags | 8) : flags);
 
-    cmd->r = (float)r * (float)texture->colorMulR * g_ColorScaleFactor;
-    cmd->g = (float)g * (float)texture->colorMulG * g_ColorScaleFactor;
-    cmd->b = (float)b * (float)texture->colorMulB * g_ColorScaleFactor;
+    // cmd->r/g/b are a 0..1 MULTIPLIER - FlushSpriteCommands does
+    // `(int)(cmd->r * 255.0f)` and clamps. draw_texture sets the convention:
+    // colorMulR alone (0x80, PS1-neutral) gives 128 * 2/255 = 1.004, i.e. 1.0.
+    // The per-effect tint arrives here as 0..255, so it has to be normalised
+    // too. Without the /255 every effect sprite came out at 153.6 -> clamped to
+    // white, so the tint was discarded entirely and each sprite rendered with
+    // its raw texture colour. The gore frames are stored near-black, so blood
+    // splatter drew dark grey; sprites that were already warm in the sheet
+    // happened to look right, which is why only "some" were grey.
+    const float tintNorm = g_ColorScaleFactor * (1.0f / 255.0f);
+    cmd->r = (float)r * (float)texture->colorMulR * tintNorm;
+    cmd->g = (float)g * (float)texture->colorMulG * tintNorm;
+    cmd->b = (float)b * (float)texture->colorMulB * tintNorm;
 
+    // NOTE: blendMode is effectively dropped - FlushSpriteCommands has no
+    // blend-mode plumbing (MarniDrawSprite takes only colour + SRV), and this
+    // field is read solely as a fallback texture slot when extraFlags' SRV is
+    // missing. Kept as-is; wiring the PS1 semi-transparency modes through is a
+    // separate job from the tint.
     cmd->texturePage = (int)((float)blendMode * g_ColorScaleFactor);
     cmd->extraFlags = textureId;
 

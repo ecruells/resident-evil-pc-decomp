@@ -493,6 +493,14 @@ extern int           DAT_00ac9cd0[8];                  // 0x00ac9cd0 - effect sp
 // through this instead of the depth-derived texture id, which several sheets
 // share. Port-only (the original keeps all sheets in one VRAM page).
 extern unsigned char g_effectSpriteSheetSlot[50];
+// Per-sprite V offset within its page, also recorded by
+// setup_effect_sprite_textures. The blend/colour band is chosen by the sprite's
+// PAGE-ABSOLUTE V (effect_submit_sprite scans g_EffectBlendTable for the first
+// row whose startV+len exceeds it), but the weapon-FX block samples from
+// per-sprite SRVs whose UVs are sprite-local, so their absolute V has to be
+// carried separately or every one of them picks band 0. Zero for room sprites -
+// they share a page, so the offset is already baked into their UV records.
+extern unsigned char g_effectSpriteBandV[50];
 
 // Entity joint animation copy base (set by SetupEntityJointAnimation)
 extern int           DAT_00be0e00;                     // 0x00be0e00
@@ -1089,8 +1097,6 @@ extern void*         DAT_004c10b0[];
 
 // Animation data constants
 extern DWORD         DAT_00606060;
-extern DWORD         DAT_00ffff50;
-extern DWORD         DAT_00808080;
 
 // Scratch globals used by animation functions
 extern VECTOR        g_playerPosScratch;               // 0x00be11b0
