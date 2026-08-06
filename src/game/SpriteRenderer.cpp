@@ -456,6 +456,13 @@ void TexturePage_ClearAll(void) {
     }
 }
 
+// TexturePage_Create (0x0046c3c0) - re-create a texture page from the slot's
+// stored PSXTexture work buffer. The original calls this from FUN_0047d0e0 at
+// menu exit, when the PSX renderer's pages were clobbered by the menu. The
+// port keeps no per-slot data copy - the D3D11 SRVs persist across the menu
+// (TexturePage_ClearAll only clears the legacy handle table) - so this is a
+// preservation no-op; create_texture_page(NULL) returns 0 without touching
+// anything.
 void TexturePage_Create(int slotIndex) {
     int mode = (slotIndex < 2) ? 2 : 0x22;
     int handle = create_texture_page(NULL, mode);

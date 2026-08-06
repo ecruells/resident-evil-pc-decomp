@@ -109,8 +109,8 @@ static unsigned short boundary_classify(SVECTOR* offset, RDT_Boundary* rec,
 // Same test as boundary_classify, but returns the record's flag bits
 // (flags & 0xff00) in place instead of the shape index.
 // ===========================================================================
-static unsigned short boundary_classify_flags(SVECTOR* offset, RDT_Boundary* rec,
-                                              unsigned int radius)
+unsigned short boundary_classify_flags(SVECTOR* offset, RDT_Boundary* rec,
+                                       unsigned int radius)
 {
     int r = (int)(radius & 0xffff);
 
@@ -629,4 +629,134 @@ unsigned int room_check_sight_blocked(VECTOR* delta, unsigned char cell)
     }
 
     return 0;
+}
+
+// ===========================================================================
+// FUN_0047d6f0 (0x0047d6f0)
+// Two-point boundary push for a PRONE body: rotate both ends by the entity
+// yaw (endA first, endB second - the callers pass the -600/-800 end first),
+// push each against its quadrant's boundary list with the SCA radius, and if
+// either end is still inside afterwards roll the whole body back, position
+// AND angle, from the backups at entity+0x6c..0x70 and +0x7e.
+//
+// Returns 0 = clear, 1 = pushed clear, 0x80 = still stuck (rolled back).
+// A zombie on the floor is ~1200 units long, so the single-point
+// check_room_collision test is not enough for it - this is what makes the
+// laying-down branches of zombie_update / zombie_dead_animation work.
+//
+// endB's records are only re-walked when endA came out blocked; the per-end
+// result bytes are the (flags & 0x300) >> 8 bits, ORed the same way
+// check_room_collision reports them.
+// ===========================================================================
+unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB)
+{
+    // Status bit 2 set: entity is deactivated - nothing to push.
+    if ((ENTITY->status_flags & 0x04) != 0) return 0;
+    if (g_RdtPointer == NULL || g_RdtPointer->boundaries == NULL) return 0;
+
+    // World-rotated ends: identity rotated by the entity yaw (0x74), the two
+    // offsets applied as full matrices (local_20 / local_10 in the original).
+    g_matrixScratch = g_identityMatrixData;
+    RotMatrixY((int)ENTITY->angle, &g_matrixScratch);
+    VECTOR rotatedA, rotatedB;
+    ApplyMatrix(&g_matrixScratch, endA, &rotatedA);
+    ApplyMatrix(&g_matrixScratch, endB, &rotatedB);
+
+    // Position-relative ends: identity rotated by the MIRROR angle (+0x7E),
+    // then the entity position folded in - these are what the collision
+    // handlers write the pushed result into.
+    g_matrixScratch = g_identityMatrixData;
+    RotMatrixY((int)*(short*)((char*)ENTITY + 0x7E), &g_matrixScratch);
+    SVECTOR worldA, worldB;
+    ApplyMatrixSV(&g_matrixScratch, endA, &worldA);
+    ApplyMatrixSV(&g_matrixScratch, endB, &worldB);
+    worldA.x += ENTITY->position.x;
+    worldA.z += ENTITY->position.z;
+    worldB.x += ENTITY->position.x;
+    worldB.z += ENTITY->position.z;
+
+    RDT_BoundaryHeader* hdr = (RDT_BoundaryHeader*)g_RdtPointer->boundaries;
+    unsigned short bitsA = 0;   // end A (param_1) result
+    unsigned short bitsB = 0;   // end B (param_2) result
+    unsigned int cellA = 0;
+    unsigned int cellB = 0;
+
+    // End B is pushed FIRST in the original (the loop counter starts at 1),
+    // so bitsB / cellB fill before bitsA / cellA.
+    for (int which = 1; which >= 0; which--) {
+        VECTOR* centre = which ? &rotatedB : &rotatedA;
+        SVECTOR* world = which ? &worldB : &worldA;
+        unsigned short* bits = which ? &bitsB : &bitsA;
+        unsigned int* cell = which ? &cellB : &cellA;
+
+        centre->x += ENTITY->scaMatrixData.localMatrix.t[0];
+        centre->z += ENTITY->scaMatrixData.localMatrix.t[2];
+
+        g_svecScratch.x = 0;
+        g_svecScratch.y = 0;
+        g_svecScratch.z = 0;
+
+        *cell = ChkOutsideCell(centre, &g_svecScratch, hdr->cellX, hdr->cellZ);
+        RDT_Boundary* first = hdr->group[*cell];
+        RDT_Boundary* last  = hdr->group[*cell + 1];
+
+        for (RDT_Boundary* rec = first; rec < last; rec++) {
+            unsigned char shape = (unsigned char)(rec->type & 0xFF);
+            if (shape == 4 || shape == 5) continue;
+
+            unsigned short s = boundary_classify(&g_svecScratch, rec,
+                (unsigned short)*(short*)(ENTITY->Sca_info + 10));
+            if (s == 0xFFFF) continue;
+
+            g_CollisionShapeHandlers[s]((short*)rec, (int*)centre, &world->x);
+            *bits |= (unsigned short)((rec->flags & 0x300) >> 8);
+        }
+    }
+
+    if (bitsA == 0) {
+        // End A clear: keep the push, mirror the position/angle backup.
+        ENTITY->position.x = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+        ENTITY->position.y = (short)ENTITY->scaMatrixData.localMatrix.t[1];
+        ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
+        *(short*)((char*)ENTITY + 0x7E) = ENTITY->angle;
+        return (unsigned char)bitsB;
+    }
+
+    // End A blocked: re-walk end B's records and OR any further hits into
+    // bitsB. Quirk of the original: the re-test walks the PREVIOUS quadrant -
+    // the saved slot holds &group[cell], so the loop is [group[cell-1],
+    // group[cell]) - not end B's own quadrant, which pass 1 already covered.
+    // For cell 0 the original reads the group[-1] slot (the cellX/cellZ dword)
+    // as a start pointer; that garbage is not reproduced, the walk just runs
+    // empty. The scratch offset is NOT re-zeroed here, exactly like the
+    // original.
+    if (cellB > 0) {
+        RDT_Boundary* first = hdr->group[cellB - 1];
+        RDT_Boundary* last  = hdr->group[cellB];
+        for (RDT_Boundary* rec = first; rec < last; rec++) {
+            unsigned char shape = (unsigned char)(rec->type & 0xFF);
+            if (shape == 4 || shape == 5) continue;
+
+            unsigned short s = boundary_classify(&g_svecScratch, rec,
+                (unsigned short)*(short*)(ENTITY->Sca_info + 10));
+            if ((s & 0x8000) != 0) continue;
+
+            bitsB |= (unsigned short)((rec->flags & 0x300) >> 8);
+        }
+    }
+
+    if (bitsB != 0) {
+        // Still stuck: roll position AND angle back from the backups.
+        ENTITY->scaMatrixData.localMatrix.t[0] = (int)ENTITY->position.x;
+        ENTITY->position.y = (short)ENTITY->scaMatrixData.localMatrix.t[1];
+        ENTITY->scaMatrixData.localMatrix.t[2] = (int)ENTITY->position.z;
+        ENTITY->angle = *(short*)((char*)ENTITY + 0x7E);
+        return 0x80;
+    }
+
+    ENTITY->position.x = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+    ENTITY->position.y = (short)ENTITY->scaMatrixData.localMatrix.t[1];
+    ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
+    *(short*)((char*)ENTITY + 0x7E) = ENTITY->angle;
+    return 1;
 }

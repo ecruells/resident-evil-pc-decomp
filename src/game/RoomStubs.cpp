@@ -2,6 +2,7 @@
 #include "../Globals.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
+#include "../marni/MarniDX.h"
 #include <cstdio>
 #include <cstring>
 #include "../system/AssetPath.h"
@@ -38,7 +39,10 @@ extern void ParseTmdTextureHeader(void* data, TmdTextureHeader* header);
 // Each group of 4 bytes: effect sprite indices for texture pages 0-3.
 // 0xFF = no effect sprite for that slot.
 // ============================================================================
-static const unsigned char g_RoomEffectSpriteTable[5 * 32 * 4] = {
+// Shared with the effect renderer (EffectSystem.cpp), which indexes the same
+// table through the depth offset 0x004c48a0. `extern` keeps external linkage:
+// a namespace-scope `const` would be internal to this TU.
+extern const unsigned char g_RoomEffectSpriteTable[5 * 32 * 4] = {
     // Stage 0 (32 rooms x 4 bytes)
     0x00,0x02,0xFF,0xFF, 0x00,0x03,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF,
     0x00,0x04,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF,
@@ -209,14 +213,17 @@ void setup_effect_sprite_textures(unsigned char startSlot)
         unsigned short* spriteInfo = (unsigned short*)g_effectSpriteInfo[spriteIdx];
         spriteInfo[2] = curV * 0x40 + pageRow + 0x7810;
         *((unsigned char*)(spriteInfo + 3)) = texY;
+        // The D3D11 renderer resolves each effect sprite's texture by its sheet
+        // slot (0-7 weapon FX, 8-15 room), NOT by the depth-derived texture id,
+        // which several sheets share. Port-only bookkeeping.
+        g_effectSpriteSheetSlot[spriteIdx] = (unsigned char)(slot + startSlot);
 
+        // NOTE: the original adds curU to the v byte here because its VRAM
+        // pages stack the sheets; the port renders each sheet as its own SRV
+        // with sheet-relative UVs, so the addition is deliberately omitted -
+        // it pushed the v coordinates past the sheet height (the smoke's
+        // frames landed 0x40+ rows into a 112-tall sheet).
         unsigned short* uvPtr = spriteInfo + spriteInfo[1] * 2 + 4;
-        unsigned char count = 0;
-        do {
-            count = count + 1;
-            *((char*)uvPtr + 1) = *((char*)uvPtr + 1) + (char)curU;
-            uvPtr = uvPtr + 2;
-        } while ((unsigned short)count < spriteInfo[0]);
 
         curU = curU + texW;
         slot = slot + 1;
@@ -240,8 +247,14 @@ static void load_effect_sprites(void)
 {
     char pathBuf[256];
 
+    // The room's esp sprites use sheet slots 8-11 (the weapon FX hold 0-7),
+    // mapped to SRV slots 11-14. Free exactly those four on each room change.
     for (int i = 0; i < 4; i++) {
-        TexturePage_DeleteSet(i);
+        int slot = 11 + i;
+        if (g_TexturePageSRV[slot] != MARNI_NULL_HANDLE) {
+            if (Marni_DX() != NULL) Marni_DX()->DestroyTexture(g_TexturePageSRV[slot]);
+            g_TexturePageSRV[slot] = MARNI_NULL_HANDLE;
+        }
     }
 
     for (int i = 0; i < 4; i++) {
@@ -250,7 +263,7 @@ static void load_effect_sprites(void)
         if (relIdx != 0xFF) {
             sprintf(pathBuf, GAME_DATA_ROOT "effspr\\%s.tim", g_EffectSpriteNames[relIdx]);
             LoadFile(pathBuf, g_TimImageBuffer__bitmap, 0x20);
-            TexturePage_Load(i, g_TimImageBuffer__bitmap);
+            LoadEffectTextureSheet(11 + i, g_TimImageBuffer__bitmap);
         }
     }
 
@@ -301,6 +314,19 @@ void load_shoot_direction_data(void)
     }
 
     setup_effect_sprite_textures(0);
+
+    // Load the eight weapon-FX sheets (core00.etm) into dedicated D3D11
+    // texture-page slots so the effect renderer can find them - the ORIGINAL
+    // keeps the sheets resident in VRAM; the port must upload each sheet to
+    // its SRV slot. Slots 3-10 are free (the global textures own 0-2, the
+    // menu/item images own 15-30); the room's esp sprites use 11-14
+    // (load_effect_sprites). UVs in the esp data are coordinates within each
+    // sheet.
+    for (int i = 0; i < 8; i++) {
+        if (DAT_00ac9cd0[i] != 0) {
+            LoadEffectTextureSheet(3 + i, (void*)DAT_00ac9cd0[i]);
+        }
+    }
 }
 
 // ============================================================================

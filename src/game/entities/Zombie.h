@@ -15,10 +15,10 @@
 //   zombie_init            @ 0x00433440
 //   zombie_state_check     @ 0x00433ae0
 //   zombie_states_table    @ 0x004bb2c8
-//   zombie_behavior_tbl    @ 0x004bb280
-//   zombie_health_tbl      @ 0x004bb290
-//   field_0xbd_table       @ 0x004bb2a0
-//   field_0x188_tbl        @ 0x004bb2b0
+//   zombie_behavior_tbl    @ 0x004bb2f0  (second view of zombie_states_table)
+//   zombie_health_tbl      @ 0x004bb288
+//   zombie_anim_id_tbl     @ 0x004bb298  (initial animationId per behavior)
+//   zombie_stagger_tbl     @ 0x004bb2a8  (poise budget)
 // ============================================================================
 
 // Enemy ID for zombies
@@ -31,7 +31,8 @@ enum ZombieState {
     ZOMBIE_STATE_IDLE           = 1,  // zombie_state_check - main idle/behavior dispatch
     ZOMBIE_STATE_DAMAGED        = 2,  // zombie_damaged - hit reaction
     ZOMBIE_STATE_DIE            = 3,  // zombie_die - death sequence
-    ZOMBIE_STATE_DEAD_ANIM      = 4,  // (0x004342d0) - dead animation
+    ZOMBIE_STATE_DEAD_ANIM      = 4,  // no_action @ 0x004342d0 (bare RET); the
+                                      // corpse tail is zombie_dead_animation @ 0x00437740
     ZOMBIE_STATE_ATTACK         = 5,  // zombie_attack - attacking player
     ZOMBIE_STATE_6              = 6,  // (unused - NULL in table)
     ZOMBIE_STATE_7              = 7,  // (unused - NULL in table)

@@ -34,7 +34,7 @@ static void enemy_hit_reaction_none(Entity* enemy);    // 0x0043d400
 // (indices 3 down to 0) via room_check_sight_blocked. Returns 0 only if
 // all layers are clear — the shot has an unobstructed path.
 // ============================================================================
-static unsigned char check_weapon_line_of_sight(VECTOR* hitPos)
+unsigned char check_weapon_line_of_sight(VECTOR* hitPos)
 {
     unsigned char blocked = 0;
     VECTOR dir;

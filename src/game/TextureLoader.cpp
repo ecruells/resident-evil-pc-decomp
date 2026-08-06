@@ -23,6 +23,75 @@ struct TextureCLUTCache {
 static TextureCLUTCache g_CLUTCache[256];
 
 // ============================================================================
+// LoadEffectTextureSheet — parse one effect-sprite sheet TIM (256-wide PSX
+// 4bpp strip from core00.etm or effspr\*.tim) and install its D3D11 SRV at an
+// EXPLICIT texture-page slot.
+//
+// The effect sheets use slots 3-10 (weapon FX) and 11-14 (room esp), which no
+// other subsystem touches: the global textures own 0-2, the menu/item images
+// own 15-30 and 43-46. LoadTexturePage cannot be used - it adds 0xF to the
+// slot and would land on the menu's textures - so the SRV is built directly,
+// mirroring the conversion in LoadTexturePage's tail.
+// ============================================================================
+void LoadEffectTextureSheet(int slot, void* timData)
+{
+    if (slot < 0 || slot >= 256) return;
+    if (timData == NULL) return;
+
+    PSXTexture psxTex;
+    if (psxTex.Store((int*)timData, 1) == 0) return;
+
+    int w = psxTex.m_WidthPixels;
+    int h = psxTex.m_Height;
+    int bpp = psxTex.m_BitDepth;
+    if (w <= 0 || h <= 0 || psxTex.m_pPixelData == NULL) return;
+
+    DWORD* rgba = new DWORD[w * h];
+    if (bpp == 4 || bpp == 8) {
+        int numClutEntries = (bpp == 4) ? 16 : 256;
+        WORD* clut = psxTex.m_pCLUTData;
+        DWORD* clutRGBA = new DWORD[numClutEntries];
+        for (int c = 0; c < numClutEntries; c++) {
+            WORD clr = clut[c];
+            DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
+            DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
+            DWORD a = (c == 0) ? 0x00 : ((clr & 0x8000) ? 0x80 : 0xFF);
+            DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
+            clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+        if (bpp == 4) {
+            BYTE* src = (BYTE*)psxTex.m_pPixelData;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    int byteIdx = y * (w / 2) + x / 2;
+                    BYTE nibble = (x & 1) ? (src[byteIdx] >> 4) : (src[byteIdx] & 0xF);
+                    rgba[y * w + x] = clutRGBA[nibble];
+                }
+            }
+        } else {
+            BYTE* src = (BYTE*)psxTex.m_pPixelData;
+            for (int i = 0; i < w * h; i++) {
+                rgba[i] = clutRGBA[src[i]];
+            }
+        }
+        delete[] clutRGBA;
+    } else {
+        for (int i = 0; i < w * h; i++) rgba[i] = 0xFF000000;
+    }
+
+    if (g_TexturePageSRV[slot] != MARNI_NULL_HANDLE) {
+        Marni_DX()->DestroyTexture(g_TexturePageSRV[slot]);
+        g_TexturePageSRV[slot] = MARNI_NULL_HANDLE;
+    }
+    MarniCreateTexture(w, h, 32, rgba, &g_TexturePageSRV[slot]);
+    delete[] rgba;
+
+    g_TexturePageWidth[slot] = w;
+    g_TexturePageHeight[slot] = h;
+    g_TexturePageBpp[slot] = bpp;
+}
+
+// ============================================================================
 // RebuildTextureSRV — Rebuild the D3D11 SRV for a slot using a different CLUT
 // palette index. Uses cached pixel + CLUT data (no re-parsing).
 // Returns 1 on success, 0 on failure.
@@ -149,6 +218,13 @@ void destroy_texture_page(int id)
 // Copies PSXTexture data into work buffer, stores flags, queues async creation
 int create_texture_page(void* psxTexData, int flags)
 {
+    // The original always passes a slot's stored PSXTexture work buffer
+    // (&DAT_008ed4d0 + slot*0x37c). The port keeps no such copy - the
+    // D3D11 SRVs persist instead - and TexturePage_Create/Refresh call here
+    // with NULL. CopyFrom would dereference NULL+0x40, so treat it as a
+    // no-op that leaves the existing page untouched.
+    if (psxTexData == NULL) return 0;
+
     CMarniBits_CopyFrom(&g_MarniBitsWorkBuffer, psxTexData);
     g_texturePageMode = flags;
     ExecAsync((void*)AsyncCreateTexturePage);

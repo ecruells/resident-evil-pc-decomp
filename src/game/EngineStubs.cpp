@@ -91,9 +91,6 @@ void update_sounds(void) { }
 // (0x00473ff0) - Update room camera and lighting per-frame
 void room_camera_and_lighting_update(void) { }
 
-// (0x0047c0c0) - Update 2D sprite effects (billboards, particles)
-void update_2d_effects(void) { }
-
 // (0x00475b80) - Draw room sprites (background overlays)
 void DrawRoomSpr(void) { }
 
@@ -130,9 +127,6 @@ void FUN_004844b0(void) { }
 
 // (0x00470a40) - Texture cleanup sub-function
 void FUN_00470a40(void) { }
-
-// (0x0047d0e0) - Effect cleanup sub-function
-void FUN_0047d0e0(void) { }
 
 // (0x00470a20) - Empty function (menu init placeholder)
 void empty_00470a20(void) { }

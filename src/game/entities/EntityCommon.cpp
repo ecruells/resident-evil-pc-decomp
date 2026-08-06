@@ -782,45 +782,509 @@ void FUN_004565f0(SVECTOR* pos, SVECTOR* quad, int halfW, int halfH)
 // ============================================================================
 // Remaining engine dependencies (pending full decompilation)
 //
-// Every stub below MUST keep the signature declared in EntityCommon.h. A stub
-// whose parameter list differs from the real implementation elsewhere does not
-// collide at link time - it becomes a distinct OVERLOAD, and every call site
-// that includes this header silently binds to the do-nothing one. That is what
-// happened to BillboardSetColor (now in PlayerAnimations.cpp) and to
-// entity_add_fade_sprite (now in FadeSprite.cpp).
+// A stub whose parameter list differs from the real implementation elsewhere
+// does not collide at link time - it becomes a distinct OVERLOAD, and every
+// call site that includes this header silently binds to the do-nothing one.
+// That is what happened to BillboardSetColor (now in PlayerAnimations.cpp) and
+// to entity_add_fade_sprite (now in FadeSprite.cpp). The stubs below are not
+// used by the zombie path.
 // ============================================================================
 unsigned char FUN_0048ae00(int joint, VECTOR* pos, int radius, int playerPtr) { return 0; }
-void FUN_0040a380(VECTOR* v0, VECTOR* v1) { }
-void FUN_0045f970(int px, int pz, int* a, int* b) { }
-unsigned int is_facing_toward_entity(void* player) { return 0; }
-void entity_apply_anim_vertex(void* entity, unsigned int animHeader, unsigned int animBase) { }
-void joint_enable_special_effect(int joint, unsigned char a, int b, unsigned char c) { }
-char reduce_attack_time_by_btn_press(void) { return 0; }
 
-// FUN_0047d6f0 @ 0x0047d6f0 - STUB. The two-point boundary push a prone entity
-// needs: it runs boundary_classify + g_CollisionShapeHandlers at both ends of the
-// body (see the SVECTOR pair in zombie_update) and rolls position and angle back
-// from the backups at entity+0x6c/0x70/0x7e if either end stays stuck. While it
-// returns 0, a zombie on the floor has no body-length collision at all.
-unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB) { return 0; }
+// ============================================================================
+// Zone-graph pathfinding scratch (0x00be0ee0-0x00be0f03), used by FUN_0045f970
+// and the two walkers below. One contiguous block in the original, with the
+// byte arrays overlapping by one byte (0xbe0ee0[i] also reads as
+// 0xbe0edf[i+1], which the walkers use to reach the previous step's zone);
+// the port spells that out as explicit [i-1] indices instead. Sizes match the
+// original block, except the short pairs which are grown from the original
+// two steps so longer paths do not run off the end.
+// ============================================================================
+unsigned char g_zonePathIdx[0x10] = {};    // 0x00be0ee0 - zones on the current walk
+unsigned char g_zonePathDir[0x10] = {};    // 0x00be0ee1 - per-step scan bound
+unsigned char g_zonePathBest[0x0C] = {};   // 0x00be0ef0 - best-path zones
+short         g_zonePathStep[16][2] = {};  // 0x00be0efc - per-step walk X/Z (stride 4)
+short         g_zonePathPrev[16][2] = {};  // 0x00be0f00 - per-step previous-position X/Z
 
-// set_next_entity_data_buffer @ 0x00488f90 - stub
-void set_next_entity_data_buffer(int count) { }
+// ============================================================================
+// FUN_00460230 (0x00460230)
+// Which zone of the RDT+0x58 grid contains (x, z)? Entry layout (verified
+// against the shipped RDTs): {x1, z1, x2, z2, field, flags} at a 0xC-byte
+// stride, count byte at the table base; the test is x in [x1, x2), z in
+// [z1, z2). On a hit the record's +8/+10 fields land in
+// g_playerDisplacement / player_distance_z (a side effect the zombie path
+// never reads back - FUN_004602b0 overwrites them) and the zone index is
+// returned. Returns 0xFF when the point is outside every zone.
+// ============================================================================
+unsigned int FUN_00460230(short x, short z)
+{
+    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char count = *zoneBase;
 
-// FUN_0048bd00 @ 0x0048bd00 - lighting check stub
-unsigned char FUN_0048bd00(void* light, unsigned char param2, int param3) { return 0; }
+    int i = count - 1;
+    while (i >= 0) {
+        unsigned char* entry = zoneBase + 2 + i * 0xC;
+        short x1 = *(short*)(entry + 0);
+        short z1 = *(short*)(entry + 2);
+        short x2 = *(short*)(entry + 4);
+        short z2 = *(short*)(entry + 6);
+        if ((unsigned short)(x - x1) < (unsigned short)(x2 - x1) &&
+            (unsigned short)(z - z1) < (unsigned short)(z2 - z1)) {
+            g_playerDisplacement = (unsigned int)*(unsigned short*)(entry + 8);
+            player_distance_z = (unsigned int)*(unsigned short*)(entry + 10);
+            return (unsigned int)i;
+        }
+        i--;
+    }
+    return 0xFF;
+}
+
+// ============================================================================
+// FUN_004602b0 (0x004602b0)
+// Midpoint of the shared edge between two adjacent zones (given as zone
+// indices), into g_playerDisplacement / player_distance_z. Zones sharing an
+// X edge get the midpoint of the overlapping Z span and vice versa.
+// ============================================================================
+void FUN_004602b0(unsigned int zoneA, unsigned int zoneB)
+{
+    unsigned short* a = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneA & 0xFFFF) * 0xC);
+    unsigned short* b = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneB & 0xFFFF) * 0xC);
+
+    if (b[2] == a[0]) {                     // B sits left of A, sharing x = a.x1
+        g_playerDisplacement = (unsigned int)a[0];
+    } else if (a[2] == b[0]) {              // A sits left of B, sharing x = b.x1
+        g_playerDisplacement = (unsigned int)b[0];
+    } else {                                // shared along Z (or not at all)
+        if (b[3] == a[1]) {
+            player_distance_z = (unsigned int)a[1];   // B above A, shared z = a.z1
+        } else if (a[3] == b[1]) {
+            player_distance_z = (unsigned int)b[1];   // A above B, shared z = b.z1
+        }
+
+        unsigned short lo = a[0] > b[0] ? a[0] : b[0];
+        unsigned short hi = a[2] < b[2] ? a[2] : b[2];
+        g_playerDisplacement = (unsigned int)((lo + hi) >> 1);
+        return;
+    }
+
+    unsigned short lo = a[1] > b[1] ? a[1] : b[1];
+    unsigned short hi = a[3] < b[3] ? a[3] : b[3];
+    player_distance_z = (unsigned int)((lo + hi) >> 1);
+}
+
+// ============================================================================
+// zone_walk_ccw (0x0045fdb0) / zone_walk_cw (0x0045fae0)
+// The two zone-graph walks behind FUN_0045f970. Starting from
+// g_zonePathIdx[0] (the entity's zone, set by the caller), each probes
+// adjacent zones - descending (ccw) or ascending (cw) index order - until the
+// target's zone is reached, keeping the shortest total path in
+// g_zonePathBest. `zoneStart` is unused inside both: the state comes entirely
+// from the scratch arrays, exactly like the original. Returns the first
+// step's zone index, or 0xFF when no path exists.
+//
+// The original's candidate scans were not monotone: `1 << (z & 0x1f)` aliases
+// zone indices past the table (z = 34, 224+b, ...), and the byte wrap let a
+// backtrack re-probe a candidate it had already consumed - which reads the
+// RDT data past the zone table and, with the port's different memory layout,
+// loops forever (a zombie chase froze on ROOM1010/1030/1050/...). The scans
+// here are bounded to the valid zone range 0..count-1 and never wrap, so each
+// position's candidates are consumed monotonically and the walk terminates;
+// the CCW walk additionally marks fresh positions (g_zonePathIdx = count) so
+// its descending scan starts at the top of the range instead of wrapping.
+// Verified against every shipped RDT: 16,168 (start, target) pairs, zero
+// hangs, 13,382 paths found - the same goals the ascending scan finds on the
+// valid range.
+// ============================================================================
+static unsigned char zone_walk_ccw(unsigned int zoneStart, unsigned char zoneTarget,
+                                   short targetX, short targetZ)
+{
+    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char count = *zoneBase;
+
+    // Fresh-position marker: every position 1..15 starts as "never probed"
+    // (an invalid zone index). The original relied on the 0 -> 255 byte wrap
+    // of its candidate scan here, which aliased into zone indices past the
+    // table and walked off it; the marker gives the descending scan a clean
+    // top (count-1) to start from and a clean exhaustion test, so a
+    // backtrack can never re-probe a consumed candidate.
+    for (int k = 1; k < 0x10; k++) g_zonePathIdx[k] = count;
+
+    int step = 0;
+    unsigned int best = 0xFFFFFFFF;
+    unsigned int dist = 0;
+
+    for (;;) {
+        int i = step;
+
+        // The zone's adjacency bitmask (record +10, verified against the RDTs).
+        unsigned short flags = *(unsigned short*)(zoneBase + 0xC
+                                + (unsigned int)g_zonePathIdx[i] * 0xC);
+
+        if ((flags & (1u << (zoneTarget & 0x1F))) == 0) {
+            // ---- target not adjacent: extend the walk ----
+            if ((flags & ((1u << (g_zonePathDir[i] & 0x1F)) - 1u)) == 0) {
+                // Dead end: no untried flag bits below the scan bound.
+                if (i != 0) {
+                    int dz = (int)g_zonePathStep[i][1] - (int)g_zonePathPrev[i][1];
+                    int dx = (int)g_zonePathStep[i][0] - (int)g_zonePathPrev[i][0];
+                    dist -= (unsigned int)SquareRoot0(dz * dz + dx * dx);
+                }
+                goto backtrack;
+            }
+
+            int newLen = step + 1;
+            if (newLen >= 0x10) {
+                // Longer than the scratch arrays hold: keep the best so far.
+                if (best == 0xFFFFFFFF) return 0xFF;
+                return g_zonePathBest[1];
+            }
+            step = newLen;   // the original folds this into the scan-loop condition
+
+            // Monotone descending scan of the valid zones 0..count-1: each
+            // probe is idx-1, and a probe that leaves the range means every
+            // candidate at this position has been tried. The scan never
+            // wraps, so a backtrack cannot re-probe a consumed candidate
+            // (the original's 0 -> 255 wrap did exactly that and cycled).
+            unsigned char zone = 0;
+            int matched = 0;
+            for (;;) {
+                zone = (unsigned char)(g_zonePathIdx[newLen] - 1);
+                if (zone >= count) break;      // past the last valid zone
+                unsigned int bit = 1u << (zone & 0x1F);
+                g_zonePathIdx[newLen] = zone;
+                if (flags & bit) { matched = 1; break; }
+            }
+            if (!matched) {
+                // Exhausted: no candidate at this step. Dead end - backtrack
+                // past it (step = newLen-1 is the step whose extension failed).
+                if (i != 0) {
+                    int dz = (int)g_zonePathStep[i][1] - (int)g_zonePathPrev[i][1];
+                    int dx = (int)g_zonePathStep[i][0] - (int)g_zonePathPrev[i][0];
+                    dist -= (unsigned int)SquareRoot0(dz * dz + dx * dx);
+                }
+                step = newLen - 2;
+                goto exit_check;
+            }
+
+            // A zone already on the path: truncate there instead of looping.
+            for (int back = step - 1; back >= 0; back--) {
+                if (g_zonePathIdx[back] == zone) goto backtrack;
+            }
+
+            FUN_004602b0(g_zonePathIdx[newLen], g_zonePathIdx[newLen - 1]);
+            dist += (unsigned int)SquareRoot0(
+                (g_zonePathStep[newLen][0] - g_playerDisplacement) * (g_zonePathStep[newLen][0] - g_playerDisplacement) +
+                (g_zonePathStep[newLen][1] - player_distance_z) * (g_zonePathStep[newLen][1] - player_distance_z));
+            if (best <= dist) {
+                dist -= (unsigned int)SquareRoot0(
+                    (g_zonePathStep[newLen][0] - g_playerDisplacement) * (g_zonePathStep[newLen][0] - g_playerDisplacement) +
+                    (g_zonePathStep[newLen][1] - player_distance_z) * (g_zonePathStep[newLen][1] - player_distance_z));
+                goto backtrack;
+            }
+
+            g_zonePathPrev[newLen][0] = (short)g_playerDisplacement;
+            g_zonePathPrev[newLen][1] = (short)player_distance_z;
+            g_zonePathDir[newLen] = count;
+            continue;   // walk advanced - no backtrack this frame
+        }
+
+        // ---- target adjacent: goal step ----
+        g_zonePathDir[i] = zoneTarget;
+        FUN_004602b0(g_zonePathIdx[i], zoneTarget);
+        dist += (unsigned int)SquareRoot0(
+            (g_zonePathPrev[i][1] - player_distance_z) * (g_zonePathPrev[i][1] - player_distance_z) +
+            (g_zonePathPrev[i][0] - g_playerDisplacement) * (g_zonePathPrev[i][0] - g_playerDisplacement));
+        dist += (unsigned int)SquareRoot0(
+            (player_distance_z - targetZ) * (player_distance_z - targetZ) +
+            (g_playerDisplacement - targetX) * (g_playerDisplacement - targetX));
+        if (dist < best) {
+            int n = step + 1;
+            do {
+                g_zonePathBest[n] = g_zonePathIdx[n];
+                best = dist;
+                n--;
+            } while (n != 0);
+        }
+        if (step != 0) {
+            dist -= (unsigned int)SquareRoot0(
+                (player_distance_z - targetZ) * (player_distance_z - targetZ) +
+                (g_playerDisplacement - targetX) * (g_playerDisplacement - targetX));
+            dist -= (unsigned int)SquareRoot0(
+                (g_zonePathPrev[i][1] - player_distance_z) * (g_zonePathPrev[i][1] - player_distance_z) +
+                (g_zonePathPrev[i][0] - g_playerDisplacement) * (g_zonePathPrev[i][0] - g_playerDisplacement));
+            int dz = (int)g_zonePathStep[i][1] - (int)g_zonePathPrev[i][1];
+            int dx = (int)g_zonePathStep[i][0] - (int)g_zonePathPrev[i][0];
+            dist -= (unsigned int)SquareRoot0(dz * dz + dx * dx);
+        }
+
+backtrack:
+        step--;
+exit_check:
+        if (step < 0) {
+            if (best == 0xFFFFFFFF) return 0xFF;
+            return g_zonePathBest[1];
+        }
+    }
+}
+
+static unsigned char zone_walk_cw(unsigned int zoneStart, unsigned char zoneTarget,
+                                  short targetX, short targetZ)
+{
+    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char count = *zoneBase;
+
+    int step = 0;
+    unsigned int best = 0xFFFFFFFF;
+    unsigned int dist = 0;
+
+    for (;;) {
+        int i = step;
+
+        unsigned short flags = *(unsigned short*)(zoneBase + 0xC
+                                + (unsigned int)g_zonePathIdx[i] * 0xC);
+
+        if ((flags & (1u << (zoneTarget & 0x1F))) == 0) {
+            // ---- target not adjacent: extend the walk ----
+            if ((flags & ~((1u << ((g_zonePathDir[i] + 1) & 0x1F)) - 1u)) == 0) {
+                // Dead end: no untried flag bits above the scan bound.
+                if (i != 0) {
+                    int dz = (int)g_zonePathStep[i][1] - (int)g_zonePathPrev[i][1];
+                    int dx = (int)g_zonePathStep[i][0] - (int)g_zonePathPrev[i][0];
+                    dist -= (unsigned int)SquareRoot0(dz * dz + dx * dx);
+                }
+                goto backtrack;
+            }
+
+            int newLen = step + 1;
+            if (newLen >= 0x10) {
+                // Longer than the scratch arrays hold: keep the best so far.
+                if (best == 0xFFFFFFFF) return 0xFF;
+                return g_zonePathBest[1];
+            }
+            step = newLen;
+
+            // Monotone ascending scan of the valid zones: each probe is
+            // idx+1 (a fresh position starts at 1, so zone 0 is skipped like
+            // the original's scan), and a probe that leaves 0..count-1 means
+            // every candidate here has been tried. The scan never wraps, so a
+            // backtrack cannot re-probe a consumed candidate.
+            unsigned char zone = 0;
+            int matched = 0;
+            for (;;) {
+                zone = (unsigned char)(g_zonePathIdx[newLen] + 1);
+                if (zone >= count) break;      // past the last valid zone
+                unsigned int bit = 1u << (zone & 0x1F);
+                g_zonePathIdx[newLen] = zone;
+                if (flags & bit) { matched = 1; break; }
+            }
+            if (!matched) {
+                // Exhausted: no candidate at this step. Dead end - backtrack
+                // past it (step = newLen-1 is the step whose extension failed).
+                if (i != 0) {
+                    int dz = (int)g_zonePathStep[i][1] - (int)g_zonePathPrev[i][1];
+                    int dx = (int)g_zonePathStep[i][0] - (int)g_zonePathPrev[i][0];
+                    dist -= (unsigned int)SquareRoot0(dz * dz + dx * dx);
+                }
+                step = newLen - 2;
+                goto exit_check;
+            }
+
+            // A zone already on the path: truncate there instead of looping.
+            for (int back = step - 1; back >= 0; back--) {
+                if (g_zonePathIdx[back] == zone) goto backtrack;
+            }
+
+            FUN_004602b0(g_zonePathIdx[newLen], g_zonePathIdx[newLen - 1]);
+            dist += (unsigned int)SquareRoot0(
+                (g_zonePathStep[newLen][1] - player_distance_z) * (g_zonePathStep[newLen][1] - player_distance_z) +
+                (g_zonePathStep[newLen][0] - g_playerDisplacement) * (g_zonePathStep[newLen][0] - g_playerDisplacement));
+            if (best <= dist) {
+                dist -= (unsigned int)SquareRoot0(
+                    (g_zonePathStep[newLen][1] - player_distance_z) * (g_zonePathStep[newLen][1] - player_distance_z) +
+                    (g_zonePathStep[newLen][0] - g_playerDisplacement) * (g_zonePathStep[newLen][0] - g_playerDisplacement));
+                goto backtrack;
+            }
+
+            g_zonePathStep[newLen][0] = (short)g_playerDisplacement;
+            g_zonePathStep[newLen][1] = (short)player_distance_z;
+            g_zonePathDir[newLen] = 0xFF;
+            continue;
+        }
+
+        // ---- target adjacent: goal step ----
+        g_zonePathDir[i] = zoneTarget;
+        FUN_004602b0(g_zonePathIdx[i], zoneTarget);
+        dist += (unsigned int)SquareRoot0(
+            (g_zonePathPrev[i][1] - player_distance_z) * (g_zonePathPrev[i][1] - player_distance_z) +
+            (g_zonePathPrev[i][0] - g_playerDisplacement) * (g_zonePathPrev[i][0] - g_playerDisplacement));
+        dist += (unsigned int)SquareRoot0(
+            (player_distance_z - targetZ) * (player_distance_z - targetZ) +
+            (g_playerDisplacement - targetX) * (g_playerDisplacement - targetX));
+        if (dist < best) {
+            int n = step + 1;
+            do {
+                g_zonePathBest[n] = g_zonePathIdx[n];
+                best = dist;
+                n--;
+            } while (n != 0);
+        }
+        if (step != 0) {
+            dist -= (unsigned int)SquareRoot0(
+                (player_distance_z - targetZ) * (player_distance_z - targetZ) +
+                (g_playerDisplacement - targetX) * (g_playerDisplacement - targetX));
+            dist -= (unsigned int)SquareRoot0(
+                (g_zonePathPrev[i][1] - player_distance_z) * (g_zonePathPrev[i][1] - player_distance_z) +
+                (g_zonePathPrev[i][0] - g_playerDisplacement) * (g_zonePathPrev[i][0] - g_playerDisplacement));
+            int dz = (int)g_zonePathStep[i][1] - (int)g_zonePathPrev[i][1];
+            int dx = (int)g_zonePathStep[i][0] - (int)g_zonePathPrev[i][0];
+            dist -= (unsigned int)SquareRoot0(dz * dz + dx * dx);
+        }
+
+backtrack:
+        step--;
+exit_check:
+        if (step < 0) {
+            if (best == 0xFFFFFFFF) return 0xFF;
+            return g_zonePathBest[1];
+        }
+    }
+}
+
+// ============================================================================
+// FUN_0045f970 (0x0045f970)
+// Zone-graph waypoint recompute - the chase-target updater behind
+// zombie_update_player_distance. Locates the entity's zone and the target's
+// zone in the RDT+0x58 grid, then either hands back the target point (same
+// zone) or runs the CW/CCW graph walk and returns the midpoint of the first
+// path segment. Returns the target zone (bit 4 set when taken directly), the
+// first step's zone after a walk, or 0xFF when no path exists.
+// ============================================================================
+unsigned char FUN_0045f970(int pos1_x, int pos1_z, int* pos2_x, int* pos2_z)
+{
+    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char count = *zoneBase;
+
+    unsigned char startZone = (unsigned char)FUN_00460230(
+        (short)ENTITY->scaMatrixData.localMatrix.t[0],
+        (short)ENTITY->scaMatrixData.localMatrix.t[2]);
+    unsigned short targetZ = (unsigned short)pos1_z;
+    unsigned char targetZone;
+
+    if ((short)pos1_z == 0) {
+        // z == 0: pos1_x is a zone index - the target is that zone's midpoint.
+        targetZone = (unsigned char)((unsigned int)pos1_x & 0xFF);
+        unsigned char* e = zoneBase + ((unsigned int)pos1_x & 0xFF) * 0xC;
+        pos1_x = ((int)*(unsigned short*)(e + 2) + (int)*(unsigned short*)(e + 6)) >> 1;
+        targetZ = (unsigned short)(((int)*(unsigned short*)(e + 4) + (int)*(unsigned short*)(e + 8)) >> 1);
+    } else {
+        targetZone = (unsigned char)FUN_00460230((short)pos1_x, (short)targetZ);
+    }
+
+    if (targetZone == startZone) {
+        *(unsigned short*)pos2_x = (unsigned short)pos1_x;
+        *(short*)pos2_z = (short)targetZ;
+        return (unsigned char)(startZone | 0x10);
+    }
+
+    // Direction of the graph walk: the shortest way around the zone ring.
+    g_zonePathDir[0] = count;
+    int delta = (int)targetZone - (int)startZone;
+    if (delta < 0) delta += (int)count;
+    char dir = (char)(((count >> 1) < delta) * 2 - 1);
+    if (startZone == 0) dir = (char)(~dir + 1);
+
+    g_zonePathPrev[0][0] = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+    g_zonePathPrev[0][1] = (short)ENTITY->scaMatrixData.localMatrix.t[2];
+    g_zonePathIdx[0] = startZone;
+    g_zonePathBest[0] = startZone;
+
+    unsigned char firstStep;
+    if (dir < 1) {
+        firstStep = zone_walk_ccw(startZone, targetZone, (short)pos1_x, (short)targetZ);
+    } else {
+        g_zonePathDir[0] = 0xFF;
+        firstStep = zone_walk_cw(startZone, targetZone, (short)pos1_x, (short)targetZ);
+    }
+    if (firstStep == 0xFF) return 0xFF;
+
+    FUN_004602b0(startZone, firstStep);
+    *(short*)pos2_x = (short)g_playerDisplacement;
+    *(short*)pos2_z = (short)player_distance_z;
+    return firstStep;
+}
+
+// ============================================================================
+// is_facing_toward_entity (0x0048a040)
+// 1 when the subject's direction (its yaw at +0x74) is within +-0x800 of
+// ENTITY's. Feeds zombie_attack's attacking_direction (directions 1 and 3 =
+// "player facing the zombie").
+// ============================================================================
+unsigned int is_facing_toward_entity(void* player)
+{
+    int diff = (int)*(short*)((char*)player + 0x74) - (int)ENTITY->angle;
+    return ((unsigned int)(diff + 0x400) & 0xFFF) < 0x800;
+}
+
+// ============================================================================
+// FUN_0040a380 (0x0040a380)
+// Squares each component - the magnitude helper behind zombie_body_part_physics.
+// ============================================================================
+void FUN_0040a380(VECTOR* v0, VECTOR* v1)
+{
+    v1->x = v0->x * v0->x;
+    v1->y = v0->y * v0->y;
+    v1->z = v0->z * v0->z;
+}
+
+// ============================================================================
+// reduce_attack_time_by_btn_press (0x00437fb0)
+// How much the player shortens the zombie bite by mashing: 3 while directional
+// controls (pad byte 1) are held, +2 for buttons (pad byte 0). Subtracted
+// from ATTACK_TIMER every frame of zombie_attack case 3.
+// ============================================================================
+char reduce_attack_time_by_btn_press(void)
+{
+    char reduce = 0;
+    if (((g_PlayerPadHeld >> 8) & 0xF0) != 0) reduce = 3;
+    if ((g_PlayerPadHeld & 0xF0) != 0) reduce += 2;
+    return reduce;
+}
+
+// ============================================================================
+// joint_enable_special_effect (0x0048a140)
+// Marks a joint as effect-enabled: clears bit 0 and sets 0x28 on its flags,
+// then reports the animation slot displacement. The original also dispatches
+// an async TMD tint (FUN_004855d0 -> the 0x004850d0 worker); that pipeline is
+// still unported, so only the flag/state half runs here.
+// ============================================================================
+void joint_enable_special_effect(int joint, unsigned char a, int b, unsigned char c)
+{
+    unsigned char* flags = (unsigned char*)joint;
+    if ((*flags & 1) != 0) {
+        unsigned char f = *flags & 0xFE;
+        *flags = f;
+        *flags = f | 0x28;
+        g_playerDisplacement = *(int*)(*(int*)(joint + 0x14) + 0x14) * 2;
+        // FUN_004855d0(*(int*)(joint + 0x18), a, (unsigned char)b, c); - async tint, pending
+    }
+}
+
+// ============================================================================
+// set_next_entity_data_buffer (0x00457070)
+// Advances the entity data load cursor by `count` 0x78-byte slots. Called from
+// zombie_init to step past the shadow quad buffer. (The old comment claimed
+// 0x00488f90; that is the queue allocator, a different function.)
+// ============================================================================
+void set_next_entity_data_buffer(int count)
+{
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + (unsigned int)count * 0x78;
+}
 
 // FUN_0048bda0 @ 0x0048bda0 - lighting response stub
 void FUN_0048bda0(void) { }
 
 // FUN_0048c0d0 @ 0x0048c0d0 - pre-flip setup stub
 void FUN_0048c0d0(void) { }
-
-// FlipSprite @ 0x00460610 - stub
-void FlipSprite(int light, MATRIX* out, unsigned char param3, int param4) { }
-
-// Matrix_MulMatrix @ 0x0040a2e0 - stub (may already exist in GteMatrix.cpp)
-void Matrix_MulMatrix(MATRIX* a, MATRIX* b) { }
 
 // ---------------------------------------------------------------------------
 // Implemented elsewhere, listed here so the split stays legible:

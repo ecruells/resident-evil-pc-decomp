@@ -141,6 +141,7 @@
     <ClCompile Include="src\game\PrintText.cpp" />
     <ClCompile Include="src\game\TextureLoader.cpp" />
     <ClCompile Include="src\game\FadeSprite.cpp" />
+    <ClCompile Include="src\game\EffectSystem.cpp" />
     <ClCompile Include="src\game\SpriteRenderer.cpp" />
     <ClCompile Include="src\marni\Marni3DObject.cpp" />
     <ClCompile Include="src\game\InputSystem.cpp" />

@@ -370,8 +370,8 @@ static void npc_idle_play_anim(void)
 // ----------------------------------------------------------------------------
 // Idle behaviours 0-3 (0x0046b580, 0x0046b620, 0x0046b800, 0x0046bb20) and NPC
 // state 9 (0x00471950) are the walk/pathfind layer. They are not transcribed
-// yet - state 9 alone needs entity_pathfind_update, FUN_00471e70/e90/2570,
-// FUN_00460230 and ResolveEntityScaCollision, none of which the port has.
+// yet - state 9 alone needs entity_pathfind_update, FUN_00471e70/e90/2570
+// (FUN_00460230 and ResolveEntityScaCollision are now ported).
 // Logging the index beats a NULL slot: it names the missing handler the moment a
 // script asks for it, instead of faulting with no context.
 // ----------------------------------------------------------------------------

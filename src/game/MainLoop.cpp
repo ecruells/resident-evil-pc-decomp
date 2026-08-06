@@ -15,7 +15,7 @@ short g_spriteAnimIntensity;        // 0x00be41d4
 static int g_pressF9Flag;           // 0x004ba718
 static int g_fading_007d9048;       // 0x007d9048
 static int g_fading_007d904c;       // 0x007d904c
-static int g_MaxHealthDisplayFlag;  // 0x00d227c0
+int g_MaxHealthDisplayFlag;  // 0x00d227c0 (also written by the effect system)
 RectDrawDesc g_FadingRect = { 0x60000000, -160, -120, 320, 240, 0, 0, 0 };  // 0x004ba720
 static RectDrawDesc g_ColorRect  = { 0x60000000, -164, -130, 328,  38, 0, 0, 0 };  // 0x004ba730
 static RectDrawDesc g_ColorRect2 = { 0x60000000, -164,   92, 328,  38, 0, 0, 0 };  // 0x004ba740

@@ -629,7 +629,10 @@ static void explode_leg_and_drop(void)
         joint_setup_attack_effect(joint + 0x4D8, 0x14, 5, 3);
         joint_setup_attack_effect(joint + 0x554, 0x14, 5, 3);
 
-        const int* spawn = (const int*)((char*)&g_deadMoveValue + 0x14);
+        // g_deadMoveValue (0x00d1fdd0) HOLDS a pointer; the original copies the
+        // 4 dwords at *(g_deadMoveValue + 0x14). The old `&g_deadMoveValue`
+        // read the dword's own .bss storage instead.
+        const int* spawn = (const int*)((char*)g_deadMoveValue + 0x14);
         g_playerPosScratch.x   = spawn[0];
         g_playerPosScratch.y   = spawn[1];
         g_playerPosScratch.z   = spawn[2];
@@ -1297,40 +1300,71 @@ void zombie_dead_animation(void)
 // Zombie attack data tables
 // ============================================================================
 
-// zombie_attack_animations @ 0x004bb4?? — attack animation IDs indexed by attacking_direction * 3
-static const unsigned char zombie_attack_anim_tbl[18] = {
-    0x0B, 0x0C, 0x0D,   // facing player (0)
-    0x14, 0x13, 0x14,   // laying down front (1)
-    0x16, 0x17, 0x18    // laying down back (2)
+// ---------------------------------------------------------------------------
+// Zombie attack data tables - all read from the exe.
+//
+// The three animation tables are ONE 12-byte block at 0x004bb3a0 read through
+// three overlapping bases (attack anim +0, player anim +1, keyframe +2) - the
+// same multi-view trick as zombie_states_table / zombie_behavior_tbl. Each row
+// is one attacking_direction (0..3): standing/not-facing, standing/facing,
+// laying/not-facing, laying/facing. The old pass declared three separate
+// 3-row tables at invented "0x004bb4??" addresses whose values matched nothing
+// in the exe - every attack played the wrong animation.
+// ---------------------------------------------------------------------------
+static const unsigned char zombie_attack_anim_tbl[12] = {
+    0x11, 0x00, 0x00,   // dir 0: attack anim 17, player anim 0,  keyframe 0
+    0x14, 0x03, 0x00,   // dir 1: attack anim 20, player anim 3,  keyframe 0
+    0x17, 0x06, 0x06,   // dir 2: attack anim 23, player anim 6,  keyframe 6
+    0x1A, 0x09, 0x0E    // dir 3: attack anim 26, player anim 9,  keyframe 14
 };
 
-// zombie_attack_anim__player @ — player reaction animation IDs
-static const unsigned char zombie_attack_player_anim_tbl[9] = {
-    0x04, 0x05, 0x14,   // facing player
-    0x05, 0x06, 0x15,   // laying down front
-    0x07, 0x08, 0x16    // laying down back
-};
+// 0x004bb3a1 / 0x004bb3a2 - the player-anim and keyframe views of the block above.
+static const unsigned char* const zombie_attack_player_anim_tbl = &zombie_attack_anim_tbl[1];
+static const unsigned char* const zombie_attack_keyframe_tbl   = &zombie_attack_anim_tbl[2];
 
-// attack_direction_relative @ — player angle offset per attack type
-static const short attack_dir_offset_tbl[3] = { 0x800, 0, 0 };
+// 0x004bb3b0 - player attackDirection per direction. 0x7FFF is the "keep the
+// player's facing" sentinel; the original reads these as shorts.
+static const short attack_dir_offset_tbl[4] = { 0x7FFF, 0x0000, 0x7FFF, 0x0000 };
 
-// zombie_attack_frame_check @ — specific animation frames to trigger effects
-static const unsigned char zombie_attack_keyframe_tbl[9] = {
-    0, 0x0A, 0x1C,   // facing player
-    0, 0x10, 0x10,   // laying down front
-    0, 0x10, 0x10    // laying down back
-};
-
-// zombie_damage_values @ — damage per behavior type (easy difficulty)
+// 0x004bb3c8 / 0x004bb3d8 - per-tick bite damage, indexed by behavior & 0xF,
+// applied every 19 frames of the damage loop (case 3). Behaviours 2/3 (laying)
+// bite for less; behaviours 9+ never attack, so their rows are zero.
 static const unsigned char zombie_damage_easy_tbl[16] = {
-    20, 35, 20, 35, 40, 35, 20, 35,
-    45, 35, 20, 35, 20, 35, 20, 35
+    10, 10, 6, 6, 10, 10, 10, 10,
+    10, 0, 0, 0, 0, 0, 0, 0
 };
 
-// zombie_damage_values_normal @ — damage per behavior type (normal difficulty)
 static const unsigned char zombie_damage_normal_tbl[16] = {
-    40, 35, 40, 40, 45, 35, 40, 40,
-    45, 40, 40, 40, 40, 35, 40, 35
+    12, 12, 9, 9, 12, 12, 12, 12,
+    12, 0, 0, 0, 0, 0, 0, 0
+};
+
+// ---------------------------------------------------------------------------
+// player_death_animations_tbl @ 0x004bb3b8 - indexed by attacking_direction.
+// Each entry tints a pair of the player's joints (the death wound) after the
+// zombie kills the player mid-attack. The original swaps ENTITY to the player
+// for the tint (JointApplyColorTint pairs the weapon joint against ENTITY),
+// then restores it. Entries 0 and 1 are the same code twice in the original.
+// ---------------------------------------------------------------------------
+static void player_death_anim_tint(void* joints, int jointOffA, int jointOffB)
+{
+    g_entity_bkp = (unsigned int)ENTITY;
+    ENTITY = (Entity*)&g_playerEntityPointer;
+    JointApplyColorTint((JointStruct*)((char*)joints + jointOffA), 0x30, 0x80820, &DAT_00606060);
+    JointApplyColorTint((JointStruct*)((char*)joints + jointOffB), 0x30, 0x80820, &DAT_00606060);
+    ENTITY = (Entity*)g_entity_bkp;
+}
+
+static void player_death_anim_0(void* joints) { player_death_anim_tint(joints, 0x5D0, 0x7C); }  // 0x00435ae0
+static void player_death_anim_1(void* joints) { player_death_anim_tint(joints, 0x5D0, 0x7C); }  // 0x00435b40 - same code as [0]
+static void player_death_anim_2(void* joints) { player_death_anim_tint(joints, 0x1F0, 0x26C); }  // 0x00435ba0
+static void player_death_anim_3(void* joints) { player_death_anim_tint(joints, 0x3E0, 0x45C); }  // 0x00435c00
+
+static void* const player_death_animations_tbl[4] = {
+    (void*)player_death_anim_0,
+    (void*)player_death_anim_1,
+    (void*)player_death_anim_2,
+    (void*)player_death_anim_3
 };
 
 // ---------------------------------------------------------------------------
@@ -1460,9 +1494,13 @@ void zombie_attack(void)
         ENTITY->status_flags |= (ENTITY_STATUS_ACTIVE | ENTITY_STATUS_DEAD);
         Snd_em(4);                      // attack roar
 
+        // `(behavior_flags & 2) + is_facing_toward_entity(player)` - 0..3:
+        // standing/not-facing, standing/facing, laying/not-facing, laying/facing.
+        // The old `? 0 : 0` dropped the facing term, so a laying zombie played
+        // the standing attack rows and directions 2/3 were unreachable.
         ENTITY->attacking_direction =
-            ((ENTITY->behavior_flags & ZOMBIE_FLAG_LAYING_DOWN) ? 1 : 0)
-            + (is_facing_toward_entity(&g_playerEntity) ? 0 : 0);
+            (ENTITY->behavior_flags & ZOMBIE_FLAG_LAYING_DOWN)
+            + (unsigned char)is_facing_toward_entity(&g_playerEntity);
 
         ENTITY->animationId =
             zombie_attack_anim_tbl[ENTITY->attacking_direction * 3];
@@ -1497,28 +1535,41 @@ void zombie_attack(void)
         ENTITY->timing_control = 0;
         ENTITY->action_ticks_counter = 0;
         ATTACK_TIMER = 105;
+        // The player attacking during the grab cuts the bite to 30 frames
+        // (0x0043539f: CMP word [player+0xE2]). Missing in the old pass, so
+        // the bite always ran the full 105 frames.
+        if (g_playerEntity.attackTimer != 0) {
+            ATTACK_TIMER = 30;
+        }
         break;
 
     case 3:
         // ---- DAMAGE LOOP: deal damage every 19 frames ----
-        ENTITY->action_ticks_counter++;
-        if ((short)ENTITY->action_ticks_counter % 19 == 0) {
-            unsigned char damage;
-            if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
-                damage = zombie_damage_easy_tbl[ENTITY->behavior_flags & 0x0F];
-            else
-                damage = zombie_damage_normal_tbl[ENTITY->behavior_flags & 0x0F];
-            g_playerEntity.health -= damage;
-            Snd_em(3);
+        // Value-before-increment: the original tests the OLD counter (0 on the
+        // first frame of the loop, so the first bite lands immediately), then
+        // stores old+1. The old pass incremented first, shifting every bite one
+        // cycle later - first hit at frame 19 instead of frame 0.
+        {
+            short tick = (short)ENTITY->action_ticks_counter;
+            ENTITY->action_ticks_counter = (unsigned short)(tick + 1);
+            if (tick % 19 == 0) {
+                unsigned char damage;
+                if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
+                    damage = zombie_damage_easy_tbl[ENTITY->behavior_flags & 0x0F];
+                else
+                    damage = zombie_damage_normal_tbl[ENTITY->behavior_flags & 0x0F];
+                g_playerEntity.health -= damage;
+                Snd_em(3);
 
-            Effect_CreateBillboard(0, 0,
-                g_playerEntity.directionAngle + 2048,
-                (void*)g_deadMoveValue,
-                (void*)((int)ENTITY->jointsStructs + 0x150), 0);
+                Effect_CreateBillboard(0, 0,
+                    g_playerEntity.directionAngle + 2048,
+                    (void*)g_deadMoveValue,
+                    (void*)((int)ENTITY->jointsStructs + 0x150), 0);
 
-            if (g_playerEntity.health < 0
-                && (ENTITY->attacking_direction & 2) != 0) {
-                g_playerEntity.health = 1;
+                if (g_playerEntity.health < 0
+                    && (ENTITY->attacking_direction & 2) != 0) {
+                    g_playerEntity.health = 1;
+                }
             }
         }
 
@@ -1543,8 +1594,25 @@ void zombie_attack(void)
                 (((int)ENTITY->behavior_flags & ZOMBIE_FLAG_LAYING_DOWN) ? -5 : 0);
 
             g_playerEntity.animationId = 1;
-            g_playerEntity.action_state = 3;
             g_playerEntity.action_behavior = 200;
+
+            // Blood spray from the zombie's mouth joint (0x00435a0a), then the
+            // player's death pose per attack direction (0x00435aa1). The old
+            // pass stopped at the anim fields, so a player killed mid-bite kept
+            // the grab pose with no wound tint. (The 4-dword spawn block is
+            // copied out of *(g_deadMoveValue + 0x14) like explode_leg_and_drop.)
+            {
+                const int* spawn = (const int*)((char*)g_deadMoveValue + 0x14);
+                g_playerPosScratch.x   = spawn[0];
+                g_playerPosScratch.y   = spawn[1];
+                g_playerPosScratch.z   = spawn[2];
+                g_playerPosScratch.pad = spawn[3];
+            }
+            Effect_CreateBillboard(0, 0, 0x200,
+                (void*)((int)ENTITY->jointsStructs + 0x13C),
+                &g_playerPosScratch, 0);
+            ((void(*)(void*))player_death_animations_tbl[ENTITY->attacking_direction])(
+                g_playerEntityPointer.jointsStructs);
         }
         break;
 
@@ -2588,18 +2656,20 @@ static void turn_towards_player(void)
         ENTITY->blend_counter = 3;
         ENTITY->animationId = 3;
         ENTITY->move_speed_current = 45;
-        Add_speedXZ(*(unsigned short*)(&zombie_attack_data_tbl
-            + (unsigned int)ENTITY->attacking_direction * 6));
-        ENTITY->action_ticks_counter = *(unsigned short*)(&zombie_attack_data_tbl
-            + (unsigned int)ENTITY->attacking_direction * 6 + 2);
+        // Byte offset = direction * 6 (three ushorts per row: speed, timer,
+        // angle). The old `&tbl + direction*6` was pointer arithmetic on the
+        // ARRAY type - direction*144 bytes - so the timer and angle reads were
+        // always out of bounds.
+        Add_speedXZ(zombie_attack_data_tbl[ENTITY->attacking_direction * 3]);
+        ENTITY->action_ticks_counter =
+            zombie_attack_data_tbl[ENTITY->attacking_direction * 3 + 1];
     }
     if (ENTITY->timing_control == 1) {
         if (ENTITY->animation_frame_id == 8) Snd_em(1);
         if (ENTITY->animation_frame_id == 0x1D) Snd_em(1);
     }
     ENTITY->angle = ENTITY->angle
-        - *(short*)(&zombie_attack_data_tbl
-            + (unsigned int)ENTITY->attacking_direction * 6 + 4);
+        - (short)zombie_attack_data_tbl[ENTITY->attacking_direction * 3 + 2];
     Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
     {
         // Value-before-decrement test again (0x004355xx).
@@ -2771,7 +2841,8 @@ void zombie_falldown(void)
         ENTITY->blend_counter = 7;
         ENTITY->move_speed_current = 20;
         Snd_em(5);
-        ENTITY->scaMatrixData.localMatrix.m[1][0] = 1;  // set laying-down matrix
+        // dword at 0x38 is localMatrix.t[1], not m[1][0] (0x26, rotation).
+        ENTITY->scaMatrixData.localMatrix.t[1] = 1;  // set laying-down height
         break;
 
     case 1:
@@ -2779,10 +2850,15 @@ void zombie_falldown(void)
         ENTITY->hit_state = 1;
         ENTITY->action_speed |= 0x80;
 
-        if (ENTITY->animation_frame_id < 4)
-            ENTITY->action_speed &= ~0x80;  // still falling forward
-        else
-            ENTITY->behavior_step |= 0x04;  // actually on ground
+        if (ENTITY->animation_frame_id < 4) {
+            // Still falling forward: keep the "down" bit (0x80) clear, and set
+            // the falling bit + clear hit_state so a hit mid-fall restores the
+            // previous state instead of re-reacting (0x0043694d-0x00436965).
+            // The old pass had the branch inverted and dropped both extras.
+            ENTITY->action_speed &= ~0x80;
+            ENTITY->behavior_step |= 0x04;
+            ENTITY->hit_state = 0;
+        }
 
         if (ENTITY->timing_control == 1) {
             if (ENTITY->animation_frame_id == 8)
@@ -2815,20 +2891,35 @@ void zombie_falldown(void)
         ENTITY->hit_state = 1;
         ENTITY->action_speed |= 0x80;
 
-        if (ENTITY->animation_frame_id > 0x1A)
-            ENTITY->action_speed &= ~0x7F;  // almost stood up
+        if (ENTITY->animation_frame_id > 0x1A) {
+            // Almost stood up (0x00436a96-0x00436aae): same flag trio as case 1.
+            ENTITY->action_speed &= ~0x7F;
+            ENTITY->behavior_step |= 0x04;
+            ENTITY->hit_state = 0;
+        }
 
         if ((char)Joint_move(1, ENTITY->animHeader, ENTITY->animBase, 0x200) != 0) {
             if (ENTITY->stagger_timer == 0) {
-                ENTITY->action_speed = 0;
-            } else {
+                // Poise spent: replenish from the stagger table and clear the
+                // "down" bit so damage can trigger again (0x00436af8). The old
+                // pass had this branch swapped with the else and never
+                // replenished the timer.
+                ENTITY->stagger_timer = zombie_stagger_tbl[g_RandSeed & 0x1F];
                 ENTITY->action_speed &= ~0x80;
+            } else {
+                ENTITY->action_speed = 0;
             }
             ENTITY->hit_state = 0;
-            ENTITY->state = ZOMBIE_STATE_DIE;
+            // MOV dword [EAX+0x84],0x30101 - state=1 IDLE, ignore=1,
+            // action_behavior=3, action_state=0. The old pass sent it to
+            // state 3 (DIE), so every successful get-up played the death
+            // sequence instead of returning to behaviour 3.
+            ENTITY->state = ZOMBIE_STATE_IDLE;
             ENTITY->ignore_player_flag = 1;
+            ENTITY->action_behavior = 3;
+            ENTITY->action_state = 0;
             ENTITY->behavior_step &= ~0x04;
-            ENTITY->scaMatrixData.localMatrix.m[1][0] = 0;  // clear laying state
+            ENTITY->scaMatrixData.localMatrix.t[1] = 0;  // clear laying height
         }
         Add_speedXZ(0x800);
         break;

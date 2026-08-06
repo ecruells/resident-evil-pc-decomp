@@ -103,7 +103,7 @@ extern unsigned int HandleEnemyPlayerCollisions(void);                       // 
 // 0x0047d6f0 - two-point boundary push for a prone body: rotates each offset
 // by the entity yaw, pushes at both, rolls position AND angle back on failure.
 // Returns 0 = clear, 1 = pushed clear, 0x80 = still stuck (rolled back).
-// STILL A STUB - see EntityCommon.cpp.
+// Defined in RoomCollision.cpp (needs the static boundary_classify there).
 extern unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB);
 // check_room_collision (0x0047d310), ChkOutsideCell (0x0047d270) and
 // room_check_sight_blocked (0x0047db90) live in RoomCollision.cpp and are
@@ -117,7 +117,10 @@ extern unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB);
 // ============================================================================
 extern void blood_splatter_physics(int jointData, short gravityStep);         // 0x00437d20
 extern void snap_player_to_grab_position(void* player);                       // 0x00489ee0
-extern void entity_apply_anim_vertex(void* entity, unsigned int animHeader, unsigned int animBase);
+// entity_apply_anim_vertex is declared in Globals.h with its real signature
+// (Entity* first parameter). Do NOT redeclare it with a different parameter
+// type here: that made the old void* stub an OVERLOAD, the trap this header
+// documents below.
 extern void joint_setup_attack_effect(int joint, unsigned char effectType,
                                       unsigned short timer, unsigned short frameMatch); // 0x0048a070
 extern void joint_enable_special_effect(int joint, unsigned char a, int b, unsigned char c);
@@ -125,16 +128,22 @@ extern void FUN_004565f0(SVECTOR* pos, SVECTOR* quad, int halfW, int halfH);  //
 extern void entity_add_fade_sprite(VECTOR* pos, short* velocity, short yOffset, short angle); // 0x00456810 - FadeSprite.cpp
 
 // ============================================================================
+// Zone-graph pathfinding (FUN_0045f970 + helpers, all in EntityCommon.cpp)
+// ============================================================================
+extern unsigned char FUN_0045f970(int px, int pz, int* a, int* b);            // 0x0045f970
+extern unsigned int FUN_00460230(short x, short z);                           // 0x00460230
+extern void FUN_004602b0(unsigned int zoneA, unsigned int zoneB);             // 0x004602b0
+
+// ============================================================================
 // Remaining engine dependencies (still stubs pending decompilation)
 // ============================================================================
 extern void FUN_0040a380(VECTOR* v0, VECTOR* v1);
-extern void FUN_0045f970(int px, int pz, int* a, int* b);
 extern unsigned char FUN_0048ae00(int joint, VECTOR* pos, int radius, int playerPtr);
 extern unsigned int is_facing_toward_entity(void* player);
 extern char reduce_attack_time_by_btn_press(void);
-extern void set_next_entity_data_buffer(int count);                           // 0x00488f90
-extern unsigned char FUN_0048bd00(void* light, unsigned char param2, int param3); // 0x0048bd00 - lighting check
+extern void set_next_entity_data_buffer(int count);                           // 0x00457070
+extern unsigned char FUN_0048bd00(void* light, unsigned char param2, int param3); // 0x0048bd00 - lighting check (EffectSystem.cpp)
 extern void FUN_0048bda0(void);                                               // 0x0048bda0 - lighting response
 extern void FUN_0048c0d0(void);                                               // 0x0048c0d0 - pre-flip setup
-extern void FlipSprite(int light, MATRIX* out, unsigned char param3, int param4); // 0x00460610
-extern void Matrix_MulMatrix(MATRIX* a, MATRIX* b);                           // 0x0040a2e0
+extern void FlipSprite(int* src, MATRIX* dst, unsigned char mirror, unsigned int width); // 0x0048bca0 - EffectSystem.cpp
+extern void Matrix_MulMatrix(MATRIX* a, MATRIX* b);                           // 0x0040a210 - EffectSystem.cpp

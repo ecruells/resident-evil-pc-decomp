@@ -3137,8 +3137,9 @@ static void auto_aim_pitch_update(void)
 // equipped slot still has rounds, and 0 when empty. The knife never passes.
 // The special weapons (id >= 0x6f) and the infinite-ammo flag (player flag
 // bit 0x7e, id 10) are topped back up to 4.
+// Also read by the effect system's auto-aim flash (behavior 58, EffectSystem.cpp).
 // ============================================================================
-static unsigned char weapon_autoaim_check(void)
+unsigned char weapon_autoaim_check(void)
 {
     if (g_EquippedItemId == 0) return 0;
 

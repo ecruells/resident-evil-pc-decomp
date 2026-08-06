@@ -475,6 +475,8 @@ extern DWORD         g_scaPoolBase;                    // 0x00d21358
 extern Effect        g_effectPool[MAX_EFFECTS];        // 0x00be41e4 - 64 slots x 0x84 bytes [.gwipe]
 extern unsigned char g_freeEffectSlots;                // 0x00bf07ee - free slot counter (starts at 64)
 extern DWORD         g_effectSpriteInfo[50];           // 0x00bf0a54 - per-type sprite header pointers
+extern unsigned char g_activeEffectIndex;              // 0x00bf0a2e - slot being processed by update_2d_effects
+extern int           g_MaxHealthDisplayFlag;           // 0x00d227c0 - nearest-effect depth (shared with health bar)
 
 // Effect sprite texture management state
 extern unsigned char  DAT_00bf0a38;                    // 0x00bf0a38 - effect tex Y position
@@ -486,6 +488,11 @@ extern unsigned char  g_abEffSpriteIndexTable[16];     // 0x00bf0a44 - effect sp
 
 // Effect sprite per-slot image data pointers (computed from RDT by InitRoomEffSprite)
 extern int           DAT_00ac9cd0[8];                  // 0x00ac9cd0 - effect sprite image pointers
+// Per-sprite texture sheet slot (0-7 weapon FX, 8-15 room), recorded by
+// setup_effect_sprite_textures; the effect renderer resolves its D3D11 SRV
+// through this instead of the depth-derived texture id, which several sheets
+// share. Port-only (the original keeps all sheets in one VRAM page).
+extern unsigned char g_effectSpriteSheetSlot[50];
 
 // Entity joint animation copy base (set by SetupEntityJointAnimation)
 extern int           DAT_00be0e00;                     // 0x00be0e00
@@ -1323,6 +1330,7 @@ void CreateTexturedQuad(int viewportSlot, int texturePageId, int* vertexData);
 void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffset, int slotIndex);
 void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotIndex,
                      int unused, short posX, short posY, unsigned int flags);
+void LoadEffectTextureSheet(int slot, void* timData);   // effect sheets at explicit slots (TextureLoader.cpp)
 int  create_texture_page(void* data, int mode);
 void destroy_texture_page(int handle);
 void cleanup_texture_slot(int slot);
@@ -1553,6 +1561,7 @@ unsigned int Joint_move(char reverse, unsigned int animHeader, unsigned int anim
 void  entity_apply_anim_vertex(Entity* entity, unsigned int emdScratch1, unsigned int emdScratch2);
 void  entity_extract_anim_vertex(Entity* entity, unsigned int emdScratch1, unsigned int emdScratch2, char reverse);
 unsigned char Effect_CreateBillboard(unsigned char type, unsigned char depthGroup, short yaw, void* spriteInfo, void* pos, char lightFactor);
+void  EffectActor_UpdateAndRender(void);        // 0x0047c2f0 - per-slot effect update+render (EffectSystem.cpp)
 void  JointApplyColorTint(JointStruct* joint, int param2, int param3, void* data);
 void  JointSetColorTint(int modelObjPtr, unsigned int packedColor);
 MATRIX* RotMatrixY(int angle, MATRIX* m);

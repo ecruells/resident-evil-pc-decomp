@@ -1630,6 +1630,7 @@ unsigned char  g_abEffSpriteIndexTable[16] = {};          // 0x00bf0a44
 
 // Effect sprite per-slot image data pointers
 int            DAT_00ac9cd0[8] = {};           // 0x00ac9cd0
+unsigned char  g_effectSpriteSheetSlot[50] = {};   // per-sprite SRV sheet slot (see Globals.h)
 
 // Entity joint animation copy base pointer
 int            DAT_00be0e00 = 0;               // 0x00be0e00
