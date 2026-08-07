@@ -344,11 +344,15 @@ void use_room_action_item(void)
 // ============================================================================
 // rearrange_item_slots (0x00451510)
 // Compacts the item inventory by removing empty gaps left by consumed items.
+// The original reads/writes g_ItemSlotsPointer, g_TotalHeldItems,
+// g_ItemSlotsBitmask and g_ItemSlotIndices directly (no NULL guard). An
+// earlier port used g_firstItemSlotPointer / g_totalHeldItems /
+// g_heItemsX2Less1 / g_itemSlotIndices - .gwipe overlay globals that are
+// never assigned - which made this function a silent no-op and left the
+// slot->sheet-row mapping (g_ItemSlotIndices) stale after consumption.
 // ============================================================================
 void rearrange_item_slots(void)
 {
-    if (g_firstItemSlotPointer == NULL) return;
-
     unsigned char equippedSlotIdx = g_EquippedItemId - 1;
     unsigned char readIdx = 0;
     unsigned char writeIdx = 0;
@@ -357,18 +361,19 @@ void rearrange_item_slots(void)
     int remaining = maxSlots;
 
     do {
-        unsigned char itemId = g_firstItemSlotPointer[readIdx * 2];
+        unsigned char itemId = ((unsigned char*)g_ItemSlotsPointer)[readIdx * 2];
         if (itemId == 0) {
             // Empty slot — skip, clear held-items bit
-            if (readIdx < (unsigned char)g_totalHeldItems) {
-                g_heItemsX2Less1 &= ~(1 << (g_itemSlotIndices[readIdx] & 0x1F));
+            if (readIdx < g_TotalHeldItems) {
+                g_ItemSlotsBitmask &= ~(1u << (g_ItemSlotIndices[readIdx] & 0x1F));
             }
         } else {
             // Has item — compact
             if (writeIdx != readIdx) {
-                g_firstItemSlotPointer[writeIdx * 2] = itemId;
-                g_firstItemSlotPointer[writeIdx * 2 + 1] = g_firstItemSlotPointer[readIdx * 2 + 1];
-                g_itemSlotIndices[writeIdx] = g_itemSlotIndices[readIdx];
+                ((unsigned char*)g_ItemSlotsPointer)[writeIdx * 2] = itemId;
+                ((unsigned char*)g_ItemSlotsPointer)[writeIdx * 2 + 1] =
+                    ((unsigned char*)g_ItemSlotsPointer)[readIdx * 2 + 1];
+                g_ItemSlotIndices[writeIdx] = g_ItemSlotIndices[readIdx];
                 if (equippedSlotIdx == readIdx) {
                     equippedSlotIdx = writeIdx;
                 }
@@ -380,12 +385,12 @@ void rearrange_item_slots(void)
     } while (remaining != 0);
 
     g_EquippedItemId = equippedSlotIdx + 1;
-    g_totalHeldItems = writeIdx;
+    g_TotalHeldItems = writeIdx;
 
     // Zero remaining empty slots
     for (int i = maxSlots - writeIdx; i > 0; i--) {
-        g_firstItemSlotPointer[writeIdx * 2] = 0;
-        g_firstItemSlotPointer[writeIdx * 2 + 1] = 0;
+        ((unsigned char*)g_ItemSlotsPointer)[writeIdx * 2] = 0;
+        ((unsigned char*)g_ItemSlotsPointer)[writeIdx * 2 + 1] = 0;
         writeIdx++;
     }
 }

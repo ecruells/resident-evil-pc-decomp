@@ -742,7 +742,13 @@ static void menu_draw_inventory(void)
         g_TextureDesc.texU = 0x58;
         g_TextureDesc.printClutTint = 0x1e4;
         g_TextureDesc.depth = 0x1d;
-        g_TextureDesc.texV = DAT_00d21ccf[g_EquippedItemId] << 5;
+        // 0x00463fa1: the original reads [ECX + 0xd21ccf] with ECX = the 1-based
+        // equipped slot; 0xd21ccf is the byte just before g_ItemSlotIndices
+        // (0xd21cd0), so this aliases g_ItemSlotIndices[slot - 1] - the sheet
+        // row of the equipped item. Ghidra named that byte DAT_00d21ccf and an
+        // earlier port read a separate all-zero table, always drawing sheet
+        // row 0 (the first slot's sprite). DAT_00d21ccf is not a real global.
+        g_TextureDesc.texV = g_ItemSlotIndices[g_EquippedItemId - 1] << 5;
         pbVar2 = (unsigned char*)ITEM_SLOTS + (g_EquippedItemId * 2 - 2);
         if (*pbVar2 < 0x6f) {
             uVar11 = 8;
@@ -786,7 +792,7 @@ static void menu_draw_inventory(void)
         g_TextureDesc.screenY = *(short*)((int)g_inventorySlotsPos + (unsigned int)(unsigned char)(local_2 - 1) * 2);
         local_2 = local_2 - 2;
         g_TextureDesc.screenX = *(short*)((int)g_inventorySlotsPos + (unsigned int)local_2 * 2);
-        g_TextureDesc.texV = g_ItemSlotsIndexes[uVar7] << 5;
+        g_TextureDesc.texV = g_ItemSlotIndices[uVar7] << 5;
         pbVar2 = (unsigned char*)ITEM_SLOTS + uVar7 * 2;
         if (*pbVar2 < 0x6f) {
             uVar11 = 8;
@@ -1348,10 +1354,10 @@ static void menu_item_combine_refresh(unsigned char slot1, unsigned char slot2,
         LoadFile((char*)g_ItemMixPixPath, g_TimImageBuffer__bitmap, 0x20);
     }
     if (refresh1 != 0) {
-        LoadItemImage((int)refresh1 - 1, (int)g_ItemSlotsIndexes[slot1], (int)g_TimImageBuffer__bitmap);
+        LoadItemImage((int)refresh1 - 1, (int)g_ItemSlotIndices[slot1], (int)g_TimImageBuffer__bitmap);
     }
     if (refresh2 != 0) {
-        LoadItemImage((int)refresh2 - 1, (int)g_ItemSlotsIndexes[slot2], (int)g_TimImageBuffer__bitmap);
+        LoadItemImage((int)refresh2 - 1, (int)g_ItemSlotIndices[slot2], (int)g_TimImageBuffer__bitmap);
     }
 }
 

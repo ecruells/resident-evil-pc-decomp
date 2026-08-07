@@ -412,7 +412,12 @@ extern unsigned int  g_typewriter_id;                  // 0x004d6eb8 - save-slot
 extern short         g_counter_increase;               // 0x004d6ebc - lid travel step (reversed on overflow)
 
 // Inventory bookkeeping
-extern unsigned char g_ItemSlotIndices[8];             // 0x00d21cd0 - held-item index -> physical slot order
+// 0x00d21cd0 - per-slot sheet row: where each inventory slot's sprite sits in
+// the item composite (row = slot at rebuild; maintained through
+// rearrange/pickup/swap). The equipped-box draw reads this at
+// [g_EquippedItemId - 1] via the aliased address 0x00d21ccf (the byte just
+// before the array - NOT a real global).
+extern unsigned char g_ItemSlotIndices[8];             // 0x00d21cd0
 
 // Climb-object scratch (0x00ae9ef0, next to g_omodelCount)
 extern unsigned int  DAT_00ae9ef0;                     // 0x00ae9ef0 - omodel of the climb/push object in reach
@@ -531,7 +536,6 @@ extern int           g_SpecialB1;                      // 0x00be961f [.gwipe]
 extern BioCardLayout g_BioCard;                        // 0x00be9620 [.gwipe end marker]
 
 extern const unsigned char g_StageRoomFlagOffset[6];   // 0x004d31e0 - per-stage room flag base offsets
-extern unsigned char g_ItemSlotsIndexes[16];           // 0x00be9a3c
 extern DWORD         g_ItemSlotsBitmask;               // 0x00d22734
 extern unsigned char g_defaultItemSlot;                // 0x00be41e0 [.gwipe start marker]
 extern unsigned char DAT_00be41e1;                     // 0x00be41e1 [.gwipe]
@@ -543,15 +547,6 @@ extern void*         g_ItemSlotsPointer;               // 0x00d22768
 // 0x00d226f0 - set by get_item_slot to the matched 2-byte inventory slot, or to
 // &g_defaultItemSlot when the item is not held.
 extern unsigned char* g_pCurrentItemSlot;
-
-// Item inventory state (originals overlay g_playerEntity's range → [.gwipe])
-extern unsigned char* g_firstItemSlotPointer;          // 0x00be63a0 [.gwipe]
-extern int           g_totalHeldItems;                 // 0x00be63a4 [.gwipe]
-extern DWORD         g_heItemsX2Less1;                 // 0x00be63a8 [.gwipe]
-extern unsigned char g_itemSlotIndices[8];             // 0x00be63b0 [.gwipe]
-
-// Item image texture V lookup table (indexed by item ID, BSS at 0x00d21ccf)
-extern unsigned char DAT_00d21ccf[256];                // 0x00d21ccf
 
 // ============================================================================
 // SECTION 10: Rooms (RDT, SCD scripts, backgrounds, PAK/LZW, lab slides)

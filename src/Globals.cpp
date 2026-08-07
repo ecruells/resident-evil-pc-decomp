@@ -64,10 +64,6 @@
 #pragma section(".gwipe$6382", read, write)
 #pragma section(".gwipe$6384", read, write)
 #pragma section(".gwipe$6388", read, write)
-#pragma section(".gwipe$63a0", read, write)
-#pragma section(".gwipe$63a4", read, write)
-#pragma section(".gwipe$63a8", read, write)
-#pragma section(".gwipe$63b0", read, write)
 #pragma section(".gwipe$6464", read, write)
 #pragma section(".gwipe$92cc", read, write)
 #pragma section(".gwipe$9614", read, write)
@@ -550,9 +546,6 @@ int unk_00be1180 = 0;
 unsigned char g_EkgPrimaryLine[16] = {};               // 0x00be1198
 unsigned char g_EkgSecondaryLine[24] = {};             // 0x00be1184
 
-// Item image texture V lookup table (indexed by item ID)
-unsigned char DAT_00d21ccf[256] = {};                   // 0x00d21ccf
-
 // --- Counters ---
 int g_numFramesRendered = 0;    // DAT_004d4694
 int g_numFramesPresented = 0;   // DAT_004d469c
@@ -837,11 +830,6 @@ __declspec(allocate(".gwipe$6388")) short         g_playerBkpAngle = 0;         
 __declspec(allocate(".gwipe$6350")) int           g_playerPosX = 0;                // 0x00be6350
 __declspec(allocate(".gwipe$6358")) int           g_playerPosZ = 0;                // 0x00be6358
 int           g_savesCounter = 0;              // 0x004d467c (outside wipe range)
-__declspec(allocate(".gwipe$63a0")) unsigned char* g_firstItemSlotPointer = NULL;  // 0x00be63a0
-__declspec(allocate(".gwipe$63a4")) int           g_totalHeldItems = 0;            // 0x00be63a4
-
-__declspec(allocate(".gwipe$63a8")) DWORD         g_heItemsX2Less1 = 0;            // 0x00be63a8
-__declspec(allocate(".gwipe$63b0")) unsigned char g_itemSlotIndices[8] = {};        // 0x00be63b0
 char          g_saveFileName[260] = {};         // 0x004d42d8
 
 
@@ -1170,9 +1158,6 @@ int           g_labSlidesState = 0;
 
 // 0x00d226a4 - Room event index (SCD event pointer for current room entity)
 void*         g_room_event_index = NULL;
-
-// 0x00be9a3c - Item slot index table (first byte AFTER bio_card range)
-unsigned char g_ItemSlotsIndexes[16] = {};
 
 // 0x00d22734 - Bitmask of held items (1 << count) - 1
 DWORD         g_ItemSlotsBitmask = 0;

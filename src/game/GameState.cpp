@@ -807,7 +807,7 @@ void SetInitialItems(void)
     while (item_qty != 0) {
         g_ItemsSlots[slot_index].Id = *item_slot;
         item_qty = item_slot[1];
-        g_ItemSlotsIndexes[slot_index] = slot_index;
+        g_ItemSlotIndices[slot_index] = slot_index;
         g_ItemsSlots[slot_index].qty = item_qty;
         item_qty = item_slot[2];
         item_slot = item_slot + 2;
@@ -862,7 +862,7 @@ void LoadHeldItemsImages(void) // 0x00451640
         totalItems = totalItems - 1;
         index = (unsigned int)totalItems;
         g_ItemSlotsPointer = savedSlotPointer;
-        g_ItemSlotsIndexes[index] = totalItems;
+        g_ItemSlotIndices[index] = totalItems;
         unsigned char itemId = ((unsigned char*)savedSlotPointer)[index * 2];
         unsigned char imageType = g_ItemImageLookupTable[itemId * 4];
         LoadItemImage(imageType - 1, (int)index, (int)g_ItemsImageBuffer);
