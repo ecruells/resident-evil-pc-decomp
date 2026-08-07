@@ -97,6 +97,22 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     unsigned int g = ((unsigned int)(texture->colorMulG & 0xFF)) * 2; if (g > 255) g = 255;
     unsigned int b = ((unsigned int)(texture->colorMulB & 0xFF)) * 2; if (b > 255) b = 255;
 
+    // CLUT-tint table (original AddTintSprite 0x0046e0a0): printClutTint minus
+    // the font CLUT base (0x1E0, set by ProcessTextureImage bank 0x1E) selects
+    // an RGB tint multiplier — 0 white, 1 green (message item names), 2 red,
+    // 3 gray, anything else yellow. CLUT 8 (the PrintText shadow row 0x1E8)
+    // maps to 1 like the original. The message renderer sets 0x1E1 around an
+    // item name, which is what turns "INK RIBBON" green.
+    int clutTint = (int)texture->printClutTint - 0x1E0;
+    if (clutTint == 8) clutTint = 1;
+    switch (clutTint) {
+    case 0:  break;                       // white (default)
+    case 1:  r = 0; g = 255; b = 0; break;       // green
+    case 2:  r = 255; g = 0; b = 0; break;       // red
+    case 3:  r = 204; g = 204; b = 204; break;   // gray (0.8)
+    default: r = 255; g = 255; b = 0; break;     // yellow
+    }
+
     DWORD color;
     if (texture->colorMulR == 0 && texture->colorMulG == 0 && texture->colorMulB == 0) {
         // Shadow pass: semi-transparent black (brightness controls alpha)

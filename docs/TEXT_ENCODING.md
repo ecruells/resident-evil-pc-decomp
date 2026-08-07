@@ -216,18 +216,25 @@ wrap them in `STR()` (that would font-encode them and break file loading):
 These are consumed via `strcat`/`LoadFile` (e.g. `menu_load_item_model`), not
 by the font renderer.
 
-## 7. Known issue: the `\i` escape vs. tag 0x06
+## 7. The `\i` escape vs. tag 0x06
 
-The message protocol's item-name tag is `0x06` (§5), but the current `\i`
-escape emits a single `0x05`, which is the **set-CLUT** tag. The original
-message bytes for e.g. "You got the [item]." are
-`...the 05 01 06 00 <name> 07 05 00 . 01 00` — the `05 01`/`05 00` pairs are
-the CLUT highlight around the name and `06 00` is the actual item-name lookup.
-A STR string such as `STR("You got the \\i")` currently encodes only
-`...the 05 01` (the trailing `01` being the terminator), so the item name is
-not inserted and the CLUT color is clobbered.
+The message protocol's item-name tag is `0x06` (§5). The `\i` escape emits the
+full original sequence `05 01 06 00 05 00` — CLUT 1 (green tint), tag 06 with
+arg 0 (= `g_selectedItemId`), CLUT 0 — matching e.g. the original "You got the
+[item]." bytes at `0x004bf3f7`. `Encoded<N>` sizes `bytes` at `N*3+2`, so a
+message ending in `\i` fits.
 
-Making `\i` produce the correct two-byte `06 00` sequence also requires the
-`Encoded<N>` sizing to account for the extra byte (a message ending in `\i`
-would otherwise overflow `bytes[N]`). This is left as an explicit
-reconciliation task; it needs in-game verification once changed.
+Two things to remember when a message embeds an item name:
+
+- `\i` resolves `g_selectedItemId` at display time. The typewriter texts
+  (`global_messages[30/31]`, 0x004BF886/0x004BF8D9) do **not** use it — the
+  original hardcodes the literal `INK RIBBON` between raw `\x05\x01` /
+  `\x05\x00` CLUT brackets, because `g_selectedItemId` is not the ribbon when
+  those messages fire.
+- The green colour is not baked into fontus.tim (its CLUT has one grayscale
+  row); `AddTintSprite` (0x0046e0a0) maps `printClutTint - 0x1E0` to an RGB
+  tint (0 white, 1 green, 2 red, 3 gray, else yellow), which the port
+  implements in `src/game/Rendering.cpp`.
+
+All 64 `global_messages` entries have been verified byte-for-byte against
+`ResidentEvil.exe` (`tools/verify_msg_fixes.py` + `tools/decode_msg_table.py`).

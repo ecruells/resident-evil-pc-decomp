@@ -1286,21 +1286,21 @@ static constexpr auto s_gm06 = STR("\\i\\nhas been filed.\\p \\d\\x01");
 // [7] 0x004BF4A3 - Key discard confirmation
 static constexpr auto s_gm07 = STR("This key is useless now.\\nDiscard?\\c\\n\\q\\n");
 // [8] 0x004BF4CA - Door locked, sword carving
-static constexpr auto s_gm08 = STR("\\nIt's locked.\\p\\nA carving of a sword.");
+static constexpr auto s_gm08 = STR("\\nIt's locked.\\p \\nA carving of a sword.");
 // [9] 0x004BF4F1 - Door locked, armor carving
-static constexpr auto s_gm09 = STR("\\nIt's locked.\\p\\nA carving of armor.");
+static constexpr auto s_gm09 = STR("\\nIt's locked.\\p \\nA carving of armor.");
 // [10] 0x004BF516 - Door locked, shield carving
-static constexpr auto s_gm10 = STR("\\nIt's locked.\\p\\nA carving of a shield.");
+static constexpr auto s_gm10 = STR("\\nIt's locked.\\p \\nA carving of a shield.");
 // [11] 0x004BF53E - Door locked, helmet carving
-static constexpr auto s_gm11 = STR("\\nIt's locked.\\p\\nA carving of a helmet.");
+static constexpr auto s_gm11 = STR("\\nIt's locked.\\p \\nA carving of a helmet.");
 // [12] 0x004BF566 - Door tightly locked with plate
 static constexpr auto s_gm12 = STR("The door is tightly\\nlocked.\\p There's a plate on right\\nhand side.");
 // [13] 0x004BF5A8 - Door locked, says Closet
-static constexpr auto s_gm13 = STR("\\nIt's locked.\\p\\nThe door says \"Closet\".");
+static constexpr auto s_gm13 = STR("\\nIt's locked.\\p \\nThe door says \\oCloset\".");
 // [14] 0x004BF5D1 - Door locked, plate says 002
-static constexpr auto s_gm14 = STR("\\nIt's locked.\\p\\nThe plate says 002.");
+static constexpr auto s_gm14 = STR("\\nIt's locked.\\p \\nThe plate says 002.");
 // [15] 0x004BF5F6 - Door locked, plate says 003
-static constexpr auto s_gm15 = STR("\\nIt's locked.\\p\\nThe plate says 003.");
+static constexpr auto s_gm15 = STR("\\nIt's locked.\\p \\nThe plate says 003.");
 // [16] 0x004BF61B - Door locked, says Control Room
 static constexpr auto s_gm16 = STR("\\nIt's locked.\\p The door says\\n\\oControl Room\".");
 // [17] 0x004BF649 - Power Room door locked
@@ -1319,8 +1319,9 @@ static constexpr auto s_gm22 = STR("\\nI've got to hurry!");
 static constexpr auto s_gm23 = STR("There is no time to check\\nit.");
 // [24] 0x004BF719 - Desk locked
 static constexpr auto s_gm24 = STR("\\nThe desk is locked.");
-// [25] 0x004BF72F - Desk locked, use item prompt
-static constexpr auto s_gm25 = STR("\\nThe desk is locked.\\pWill you use\\nthe \\i");
+// [25] 0x004BF72F - Desk locked, use item prompt (yes = use the selected key;
+// the post-action selector is \q and its data byte is the message terminator)
+static constexpr auto s_gm25 = STR("\\nThe desk is locked.\\p Will you use\\nthe \\i?\\c\\n\\q\\x01");
 // The four opening narrations are the only global messages that auto-dismiss.
 // Every other entry in this table ends `01 00` in the original and holds until
 // the player presses a button; these end `01 30` (26/27/28) and `01 40` (29),
@@ -1336,12 +1337,17 @@ static constexpr auto s_gm27 = STR("\\s\\nThey have escaped\\ninto the mansion\\
 static constexpr auto s_gm28 = STR("\\s\\nYou have once\\n\\s\\nagain entered\\pT\\s\\nthe world of\\n\\s\\nsurvival horror.\\pT\\s\\nGood luck!\\dT");
 // [29] 0x004BF836 - Opening narration: be smart
 static constexpr auto s_gm29 = STR("\\s\\nBe smart!\\n\\s\\nFighting foes\\pT\\s\\nisn't the only\\n\\s\\nway to survive\\pT\\s\\nthis horror.\\dd");
-// [30] 0x004BF886 - Typewriter, no ink ribbon
-static constexpr auto s_gm30 = STR("\\nIt's an old typewriter.\\p If I had an \\i");
-// [31] 0x004BF8D9 - Typewriter, use ink ribbon prompt
-static constexpr auto s_gm31 = STR("You can save your progress\\nwith this.\\pWill you use\\nthe \\i");
+// [30] 0x004BF886 - Typewriter, no ink ribbon. The name is literal (05 01
+// CLUT-green brackets, like the original) — g_selectedItemId is NOT the
+// ribbon here, so a \i lookup would show the wrong item.
+static constexpr auto s_gm30 = STR("\\nIt's an old typewriter.\\p If I had an \\x05\\x01INK RIBBON\\x05\\x00, I\\ncould save my progress...");
+// [31] 0x004BF8D9 - Typewriter, use ink ribbon prompt (yes/no; literal
+// INK RIBBON for the same reason as [30]; the \x00 after \c is the
+// choice-1 offset — this message has no post-action, the typewriter state
+// machine reads g_menu_choice_id itself).
+static constexpr auto s_gm31 = STR("You can save your progress\\nwith this.\\p Will you use\\nthe \\x05\\x01INK RIBBON\\x05\\x00?\\c\\x00");
 // [32] 0x004BF924 - Typewriter, save confirmation
-static constexpr auto s_gm32 = STR("You can save your progress\\nwith this.\\pWill you save your progress?\\c ");
+static constexpr auto s_gm32 = STR("You can save your progress\\nwith this.\\p Will you save your progress?\\c ");
 // [33] 0x004BF4DA - Carving of a sword (examined)
 static constexpr auto s_gm33 = STR("A carving of a sword.");
 // [34] 0x004BF501 - Carving of armor (examined)
@@ -1372,8 +1378,8 @@ static constexpr auto s_gm45 = STR("All pages are blank.\\nWhat's it for...?");
 static constexpr auto s_gm46 = STR("There was a medal in the\\nbook.");
 // [47] 0x004BFA9F - Chemical to kill weeds
 static constexpr auto s_gm47 = STR("A chemical to kill the\\nweeds.");
-// [48] 0x004BFABE - Dynamic item name (alternate)
-static constexpr auto s_gm48 = STR("\\i");
+// [48] 0x004BFABE - Item loaded (e.g. "MAGNUM loaded.")
+static constexpr auto s_gm48 = STR("\\i loaded.");
 // [49] 0x004BFACE - Don't need this any more
 static constexpr auto s_gm49 = STR("I don't need this any\\nmore.");
 // [50] 0x004BFAEB - Too dangerous to mix here
@@ -1453,7 +1459,7 @@ unsigned char* global_messages[64] = {
     (unsigned char*)s_gm45.bytes,  // [45] All pages blank.
     (unsigned char*)s_gm46.bytes,  // [46] Medal in the book.
     (unsigned char*)s_gm47.bytes,  // [47] Chemical to kill weeds.
-    (unsigned char*)s_gm48.bytes,  // [48] [L1] (item name)
+    (unsigned char*)s_gm48.bytes,  // [48] [L1] loaded.
     (unsigned char*)s_gm49.bytes,  // [49] Don't need this any more.
     (unsigned char*)s_gm50.bytes,  // [50] Too dangerous to mix here.
     (unsigned char*)s_gm51.bytes,  // [51] Poison gas enveloped.
