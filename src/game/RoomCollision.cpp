@@ -697,6 +697,18 @@ unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB)
         g_svecScratch.z = 0;
 
         *cell = ChkOutsideCell(centre, &g_svecScratch, hdr->cellX, hdr->cellZ);
+
+        // 0x0047d80a: a straight 16-byte copy of this endpoint into the point
+        // boundary_classify actually tests. Ghidra splits it into five stores
+        // through short halves, which reads as scratch bookkeeping and is easy
+        // to drop - it was missing here, so every classify below tested
+        // whatever position the LAST check_room_collision had left behind
+        // (i.e. the player's), not this endpoint. The two-point body test then
+        // reported "blocked" or "clear" based on where the player happened to
+        // be standing, which for a pushed room object made the push succeed or
+        // fail depending purely on which side it was approached from.
+        g_playerPosScratch = *centre;
+
         RDT_Boundary* first = hdr->group[*cell];
         RDT_Boundary* last  = hdr->group[*cell + 1];
 
@@ -731,6 +743,10 @@ unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB)
     // empty. The scratch offset is NOT re-zeroed here, exactly like the
     // original.
     if (cellB > 0) {
+        // 0x0047d8ec: end B's endpoint is copied into the tested point again
+        // before the re-walk, the same 16-byte copy as in the loop above.
+        g_playerPosScratch = rotatedB;
+
         RDT_Boundary* first = hdr->group[cellB - 1];
         RDT_Boundary* last  = hdr->group[cellB];
         for (RDT_Boundary* rec = first; rec < last; rec++) {
@@ -759,4 +775,353 @@ unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB)
     ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
     *(short*)((char*)ENTITY + 0x7E) = ENTITY->angle;
     return 1;
+}
+
+// ===========================================================================
+// Room 3D-object collision, pushing and climbing.
+//
+// This is a whole subsystem that was missing: update_room_objects (0x00474090)
+// was an empty stub in EngineStubs.cpp, so nothing in the port ever collided
+// an entity with a room object and nothing ever raised g_main_state_flags bit
+// 0x40 - the sole trigger for the push behaviour (0x10).
+//
+// Ghidra names 0x00474090 `update_sounds`; that is wrong, it touches no sound
+// code at all. Renamed here and in the Ghidra database.
+//
+// Objects are the 0xA4-byte blocks cmd_omodel_set fills in, held in
+// g_itemboxes_covers_table[0 .. RDT.sound_banks_count). They are laid out like
+// the head of an Entity - Sca_info at +4, localMatrix.t at +0x34, position at
+// +0x6C, yaw at +0x74 - which is exactly why the entity helpers below can take
+// one on either side. Everything is addressed by raw offset because a 0xA4
+// block is far shorter than a real Entity and must never be dereferenced as
+// one.
+//
+// Object flag byte (record+0, SCD operand 2):
+//   0x01 active   0x02 intangible   0x08 no collision
+//   0x20 not pushable                0x40 climbable
+// ===========================================================================
+
+extern void update_player_position(PlayerEntity* ent, int mask); // 0x0041c060
+extern int  ChkPlReachEntity(int obj);                           // 0x00474a20
+
+// ===========================================================================
+// ChkEntitySlide (0x00474330)
+// Resolve one entity against one object along the shallower penetration axis.
+//
+//   ent        the moving actor - the player or an enemy. Its Sca_info (+4)
+//              supplies the body extents and its pSca_hit_data (+8) the
+//              per-part offsets.
+//   obj        the room object. Its Sca_info supplies the box half-extents.
+//   moveObject 0 = push `ent` out of `obj` (the real collision response)
+//              1 = move `obj` instead, and return how many axes were moved.
+//
+// Mode 1 is how update_room_objects asks "is the player pressing into this?":
+// the caller saves obj's position first and restores it afterwards, using only
+// the return count. Mode 0 is the response that actually makes objects solid.
+//
+// Two quirks of the original, both reproduced deliberately:
+//  - the loop advances the offsets pointer by 6 bytes and the size pointer by
+//    0xC per part, but re-reads the extents from the FIRST size record every
+//    iteration (0x004743b6 loads [ECX+4], not the advanced copy). Only the
+//    part offsets really vary.
+//  - the terminating `size[0] < 0` test happens after the part is processed,
+//    so a list is always walked at least once. omodel records set +0x88 to
+//    0x8000, i.e. exactly one part.
+// ===========================================================================
+int ChkEntitySlide(unsigned char* ent, unsigned char* obj, int moveObject)
+{
+    int moved = 0;
+
+    if ((ent[0] & 0x08) != 0) return 0;     // entity has collision disabled
+    if ((obj[0] & 0x02) != 0) return 0;     // object is intangible
+
+    short* offsets = *(short**)(ent + 8);   // pSca_hit_data - per-part x,y,z
+    short* sizes   = *(short**)(ent + 4);   // Sca_info - the walked size list
+
+    // PORT GUARD, no equivalent in the original: an entity whose SCA data has
+    // not been bound yet would walk a null list. The original is always called
+    // after SetEntityScaHitData; the port has more stubbed init paths.
+    if (offsets == NULL || sizes == NULL || *(short**)(obj + 4) == NULL) return 0;
+
+    for (;;) {
+        short* entSize = *(short**)(ent + 4);   // always the base record
+        short* objSize = *(short**)(obj + 4);
+
+        int objX = *(int*)(obj + 0x34);
+        int objZ = *(int*)(obj + 0x3c);
+
+        int dx = (objX - (int)offsets[0]) - *(int*)(ent + 0x34);
+        int dy = (*(int*)(obj + 0x38) - (int)offsets[1]) - *(int*)(ent + 0x38);
+        int dz = (objZ - (int)offsets[2]) - *(int*)(ent + 0x3c);
+
+        // Summed half-extents. The entity contributes its radius (+0xA) on both
+        // horizontal axes and its height (+0x8) on Y; the object contributes
+        // its own per-axis half-extents (+2/+4/+6).
+        int extX = (int)objSize[1] + (int)(unsigned short)entSize[5];
+        int extY = (int)objSize[2] + (int)(unsigned short)entSize[4];
+        int extZ = (int)objSize[3] + (int)(unsigned short)entSize[5];
+
+        // The unsigned-wrap containment test used everywhere in this engine:
+        // (d + ext) as unsigned <= 2*ext rejects both sides of the box at once.
+        if ((unsigned int)(dx + extX) <= (unsigned int)(extX * 2) &&
+            (unsigned int)(dy + extY) <= (unsigned int)(extY * 2) &&
+            (unsigned int)(dz + extZ) <= (unsigned int)(extZ * 2)) {
+
+            // Resolve along whichever axis is cheaper to escape. The cross
+            // products compare the penetration depths without a divide.
+            int crossX = extX * dz;
+            int crossZ = extZ * dx;
+            if (abs(crossX) < abs(crossZ)) {
+                int push = extX;
+                if (moveObject == 0) {
+                    if (dx >= 0) push = -push;
+                    *(int*)(ent + 0x34) = objX + push;
+                } else {
+                    if (dx < 0) push = -push;
+                    moved++;
+                    *(int*)(obj + 0x34) = (int)entSize[1] + *(int*)(ent + 0x34) + push;
+                }
+            } else {
+                int push = extZ;
+                if (moveObject == 0) {
+                    if (dz >= 0) push = -push;
+                    *(int*)(ent + 0x3c) = objZ + push;
+                } else {
+                    if (dz < 0) push = -push;
+                    moved++;
+                    *(int*)(obj + 0x3c) = (int)entSize[3] + *(int*)(ent + 0x3c) + push;
+                }
+            }
+        }
+
+        if (sizes[0] < 0) break;
+        offsets += 3;   // 6 bytes
+        sizes   += 6;   // 0xC bytes
+    }
+
+    return moved;
+}
+
+// ===========================================================================
+// ChkObjSlide (0x00474500)
+// Object-versus-object shove: if `mover` overlaps `other`, displace `other`
+// out of it along the shallower axis. Both boxes use the Sca_info half-extents
+// (+2 for X, +6 for Z); Y is not considered. Returns 1 when a shove happened.
+//
+// update_room_objects uses it twice: as a veto before a push starts (a crate
+// already touching another crate cannot be pushed) and afterwards, to carry
+// the shove on to whatever the moved object ran into.
+// ===========================================================================
+static int ChkObjSlide(unsigned char* mover, unsigned char* other)
+{
+    if (((other[0] | mover[0]) & 0x08) != 0) return 0;
+
+    int dx = *(int*)(other + 0x34) - *(int*)(mover + 0x34);
+    int dz = *(int*)(other + 0x3c) - *(int*)(mover + 0x3c);
+
+    short* moverSize = *(short**)(mover + 4);
+    short* otherSize = *(short**)(other + 4);
+
+    int extX = (int)otherSize[1] + (int)moverSize[1];
+    int extZ = (int)otherSize[3] + (int)moverSize[3];
+
+    if ((unsigned int)(dx + extX) > (unsigned int)(extX * 2)) return 0;
+    if ((unsigned int)(dz + extZ) > (unsigned int)(extZ * 2)) return 0;
+
+    // The +1 / -1-minus is the original's: it parks the pushed object one unit
+    // clear of the touching distance so the next frame does not re-trigger.
+    if (abs(extX * dz) < abs(extZ * dx)) {
+        int place = (dx < 0) ? (-1 - extX) : (extX + 1);
+        *(int*)(other + 0x34) = *(int*)(mover + 0x34) + place;
+    } else {
+        int place = (dz < 0) ? (-1 - extZ) : (extZ + 1);
+        *(int*)(other + 0x3c) = *(int*)(mover + 0x3c) + place;
+    }
+    return 1;
+}
+
+// ===========================================================================
+// update_room_objects (0x00474090) - Ghidra `update_sounds`
+// One pass over every active room object, run each frame from game_loop.
+// Does five things per object, in this order:
+//
+//   1. resolve every active enemy out of it
+//   2. count how long the player has been walking into it (the push probe)
+//   3. at nine frames, start a push unless something vetoes it
+//   4. resolve the PLAYER out of it - this is what makes objects solid
+//   5. if it moved, shove the other objects and commit its new position
+//
+// A started push raises g_main_state_flags bit 0x40 for the whole frame;
+// player_input_to_behavior turns that into action_behavior 0x10 and
+// behavior_10_push runs until the bit drops, which happens the moment the
+// player stops walking into the object.
+//
+// Note the enemy loops: the original decrements the counter only for ACTIVE
+// entities while advancing the pointer unconditionally, so an inactive slot
+// extends the walk. Reproduced as-is.
+// ===========================================================================
+void update_room_objects(void)
+{
+    int pushStarted = 0;
+
+    for (int i = 0; i < (int)(unsigned char)g_RdtPointer->sound_banks_count; i++) {
+        unsigned char* obj = (unsigned char*)g_itemboxes_covers_table[i];
+        if (obj == NULL || (obj[0] & 1) == 0) continue;
+
+        // ---- 1. enemies get pushed out of the object ----
+        {
+            Entity*      em      = g_EnemiesList;
+            unsigned int emCount = (unsigned int)g_enemy_count;
+            if (emCount != 0) {
+                do {
+                    if ((em->status_flags & 1) != 0) {
+                        emCount--;
+                        ChkEntitySlide((unsigned char*)em, obj, 0);
+                    }
+                    em++;
+                } while ((int)emCount > 0);
+            }
+        }
+
+        // The push probe below moves the object; these are the values to put
+        // back once the probe has answered.
+        int savedX = *(int*)(obj + 0x34);
+        int savedZ = *(int*)(obj + 0x3c);
+
+        // ---- 2. the push probe ----
+        // Overlapping is not enough: the player must also be holding forward
+        // and have the object inside the 470-unit reach box. Anything else
+        // resets the counter, so the nine frames have to be consecutive.
+        // The three tests short-circuit in the original, and that matters:
+        // ChkPlReachEntity writes g_svecScratch as a side effect, so it must
+        // not run when the first two have already failed.
+        if (ChkEntitySlide((unsigned char*)&g_playerEntity, obj, 1) == 0 ||
+            ((unsigned char)g_PlayerDpadHeld & 1) == 0 ||
+            ChkPlReachEntity((int)obj) == 0) {
+            obj[0x86] = 0;
+            obj[0x87] = 0;
+        } else {
+            *(short*)(obj + 0x86) = (short)(*(short*)(obj + 0x86) + 1);
+        }
+
+        // ---- 3. start the push on the ninth frame ----
+        // The probe's displacement is normally thrown away again: an object
+        // only really moves on the frames where the push animation is ALREADY
+        // running (action_behavior 0x10). The counter is reset to 8 rather than
+        // 0 on a successful start, so it climbs back to 9 every frame the
+        // player keeps leaning in and this block re-runs for the whole push.
+        int restorePosition = 1;
+        if ((obj[0] & 0x20) == 0 && *(short*)(obj + 0x86) == 9) {
+            ENTITY = (Entity*)obj;
+
+            // The object's own floor probe. Flag bit 0x04 means "this thing
+            // never needs one" (objects that cannot leave their footprint).
+            int blockedByRoom = 0;
+            if ((obj[0] & 0x04) == 0) {
+                if (FUN_0047d6f0((SVECTOR*)(obj + 0x94),
+                                 (SVECTOR*)(obj + 0x9c)) != 0) {
+                    blockedByRoom = 1;
+                }
+            }
+
+            if (blockedByRoom) {
+                // Parked at 10: the counter never reaches 9 again until the
+                // player lets go, so a blocked object cannot re-trigger.
+                obj[0x86] = 10;
+                obj[0x87] = 0;
+                DAT_00ae9ee8 = (unsigned int)obj;
+            } else {
+                pushStarted = 1;
+                obj[0x86] = 8;
+                obj[0x87] = 0;
+                DAT_00ae9ee8 = (unsigned int)obj;
+
+                // Snap the player square to the object before the animation.
+                g_playerEntity.directionAngle =
+                    (short)(((unsigned int)g_playerEntity.directionAngle + 0x200u) & 0xc00);
+
+                // An enemy standing where the object would go vetoes the push.
+                Entity*      em      = g_EnemiesList;
+                unsigned int emCount = (unsigned int)g_enemy_count;
+                if (emCount != 0) {
+                    do {
+                        if ((em->status_flags & 1) != 0) {
+                            emCount--;
+                            if (ChkEntitySlide((unsigned char*)em, obj, 1) != 0) {
+                                obj[0x86] = 10;
+                                obj[0x87] = 0;
+                            }
+                        }
+                        em++;
+                    } while ((int)emCount > 0);
+                }
+
+                // So does another object in the way - and that one aborts the
+                // whole push, jumping straight to the position restore.
+                int vetoed = 0;
+                for (int j = 0; j < (int)(unsigned char)g_RdtPointer->sound_banks_count; j++) {
+                    unsigned char* other = (unsigned char*)g_itemboxes_covers_table[j];
+                    if (other == NULL || (other[0] & 1) == 0 || other == obj) continue;
+                    if (ChkObjSlide(other, obj) != 0) {
+                        obj[0x86] = 10;
+                        obj[0x87] = 0;
+                        DAT_00ae9ee8 = (unsigned int)obj;
+                        vetoed = 1;
+                        break;
+                    }
+                }
+
+                if (!vetoed) {
+                    if (g_playerEntity.isBeingAttackedFlag == 0 &&
+                        g_playerEntity.action_behavior != 0x10) {
+                        // The starting frame: lock the menu out and undo the
+                        // probe - the object holds still while the wind-up
+                        // animation plays.
+                        g_message_flags &= 0xffbf;
+                    } else {
+                        // The push animation is already running (or the player
+                        // is otherwise committed). This is the only path that
+                        // keeps the probe's displacement, and it is what
+                        // actually slides the object across the floor.
+                        restorePosition = 0;
+                    }
+                }
+            }
+        }
+
+        if (restorePosition) {
+            *(int*)(obj + 0x34) = savedX;
+            *(int*)(obj + 0x3c) = savedZ;
+        }
+
+        // ---- 4. the player is resolved out of the object ----
+        ChkEntitySlide((unsigned char*)&g_playerEntity, obj, 0);
+
+        // ---- 5. commit a moved object, shoving whatever it ran into ----
+        if ((int)*(short*)(obj + 0x6c) != *(int*)(obj + 0x34) ||
+            (int)*(short*)(obj + 0x70) != *(int*)(obj + 0x3c)) {
+            for (int j = 0; j < (int)(unsigned char)g_RdtPointer->sound_banks_count; j++) {
+                unsigned char* other = (unsigned char*)g_itemboxes_covers_table[j];
+                if (other == NULL || (other[0] & 1) == 0 || other == obj) continue;
+                ChkObjSlide(obj, other);
+            }
+            *(short*)(obj + 0x6c) = (short)*(int*)(obj + 0x34);
+            *(short*)(obj + 0x70) = (short)*(int*)(obj + 0x3c);
+        }
+
+        // Mask 4 selects the event entries that probe against an object rather
+        // than the player (game_loop passes mask 1 for the player's own pass).
+        update_player_position((PlayerEntity*)obj, 4);
+    }
+
+    if (pushStarted) {
+        g_main_state_flags |= 0x40;
+        return;
+    }
+    if ((g_main_state_flags & 0x40) != 0) {
+        // The push just ended: behavior_10_push watches this bit drop to run
+        // its release state, and the menu bit comes back with it.
+        g_main_state_flags &= ~0x40u;
+        g_message_flags |= 0x40;
+    }
 }

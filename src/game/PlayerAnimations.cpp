@@ -1541,10 +1541,19 @@ int ChkPlReachEntity(int obj)
     short extX = *(short*)(obj + 0x8a);
     short extZ = *(short*)(obj + 0x8e);
 
-    if ((unsigned int)(extX * 2) < (unsigned int)((int)(*(int*)(obj + 0x34) - extX) + g_svecScratch.x)) {
+    // The offset is (probe - objectCentre + ext), NOT (objectCentre - ext +
+    // probe): 0x00474a8c/0x00474a8f both SUB the object position out of the
+    // extent, they do not add it in. With the operands the wrong way round the
+    // sum is roughly (probe + centre), which for any object away from the world
+    // origin dwarfs 2*ext, so this returned 0 for EVERY object in EVERY room -
+    // silently disabling climbing and, through update_room_objects' hold
+    // counter, pushing as well.
+    if ((unsigned int)(extX * 2) <
+        (unsigned int)((int)extX - *(int*)(obj + 0x34) + (int)g_svecScratch.x)) {
         return 0;
     }
-    if ((unsigned int)(extZ * 2) < (unsigned int)((int)(*(int*)(obj + 0x3c) - extZ) + g_svecScratch.z)) {
+    if ((unsigned int)(extZ * 2) <
+        (unsigned int)((int)g_svecScratch.z - *(int*)(obj + 0x3c) + (int)extZ)) {
         return 0;
     }
     if (abs(g_svecScratch.z) < abs(g_svecScratch.x)) {
@@ -2804,9 +2813,11 @@ static void player_behavior_10_push(void)
             g_playerEntity.unk_8c = 3;
         }
         if (g_playerEntity.animation_frame_id == 1) {
-            // object id byte bit 0x40 picks the grunt variant (0x16/0x17)
+            // object id byte bit 0x40 picks the grunt variant (0x16/0x17).
+            // DAT_00ae9ee8, the object update_room_objects is pushing - NOT
+            // DAT_00ae9ef0, which is check_climb_object's separate scratch.
             unsigned char sndId = (unsigned char)(
-                0x17 - ((*(unsigned char*)(DAT_00ae9ef0 + 1) & 0x40) == 0));
+                0x17 - ((*(unsigned char*)(DAT_00ae9ee8 + 1) & 0x40) == 0));
             Play3DSnd(2, sndId, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
             return;
         }
@@ -5433,7 +5444,7 @@ int no_room_action(unsigned char* entry)
 //
 // Called every frame while the player's reach probe is inside the door's action
 // zone - there is NO action-button check. Confirmed by the two call sites of
-// update_player_position: game_loop passes mask 1 and update_sounds passes mask 4,
+// update_player_position: game_loop passes mask 1 and update_room_objects passes mask 4,
 // so the entry flag byte is a mask *selector*, and a door with bit 0 set is tested
 // every frame. Walking into the zone is the trigger.
 //
@@ -6144,16 +6155,16 @@ void update_player_position(PlayerEntity* ent, int mask)
                     if (++missGap > 90 || key != lastKey) {
                         missGap = 0;
                         lastKey = key;
-                        dbg_printf("[zone] MISS entry=%d act=%u probe=%s pt=(%d,%d)"
-                                   " zone=(%u..%u, %u..%u) dx=%d%s dz=%d%s\n",
-                                   (int)index, (unsigned int)*entry,
-                                   (flags & 0x40) ? "position" : "reach", px, pz,
-                                   (unsigned int)z[0],
-                                   (unsigned int)(z[0] + z[2]),
-                                   (unsigned int)z[1],
-                                   (unsigned int)(z[1] + z[3]),
-                                   dx, (dx >= 0 && dx <= (int)z[2]) ? "(in)" : "(OUT)",
-                                   dz, (dz >= 0 && dz <= (int)z[3]) ? "(in)" : "(OUT)");
+                        // dbg_printf("[zone] MISS entry=%d act=%u probe=%s pt=(%d,%d)"
+                        //            " zone=(%u..%u, %u..%u) dx=%d%s dz=%d%s\n",
+                        //            (int)index, (unsigned int)*entry,
+                        //            (flags & 0x40) ? "position" : "reach", px, pz,
+                        //            (unsigned int)z[0],
+                        //            (unsigned int)(z[0] + z[2]),
+                        //            (unsigned int)z[1],
+                        //            (unsigned int)(z[1] + z[3]),
+                        //            dx, (dx >= 0 && dx <= (int)z[2]) ? "(in)" : "(OUT)",
+                        //            dz, (dz >= 0 && dz <= (int)z[3]) ? "(in)" : "(OUT)");
                     }
                 }
             }

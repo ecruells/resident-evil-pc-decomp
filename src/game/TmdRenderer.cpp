@@ -154,14 +154,7 @@ void TmdQueueObject(void* objData, int depth)
 
     const int slotStride = 0x1594;
 
-    // The stage-1 dining-hall table renders through the FIXED render-state
-    // slot g_renderStateTMD (0x00aac158), which sits outside (after)
-    // g_tmdObjectBuffer. The original queues it into the ordering table like
-    // any other slot (FUN_00484eb0); the port's slot recovery has to accept
-    // it explicitly or the table's Transform call is silently dropped and
-    // nothing draws. Check it FIRST: it is a single 0x1594-byte slot, and the
-    // g_tmdObjectBuffer mapping below would otherwise consume it as one of the
-    // unused slots past the 250-slot cap and reject it.
+
     BYTE* rs = (BYTE*)g_renderStateTMD;
     if (p >= rs && p < rs + slotStride) {
         slotBase = rs;

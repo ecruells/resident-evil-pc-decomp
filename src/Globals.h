@@ -420,7 +420,11 @@ extern short         g_counter_increase;               // 0x004d6ebc - lid trave
 extern unsigned char g_ItemSlotIndices[8];             // 0x00d21cd0
 
 // Climb-object scratch (0x00ae9ef0, next to g_omodelCount)
-extern unsigned int  DAT_00ae9ef0;                     // 0x00ae9ef0 - omodel of the climb/push object in reach
+extern unsigned int  DAT_00ae9ef0;                     // 0x00ae9ef0 - omodel check_climb_object found in reach
+// Push-object scratch. A DIFFERENT global from the climb one above: this is the
+// omodel update_room_objects is currently pushing, and it is what
+// behavior_10_push reads to pick the grunt SFX.
+extern unsigned int  DAT_00ae9ee8;                     // 0x00ae9ee8 - omodel being pushed
 // Dead constant read by room_check_actions[0x0B] (0x00d226e8, past g_itemboxes_covers_table)
 extern unsigned int  DAT_00d226e8;                     // 0x00d226e8 - always 0, never written
 // Screen-distortion effect struct (0x00be63c8) - FUN_004567d0 writes it; the
@@ -1433,7 +1437,10 @@ void door_transition_update(void);                   // 0x00495d70
 void room_event_item_pickup(void);                   // 0x00451700
 void use_room_action_item(void);                     // 0x004631f0
 void DrawFadeSpr(void);                               // 0x00456d30
-void update_sounds(void);                             // 0x00474090
+// 0x00474090 - room 3D-object collision + the walk-into-it push driver.
+// Ghidra calls this `update_sounds`; it has nothing to do with sound.
+void update_room_objects(void);                       // 0x00474090
+int  ChkEntitySlide(unsigned char* ent, unsigned char* obj, int moveObject); // 0x00474330
 void room_camera_and_lighting_update(void);           // 0x00473ff0
 void    EntityComputeJointWorldMatrices(int ca); // 0x0048c190 - Compute entity joint world matrices
 void EntityApplyLookAtRotation(void);                 // 0x0045a2e0

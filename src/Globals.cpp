@@ -721,6 +721,7 @@ unsigned int g_typewriter_id = 0;        // 0x004d6eb8
 short g_counter_increase = 0;            // 0x004d6ebc
 unsigned char g_ItemSlotIndices[8] = {}; // 0x00d21cd0
 unsigned int DAT_00ae9ef0 = 0;           // 0x00ae9ef0
+unsigned int DAT_00ae9ee8 = 0;           // 0x00ae9ee8
 unsigned int DAT_00d226e8 = 0;           // 0x00d226e8
 unsigned char DAT_00be63c8[0x80] = {};   // 0x00be63c8
 unsigned char g_nextRoomDoorType = 0;    // 0x00be0bc8

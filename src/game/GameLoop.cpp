@@ -194,9 +194,10 @@ LAB_00480e89:
                 g_main_state_flags2 &= ~1;
                 update_player_position(&g_playerEntity, 1);
 
-                // 0x00480ecf-0x00480ed4: Screen effects and sound
+                // 0x00480ecf-0x00480ed4: Screen effects, then the room 3D-object
+                // pass (collision + the walk-into-it push driver).
                 DrawFadeSpr();
-                update_sounds();
+                update_room_objects();
 
                 // 0x00480ed4: Camera/lighting update
                 if (g_dwCameraLightingEnabled != 0) {

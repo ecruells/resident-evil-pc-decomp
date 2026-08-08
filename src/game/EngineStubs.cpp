@@ -85,9 +85,6 @@ int  empty_483510(void) { return 0; }
 // These functions are called per-frame from game_loop (0x00480b30).
 // ---------------------------------------------------------------------------
 
-// (0x00474090) - Update sound system state per-frame
-void update_sounds(void) { }
-
 // (0x00475b80) - Draw room sprites (background overlays)
 void DrawRoomSpr(void) { }
 
