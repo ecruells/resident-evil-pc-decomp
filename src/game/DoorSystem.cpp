@@ -135,12 +135,19 @@ static const int g_doorPhaseSeq[11][12] = {
 //   var 6: message id                    = g_menu_choice_id     (0x00be9825)
 // Short-variable table (0x004bda24) has a single entry: 0x00be0bc8 (var 0 as
 // a short).
-#define DOOR_BYTEVAR0   (g_nextRoomDoorType)
-#define DOOR_BYTEVAR2   (g_nextRoom_be05b7)
-#define DOOR_BYTEVAR6   (g_menu_choice_id)
-static unsigned char g_doorByteVar1;    // 0x00be0bc1 (record+0x09)
-static unsigned char g_doorByteVar3;    // 0x00be0dd4 (record+0x0B & 0x3F)
-static unsigned char g_doorByteVar4;    // 0x00be0bc0 (record+0x0D)
+//
+// Vars 1/3/4 are NOT door-local: the table at 0x004bda08 points them straight
+// at the globals room_transition_load latches from the door record. Declaring
+// private statics here left them permanently 0, and var 3 is the one every
+// door script uses to pick the handle model (a scan of all 34 shipped .dor
+// files finds IF_BYTE reading only var 0 and var 3, var 3 in 21 of them).
+// With var 3 stuck at 0 no handle sub-script ever matched.
+#define DOOR_BYTEVAR0   (g_nextRoomDoorType)    // 0x00be0bc8  record+0x08
+#define DOOR_BYTEVAR1   (g_nextRoomSfxId)       // 0x00be0bc1  record+0x09
+#define DOOR_BYTEVAR2   (g_nextRoom_be05b7)     // 0x00be05b7  record+0x0A
+#define DOOR_BYTEVAR3   (g_nextRoomCameraId)    // 0x00be0dd4  record+0x0B & 0x3F
+#define DOOR_BYTEVAR4   (g_nextRoomDest)        // 0x00be0bc0  record+0x0D
+#define DOOR_BYTEVAR6   (g_menu_choice_id)      // 0x00be9825
 static unsigned char g_doorByteVar5;    // 0x00be05b6 - cleared by the init
 
 // ============================================================================
@@ -209,22 +216,33 @@ static int*             g_doorScriptTable;      // relocated script table (dword
 
 static DoorCommandEntry* g_doorCmdCur;          // 0x00be0c00 - current command entry (dispatch walk)
 
-// TMD slots: one per order entry, reserved at the top of g_tmdObjectBuffer
-// (the entity allocator scans from the low end and never reaches them).
-#define DOOR_TMD_SLOT_BASE  235
-static CMarniDirect3DTMD* g_doorTmdSlots[12] = {
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 0) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 1) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 2) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 3) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 4) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 5) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 6) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 7) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 8) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 9) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 10) * 0x1594],
-    (CMarniDirect3DTMD*)&g_tmdObjectBuffer[(DOOR_TMD_SLOT_BASE + 11) * 0x1594],
+// TMD slots: one per order entry, in their own region rather than carved out of
+// g_tmdObjectBuffer. ObjectCleanupCallback sweeps the main buffer, and a
+// stage-changing transition runs that cleanup while this animation is still
+// drawing - so a door slot inside it gets destroyed mid-animation. The original
+// keeps these at 0x009104c8, well clear of the buffer it sweeps at 0x00923b50.
+// See the block comment in TmdRenderer.h.
+//
+// 16-byte aligned for the region base; individual slots inherit the stride's
+// 4-byte alignment exactly as they do in g_tmdObjectBuffer and in the original.
+alignas(16) unsigned char g_doorTmdSlotBuffer[TMD_DOOR_SLOT_COUNT * TMD_SLOT_STRIDE];
+
+static_assert(TMD_DOOR_SLOT_COUNT == 12, "one door TMD slot per order entry");
+static_assert(TMD_SLOT_STRIDE % 4 == 0, "TMD slot stride must keep slots 4-aligned");
+
+static CMarniDirect3DTMD* g_doorTmdSlots[TMD_DOOR_SLOT_COUNT] = {
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[0  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[1  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[2  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[3  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[4  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[5  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[6  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[7  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[8  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[9  * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[10 * TMD_SLOT_STRIDE],
+    (CMarniDirect3DTMD*)&g_doorTmdSlotBuffer[11 * TMD_SLOT_STRIDE],
 };
 
 // Async-call parameter staging (DAT_008fc428 / 0x00922f00 / 0x00ac3500 /
@@ -243,16 +261,23 @@ static void DoorPhaseCheck(void)
 {
     int type = g_doorTypeToSeq[DOOR_BYTEVAR2];
     for (int i = 0; i < 12; i++) {
+        // The terminator is read from row `type`, the value compared from row
+        // `seq` - that asymmetry is the original's (0x00486890), not a slip.
+        if (g_doorPhaseSeq[type][i] < 0) {
+            g_SpriteAsyncFlag = 0;
+            return;
+        }
         int seq = type;
         if (type == 9) {
             seq = DOOR_BYTEVAR0 + 9;
         }
-        int v = g_doorPhaseSeq[seq][i];
-        if (v < 0) {
-            g_SpriteAsyncFlag = 0;
-            return;
+        // The original indexes the 11-row table at 0x004d2d08 with seq and
+        // walks off the end for door direction >= 2; the port's table is a
+        // real array, so clamp instead of reading whatever follows it.
+        if (seq < 0 || seq > 10) {
+            continue;
         }
-        if (v == g_doorPhase) {
+        if (g_doorPhaseSeq[seq][i] == g_doorPhase) {
             g_SpriteAsyncFlag = 1;
             return;
         }
@@ -295,16 +320,7 @@ static void DoorDrawOrder(void)
     m[11] = 0.0f;
     m[15] = 1.0f;
 
-    int tr = g_doorTmdSlots[idx]->Transform(g_pMarniDirect3D, (void*)(size_t)depth, m, 0);
-
-    // DIAGNOSTIC - remove once the door model is confirmed.
-    static int doorDrawReported = 0;
-    if (doorDrawReported < 4) {
-        doorDrawReported++;
-        dbg_printf("[door] draw: order=%d depth=%d tr=%d init=%d flags=%04X\n",
-                   idx, depth, tr, (int)g_doorTmdSlots[idx]->m_initialized,
-                   (unsigned int)g_doorOrders[idx].flags);
-    }
+    g_doorTmdSlots[idx]->Transform(g_pMarniDirect3D, (void*)(size_t)depth, m, 0);
 }
 
 // DoorRequestDraw (0x00484ba0)
@@ -322,10 +338,8 @@ static void DoorCreateTexturePage(void)
 {
     VideoDriver_ClearState348(g_pMarniDirect3D, g_pMarniDirect3D);
     LoadPSXImage((PSXTexture*)g_doorTexPage, g_doorTexSrc, 1);
-    int tim = Direct3DTIM_Create(g_doorTexPage, g_pMarniDirect3D);
+    Direct3DTIM_Create(g_doorTexPage, g_pMarniDirect3D);
     g_doorTexCreated = 1;
-    // DIAGNOSTIC - remove once the door model is confirmed.
-    dbg_printf("[door] texture page: src=%p tim=%08X\n", g_doorTexSrc, (unsigned int)tim);
 }
 
 // DoorRequestTexture (0x004848e0)
@@ -344,12 +358,7 @@ static void DoorLoadData(void)
 {
     unsigned int type = DOOR_BYTEVAR2;
     if (type >= 0x22) type = 0;         // guard: the original indexes without a bound
-    size_t sz = LoadFile(g_doorFileNameTable[type], g_doorFileData, 0x20);
-    // DIAGNOSTIC - remove once the door model is confirmed.
-    dbg_printf("[door] LoadFile type=%u \"%s\" -> %d bytes (hdr %08X %08X %08X)\n",
-               type, g_doorFileNameTable[type], (int)sz,
-               *(unsigned int*)&g_doorFileData[0], *(unsigned int*)&g_doorFileData[4],
-               *(unsigned int*)&g_doorFileData[8]);
+    LoadFile(g_doorFileNameTable[type], g_doorFileData, 0x20);
 
     // TMD header / TIM pointers come from the file header (dword1/dword2) -
     // they differ per door file.
@@ -382,28 +391,45 @@ static void DoorAsyncCreateTmd(void)
     // door primitives), UV divisor 0x80 = 128.
     int st = PSXObject_Store(slot, (int*)g_doorCreateTmdBase, modelIdx, 0x15, 0x80);
 
-    // Double-buffer mode: 1 when the door type maps to sequence 0, else 2.
+    // Object-creation flag: 1 when the door type maps to sequence 0, else 2
+    // (FUN_00486910 is exactly `g_doorTypeToSeq[byteVar2] == 0`).
     int db = (g_doorTypeToSeq[DOOR_BYTEVAR2] == 0) ? 1 : 2;
     int cr = slot->Create(g_pMarniDirect3D, g_doorTexPage, (void*)(size_t)db);
 
-    // DIAGNOSTIC - remove once the door model is confirmed.
-    static int doorCreateReported = 0;
-    if (doorCreateReported < 6) {
-        doorCreateReported++;
-        DWORD texCount = *(DWORD*)((BYTE*)g_doorTexPage + 0x340);
-        int ctxReady = *(int*)((BYTE*)g_pMarniDirect3D + 0x3C);
-        if (doorCreateReported == 1) {
-            dbg_printf("[door] buffers: fileData=%p texPage=%p orders=%p\n",
-                       (void*)g_doorFileData, (void*)g_doorTexPage, (void*)g_doorOrders);
+    // 0x0048497c: mark every per-object entry UNLIT. Bit 2 of the entry's
+    // +0x80 word is what the original's renderer tests at 0x00446e99 and
+    // 0x00447043: when set it skips both the light-direction transform and the
+    // per-vertex light accumulation and writes the vertex colour straight into
+    // the primitive. The door animation is deliberately full-bright - without
+    // this it gets shaded by whatever g_d3dLightData the room you just left
+    // happened to leave behind, so the same door renders darker on the way
+    // back than on the way in.
+    //
+    // Create() zeroes m_objectData, so this has to run after it. The original
+    // walks two entries per iteration (0x108 stride, +0 and +0x84), i.e. it
+    // flags 2*objectCount entries; with the 16+16 entry array that stays in
+    // bounds for any count up to 16, but clamp anyway.
+    {
+        DWORD count = slot->m_objectCount;
+        DWORD entries = count * 2;
+        if (entries > 32) entries = 32;
+        for (DWORD k = 0; k < entries; k++) {
+            *(DWORD*)((BYTE*)slot + 0x550 + k * 0x84) |= 2;
         }
-        // Element material fields (Create compares these against the page's
-        // texture entries): slot+0x38/0x3C/0x40/0x44 vs page+0x54/0x58/0x5C/0x60.
+    }
+
+    // A failure here renders nothing at all, so keep it audible rather than
+    // silent: Store rejects the model, or Create fails to match the element's
+    // material against the door texture page (slot+0x38..0x44 vs page+0x54..0x60).
+    if (st == 0 || cr == 0 || slot->m_initialized == 0) {
         DWORD* elem = (DWORD*)((BYTE*)slot + 0x38);
-        DWORD* te = (DWORD*)((BYTE*)g_doorTexPage + 0x54);
-        dbg_printf("[door] TMD create: order=%d model=%d store=%d create=%d init=%d count=%d flag4C4=%d ctxReady=%d texCount=%d\n",
-                   orderIdx, modelIdx, st, cr, (int)slot->m_initialized, (int)slot->m_objectCount,
-                   (int)slot->m_flag4C4, ctxReady, (int)texCount);
-        dbg_printf("[door]   mat fields: elem(+38 %08X +3C %08X +40 %08X +44 %08X) page(+54 %08X +58 %08X +5C %08X +60 %08X)\n",
+        DWORD* te   = (DWORD*)((BYTE*)g_doorTexPage + 0x54);
+        dbg_printf("[door] TMD create FAILED: order=%d model=%d store=%d create=%d "
+                   "init=%d count=%d texCount=%d elem(%08X %08X %08X %08X) "
+                   "page(%08X %08X %08X %08X)\n",
+                   orderIdx, modelIdx, st, cr, (int)slot->m_initialized,
+                   (int)slot->m_objectCount,
+                   (int)*(DWORD*)((BYTE*)g_doorTexPage + 0x340),
                    elem[0], elem[1], elem[2], elem[3], te[0], te[1], te[2], te[3]);
     }
 }
@@ -475,7 +501,13 @@ static void DoorAnimInit(void)
 // ============================================================================
 #define DATA g_doorCmdCur->data
 
-// 0x00: terminate the whole animation
+// 0x00: terminate the whole animation.
+//
+// Script 0 of every .dor is a chain of "IF_BYTE(var0 == N) -> skip; ACTIVATE...;
+// CLEAR_SELF" arms with a bare END after the last one, so reaching END on the
+// first frame means the door direction has no arm in this file and nothing will
+// ever be drawn. The door files cover var0 0..12; the stairs, ladder, elevator
+// and mon files only cover 0 and 1.
 static int door_op_end(void)        { g_doorState = 0; return 0; }
 
 // 0x01: clear this command entry and stop
@@ -501,35 +533,42 @@ static int door_op_wait_free(void)
 // 0x03: advance 2 bytes, yield
 static int door_op_yield2(void)     { DATA += 2; return 0; }
 
-// 0x04: byte-var compare; on true, jump fallthrough + DATA[1]
+// 0x04: byte-var compare. The BRANCH IS TAKEN WHEN THE COMPARISON FAILS
+// (0x004439e0: every satisfied case jumps straight to the `data += 6` tail,
+// and only the fall-out path does `data = data + operand` first). The scripts
+// are written around that: script 0 of door00.dor is a chain of
+//     IF_BYTE(var0 == 6) -> skip;  ACTIVATE double-door scripts;  CLEAR_SELF
+// so with the sense reversed EVERY door (var0 != 6) activated the double-door
+// branch, which is why single doors rendered as a pair of leaves.
+// The operands are signed chars in the original.
 static int door_op_jmp_byte(void)
 {
     unsigned char* p = DATA;
-    unsigned char* var = &DOOR_BYTEVAR0;    // default; resolved below
+    signed char* var;
     switch (p[2]) {
-    case 0: var = &DOOR_BYTEVAR0; break;
-    case 1: var = &g_doorByteVar1; break;
-    case 2: var = &DOOR_BYTEVAR2; break;
-    case 3: var = &g_doorByteVar3; break;
-    case 4: var = &g_doorByteVar4; break;
-    case 5: var = &g_doorByteVar5; break;
-    case 6: var = &DOOR_BYTEVAR6; break;
-    default: var = &DOOR_BYTEVAR0; break;
+    case 1: var = (signed char*)&DOOR_BYTEVAR1; break;
+    case 2: var = (signed char*)&DOOR_BYTEVAR2; break;
+    case 3: var = (signed char*)&DOOR_BYTEVAR3; break;
+    case 4: var = (signed char*)&DOOR_BYTEVAR4; break;
+    case 5: var = (signed char*)&g_doorByteVar5; break;
+    case 6: var = (signed char*)&DOOR_BYTEVAR6; break;
+    case 0:
+    default: var = (signed char*)&DOOR_BYTEVAR0; break;
     }
-    unsigned char v = p[4];
+    signed char v = (signed char)p[4];
     unsigned char relop = p[3];
-    bool cond = false;
+    bool taken;                             // true = branch, false = fall through
     switch (relop) {
-    case 0: cond = (*var == v); break;
-    case 1: cond = (*var > v); break;
-    case 2: cond = (*var >= v); break;
-    case 3: cond = (*var < v); break;
-    case 4: cond = (*var <= v); break;
-    case 5: cond = (*var != v); break;
-    default: cond = true; break;            // relop > 5 = unconditional jump
+    case 0: taken = !(*var == v); break;
+    case 1: taken = !(*var >  v); break;
+    case 2: taken = !(*var >= v); break;
+    case 3: taken = !(*var <  v); break;
+    case 4: taken = !(*var <= v); break;
+    case 5: taken = !(*var != v); break;
+    default: taken = true; break;           // relop > 5 = unconditional jump
     }
-    if (cond) DATA = p + 6 + p[1];
-    else      DATA = p + 6;
+    if (taken) DATA = p + 6 + p[1];
+    else       DATA = p + 6;
     return 1;
 }
 
@@ -537,7 +576,9 @@ static int door_op_jmp_byte(void)
 // the WORD at 0x00be0bc8 (the door direction byte plus its neighbour); the
 // shipped door scripts only use the short ops as unconditional jumps (relop
 // > 5), so the port keeps the short var as its own word - aliasing the byte
-// global would read past it.
+// global would read past it. Branch sense as in 0x04: taken when the
+// comparison FAILS (0x00443a60). No shipped .dor uses this opcode at all, so
+// only the unconditional (relop > 5) form ever mattered.
 static short g_doorShortVar0;
 static int door_op_jmp_short(void)
 {
@@ -545,18 +586,18 @@ static int door_op_jmp_short(void)
     short v = *(short*)(p + 4);
     unsigned char relop = p[3];
     short var = g_doorShortVar0;
-    bool cond = false;
+    bool taken;
     switch (relop) {
-    case 0: cond = (var == v); break;
-    case 1: cond = (var > v); break;
-    case 2: cond = (var >= v); break;
-    case 3: cond = (var < v); break;
-    case 4: cond = (var <= v); break;
-    case 5: cond = (var != v); break;
-    default: cond = true; break;
+    case 0: taken = !(var == v); break;
+    case 1: taken = !(var >  v); break;
+    case 2: taken = !(var >= v); break;
+    case 3: taken = !(var <  v); break;
+    case 4: taken = !(var <= v); break;
+    case 5: taken = !(var != v); break;
+    default: taken = true; break;
     }
-    if (cond) DATA = p + 6 + p[1];
-    else      DATA = p + 6;
+    if (taken) DATA = p + 6 + p[1];
+    else       DATA = p + 6;
     return 1;
 }
 
@@ -629,10 +670,10 @@ static int door_op_bytevar_set(void)
     unsigned char* p = DATA;
     switch (p[1]) {
     case 0: DOOR_BYTEVAR0 = p[2]; break;
-    case 1: g_doorByteVar1 = p[2]; break;
+    case 1: DOOR_BYTEVAR1 = p[2]; break;
     case 2: DOOR_BYTEVAR2 = p[2]; break;
-    case 3: g_doorByteVar3 = p[2]; break;
-    case 4: g_doorByteVar4 = p[2]; break;
+    case 3: DOOR_BYTEVAR3 = p[2]; break;
+    case 4: DOOR_BYTEVAR4 = p[2]; break;
     case 5: g_doorByteVar5 = p[2]; break;
     case 6: DOOR_BYTEVAR6 = p[2]; break;
     }
@@ -645,10 +686,10 @@ static int door_op_bytevar_add(void)
     signed char d = (signed char)p[2];
     switch (p[1]) {
     case 0: DOOR_BYTEVAR0 = (unsigned char)(DOOR_BYTEVAR0 + d); break;
-    case 1: g_doorByteVar1 = (unsigned char)(g_doorByteVar1 + d); break;
+    case 1: DOOR_BYTEVAR1 = (unsigned char)(DOOR_BYTEVAR1 + d); break;
     case 2: DOOR_BYTEVAR2 = (unsigned char)(DOOR_BYTEVAR2 + d); break;
-    case 3: g_doorByteVar3 = (unsigned char)(g_doorByteVar3 + d); break;
-    case 4: g_doorByteVar4 = (unsigned char)(g_doorByteVar4 + d); break;
+    case 3: DOOR_BYTEVAR3 = (unsigned char)(DOOR_BYTEVAR3 + d); break;
+    case 4: DOOR_BYTEVAR4 = (unsigned char)(DOOR_BYTEVAR4 + d); break;
     case 5: g_doorByteVar5 = (unsigned char)(g_doorByteVar5 + d); break;
     case 6: DOOR_BYTEVAR6 = (unsigned char)(DOOR_BYTEVAR6 + d); break;
     }

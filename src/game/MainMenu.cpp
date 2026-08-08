@@ -19,6 +19,7 @@
 #include "../marni/PSXTexture.h"
 #include "../marni/MarniBits.h"
 #include "../marni/Marni3DObject.h"
+#include "TmdRenderer.h"     // TMD slot regions - see the slot-region note there
 #include <math.h>
 #include <cstdio>
 #include <cstring>
@@ -4666,21 +4667,25 @@ static int  g_itemSharedTmdCount;      // DAT_008f8c48 - shared transparent TMD 
 static int  g_itemSharedTmdReady;      // DAT_008f8c50 - shared textures created flag
 static int  g_itemRenderSlot;          // DAT_008f8d80 - render slot index (0-2)
 static int  g_itemSharedDisplayFlag;   // DAT_009220b8 - shared model drawn flag
-// The item model slot(s) must live inside g_tmdObjectBuffer: TmdQueueObject
-// (the CMarniDirect3D vtable[10] adapter) only accepts object data that
-// falls within that buffer and computes the slot index from the offset.
 // The original stores EACH TMD object of a multi-object item into its own
-// CMarniDirect3DTMD slot (0x008f8d88 + objIndex*0x1594) and the viewer draws
-// the slot matching the render slot, so the port reserves three adjacent slots
-// (247..249) and indexes them by the item object / render slot index. The
-// entity allocator scans from the low end and never reaches them in practice.
-#define ITEM_TMD_SLOT_INDEX 247
-static BYTE* g_itemTmdSlots[3] = {
-    &g_tmdObjectBuffer[(ITEM_TMD_SLOT_INDEX + 0) * 0x1594], // DAT_008fc0b0 (item object 0)
-    &g_tmdObjectBuffer[(ITEM_TMD_SLOT_INDEX + 1) * 0x1594], // item object 1
-    &g_tmdObjectBuffer[(ITEM_TMD_SLOT_INDEX + 2) * 0x1594], // item object 2
+// CMarniDirect3DTMD slot at 0x008f8d88 + objIndex*0x1594, and the viewer draws
+// the slot matching the render slot. That address is a region of its own, well
+// clear of the main TMD buffer at 0x00923b50 that ObjectCleanupCallback sweeps
+// - so the port gives it one too, rather than carving slots 247..249 out of
+// g_tmdObjectBuffer and relying on the sweep never coinciding with a viewer
+// draw. See the slot-region note in TmdRenderer.h.
+alignas(16) unsigned char g_itemTmdSlotBuffer[TMD_ITEM_SLOT_COUNT * TMD_SLOT_STRIDE];
+
+static BYTE* g_itemTmdSlots[TMD_ITEM_SLOT_COUNT] = {
+    &g_itemTmdSlotBuffer[0 * TMD_SLOT_STRIDE],  // DAT_008fc0b0 (item object 0)
+    &g_itemTmdSlotBuffer[1 * TMD_SLOT_STRIDE],  // item object 1
+    &g_itemTmdSlotBuffer[2 * TMD_SLOT_STRIDE],  // item object 2
 };
-static BYTE g_itemSharedTmdSlot[0x1594]; // DAT_008f8908 - shared transparent slot
+// DAT_008f8908 - shared transparent slot. Another region of its own in the
+// original; CMarniDirect3DTMD::Transform is called on it (see the examine
+// render), so TmdQueueObject has to be able to resolve pointers into it or the
+// object is silently dropped from the frame's queue.
+alignas(16) unsigned char g_itemSharedTmdSlot[TMD_SLOT_STRIDE];
 static DWORD g_itemSharedTmdHandles[16]; // DAT_008f8c54 - shared texture handles
 
 // Viewer animation state

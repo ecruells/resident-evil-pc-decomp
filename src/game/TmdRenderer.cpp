@@ -14,6 +14,12 @@
 //          convention.
 //   +0x54  DWORD  D3D object handle (unused in the DX11 port)
 //   +0x58  DWORD  texture handle (MarniHandle via VTable_CreateTextureHandle)
+//   +0x80  DWORD  render flags. Bit 2 = UNLIT: the original's renderer tests
+//          it at 0x00446e99 (skip transforming the light directions) and
+//          0x00447043 (skip accumulating the lights - write the vertex colour
+//          straight into the primitive). Only the door animation sets it, in
+//          DoorAsyncCreateTmd; the door is meant to be full-bright rather than
+//          shaded by whatever room lighting was last in the globals.
 //
 // Geometry lives in the slot's embedded CMarniViewport2 elements
 // (slot + objIndex*0x4C): m_pVertexBuffer holds 11-float vertices
@@ -110,8 +116,15 @@ static TmdLightState* g_tmdLight = NULL;   // TMD_MAX_QUEUE records, heap, never
 
 // Per-frame triangle pool. Triangles from every queued object are gathered here
 // and submitted only after a global depth sort (see FlushTmdObjects).
+// 3 vertices x {x, y, z(ndc), w, u, v, r, g, b, a}. `w` is the vertex's
+// view-space Z: DrawTriangles3D's vertex shader divides by it so the UVs and
+// colours interpolate perspective-correctly instead of affinely (see
+// g_Model3DVS_Source). Without it, large near polygons - the door panel in the
+// room transition above all - swim their texture as they turn.
+#define TMD_VERT_FLOATS  10
+#define TMD_TRI_FLOATS   (TMD_VERT_FLOATS * 3)
 struct TmdTri {
-    float v[27];   // 3 vertices x {x, y, z, u, v, r, g, b, a}
+    float v[TMD_TRI_FLOATS];
     float depth;   // mean view-space Z (larger = farther)
     DWORD tex;
 };
@@ -149,27 +162,34 @@ void TmdQueueObject(void* objData, int depth)
     }
 
     BYTE* p = (BYTE*)objData;
-    BYTE* slotBase;
-    ptrdiff_t within;
+    const int slotStride = TMD_SLOT_STRIDE;
 
-    const int slotStride = 0x1594;
+    // Resolve the pointer to (owning slot, offset within it). Every region that
+    // can own a CMarniDirect3DTMD slot is listed here; they are disjoint, so
+    // order does not matter. Each bound is the region's own size - notably the
+    // main buffer's is its capacity, NOT TMD_CLEANUP_SLOT_COUNT, which is a
+    // fact about what the cleanup destroys rather than about what is
+    // addressable. Tying those two together is what broke the door animation.
+    static const struct { BYTE* base; size_t size; } kSlotRegions[] = {
+        { g_renderStateTMD,     sizeof(g_renderStateTMD)     },  // item examine / render state
+        { g_doorTmdSlotBuffer,  sizeof(g_doorTmdSlotBuffer)  },  // door animation
+        { g_itemTmdSlotBuffer,  sizeof(g_itemTmdSlotBuffer)  },  // item viewer
+        { g_itemSharedTmdSlot,  sizeof(g_itemSharedTmdSlot)  },  // item viewer, shared transparent
+        { g_tmdObjectBuffer,    sizeof(g_tmdObjectBuffer)    },  // entities, room objects
+    };
 
-
-    BYTE* rs = (BYTE*)g_renderStateTMD;
-    if (p >= rs && p < rs + slotStride) {
-        slotBase = rs;
-        within = p - rs;
-    } else {
-        BYTE* buf = (BYTE*)g_tmdObjectBuffer;
-        const int maxSlot = 250;
-
-        ptrdiff_t diff = p - buf;
-        if (diff < 0) return;
-        int slotIdx = (int)(diff / slotStride);
-        if (slotIdx >= maxSlot) return;
-        slotBase = buf + (ptrdiff_t)slotIdx * slotStride;
-        within = diff - (ptrdiff_t)slotIdx * slotStride;
+    BYTE* slotBase = NULL;
+    ptrdiff_t within = 0;
+    for (size_t r = 0; r < sizeof(kSlotRegions) / sizeof(kSlotRegions[0]); r++) {
+        BYTE* base = kSlotRegions[r].base;
+        if (p < base || p >= base + kSlotRegions[r].size) continue;
+        ptrdiff_t diff = p - base;
+        ptrdiff_t off  = (diff / slotStride) * slotStride;
+        slotBase = base + off;
+        within   = diff - off;
+        break;
     }
+    if (slotBase == NULL) return;
 
     int objIndex;
     if (within >= 0x4D0 && within < 0x4D0 + 16 * 0x84) {
@@ -311,6 +331,9 @@ void FlushTmdObjects(void)
             const float* M = (const float*)(e->objData + 0x08);
             DWORD tex = (*(DWORD*)(e->slot + e->objIndex * 0x4C + 0x48) != 0)
                         ? *(DWORD*)(e->objData + 0x58) : 0;
+            // Render flags at +0x80: bit 2 = unlit, take the vertex colour as
+            // it stands (see the layout note at the top of this file).
+            bool unlit = (*(DWORD*)(e->objData + 0x80) & 2) != 0;
 
             // Transform + project + light every vertex
             // (heap-allocate per object; vertex counts are small)
@@ -348,12 +371,21 @@ void FlushTmdObjects(void)
                     sy[v] = cy - vy * iz;
                 }
 
-                // Lighting: vertices without a normal (flat prims) reuse
-                // the first vertex's normal.
-                const float* n = vtx + 3;
-                if (n[0] == 0.0f && n[1] == 0.0f && n[2] == 0.0f) n = flatN;
-                TmdComputeLight(&g_tmdLight[i], n, M, &cr[v], &cg[v], &cb[v]);
-                cr[v] *= vtx[6]; cg[v] *= vtx[7]; cb[v] *= vtx[8];
+                if (unlit) {
+                    // The original's else-branch at 0x00447043: no ambient, no
+                    // lights, the vertex colour becomes the primitive colour.
+                    // PSXObject_Store writes 1.0 for textured primitives, so a
+                    // door renders at full texture brightness every time.
+                    cr[v] = vtx[6]; cg[v] = vtx[7]; cb[v] = vtx[8];
+                }
+                else {
+                    // Lighting: vertices without a normal (flat prims) reuse
+                    // the first vertex's normal.
+                    const float* n = vtx + 3;
+                    if (n[0] == 0.0f && n[1] == 0.0f && n[2] == 0.0f) n = flatN;
+                    TmdComputeLight(&g_tmdLight[i], n, M, &cr[v], &cg[v], &cb[v]);
+                    cr[v] *= vtx[6]; cg[v] *= vtx[7]; cb[v] *= vtx[8];
+                }
             }
 
             // Emit triangles
@@ -396,14 +428,17 @@ void FlushTmdObjects(void)
                     const float* v1 = vbuf + i1 * 11;
                     const float* v2 = vbuf + i2 * 11;
                     o[0]  = x0; o[1]  = y0; o[2]  = TmdDepthNdc(vzArr[i0]);
-                    o[3]  = v0[9];  o[4]  = v0[10];
-                    o[5]  = cr[i0]; o[6]  = cg[i0]; o[7]  = cb[i0]; o[8]  = 1.0f;
-                    o[9]  = x1; o[10] = y1; o[11] = TmdDepthNdc(vzArr[i1]);
-                    o[12] = v1[9];  o[13] = v1[10];
-                    o[14] = cr[i1]; o[15] = cg[i1]; o[16] = cb[i1]; o[17] = 1.0f;
-                    o[18] = x2; o[19] = y2; o[20] = TmdDepthNdc(vzArr[i2]);
-                    o[21] = v2[9];  o[22] = v2[10];
-                    o[23] = cr[i2]; o[24] = cg[i2]; o[25] = cb[i2]; o[26] = 1.0f;
+                    o[3]  = vzArr[i0];
+                    o[4]  = v0[9];  o[5]  = v0[10];
+                    o[6]  = cr[i0]; o[7]  = cg[i0]; o[8]  = cb[i0]; o[9]  = 1.0f;
+                    o[10] = x1; o[11] = y1; o[12] = TmdDepthNdc(vzArr[i1]);
+                    o[13] = vzArr[i1];
+                    o[14] = v1[9];  o[15] = v1[10];
+                    o[16] = cr[i1]; o[17] = cg[i1]; o[18] = cb[i1]; o[19] = 1.0f;
+                    o[20] = x2; o[21] = y2; o[22] = TmdDepthNdc(vzArr[i2]);
+                    o[23] = vzArr[i2];
+                    o[24] = v2[9];  o[25] = v2[10];
+                    o[26] = cr[i2]; o[27] = cg[i2]; o[28] = cb[i2]; o[29] = 1.0f;
                     t3->depth = (vzArr[i0] + vzArr[i1] + vzArr[i2]) * (1.0f / 3.0f);
                     t3->tex   = tex;
                     g_tmdTriOrder[collected] = collected;
@@ -422,7 +457,7 @@ void FlushTmdObjects(void)
             return g_tmdTris[a].depth > g_tmdTris[b].depth;
         });
 
-        static float triVerts[TMD_MAX_TRIS_FLUSH * 3 * 9];
+        static float triVerts[TMD_MAX_TRIS_FLUSH * TMD_TRI_FLOATS];
         int   triCount = 0;
         DWORD triTex   = 0;
 
@@ -434,7 +469,7 @@ void FlushTmdObjects(void)
                 triCount = 0;
             }
             triTex = t3->tex;
-            memcpy(triVerts + triCount * 27, t3->v, sizeof(t3->v));
+            memcpy(triVerts + triCount * TMD_TRI_FLOATS, t3->v, sizeof(t3->v));
             triCount++;
         }
         if (triCount > 0) {

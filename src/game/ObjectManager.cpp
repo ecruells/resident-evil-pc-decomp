@@ -3,6 +3,7 @@
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "SpriteRenderer.h"
+#include "TmdRenderer.h"     // TMD_CLEANUP_SLOT_COUNT - see the slot-map note there
 
 // ============================================================================
 // ObjectList_Cleanup (0x00487040)
@@ -167,10 +168,19 @@ void ObjectCleanupCallback(void)
 
     OutputDebugStringA("[ObjectCleanup] start second pass\n");
 
-    // Second pass: zero memory and cleanup TMD objects
+    // Second pass: zero memory and cleanup TMD objects.
+    //
+    // 250 slots exactly, matching the original's `MOV EDI,0x923b50` /
+    // `CMP ESI,0x3e8` loop.
+    //
+    // This must stay confined to g_tmdObjectBuffer. A stage-changing transition
+    // runs this cleanup while the door animation task is still drawing, so
+    // anything it reaches gets destroyed mid-animation - which is why the door
+    // slots are their own region (g_doorTmdSlotBuffer, the original's
+    // 0x009104c8) and not carved out of the buffer swept here.
     g_objectDeleteCounter = 0;
     char* tmdBase = (char*)&g_tmdObjectBuffer[0];
-    for (int i = 0; i < 250; i++) {
+    for (int i = 0; i < TMD_CLEANUP_SLOT_COUNT; i++) {
         if (g_objectDeletePtr) {
             g_objectDeletePtr[i] = 0;
         }

@@ -53,15 +53,25 @@ VS_OUTPUT main(VS_INPUT input)
 // can resolve the model. The original leaned on a real Z-buffer for this
 // ("MarniSystem Direct3D::MD3DCreateZBuffer"); a per-triangle painter sort
 // cannot, and made faces pop in and out as a model turned.
+//
+// pos.w carries the vertex's VIEW-SPACE Z. The caller already did the divide
+// when it projected to screen space, so emitting SV_Position with w = 1 made
+// the rasteriser interpolate UV and colour LINEARLY IN SCREEN SPACE - affine
+// mapping, i.e. the PS1 texture swim. Pre-multiplying x/y/z by w and handing
+// the rasteriser that w restores the same screen position after the perspective
+// divide while making every interpolator perspective-correct. It shows up
+// worst on big polygons close to the camera at an oblique angle - the door
+// panel in the room-transition animation.
 static const char* g_Model3DVS_Source = R"(
 cbuffer SpriteCB : register(b0) { row_major float4x4 g_MVP; };
-struct VS_INPUT  { float3 pos:POSITION; float2 tex:TEXCOORD0; float4 col:COLOR0; };
+struct VS_INPUT  { float4 pos:POSITION; float2 tex:TEXCOORD0; float4 col:COLOR0; };
 struct VS_OUTPUT { float4 pos:SV_Position; float2 tex:TEXCOORD0; float4 col:COLOR0; };
 VS_OUTPUT main(VS_INPUT input)
 {
     VS_OUTPUT o;
     float4 p = mul(float4(input.pos.x, input.pos.y, 0.0f, 1.0f), g_MVP);
-    o.pos = float4(p.xy, input.pos.z, 1.0f);
+    float w = max(input.pos.w, 1e-4f);
+    o.pos = float4(p.x * w, p.y * w, input.pos.z * w, w);
     o.tex = input.tex;
     o.col = input.col;
     return o;
@@ -87,6 +97,8 @@ struct QuadVertex {
 // Depth-buffered variant used by the TMD model path.
 struct Model3DVertex {
     float x, y, z;      // screen position + normalised [0,1] depth
+    float w;            // view-space Z; the VS uses it to restore perspective-
+                        // correct interpolation of u/v and the vertex colour
     float u, v;
     float r, g, b, a;
 };
@@ -282,9 +294,9 @@ static bool CompileModel3DShader(ID3D11Device* dev,
     if (FAILED(hr)) { vsBlob->Release(); return false; }
 
     D3D11_INPUT_ELEMENT_DESC layout[] = {
-        { "POSITION", 0, DXGI_FORMAT_R32G32B32_FLOAT,    0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 12, D3D11_INPUT_PER_VERTEX_DATA, 0 },
-        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 20, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "POSITION", 0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 0,  D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "TEXCOORD", 0, DXGI_FORMAT_R32G32_FLOAT,       0, 16, D3D11_INPUT_PER_VERTEX_DATA, 0 },
+        { "COLOR",    0, DXGI_FORMAT_R32G32B32A32_FLOAT, 0, 24, D3D11_INPUT_PER_VERTEX_DATA, 0 },
     };
     hr = dev->CreateInputLayout(layout, 3, vsBlob->GetBufferPointer(),
         vsBlob->GetBufferSize(), outLayout);
