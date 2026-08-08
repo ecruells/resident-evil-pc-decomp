@@ -199,7 +199,69 @@ void FlushSpriteCommands(void) {
 int draw_texture(TextureDesc* texture, unsigned short depth) {
     if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return 0;
 
-    int pageW = g_PageWidthFactor[(texture->flags >> 22) & 3];
+    // BPP scale = g_dwTexScaleFactors[(flags>>24)&3] = {4,2,1,1}
+    static const int s_TexScale[4] = { 4, 2, 1, 1 };
+    int scale = s_TexScale[(texture->flags >> 24) & 3];
+
+    // VRAM-space texture position (from depth/tpage code, texU, texV)
+    unsigned int vAdd = 0;
+    unsigned int p    = texture->depth;
+    if (p > 16) { vAdd = 256; p -= 16; }
+    int texUWords = (int)(p * 0x40u + texture->texU / scale);
+    int texVAbs   = (int)(vAdd + texture->texV);
+
+    // Search page descriptors from slot 0xF upward. The original (0x0046e410)
+    // scans the whole descriptor table and requires the found slot <= 0x2D;
+    // the previous port version skipped the search and always sampled texture
+    // slot 0 (the font), so every draw_texture call (menu cursor, itembox
+    // frame borders, health-bar pieces) rendered the wrong texture or nothing.
+    int foundSlot    = -1;
+    int foundOriginX = 0, foundOriginY = 0;
+    int foundDepth   = 0;
+
+    for (int cur = 0xF; cur <= 0x2D; cur++) {
+        if (g_TexturePageSRV[cur] == NULL) continue;
+
+        short oX  = g_TexturePageOriginX[cur];
+        short oY  = g_TexturePageOriginY[cur];
+        short d   = g_TexturePageDepth[cur];
+        int   bpp = g_TexturePageBpp[cur];
+        if (bpp <= 0) bpp = 16;
+        int bw = bpp == 4 ? 4 : bpp == 8 ? 2 : 1;
+
+        int pX = (int)(d & 15) * 0x40;
+        int pY = (int)(d / 16) * 0x100;
+
+        int pageW = g_TexturePageWidth[cur]  / bw;
+        int pageH = g_TexturePageHeight[cur];
+        int pageL = oX + pX, pageR = pageL + pageW;
+        int pageT = oY + pY, pageB = pageT + pageH;
+
+        int texR = texUWords + texture->width / scale;
+        int texB = texVAbs   + texture->height;
+
+        if (pageL <= texUWords && texR <= pageR &&
+            pageT <= texVAbs   && texB <= pageB) {
+            foundSlot    = cur;
+            foundOriginX = oX;
+            foundOriginY = oY;
+            foundDepth   = d;
+            break;
+        }
+    }
+    if (foundSlot < 0) return 0;
+
+    // CLUT lookup: uVar4 = printClutTint - clutBase; ==8 → 1
+    int clutIdx = (int)texture->printClutTint - g_TexturePageClutBase[foundSlot];
+    if (clutIdx < 0 || clutIdx > 7) return 0;
+    if (clutIdx == 8) clutIdx = 1;
+
+    // UV computation (page-relative PIXEL units):
+    int depthOfs = ((int)texture->depth - foundDepth) * scale * 0x40;
+    int su0 = (int)texture->texU - foundOriginX * scale + depthOfs;
+    int sv0 = (int)texture->texV - foundOriginY;
+    int su1 = su0 + texture->width  - 1;
+    int sv1 = sv0 + texture->height - 1;
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
@@ -228,12 +290,11 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
 
     cmd->depthSort = (unsigned int)depth * 16 + 500;
 
-    cmd->u0 = (unsigned short)texture->texU;
-    cmd->v0 = (unsigned short)texture->texV;
-    cmd->u1 = cmd->u0 + texture->width - 1;
-    cmd->v1 = cmd->v0 + texture->height - 1;
-
-    cmd->extraFlags = 0;
+    cmd->u0 = (unsigned short)(su0 >= 0 ? su0 : 0);
+    cmd->v0 = (unsigned short)(sv0 >= 0 ? sv0 : 0);
+    cmd->u1 = (unsigned short)(su1 >= 0 ? su1 : 0);
+    cmd->v1 = (unsigned short)(sv1 >= 0 ? sv1 : 0);
+    cmd->extraFlags = foundSlot;
 
     g_SpriteQueueCount++;
     return 1;

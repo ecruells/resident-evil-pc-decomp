@@ -4095,12 +4095,19 @@ static void itembox_refresh_item(void)
 // 0x00420a70 - draw the menu cursor frame at the current cursor position
 static void itembox_draw_cursor(void)
 {
-    g_TextureDesc.flags = 0x40;
+    // Cursor positions come from the 0x004c2960 table: 4 menu-tab positions
+    // then the 8 inventory slots as (x, y) short pairs. The original reads
+    // word[0x4c2960 + cursor*2] for X and word[0x4c2960 + cursor*2 + 2] for Y
+    // (assembly 0x00420a9e/0x00420aac); an earlier port read
+    // g_MenuFrameDataBlock + cursor + 0x148, which pointed at the tab-button
+    // frame parts and dropped the *2 scale, so the cursor drew at garbage
+    // positions.
+    g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.depth = 0x1c;
     g_TextureDesc.unk10 = 0;
     g_TextureDesc.printClutTint = 0x1e4;
-    g_TextureDesc.screenX = *(short*)(g_MenuFrameDataBlock + DAT_00ae9f23 + 0x148);
-    g_TextureDesc.screenY = *(short*)(g_MenuFrameDataBlock + DAT_00ae9f23 + 0x149);
+    g_TextureDesc.screenX = *(short*)(g_inventorySlotsPos + (unsigned int)DAT_00ae9f23 * 2);
+    g_TextureDesc.screenY = *(short*)(g_inventorySlotsPos + (unsigned int)DAT_00ae9f23 * 2 + 2);
     if ((DAT_00ae9f23 & 0xf8) != 0) {
         g_TextureDesc.width = 0x28;
         g_TextureDesc.texU = 0x80;
@@ -4122,7 +4129,7 @@ static void itembox_draw_cursor(void)
     g_TextureDesc.texV = 0x50;
     g_TextureDesc.height = 0x10;
     if (g_MainMenuState == 3) {
-        g_TextureDesc.screenX = *(short*)(g_MenuFrameDataBlock + (DAT_00ae9f23 | 2) + 0x148);
+        g_TextureDesc.screenX = *(short*)(g_inventorySlotsPos + (unsigned int)(DAT_00ae9f23 | 2) * 2);
     }
     draw_texture(&g_TextureDesc, 0x19);
     g_TextureDesc.texV = 0x98;
@@ -4251,7 +4258,11 @@ static int menu_itembox_interaction(void)
         DAT_00ae9f28 = 1;
         play_sfx(2, 0x21, 0);
         if (((unsigned short)g_button_pressed_id & 0x1000) == 0) {
-            // R1 (or next page): slide forward
+            // R1 (or next page): slide forward. The original does NOT advance
+            // DAT_00ae9f24 here - only `next` is computed for the icon blit;
+            // the cursor moves +1 when the slide finishes (state 3). The port
+            // used to store `next` into DAT_00ae9f24 AND the slide end added
+            // +1 again, so R1 paged two slots per press.
             SUBMENU_STATE_ID = 0;
             DAT_00ae9f1c = 1;
             unsigned char next = DAT_00ae9f24 + 1;
@@ -4259,7 +4270,6 @@ static int menu_itembox_interaction(void)
                 next = 0;
             }
             unsigned char itemId = g_itemboxSlots[next].Id;
-            DAT_00ae9f24 = next;
             if ((itemId != 0) && (itemId < 0x6f)) {
                 itembox_draw_slot_icon((int)g_ItemImageLookupTable[(unsigned int)itemId * 4] - 1,
                                        next & 7);
@@ -4323,11 +4333,287 @@ static int menu_itembox_interaction(void)
     return 0;
 }
 
+// ============================================================================
+// Item box screen assets and per-frame overlay (loadMenuAssets + draw_itembox_menu)
+//
+// loadMenuAssets (0x00494730) loads itemboxn.tim (the box frame art: panel
+// edges, list border, page arrows) into texture page slot 0xC, then item_all.pix
+// (the item sprite sheet) into the TIM buffer, and pre-blits the first box
+// slot's icon. draw_itembox_menu (0x004947c0) draws the box overlay every
+// frame: frame textures (table A), mask rects (table B), the cursor slot
+// (icon + quantity), the item name list, the "box is full" line and the
+// page-position triangles, then the final frame pieces (table C).
+//
+// The frame tables below preserve the original's memory layout: entries are
+// stored in reverse draw order and load_main_menu_frame_part_tex_area walks
+// backwards from the end of each table.
+// ============================================================================
+
+// 0x004d4430 - frame textures, 7 entries of {screenX, screenY, width, height,
+// texU, texV} + 2 pad bytes (drawn 7th..1st in memory order):
+//   preview border (42x32 at 0x10,0x30), down arrow (8x7), up arrow (8x7),
+//   then the green item-list frame. The original's table carries only the
+//   top/bottom lines at (0x41, 0x33/0x50) - offset 23px right and one name
+//   height below the 3-name list (x=0x2a, y=0x23..0x50) - and no side pieces.
+//   The panel texture (itemboxn.tim rows 0-47) has green edges on all four
+//   sides (row 0, row 47, column 0, column 127), so the frame is built from
+//   it: top at the first name's row, bottom at the last name's row, and 1px
+//   side columns at the panel's edges.
+static const unsigned char s_itemboxFramePartsA[84] = {
+    0x2a,0x00,0x23,0x00,0x80,0x00,0x01,0x00,0x00,0x00,0x00,0x00, // drawn 7th: top line (42, 35)
+    0x2a,0x00,0x50,0x00,0x80,0x00,0x01,0x00,0x00,0x00,0x2f,0x00, // drawn 6th: bottom line (42, 80)
+    0x2a,0x00,0x23,0x00,0x01,0x00,0x2e,0x00,0x00,0x00,0x00,0x00, // drawn 5th: left side (42, 35) 1x46
+    0xaa,0x00,0x23,0x00,0x01,0x00,0x2e,0x00,0x7f,0x00,0x00,0x00, // drawn 4th: right side (170, 35) 1x46
+    0xaf,0x00,0x18,0x00,0x08,0x00,0x07,0x00,0x48,0x00,0x38,0x00, // drawn 3rd: up arrow
+    0xaf,0x00,0x53,0x00,0x08,0x00,0x07,0x00,0x48,0x00,0x40,0x00, // drawn 2nd: down arrow
+    0x5b,0x00,0x57,0x00,0x2a,0x00,0x20,0x00,0x10,0x00,0x30,0x00, // drawn 1st: preview border
+};
+
+// 0x004d4498 - mask rects, 5 entries of {x, y, w, h} (drawn 5th..1st in memory
+// order): box list bottom bar, right column, left column, name area, top bar
+static const unsigned char s_itemboxMaskRects[40] = {
+    0x2a,0x00,0x18,0x00,0x7e,0x00,0x09,0x00, // drawn 5th
+    0x2a,0x00,0x51,0x00,0x31,0x00,0x0f,0x00, // drawn 4th
+    0x5b,0x00,0x51,0x00,0x2a,0x00,0x06,0x00, // drawn 3rd
+    0x85,0x00,0x51,0x00,0x23,0x00,0x0f,0x00, // drawn 2nd
+    0x5c,0x00,0x77,0x00,0x28,0x00,0x09,0x00, // drawn 1st
+};
+
+// 0x004d4470 - trailing frame textures, 3 entries (drawn 3rd..1st in memory
+// order): bottom half-arrow, top arrow, box-full corner piece (dead draw:
+// its texU 0x80 samples past the 128px-wide page and never resolves)
+static const unsigned char s_itemboxFramePartsC[36] = {
+    0x00,0x00,0x00,0x00,0x41,0x00,0x22,0x00,0x80,0x00,0x2e,0x00, // drawn 3rd
+    0xaf,0x00,0x20,0x00,0x08,0x00,0x20,0x00,0x00,0x00,0x30,0x00, // drawn 2nd
+    0xaf,0x00,0x40,0x00,0x08,0x00,0x12,0x00,0x08,0x00,0x30,0x00, // drawn 1st
+};
+
 // (0x00494730) - Load item box menu textures
-static void loadMenuAssets(void) { }
+static void loadMenuAssets(void)
+{
+    LoadFile(GAME_DATA_ROOT "data\\itemboxn.tim", g_TimImageBuffer__bitmap, 0x20);
+    g_TextureDepthByte = 0x1c;
+    g_TextureBankID = 0x15;
+    LoadTexturePage(g_TimImageBuffer__bitmap, 0x15, 0x1c, 0xc, 0, 0, 0, 0);
+
+    LoadFile(GAME_DATA_ROOT "data\\item_all.pix", g_TimImageBuffer__bitmap, 0x20);
+    if ((g_itemboxSlots[0].Id != 0) && (g_itemboxSlots[0].Id < 0x6f)) {
+        itembox_draw_slot_icon((int)g_ItemImageLookupTable[(unsigned int)g_itemboxSlots[0].Id * 4] - 1, 0);
+    }
+    DAT_00ae9f24 = 0;
+    SUBMENU_STATE_ID = 0;
+    DAT_00ae9f1c = 0;
+}
 
 // (0x004947c0) - Draw item box menu overlay
-static void draw_itembox_menu(void) { }
+static void draw_itembox_menu(void)
+{
+    // 0x00494855-0x004948d3: Draw the mask rects (cut the box list slots out
+    // of the dark background)
+    g_rect.textureId = 0;
+    g_rect.r = 0;
+    g_rect.g = 0;
+    g_rect.b = 0;
+    const unsigned char* pRect = s_itemboxMaskRects + sizeof(s_itemboxMaskRects);
+    do {
+        pRect -= 8;
+        g_rect.h = *(short*)(pRect + 6);
+        g_rect.w = *(short*)(pRect + 4);
+        g_rect.y = *(short*)(pRect + 2);
+        g_rect.x = *(short*)(pRect + 0);
+        draw_rect(&g_rect, 0, 0);
+    } while (pRect > s_itemboxMaskRects);
+
+    // 0x004948d5-0x004949ad: Shadow rects above the item list and cursor
+    // highlight rects while the box is in cursor mode (DAT_00ae9f20 < 2).
+    // These rects are drawn with blend=50 (depth 500) instead of the original
+    // blend=0 (depth 450): the port's renderer draws pending sprites with
+    // depth < 500 AFTER the sprite command buffer, so at 450 the shadows
+    // covered the item-list frame and the names. Depth 500 puts them in the
+    // background pass - shading behind the list content, as intended.
+    g_rect.r = 112;
+    g_rect.g = 112;
+    g_rect.y = 34;
+    g_rect.b = 112;
+    g_rect.textureId = 0x60000000;
+    g_rect.x = 42;
+    g_rect.w = 126;
+    g_rect.h = 15;
+    draw_rect(&g_rect, 50, 0);
+    g_rect.y = 0x40;
+    g_rect.h = 0x10;
+    draw_rect(&g_rect, 50, 0);
+    if (DAT_00ae9f20 < 2) {
+        g_rect.y = 34;
+        g_rect.h = 0x2e;
+        draw_rect(&g_rect, 50, 0);
+        g_rect.x = 0x5c;
+        g_rect.y = 0x58;
+        g_rect.w = 0x28;
+        g_rect.h = 0x1e;
+        draw_rect(&g_rect, 50, 0);
+    }
+
+    // 0x004949ad-0x00494a01: Small rects (scrollbar track on the right)
+    g_rect.y = 0x10;
+    g_rect.h = 0x10;
+    g_rect.x = 0xd2;
+    g_rect.w = 0x5e;
+    draw_rect(&g_rect, 0, 0);
+    g_rect.y = 0x20;
+    g_rect.w = 0x2f;
+    draw_rect(&g_rect, 0, 0);
+
+    // Draw the box frame textures (preview border, arrows, item-list frame).
+    // The original draws these before the shadow rects, which was harmless at
+    // its line positions (y=51/80); with the frame moved up to enclose the
+    // name list (y=35..80) the shadow rects (y=34..49 and y=64..80) would
+    // darken the top/bottom borders, so the frame is drawn after them.
+    g_TextureDesc.flags = 0x01000040;
+    g_TextureDesc.printClutTint = 0x1fc;
+    g_TextureDesc.depth = 0x15;
+    g_CurrentMenuFramesDataPtr = (unsigned short*)(s_itemboxFramePartsA + sizeof(s_itemboxFramePartsA));
+    g_TextureDesc.unk10 = 0;
+    for (int i = 0; i < 7; i++) {
+        load_main_menu_frame_part_tex_area();
+        draw_texture(&g_TextureDesc, 0);
+    }
+
+    // 0x00494a04-0x00494b7e: Draw the cursor slot (icon + quantity).
+    // One slot normally, two during a page slide (SUBMENU_STATE_ID != 0); the
+    // slide shifts the sampled texV by 2px/frame while the icon's height grows
+    // from 0, so the incoming slot reveals from its bottom edge.
+    unsigned char slot = DAT_00ae9f24;
+    unsigned char loopCount = 2 - (SUBMENU_STATE_ID == 0);
+    unsigned char slide2 = (unsigned char)((unsigned short)SUBMENU_STATE_ID * 2);
+    short qtyY = (0x2c - (unsigned short)SUBMENU_STATE_ID) * 2;
+    g_TextureDesc.screenY = 0x58;
+    g_TextureDesc.height = 0x1e - slide2;
+    do {
+        g_TextureDesc.screenX = 0x5c;
+        g_TextureDesc.width = 0x28;
+        unsigned char itemId = g_itemboxSlots[slot].Id;
+        if (itemId == 0) {
+            // Empty slot background (blue.tim at page slot 0xA)
+            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.texU = 0;
+            g_TextureDesc.texV = 0;
+            g_TextureDesc.depth = 0x1c;
+            display_texture(&g_TextureDesc, 0x17, 0xa, 1);
+        } else {
+            // Filled slot: the item icon was composited into the shared
+            // item-image VRAM page by itembox_draw_slot_icon at exactly
+            // ((slot&1)*40, (slot&6)*16+0x50), and the port's LoadImage page
+            // descriptors sit in 0x1d space with clut base 0x1e0 - the
+            // original's 0x15/0x1fc (the itemboxn page's space) never matches
+            // a page here, so the desc is adapted the same way the inventory
+            // item draw is.
+            g_TextureDesc.depth = 0x1d;
+            g_TextureDesc.texU = (slot & 1) * 0x28;
+            g_TextureDesc.printClutTint = 0x1e4;
+            g_TextureDesc.texV = (slot & 6) * 0x10 + slide2 + 0x50;
+            if (itemId < 0x6f) {
+                display_texture(&g_TextureDesc, 0x17, 0xf, 8);
+            } else {
+                // Special items (>= 0x6f) come from staitem.tim (page slot
+                // 0x1E), one 30px row per item id
+                g_TextureDesc.printClutTint = 0x1e0;
+                g_TextureDesc.depth = 0;
+                g_TextureDesc.texU = 0;
+                g_TextureDesc.texV = (unsigned char)(itemId * 0x1e) + slide2 - 2;
+                display_texture(&g_TextureDesc, 0x17, 0x1e, 1);
+            }
+            g_TextureDesc.screenX = g_TextureDesc.screenX - 2;
+            g_TextureDesc.depth = 0x1c;
+            g_TextureDesc.screenY = (unsigned short)qtyY;
+            display_item_qty(itemId, g_itemboxSlots[slot].qty, 0x16);
+        }
+        g_TextureDesc.height = 0x1e;
+        g_TextureDesc.screenY = (unsigned short)(qtyY + 0x1e);
+        slide2 = 0;   // the second slide slot samples its own row, no offset
+        if (slot == 0x2f) {
+            slot = 0;
+        } else {
+            slot++;
+        }
+        qtyY = qtyY + 0x1e;
+    } while (--loopCount != 0);
+
+    // 0x00494b84-0x00494c19: Item name list (3 names normally, 4 during a
+    // slide), ending at the cursor slot
+    unsigned char nameSlot = (DAT_00ae9f24 != 0) ? (DAT_00ae9f24 - 1) : 0x2f;
+    short nameY = 0x23 - (unsigned short)SUBMENU_STATE_ID;
+    sprintf(PRINT_TEXT_BUFFER, "_Nothing_");
+    unsigned char nameCount = 4 - (SUBMENU_STATE_ID == 0);
+    do {
+        if (g_itemboxSlots[nameSlot].Id == 0) {
+            PrintText8x14(0x2a, nameY, 0x83, 0);
+        } else {
+            FUN_00454fd0(g_itemboxSlots[nameSlot].Id, 0x80, 0x2a, nameY);
+        }
+        nameY = nameY + 0xf;
+        if (nameSlot == 0x2f) {
+            nameSlot = 0;
+        } else {
+            nameSlot++;
+        }
+    } while (--nameCount != 0);
+
+    // 0x00494c19-0x00494c99: "Box is full" warning line under the last row
+    // (cursor on slots 0x2E/0x2F): a red horizontal line following the grid
+    if (0x2c < (unsigned char)(DAT_00ae9f24 - 1)) {
+        unsigned char line[16] = { 0 };
+        line[0xc] = 0xff;
+        line[0xd] = 0xef;
+        line[0xe] = 0;
+        *(unsigned short*)(line + 4) = 0x2a;
+        *(unsigned short*)(line + 8) = 0xa8;
+        short lineY = 0x31 - (unsigned short)SUBMENU_STATE_ID;
+        if (DAT_00ae9f24 != 0) {
+            lineY = lineY + (0x30 - (unsigned short)DAT_00ae9f24) * 0xf;
+        }
+        *(unsigned short*)(line + 6) = (unsigned short)lineY;
+        *(unsigned short*)(line + 10) = (unsigned short)lineY;
+        FUN_00470c60(line, 0x19);
+    }
+
+    // 0x00494c9c-0x00494d37: Page-position triangles (3px strip following the
+    // cursor slot in the 48-slot list)
+    unsigned char triSlot = 0x2f;
+    if (DAT_00ae9f24 != 0) {
+        triSlot = DAT_00ae9f24 - 1;
+    }
+    if (DAT_00ae9f1c < 0) {
+        triSlot++;
+    }
+    g_TextureDesc.flags = 0x01000040;
+    g_TextureDesc.texU = 0x40;
+    g_TextureDesc.texV = 0x38;
+    g_TextureDesc.screenX = 0xb0;
+    g_TextureDesc.width = 6;
+    g_TextureDesc.height = 1;
+    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.printClutTint = 0x1fc;
+    g_TextureDesc.depth = 0x15;
+    unsigned char triCount = 3;
+    do {
+        if (0x2f < triSlot) {
+            triSlot = 0;
+        }
+        g_TextureDesc.screenY = triSlot + 0x21;
+        triSlot++;
+        draw_texture(&g_TextureDesc, 0);
+    } while (--triCount != 0);
+
+    // 0x00494d39-0x00494d86: Trailing frame pieces (arrows + dead corner)
+    g_CurrentMenuFramesDataPtr = (unsigned short*)(s_itemboxFramePartsC + sizeof(s_itemboxFramePartsC));
+    load_main_menu_frame_part_tex_area();
+    draw_texture(&g_TextureDesc, 0x1e);
+    load_main_menu_frame_part_tex_area();
+    draw_texture(&g_TextureDesc, 0x1e);
+    load_main_menu_frame_part_tex_area();
+    draw_texture(&g_TextureDesc, 0x28);
+}
 
 // (0x00464560) - Load frame part texture area from g_CurrentMenuFramesDataPtr table pointer.
 // Each call reads a 12-byte entry backwards: screenX(short), screenY(short),
