@@ -88,9 +88,6 @@ int  empty_483510(void) { return 0; }
 // (0x00474090) - Update sound system state per-frame
 void update_sounds(void) { }
 
-// (0x00473ff0) - Update room camera and lighting per-frame
-void room_camera_and_lighting_update(void) { }
-
 // (0x00475b80) - Draw room sprites (background overlays)
 void DrawRoomSpr(void) { }
 

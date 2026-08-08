@@ -35,6 +35,7 @@ extern void FUN_00486df0(void* spriteData);                 // sprite render mod
 extern void FUN_004896c0(void* joint, short p1, short p2, int p3); // 0x004896c0 (EngineStubs.cpp)
 extern void FUN_0048a210(void* joint);                      // 0x0048a210 (EngineStubs.cpp)
 extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData); // 0x00462d90 (Room.cpp)
+extern void FUN_00483580(int* joint, MATRIX* out);          // 0x00483580 item_viewer_compose_matrix (MainMenu.cpp)
 #include <algorithm>
 #include <cmath>
 #include "../DebugPrint.h"
@@ -147,23 +148,42 @@ void TmdQueueObject(void* objData, int depth)
         if (g_tmdLight == NULL) return;
     }
 
-    BYTE* p   = (BYTE*)objData;
-    BYTE* buf = (BYTE*)g_tmdObjectBuffer;
-    const int slotStride = 0x1594;
-    const int maxSlot    = 250;
+    BYTE* p = (BYTE*)objData;
+    BYTE* slotBase;
+    ptrdiff_t within;
 
-    ptrdiff_t diff = p - buf;
-    if (diff < 0) return;
-    int slotIdx = (int)(diff / slotStride);
-    if (slotIdx >= maxSlot) return;
-    int within = (int)(diff - (ptrdiff_t)slotIdx * slotStride);
+    const int slotStride = 0x1594;
+
+    // The stage-1 dining-hall table renders through the FIXED render-state
+    // slot g_renderStateTMD (0x00aac158), which sits outside (after)
+    // g_tmdObjectBuffer. The original queues it into the ordering table like
+    // any other slot (FUN_00484eb0); the port's slot recovery has to accept
+    // it explicitly or the table's Transform call is silently dropped and
+    // nothing draws. Check it FIRST: it is a single 0x1594-byte slot, and the
+    // g_tmdObjectBuffer mapping below would otherwise consume it as one of the
+    // unused slots past the 250-slot cap and reject it.
+    BYTE* rs = (BYTE*)g_renderStateTMD;
+    if (p >= rs && p < rs + slotStride) {
+        slotBase = rs;
+        within = p - rs;
+    } else {
+        BYTE* buf = (BYTE*)g_tmdObjectBuffer;
+        const int maxSlot = 250;
+
+        ptrdiff_t diff = p - buf;
+        if (diff < 0) return;
+        int slotIdx = (int)(diff / slotStride);
+        if (slotIdx >= maxSlot) return;
+        slotBase = buf + (ptrdiff_t)slotIdx * slotStride;
+        within = diff - (ptrdiff_t)slotIdx * slotStride;
+    }
 
     int objIndex;
     if (within >= 0x4D0 && within < 0x4D0 + 16 * 0x84) {
-        objIndex = (within - 0x4D0) / 0x84;
+        objIndex = (int)(within - 0x4D0) / 0x84;
     }
     else if (within >= 0xD10 && within < 0xD10 + 16 * 0x84) {
-        objIndex = (within - 0xD10) / 0x84;
+        objIndex = (int)(within - 0xD10) / 0x84;
     }
     else {
         return;
@@ -171,7 +191,7 @@ void TmdQueueObject(void* objData, int depth)
 
     int idx = g_tmdQueueCount++;
     TmdDrawEntry* e = &g_tmdQueue[idx];
-    e->slot     = buf + (ptrdiff_t)slotIdx * slotStride;
+    e->slot     = slotBase;
     e->objData  = p;
     e->objIndex = objIndex;
     e->depth    = depth;
@@ -733,5 +753,265 @@ void FUN_00483080(void* spriteData, int depthShift)
     // left every object with a garbage depth and no stored transform).
     CMarniDirect3DTMD* tmd = (CMarniDirect3DTMD*)(void*)tmdObj;
     tmd->Transform(g_pMarniDirect3D, (void*)(size_t)depth, transformMatrix, 0);
+}
+
+// ============================================================================
+// Room item / 3D object per-frame rendering (0x00473ff0 -> 0x004745f0 ->
+// 0x00483270). This is the per-frame pass the original runs between the player
+// update and the entity render in game_loop; the port had it as an empty stub
+// in EngineStubs.cpp, so the RDT's item models (g_itemboxes_covers_table) and
+// obstacle models (g_desks_pointers_table) were never queued and FlushTmdObjects
+// only ever drew entities.
+//
+// Item/desk record layout (0xA4 bytes, one per RDT model slot):
+//   +0x00  flags byte (bit 0 = visible, bit 7 = coarse depth shift 10)
+//   +0x01  model type id (low 6 bits)
+//   +0x04  pointer to the +0x88 sub-record
+//   +0x0C  anim field: [0] = 0x40000000 flags, [1] = ScaMatrixData ptr,
+//          [2] = AnimSlot ptr (written by SetAnimSlot via FUN_00473ea0),
+//          [3] = spriteData ptr (written by CreateAnimObject)
+//   +0x1C  ScaMatrixData (field_00 = "world recomputed" dirty flag)
+//   +0x20  rotation MATRIX (rebuilt from the +0x72 SVECTOR every frame)
+//   +0x34  position VECTOR (doubles as the matrix translation)
+//   +0x54  position used for the camera switch-zone cull
+//   +0x72  rotation SVECTOR (RotMatrix input)
+// ============================================================================
+
+// (0x00483270) - Render one room object into the TMD queue
+// objPtr points at the record's anim field (+0x0C); the spriteData block hangs
+// off its +0x0C (record +0x18) where CreateAnimObject stored it. Reads the GTE
+// rotation/translation buffer (set by SetRotAndTransMatrix in the caller) for
+// the transform, exactly like the entity render FUN_00483080. Depth is normally
+// GTE t[2] >> shift; DAT_00ae9ef8 / DAT_00ae9ee4 pin it to the fixed 0x32/0x33
+// ordering-table slot for the rooms that need it.
+static void FUN_00483270(unsigned char* objPtr, int depthShift)
+{
+    // spriteData = *(record + 0x18): the animation object CreateAnimObject
+    // built when the SCD command bound the TMD (FUN_00473ea0).
+    int* spriteData = *(int**)(objPtr + 0xc);
+
+    if (spriteData == NULL) return;
+
+    int depth = (DAT_00ae9ee4 != 0) ? 0x33 : 0x32;
+    if (DAT_00ae9ef8 == 0) {
+        int depthField = g_gteRotTransMatrix.t[2];
+        if (depthField < 0) return;
+        depth = depthField >> (depthShift & 0x1F);
+    }
+
+    // 0x004832cc-0x00483358: per-light colour override records copied into
+    // spriteData+0x24 and OT_InsertPrimitive'd at `depth`. The DX11 port's
+    // ordering table only consumes depth 0xFFF (the background) and the flush
+    // latches the live g_d3dLightData at queue time (TmdQueueObject), so the
+    // copy is a no-op here — same call as FUN_00482fa0 in the entity path.
+
+    // data[1] is the minimum CLUT depth (texture bank id); zero means the
+    // object carries no textured primitives and is not rendered.
+    if (spriteData[1] == 0) return;
+
+    if (spriteData[4] == 1) {
+        FUN_00486df0(spriteData);
+        return;
+    }
+
+    unsigned int tmdObj = AsyncCreateTmdObject(spriteData[1], spriteData[0], (unsigned int)spriteData);
+    spriteData[8] = (int)tmdObj;
+    if (tmdObj == 0) return;
+
+    // Build the transform from the GTE buffer — same layout as FUN_00483080.
+    float m[16];
+    float scale = 0.00024414063f; // 1/4096
+    m[0]  = (float)g_gteRotTransMatrix.m[0][0] * scale;
+    m[4]  = (float)g_gteRotTransMatrix.m[0][1] * scale;
+    m[8]  = (float)g_gteRotTransMatrix.m[0][2] * scale;
+    m[1]  = (float)g_gteRotTransMatrix.m[1][0] * scale;
+    m[5]  = (float)g_gteRotTransMatrix.m[1][1] * scale;
+    m[9]  = (float)g_gteRotTransMatrix.m[1][2] * scale;
+    m[2]  = (float)g_gteRotTransMatrix.m[2][0] * scale;
+    m[6]  = (float)g_gteRotTransMatrix.m[2][1] * scale;
+    m[10] = (float)g_gteRotTransMatrix.m[2][2] * scale;
+    m[12] = (float)g_gteRotTransMatrix.t[0];
+    m[13] = (float)g_gteRotTransMatrix.t[1];
+    m[14] = (float)g_gteRotTransMatrix.t[2];
+    m[3] = 0.0f; m[7] = 0.0f; m[11] = 0.0f; m[15] = 1.0f;
+
+    FUN_00486190(m);
+
+    CMarniDirect3DTMD* tmd = (CMarniDirect3DTMD*)(void*)tmdObj;
+    tmd->Transform(g_pMarniDirect3D, (void*)(size_t)depth, m, 0);
+}
+
+// (0x00484eb0) 
+// FUN_00486190 view rotation — the original transforms the raw GTE matrix.
+static void FUN_00484eb0(void)
+{
+    int depth = g_gteRotTransMatrix.t[2] >> 6;
+    if (depth < 0) depth = 0;
+    if (depth > 0xffa) depth = 0xffa;
+
+    float m[16];
+    float scale = 0.00024414063f; // 1/4096
+    m[0]  = (float)g_gteRotTransMatrix.m[0][0] * scale;
+    m[4]  = (float)g_gteRotTransMatrix.m[0][1] * scale;
+    m[8]  = (float)g_gteRotTransMatrix.m[0][2] * scale;
+    m[1]  = (float)g_gteRotTransMatrix.m[1][0] * scale;
+    m[5]  = (float)g_gteRotTransMatrix.m[1][1] * scale;
+    m[9]  = (float)g_gteRotTransMatrix.m[1][2] * scale;
+    m[2]  = (float)g_gteRotTransMatrix.m[2][0] * scale;
+    m[6]  = (float)g_gteRotTransMatrix.m[2][1] * scale;
+    m[10] = (float)g_gteRotTransMatrix.m[2][2] * scale;
+    m[12] = (float)g_gteRotTransMatrix.t[0];
+    m[13] = (float)g_gteRotTransMatrix.t[1];
+    m[14] = (float)g_gteRotTransMatrix.t[2];
+    m[3] = 0.0f; m[7] = 0.0f; m[11] = 0.0f; m[15] = 1.0f;
+
+    CMarniDirect3DTMD* tmd = (CMarniDirect3DTMD*)g_renderStateTMD;
+    tmd->Transform(g_pMarniDirect3D, (void*)(size_t)depth, m, 0);
+}
+
+// (0x00485000) - schedule the dining-hall table render asynchronously
+static void FUN_00485000(void)
+{
+    ExecAsync((void*)FUN_00484eb0);
+}
+
+// (0x004745f0) - Render one item/desk record: compose matrices, set lights,
+// cull against the camera switch zones, and queue the object's TMD.
+static void RoomObjectRender(unsigned char* obj)
+{
+    MATRIX localMatrix;
+
+    // 0x004745fd: per-object lighting from its world position (record +0x34,
+    // which doubles as the +0x20 rotation matrix's translation).
+    update_entity_lighting((VECTOR*)(obj + 0x34));
+
+    // 0x0047460e: compose the ScaMatrixData chain (rooted at record +0x10)
+    // into localMatrix, then fold in the camera.
+    FUN_00483580(*(int**)(obj + 0x10), &localMatrix);
+
+    // 0x00474624: object light matrix = g_lightMatrix * obj rotation matrix
+    MulMatrix0(&g_lightMatrix, (MATRIX*)(obj + 0x20), &g_matrixScratch);
+    SetLightMatrix(&g_matrixScratch);
+
+    // 0x0047465f: stage 2 room 3 item models 1-4 (pass 0 only) sit 1000 units
+    // further along the view axis — the room's shelf displays.
+    if ((g_stageId == 2) && (g_roomId == 3) && (DAT_008f8688 == 0)) {
+        int t = obj[1] & 0x3f;
+        if (t != 0 && t < 5) {
+            localMatrix.t[2] += 1000;
+        }
+    }
+
+    // 0x0047466e: DAT_00ae9ee4 — the stage-1 rooms 0xA/0xB open-lid model
+    // renders at the fixed depth 0x33 instead of 0x32.
+    DAT_00ae9ee4 = 0;
+    int stageMod = g_stageId % 5;
+    if (stageMod == 1) {
+        if ((g_roomId == 0x0a) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 1)) DAT_00ae9ee4 = 1;
+        if ((g_roomId == 0x0b) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 1)) DAT_00ae9ee4 = 1;
+    }
+
+    // 0x004746d2-0x004747b7: room-specific objects that must not render
+    // (mirror/door-frame stand-ins the SCD keeps for interaction but that
+    // have their own model elsewhere, e.g. the stage-3 room 6 mirror).
+    bool skip = false;
+    if ((g_stageId == 3) && (g_roomId == 6) && (g_roomCameraId == 4) &&
+        (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0)) {
+        skip = true;
+    } else if ((g_stageId == 4) && (g_roomId == 10) &&
+               ((g_roomCameraId == 0) || (g_roomCameraId == 4)) &&
+               (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0)) {
+        skip = true;
+    } else if ((stageMod == 0) && (g_roomId == 0x15) && (g_roomCameraId == 0) &&
+               (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0) &&
+               (*(int*)(obj + 0x34) == 0x12fc) &&
+               (*(int*)(obj + 0x38) == -0x2828) &&
+               (*(int*)(obj + 0x3c) == 0x12fc)) {
+        skip = true;
+    } else if ((stageMod == 2) && (g_roomId == 0x0f) && (g_roomCameraId == 3) &&
+               (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0) &&
+               (*(int*)(obj + 0x34) <= 0x7274)) {
+        skip = true;
+    }
+    if (skip) return;
+
+    // 0x004747b7-0x0047488b: DAT_00ae9ef8 — keep the fixed ordering-table
+    // depth for these rooms instead of sorting by GTE t[2].
+    DAT_00ae9ef8 = 0;
+    int stageModP1 = (g_stageId + 1) % 5;
+    if (stageModP1 == 4) {
+        if ((g_roomId == 0x0d) || (g_roomId == 0x0f) || (g_roomId == 0x0e) ||
+            (g_roomId == 0x10) || (g_roomId == 0x11)) {
+            DAT_00ae9ef8 = 1;
+        }
+    }
+    if ((stageModP1 == 3) && (g_roomId == 1)) DAT_00ae9ef8 = 1;
+    if ((stageMod == 1) && (g_roomId == 0x0b) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) < 2)) DAT_00ae9ef8 = 1;
+
+    // 0x00474890: push the composed matrix into the GTE rotation/translation
+    // buffer — FUN_00483270 reads the transform from there.
+    SetRotAndTransMatrix(&localMatrix);
+
+    // 0x004748a2: cull objects outside the current camera's switch-zone group.
+    if (is_entity_in_switch_zone((VECTOR*)(obj + 0x54), g_CurrentRdtDataTypePtr) == 0) return;
+
+    // 0x004748d2
+    // path (FUN_00485000) with a clamped depth.
+    if ((stageModP1 == 2) && (g_roomId == 0x0a) && ((obj[1] & 0x3f) == 0)) {
+        FUN_00485000();
+    }
+
+    // 0x004748d7: records with bit 7 set use the coarse depth shift (10);
+    // everything else uses 4.
+    if ((obj[0] & 0x80) != 0) {
+        FUN_00483270(obj + 0xc, 10);
+    } else {
+        FUN_00483270(obj + 0xc, 4);
+    }
+}
+
+// (0x00473ff0) - room_camera_and_lighting_update
+// Per-frame render pass for the room's own 3D content. Pass 0 walks the item
+// models (g_itemboxes_covers_table, count = RDT sound_banks_count), pass 1 the
+// desk/obstacle models (g_desks_pointers_table, count = RDT unknown_03[0]).
+// Each visible record with a bound model gets its rotation matrix rebuilt from
+// its +0x72 SVECTOR, its ScaMatrixData marked dirty for the compose, and is
+// handed to RoomObjectRender. Called from game_loop while
+// g_dwCameraLightingEnabled is set; was an empty stub, which is why room items
+// and 3D objects never appeared.
+void room_camera_and_lighting_update(void)
+{
+    // One-shot per room: report the item/desk pass totals so a room with no
+    // models is distinguishable from one whose models fail to bind.
+    static int s_lastDiagRoom = -1;
+    if (s_lastDiagRoom != g_roomId) {
+        s_lastDiagRoom = g_roomId;
+        dbg_printf("[roomobj] stage %d room %d: %d items, %d desks\n",
+                   g_stageId, g_roomId,
+                   g_RdtPointer->sound_banks_count, g_RdtPointer->unknown_03[0]);
+    }
+
+    for (int pass = 0; pass < 2; pass++) {
+        int count = (pass == 0)
+            ? g_RdtPointer->sound_banks_count
+            : g_RdtPointer->unknown_03[0];
+        DAT_008f8688 = pass;
+
+        for (int i = 0; i < count; i++) {
+            unsigned char* obj = (pass == 0)
+                ? (unsigned char*)g_itemboxes_covers_table[i]
+                : (unsigned char*)g_desks_pointers_table[i];
+
+            // Visible (bit 0) and with a bound model (AnimSlot ptr at +0x14).
+            if ((obj != NULL) && ((*obj & 1) != 0) && (*(int*)(obj + 0x14) != 0)) {
+                // 0x0047405b: rebuild the rotation matrix from the record's
+                // SVECTOR; 0x00474063: mark the ScaMatrixData dirty so
+                // FUN_00483580 recomposes it.
+                RotMatrix((SVECTOR*)(obj + 0x72), (MATRIX*)(obj + 0x20));
+                *(int*)(obj + 0x1c) = 0;
+                RoomObjectRender(obj);
+            }
+        }
+    }
 }
 

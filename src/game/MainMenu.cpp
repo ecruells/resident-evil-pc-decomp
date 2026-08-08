@@ -4645,7 +4645,7 @@ static void FUN_0044e8c0(void);
 static void FUN_0044e920(void);
 static void FUN_004846d0(int slot);
 static void FUN_004844c0(void);
-static void FUN_00483580(int* joint, MATRIX* out);
+extern void FUN_00483580(int* joint, MATRIX* out);   // shared with room_camera_and_lighting_update
 static void FUN_004841f0(void);
 extern void ResolveAnimPointers(unsigned char* data);
 extern void InitScaMatrix(int parentPtr, ScaMatrixData* matrix);
@@ -5347,8 +5347,9 @@ static void FUN_0040a250(MATRIX* src, MATRIX* dst)
 // through the OWNER back-pointers (ScaMatrixData.owner at +0x48, set by
 // InitScaMatrix), with each parent's child back-ref at +0x4C. The walk
 // follows the owners to the root and composes local -> world from the root
-// down, exactly like the original.
-static void FUN_00483580(int* joint, MATRIX* out)
+// down, exactly like the original. Shared with room_camera_and_lighting_update
+// (FUN_004745f0) which composes each room item/desk object the same way.
+void FUN_00483580(int* joint, MATRIX* out)
 {
     int* chain[0x14];
     int chainCount = 0;

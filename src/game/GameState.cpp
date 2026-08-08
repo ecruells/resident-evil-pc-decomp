@@ -5,6 +5,7 @@
 #include "../marni/MarniSystem.h"
 #include "../marni/MarniSound.h"
 #include "../marni/PSXTexture.h"
+#include "../marni/Marni3DObject.h"
 #include "FileLoader.h"
 #include <cstdio>
 #include "../system/AssetPath.h"
@@ -1482,11 +1483,118 @@ void FUN_004805d0(short param1, unsigned int param2, unsigned int param3, unsign
     }
 }
 
-// (0x00484d90) - Entity animation setup
-void FUN_00484d90(int param1, unsigned char param2, unsigned char param3) { }
 
-// (0x00484e40) - Entity animation setup variant
-void FUN_00484e40(int param1, unsigned char param2, unsigned char param3) { }
+
+// (0x00484c40)
+static void FUN_00484c40(void)
+{
+    int tmdData = DAT_008f8c74;
+    int bank = DAT_009104c0;
+    int depth = DAT_008ffc34;
+
+    BYTE* page = (BYTE*)g_renderStateTex;
+
+    // 0x00484c6c: release the page's previous texture handles
+    VideoDriver_ClearState348(page, g_pMarniDirect3D);
+
+    // 0x00484c71: already set up — the flag at +0x348 is what
+    // Direct3DTIM_Create also uses for the same purpose.
+    if (*(DWORD*)(page + 0x348) == 1) return;
+
+    // 0x00484c86: load the TIM image + CLUT into the page
+    ((PSXTexture*)page)->Store((int*)tmdData, 1);
+
+    // 0x00484c8d-0x00484cfb: per-material transparent-colour cleanup. Every
+    // palette entry with 5551 bit 15 set has its index zeroed out of the pixel
+    // data so those texels sample CLUT 0 (the transparent colour).
+    int matCount = *(DWORD*)(page + 0x340);     // m_NumCLUTs
+    for (int i = 0; i < matCount; i++) {
+        BYTE* mat = page + i * 0x68;
+        int* vtable = *(int**)mat;
+        void* pixelData = NULL;
+        DWORD clutPtr = 0;
+        typedef int (*LockFn)(void* self, void** outData, DWORD* outClut);
+        typedef int (*UnlockFn)(void* self);
+        // vtable[4] = CMarniBits::Lock (0x00403450): outData = m_pPixelData
+        // (+0x04), outClut = m_pPalette (+0x08, the CLUT heap copy).
+        // The original ignores the result; the guard is port-only defence.
+        if (((LockFn)vtable[4])(mat, &pixelData, &clutPtr) != 0) {
+            BYTE* clut = (BYTE*)(ULONG_PTR)clutPtr;
+            BYTE* px = (BYTE*)pixelData;
+            int size = *(DWORD*)(mat + 0x2c) * *(DWORD*)(mat + 0x30);
+            for (int clutIdx = 0; clutIdx < 0x100; clutIdx++) {
+                if ((clut[clutIdx * 2 + 1] & 0x80) != 0) {   // 5551 bit 15
+                    for (int p = 0; p < size; p++) {
+                        if (px[p] == clutIdx) px[p] = 0;
+                    }
+                }
+            }
+        }
+        ((UnlockFn)vtable[5])(mat);
+    }
+
+    // 0x00484cfd-0x00484d77: patch each material's CLUT descriptor (the same
+    // +0x54/+0x58/+0x5C/+0x60 layout PSXObject_Store matches against) and
+    // create the D3D texture handle for it.
+    for (int i = 0; i < matCount; i++) {
+        BYTE* mat = page + i * 0x68;
+        *(DWORD*)(mat + 0x54) = 0;
+        *(DWORD*)(mat + 0x58) = depth + 0x1e0;
+        *(DWORD*)(mat + 0x5c) = (bank & 0xf) << 6;
+        *(DWORD*)(mat + 0x60) = (bank & 0x10) << 4;
+        void** d3dVtable = *(void***)g_pMarniDirect3D;
+        typedef DWORD (*CreateTextureFn)(void*, BYTE*, int, int);
+        CreateTextureFn createTex = (CreateTextureFn)d3dVtable[6];
+        DWORD handle = createTex(g_pMarniDirect3D, mat, 0x21, 0);
+        *(DWORD*)(page + 0x34C + i * 4) = handle;
+    }
+
+    *(DWORD*)(page + 0x348) = 1;
+}
+
+// (0x00484dc0) 
+static void FUN_00484dc0(void)
+{
+    int* tmdHdr = (int*)DAT_00aae740;
+    int bank = DAT_00aad6ec;
+
+    CMarniDirect3DTMD* tmd = (CMarniDirect3DTMD*)g_renderStateTMD;
+
+    // 0x00484dd9: clean the slot before re-storing
+    tmd->CleanupObjects(g_pMarniDirect3D);
+
+    // 0x00484dee: parse the TMD geometry (texRef 0x80 = the page's UV divisor)
+    PSXObject_Store(tmd, tmdHdr, 0, bank, 0x80);
+
+    // 0x00484e05: bind the render-state texture page
+    tmd->Create(g_pMarniDirect3D, g_renderStateTex, (void*)1);
+
+    // 0x00484e0c-0x00484e2f: mark every embedded object's transparency flag
+    // (stride 0x108: each m_objectData entry and its copy, +0 and +0x84)
+    int count = *(int*)((BYTE*)tmd + 0x4C0);    // m_objectCount
+    for (int i = 0; i < count; i++) {
+        *(DWORD*)((BYTE*)tmd + 0x550 + i * 0x108) |= 2;
+        *(DWORD*)((BYTE*)tmd + 0x550 + i * 0x108 + 0x84) |= 2;
+    }
+}
+
+// (0x00484d90) 
+void FUN_00484d90(int param1, unsigned char param2, unsigned char param3)
+{
+    DAT_008f8c74 = param1;
+    DAT_009104c0 = param2;
+    DAT_008ffc34 = param3;
+    ExecAsync((void*)FUN_00484c40);
+}
+
+// (0x00484e40) 
+void FUN_00484e40(int param1, unsigned char param2, unsigned char param3)
+{
+    DAT_00aae740 = param1;
+    DAT_00aad6ec = param2;
+    DAT_00ac34f8 = param3;
+    ExecAsync((void*)FUN_00484dc0);
+}
 
 // ============================================================================
 // FUN_004870d0 (0x004870d0) - Set flag bit 1 on 32 consecutive 0x84-byte records

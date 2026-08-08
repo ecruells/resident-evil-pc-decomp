@@ -469,6 +469,11 @@ int g_charSfxVolume = -1;              // 0x00ac98fc
 // Indexed by g_spriteAnimActive in room_camera_and_lighting_update / calc_entity_lighting
 SpriteAnimSlot g_spriteAnimSlots[6] = {};
 
+// Per-frame room object render state (room_camera_and_lighting_update, 0x00473ff0)
+int    DAT_008f8688 = 0;    // 0x008f8688 - pass index (0 = items, 1 = desks)
+int    DAT_00ae9ee4 = 0;    // 0x00ae9ee4 - force object depth 0x33 (stage 1 rooms A/B lid)
+int    DAT_00ae9ef8 = 0;    // 0x00ae9ef8 - keep the fixed 0x32/0x33 object depth
+
 // Sprite animation data buffers (pointed to by g_spriteAnimSlots entries)
 BYTE g_entityLightData_9ad8[0x1000] = {};  // 0x00be9ad8 - entry[2] target
 BYTE g_entityLightData_bad8[0x80] = {};    // 0x00bebad8 - entry[3]/[4] target
@@ -809,7 +814,13 @@ BYTE         g_tmdObjectBuffer[1606172] = {};  // 0x00923b50 area
 
 int          g_tmdObjectSlotAnimPtrs[251] = {};     // 0x00aabd6c - TMD slot → animObjPtr table
 
-int          DAT_00aad6ec = 0; // 0x00aad6ec
+int          DAT_00aad6ec = 0; // 0x00aad6ec - 
+int          DAT_00aae740 = 0; // 0x00aae740 - 
+int          DAT_00ac34f8 = 0; // 0x00ac34f8 - 
+
+int          DAT_008f8c74 = 0; // 0x008f8c74 - TMD texture/CLUT data for PSXTexture::Store
+int          DAT_009104c0 = 0; // 0x009104c0 - texture bank id
+int          DAT_008ffc34 = 0; // 0x008ffc34 - texture depth byte
 
 BYTE         g_renderStateTMD[5524] = {};         // 0x00aac158
 
