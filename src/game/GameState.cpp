@@ -1752,7 +1752,6 @@ static void room_trans_report(const char* what)
     if (what != last) { last = what; dbg_printf("[roomtrans] missing %s\n", what); }
 }
 static void object_delete_00442170(int a) { (void)a; room_trans_report("0x00442170 object_delete"); }
-static void FUN_00412300(void)            { room_trans_report("0x00412300"); }
 static void BuildEnemySnap(void)          { room_trans_report("0x0048f150 BuildEnemySnap"); }
 static void FUN_0041d070(void)            { room_trans_report("0x0041d070"); }
 static void FUN_00442180(void)            { room_trans_report("0x00442180"); }
@@ -1786,31 +1785,18 @@ void room_transition_load(void)
     }
 
     load_room_sfx(g_nextRoomSfxId);
-    FUN_00412300();
+    door_system_load_data();            // FUN_00412300 - load the .dor + start the texture page
 
     // The original does:
     //     Task_execute(1, FUN_00444770);   // spawns the door-animation task
     //     Task_sleep(1);                   // yields so it can run
     //
-    // Still NOT spawned: 0x00444770 is `FUN_004443c0(); FUN_00444540();
-    // FUN_00444500(); Task_exit();` - the 3D door-opening animation, its own
-    // subsystem (image buffers at 0x00ac592c/0x00acd710, a relocated model table at
-    // 0x00aafce0, ResolveAnimPointers, and a renderer that calls draw_rect). Tasks
-    // here run on switched stacks, so a stub that plainly returns unwinds off the
-    // task stack and jumps to address 0.
-    //
-    // CORRECTION to the note that used to sit here: 0x00444770 does NOT load the
-    // destination room. `room_set()` / `init_room()` below do, and the original
-    // updates g_roomId from the door record immediately before calling them. The old
-    // gate omitted that update, which is the only reason room_set re-ran the
-    // outgoing room and crashed in cmd_item_model_set -> Effect_CreateBillboard.
-    // The animation task and the room load are independent; the load is enabled now.
-    //
-    // Safe to leave unspawned: FUN_004443c0 is what sets g_main_state_flags bit
-    // 0x4000000, and the wait loop below polls that bit. With no task, the bit is
-    // never set and the wait falls through immediately - an instant cut instead of a
-    // door animation.
-    room_trans_report("0x00444770 door animation task (not transcribed - instant cut)");
+    // 0x00444770 is `FUN_004443c0(); FUN_00444540(); FUN_00444500(); Task_exit();`
+    // - the 3D door-opening animation (DoorSystem.cpp): it sets g_main_state_flags
+    // bit 0x4000000 on init, animates the door (black rect, camera dolly, door
+    // panels through the TMD queue) while this task loads the destination room,
+    // and clears the bit on teardown. The wait loop below polls that bit.
+    door_system_start_animation();
     Task_sleep(1);
 
     // 0x0048148c: place the player at the destination's entry point.

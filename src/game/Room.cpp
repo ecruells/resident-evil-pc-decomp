@@ -391,8 +391,8 @@ void load_room_masks(int param_1) // 0x00475a90
         } else {
             pakData = &g_bgMaskDataBuffer[g_bgMaskOffsets[param_1]];
         }
-        unpack_pakfile_(pakData, &g_TimImageBuffer__bitmap);
-        TexturePage_SetupFull(&g_TimImageBuffer__bitmap, g_TextureBankID, g_TextureDepthByte, 0);
+        unpack_pakfile_(pakData, g_TimImageBuffer__bitmap);
+        TexturePage_SetupFull(g_TimImageBuffer__bitmap, g_TextureBankID, g_TextureDepthByte, 0);
     } else {
         TexturePage_DeleteSet(4);
     }

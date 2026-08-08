@@ -1193,7 +1193,13 @@ extern BYTE          g_DataBuffer[832728];
 // For PIX Images (Headless TIM Images), the buffer points directly to the
 // bitmap address at 0x00cf22ac (g_TimImageBuffer__bitmap)
 extern BYTE          g_TimImageBuffer[187160+20];
-#define g_TimImageBuffer__bitmap    g_TimImageBuffer+20
+// The parentheses are load-bearing. Unparenthesised, `&g_TimImageBuffer__bitmap`
+// expanded to `&g_TimImageBuffer + 20`, and since `&g_TimImageBuffer` has type
+// BYTE(*)[187180] the +20 advanced 20 * 187180 = 3,743,600 bytes - so
+// load_room_masks decompressed each camera's background mask 3.6MB past the end
+// of this buffer, straight over unrelated .bss. Parenthesised, the expression is
+// an rvalue and any `&` on it is a compile error instead of silent corruption.
+#define g_TimImageBuffer__bitmap    (g_TimImageBuffer + 20)
 
 // ============================================================================
 // SECTION 18: Debug & misc
@@ -1431,6 +1437,11 @@ void check_menus_state(void);                         // 0x004815f0
 void main_menu(void);                                 // 0x00463710 - in-game menu (status/inventory/map)
 void options_menu(void);                              // 0x004761b0 - options/configuration menu
 void room_transition_load(void);                      // 0x004813c0 - room/stage transition loader
+// Door 3D animation (DoorSystem.cpp, 0x00412300 / 0x00444770): loads the door's
+// .dor data file and spawns the door-animation task on task 1. Called from
+// room_transition_load while the destination room loads underneath.
+void door_system_load_data(void);                     // FUN_00412300 - .dor + texture page
+void door_system_start_animation(void);               // Task_execute(1, FUN_00444770)
 void set_fading(int type, int counter);               // 0x0047b980
 int  cmd_0x4c(void);                                  // 0x00460b80 - stop sound banks
 void display_die_screen(void);                        // 0x004... - death screen display

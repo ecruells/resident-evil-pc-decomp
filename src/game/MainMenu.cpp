@@ -687,7 +687,7 @@ void menu_update_equipped_weapon(void)
         unsigned char itemId = slotPtr[(g_EquippedItemId - 1) * 2];
         if (g_playerEntity.equippedWeaponId != itemId) {
             g_playerEntity.equippedWeaponId = itemId;
-            LoadSoundBank(itemId, &g_TimImageBuffer__bitmap);
+            LoadSoundBank(itemId, g_TimImageBuffer__bitmap);
             DAT_00ae9f1e = 0xFF;
         }
     }

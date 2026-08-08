@@ -5515,8 +5515,9 @@ int door_try_enter(unsigned char* entry)
         static unsigned char* lastRecord = nullptr;
         if (record != lastRecord) {
             lastRecord = record;
-            dbg_printf("[door] try_enter rec=%p lock=%02X need=%02X dest=%02X flags0B=%02X\n",
-                       record, (unsigned int)lock, (unsigned int)record[0x16],
+            dbg_printf("[door] try_enter rec=%p type0A=%02X dir08=%02X lock=%02X need=%02X dest=%02X flags0B=%02X\n",
+                       record, (unsigned int)record[0x0a], (unsigned int)record[0x08],
+                       (unsigned int)lock, (unsigned int)record[0x16],
                        (unsigned int)record[0x0d], (unsigned int)record[0x0b]);
         }
     }
