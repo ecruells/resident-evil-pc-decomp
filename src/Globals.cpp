@@ -1,6 +1,7 @@
 // Original addresses from Ghidra marked for each global variable
 #include "Globals.h"
 #include "game/PrintText.h"
+#include "game/SoundTables.h"
 #include "system/AssetPath.h"
 
 // ============================================================================
@@ -451,7 +452,10 @@ MATRIX        MATRIX_00d22680 = {};               // 0x00d22680 - camera view ma
 unsigned char g_prevBgmState = 0;               // 0x00bf07f1
 unsigned char g_targetBgmState = 0;             // 0x00bf07f0
 unsigned char* g_RoomBgmStatePtr = NULL;              // 0x00bf0a30 - pointer to current stage's room BGM state data
-void*         g_bgmDataTable = NULL;             // 0x00d1fdc4 → 0x004d0c30
+// 0x00d1fdc4 → 0x004d0c30. sounds_reset assigns this on every reset, exactly as
+// the original does; the static initialiser here only removes the ordering hazard
+// of a room loading before the first sounds_reset.
+const unsigned char* g_bgmDataTable = &g_BgmRoomData[0][0][0];
 void*         g_StageDataPtr = NULL;             // 0x00d1fdc8 - stage-specific data pointer
 
 int g_SoundPanVol = 0;

@@ -3,9 +3,11 @@
 #include "../Globals.h"
 #include "../marni/MarniSound.h"
 #include "Entities.h"
+#include "SoundTables.h"
 #include "../DebugPrint.h"
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include "../system/AssetPath.h"
 
 // ============================================================================
@@ -61,7 +63,15 @@ void sounds_reset(void)
     }
 
     g_SfxVolume = -1;
+    g_EnemySndVolume = -1;
+    g_roomSfxVolume = -1;
+    g_charSfxVolume = -1;
+    g_bgmDefaultVolume = -1;
+    DAT_00bf07ef = 0xFF;
     g_BGM_STATE = 0xFF;
+    // 0x0047eb45. Never restoring this pointer is what silenced every room's BGM:
+    // bgm_load_and_start and update_room_bgm both bail out when it is NULL.
+    g_bgmDataTable = &g_BgmRoomData[0][0][0];
 }
 
 // ============================================================================
@@ -666,35 +676,64 @@ static void bgm_fade_out_all(void)
     }
 }
 
+// ----------------------------------------------------------------------------
+// The group lookup bgm_load_and_start and update_room_bgm share, as one
+// expression. The bounds check has no counterpart in the original: with a 0xFF
+// state the low three bits are 7, which walks past the end of the last room's
+// 4-byte row and into whatever .rdata follows the table. Every caller either
+// tests for 0xFF first or only uses the result when it isn't, so 0xFF is the
+// right answer for the out-of-range case.
+// ----------------------------------------------------------------------------
+static unsigned char bgm_group_for(unsigned char roomId, unsigned char bgmState)
+{
+    unsigned int idx = (unsigned int)(g_stageId * 0x20 + roomId) * 4 + (bgmState & 7);
+    if (g_bgmDataTable == NULL || idx >= sizeof(g_BgmRoomData)) {
+        return 0xFF;
+    }
+    return g_bgmDataTable[idx];
+}
+
 // ============================================================================
 // bgm_load_and_start (0x0047f200)
-// Loads and starts secondary BGM sound banks based on the target BGM state.
-// TODO: Extract data tables from original binary:
-//   - BGM name table at 0x004d07b8
-//   - BGM pan table at 0x004d0980
-//   - BGM data table at 0x004d0c30 (pointed to by g_bgmDataTable)
+// Loads the three BGM channel banks for the current room. Despite the name it
+// only LOADS - nothing is audible until bgm_start_secondary_slots (or SCD opcode
+// 0x15) plays a channel, which is gated on bits 3-5 of the room's BGM state.
+//
+// Tables (see SoundTables.cpp section 4):
+//   group    = g_bgmDataTable[(stage * 0x20 + room) * 4 + (bgmState & 7)]
+//   filename = g_BgmNameTable[group][channel]     (0x004d07b8 -> 0x004d0428)
+//   loopFlag = g_BgmLoopTable[group][channel]     (0x004d0980 -> 0x004d089c)
+//
+// Note the retail binary nops out the alternate-path branch guarded by
+// g_SoundSystemFlags bit 3 (0x0047f42d-0x0047f470): it builds a second path from
+// g_SoundAltPathPrefix, discards it, and falls into the normal path regardless.
 // ============================================================================
 static void bgm_load_and_start(unsigned char bgmState)
 {
     int slotCount = 3;
 
-    // special case: stage 2, room 7, Jill with certain flags
-    if (g_stageId == 2 && g_roomId == 7) {
-        if ((g_playerEntity.id & 3) == 1) {
-            if (Flg_ck((int)&g_PlayerFlags, 0x5c) || Flg_ck((int)&g_PlayerFlags, 0x48) || !Flg_ck((int)&g_PlayerFlags, 0x55)) {
-                // pass - continue with slotCount=3
-            } else {
-                slotCount = 2;
-                if (g_SndBank[2].handle != 0) {
-                    destroySndBank(g_SndBank[2].handle);
-                }
-                g_SndBank[2].handle = 0;
-                g_SndBank[2].slot   = 0;
-            }
+    // 0x0047f206: stage 2 room 7 drops the third channel unless Jill is here with
+    // one exact flag combination. Every jump in that chain but the last targets
+    // the slotCount=2 path, so 3 channels survive only for
+    //   (id & 3) == 1 && Flg_ck(0x5c) && Flg_ck(0x48) && !Flg_ck(0x55)
+    // and the two-channel case is the default, not the exception. The previous
+    // transcription had the condition inverted and never reached it for Chris.
+    if (g_stageId == 2 && g_roomId == 7 &&
+        !((g_playerEntity.id & 3) == 1 &&
+          Flg_ck((int)&g_PlayerFlags, 0x5c) &&
+          Flg_ck((int)&g_PlayerFlags, 0x48) &&
+          !Flg_ck((int)&g_PlayerFlags, 0x55))) {
+        slotCount = 2;
+        if (g_SndBank[2].handle != 0) {
+            destroySndBank(g_SndBank[2].handle);
         }
+        g_SndBank[2].handle   = 0;
+        g_SndBank[2].field_04 = 0;
+        g_SndBank[2].slot     = 0;
+        g_SndBank[2].paused   = 0;
     }
 
-    unsigned char bgmIndex = bgmState & 7;
+    unsigned char group = bgm_group_for(g_roomId, bgmState);
 
     for (int idx = 0; idx < slotCount; idx++) {
         SndBankSlot* ch = &g_SndBank[idx];
@@ -706,13 +745,40 @@ static void bgm_load_and_start(unsigned char bgmState)
         ch->slot     = 0;
         ch->paused   = 0;
 
-        // TODO: Read BGM type byte from g_bgmDataTable[g_stageId][g_roomId] at offset bgmIndex
-        // const unsigned char* bgmData = (unsigned char*)g_bgmDataTable + (g_stageId * 0x20 + g_roomId) * 4;
-        // unsigned char bgmType = bgmData[bgmIndex];
-        // if (bgmType == 0xFF) continue;
-        // const char* filename = g_bgmNameTable[bgmType]->entries[idx]; // from 0x004d07b8
-        // if (filename == NULL) continue;
-        // ... load and start sound bank
+        if (group == 0xFF) continue;
+
+        const char* filename = g_BgmNameTable[group][idx];
+        if (filename == NULL) continue;
+
+        char path[260];
+        sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", filename);
+        findAndOpenFile(path);
+
+        int bank = loadSndBankFromWav(path);
+        ch->handle = bank;
+        if (bank == 0) {
+            dbg_printf("[bgm] stage %u room %u ch%d group %02X '%s' FAILED TO LOAD\n",
+                       (unsigned int)g_stageId, (unsigned int)g_roomId, idx,
+                       (unsigned int)group, filename);
+            continue;
+        }
+
+        ch->slot = (signed char)g_BgmLoopTable[group][idx];
+        pan_set(bank, 0);
+
+        // 0x0047f4df: three tracks load muted and are faded up later by the SCD
+        // volume opcodes; everything else comes in at the default BGM volume.
+        if (_stricmp(filename, "Se_01") != 0 &&
+            _stricmp(filename, "Se_4d") != 0 &&
+            _stricmp(filename, "Se_42") != 0) {
+            set_volume(bank, g_bgmDefaultVolume);
+        } else {
+            set_volume(bank, -9999);
+        }
+
+        dbg_printf("[bgm] stage %u room %u ch%d group %02X '%s' loop=%d\n",
+                   (unsigned int)g_stageId, (unsigned int)g_roomId, idx,
+                   (unsigned int)group, filename, (int)ch->slot);
     }
 }
 
@@ -755,6 +821,11 @@ void update_room_bgm(void)
     g_targetBgmState = g_RoomBgmStatePtr[g_roomId];
     g_prevBgmState = (unsigned char)g_BGM_STATE;
 
+    dbg_printf("[bgm] update: stage=%u room=%u from=%u target=%02X prev=%02X\n",
+               (unsigned int)g_stageId, (unsigned int)g_roomId,
+               (unsigned int)g_AttractMode_RoomCameraId,
+               (unsigned int)g_targetBgmState, (unsigned int)g_prevBgmState);
+
     if (g_targetBgmState == 0xFF) {
         if ((unsigned char)g_BGM_STATE != 0xFF) {
             bgm_fade_out_all();
@@ -764,83 +835,71 @@ void update_room_bgm(void)
         return;
     }
 
-    // compare BGM category byte from data table
-    // TODO: Extract g_bgmDataTable (points to 0x004d0c30) which maps (stageId, roomId) to BGM category
-    // For now, the category check is stubbed - will always trigger BGM reload on room change
-    const unsigned char* bgmData = (unsigned char*)g_bgmDataTable;
-    if (bgmData != NULL) {
-        unsigned int newIdx = (g_targetBgmState & 7) + (g_stageId * 0x20 + g_roomId) * 4;
-        unsigned int oldIdx = ((unsigned char)g_BGM_STATE & 7) + (g_stageId * 0x20 + g_AttractMode_RoomCameraId) * 4;
+    // 0x0047f670: the "group" byte the outgoing and incoming rooms resolve to.
+    // g_AttractMode_RoomCameraId holds the room we came FROM (room_transition_load
+    // stores g_roomId into it before overwriting g_roomId with the destination).
+    const unsigned char newGroup = bgm_group_for(g_roomId, g_targetBgmState);
+    const unsigned char oldGroup = bgm_group_for(g_AttractMode_RoomCameraId, g_prevBgmState);
 
-        if ((unsigned char)g_BGM_STATE != 0xFF && bgmData[newIdx] != bgmData[oldIdx] && (g_BGM_STATE & 0x38) != 0) {
-            bgm_fade_out_all();
-            g_main_state_flags2 &= 0xFF7FFFFF;
-            bgm_load_and_start(g_targetBgmState);
-        }
+    // 0x0047f6ba: a different track is coming and something is currently playing.
+    // This only tears the old banks down - the reload happens in the switch below.
+    // The original tests the group compare first; the 0xFF test is hoisted here
+    // because a 0xFF prev makes the old index (& 7 == 7) run off the end of the row.
+    if (g_prevBgmState != 0xFF && (g_prevBgmState & 0x38) != 0 && newGroup != oldGroup) {
+        bgm_fade_out_all();
+        g_main_state_flags2 &= 0xFF7FFFFF;
     }
 
+    bool startSecondary = false;
     unsigned char bgmType = g_targetBgmState >> 6;
+
     if (bgmType == 0) {
         if (g_prevBgmState == 0xFF) {
+            // nothing was playing: straight load
             g_main_state_flags2 &= 0xFF7FFFFF;
             bgm_load_and_start(g_targetBgmState);
-        } else {
-            // compare category bytes
-            const unsigned char* data = (unsigned char*)g_bgmDataTable;
-            if (data != NULL) {
-                unsigned int newIdx = (g_targetBgmState & 7) + (g_stageId * 0x20 + g_roomId) * 4;
-                unsigned int oldIdx = (g_prevBgmState & 7) + (g_stageId * 0x20 + g_AttractMode_RoomCameraId) * 4;
-                if (data[newIdx] == data[oldIdx]) {
-                    g_main_state_flags2 &= 0xFF7FFFFF;
-                    // bit-level sound slot toggling
-                    if ((g_targetBgmState ^ g_prevBgmState) & 8) {
-                        if (!(g_targetBgmState & 8)) {
-                            if (g_SndBank[0].handle != 0) setSndStop(g_SndBank[0].handle);
-                        } else {
-                            if (g_SndBank[0].handle != 0) SetSndSlot(g_SndBank[0].handle, g_SndBank[0].slot);
-                        }
-                    }
-                    if ((g_targetBgmState ^ g_prevBgmState) & 0x10) {
-                        if (!(g_targetBgmState & 0x10)) {
-                            if (g_SndBank[1].handle != 0) setSndStop(g_SndBank[1].handle);
-                        } else {
-                            if (g_SndBank[1].handle != 0) SetSndSlot(g_SndBank[1].handle, g_SndBank[1].slot);
-                        }
-                    }
-                    if ((g_targetBgmState ^ g_prevBgmState) & 0x20) {
-                        if (!(g_targetBgmState & 0x20)) {
-                            if (g_SndBank[2].handle != 0) setSndStop(g_SndBank[2].handle);
-                        } else {
-                            if (g_SndBank[2].handle != 0) SetSndSlot(g_SndBank[2].handle, g_SndBank[2].slot);
-                        }
-                    }
-                    goto done;
-                }
-            }
+            startSecondary = true;
+        } else if (newGroup != oldGroup) {
             bgm_fade_out_all();
             g_main_state_flags2 &= 0xFF7FFFFF;
             bgm_load_and_start(g_targetBgmState);
+            startSecondary = true;
+        } else {
+            // Same track continues across the transition - keep the loaded banks
+            // and only toggle the channels whose enable bit changed.
+            g_main_state_flags2 &= 0xFF7FFFFF;
+            unsigned char changed = g_targetBgmState ^ g_prevBgmState;
+            for (int i = 0; i < 3; i++) {
+                unsigned char bit = (unsigned char)(8 << i);
+                if ((changed & bit) == 0) continue;
+                if (g_SndBank[i].handle == 0) continue;
+                if (g_targetBgmState & bit) {
+                    SetSndSlot(g_SndBank[i].handle, g_SndBank[i].slot);
+                } else {
+                    setSndStop(g_SndBank[i].handle);
+                }
+            }
         }
     } else if (bgmType == 1) {
+        // always reload, never auto-start (0x0047f8ae falls through to done)
         bgm_fade_out_all();
         g_main_state_flags2 &= 0xFF7FFFFF;
         bgm_load_and_start(g_targetBgmState);
     } else if (bgmType == 2) {
+        // force restart: bit 7 is consumed here, so the (& 0xC0) test below always
+        // passes and the channels are started immediately
         g_targetBgmState &= 0x7F;
         bgm_fade_out_all();
         g_main_state_flags2 &= 0xFF7FFFFF;
         bgm_load_and_start(g_targetBgmState);
-        if ((g_targetBgmState & 0xC0) == 0) {
-            bgm_start_secondary_slots();
-        }
-        goto done;
+        startSecondary = (g_targetBgmState & 0xC0) == 0;
     }
+    // bgmType == 3 is unused: it falls straight through to done.
 
-    if (bgmType != 2) {
+    if (startSecondary) {
         bgm_start_secondary_slots();
     }
 
-done:
     g_BGM_STATE = g_targetBgmState;
     g_main_state_flags2 &= 0xFF7FFFFF;
 }

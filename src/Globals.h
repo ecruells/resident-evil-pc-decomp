@@ -907,7 +907,9 @@ extern int           g_bgmDefaultVolume;
 extern unsigned char g_prevBgmState;
 extern unsigned char g_targetBgmState;
 extern unsigned char* g_RoomBgmStatePtr;
-extern void*         g_bgmDataTable;
+// 0x00d1fdc4 - set to g_BgmRoomData (0x004d0c30) by sounds_reset. Indexed flat:
+// g_bgmDataTable[(stageId * 0x20 + roomId) * 4 + (bgmState & 7)].
+extern const unsigned char* g_bgmDataTable;
 extern void*         g_StageDataPtr;
 extern const unsigned short* g_StageVoiceOffsetTable[];
 extern const char*   g_StageVoiceNamesTable[];
