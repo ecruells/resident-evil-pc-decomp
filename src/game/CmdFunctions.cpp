@@ -122,9 +122,9 @@ int cmd_end_if(void)
 // ============================================================================
 // 0x04 - cmd_bit_test (0x00460570)
 // Test a bit in a flag bank. Returns 1 if condition matches, 0 otherwise.
-// Flag banks: 0=PlayerFlags, 1=PlayerFlags3, 2=desks_locks, 3=RoomEventFlags,
-//             4=SysFlags, 5=main_state_flags, 6=message_flags,
-//             7=PlayerFlags2, 8=RoomFlags, 9=DAT_00d213a0
+// Flag banks: 0=PlayerFlags, 1=PlayerFlags3, 2=locksFlags (g_LocksFlags),
+//             3=RoomEventFlags, 4=SysFlags, 5=main_state_flags,
+//             6=message_flags, 7=PlayerFlags2, 8=RoomFlags, 9=DAT_00d213a0
 // ============================================================================
 int cmd_bit_test(void)
 {
@@ -135,7 +135,7 @@ int cmd_bit_test(void)
     switch (op1 >> 8) {
     case 0: flagBank = (unsigned int*)&g_PlayerFlags; break;
     case 1: flagBank = (unsigned int*)&g_PlayerFlags3; break;
-    case 2: flagBank = (unsigned int*)&g_desks_locks_flags; break;
+    case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
     case 3: flagBank = (unsigned int*)g_RoomEventFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
     case 5: flagBank = (unsigned int*)&g_main_state_flags; break;
@@ -170,7 +170,7 @@ int cmd_bit_op(void)
     switch (op1 >> 8) {
     case 0: flagBank = (unsigned int*)&g_PlayerFlags; break;
     case 1: flagBank = (unsigned int*)&g_PlayerFlags3; break;
-    case 2: flagBank = (unsigned int*)&g_desks_locks_flags; break;
+    case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
     case 3: flagBank = (unsigned int*)g_RoomEventFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
     case 5: flagBank = (unsigned int*)&g_main_state_flags; break;

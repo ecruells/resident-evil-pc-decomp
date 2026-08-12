@@ -249,7 +249,7 @@ value is a condition (0 aborts the straight-line run).
 | `0x01` | `cmd_if` | `004604e0` | 2 | `[op, skipLen]`. Pushes `(p+2) + skipLen` on the branch stack, `++g_ScriptContinueFlag`. |
 | `0x02` | `cmd_else` | `00460520` | 2 | `[op, jumpLen]`. Pops the branch stack and jumps `p += jumpLen`. |
 | `0x03` | `cmd_end_if` | `00460550` | 2 | Pops the branch stack. |
-| `0x04` | `cmd_bit_test` | `00460570` | 4 | **Cond.** `[op, bank][sel, expect]`. `sel & 0x1F` = bit index, `(sel & 0xE0) >> 3` = byte offset into the bank. Returns `bitIsSet ^ expect`. Banks: 0 `g_PlayerFlags`, 1 `g_PlayerFlags3`, 2 `g_desks_locks_flags`, 3 `g_RoomEventFlags`, 4 `g_SysFlags`, 5 `g_main_state_flags`, 6 `g_message_flags`, 7 `g_roomItemsFlags`, 8 `g_RoomFlags`, 9 `DAT_00d213a0`. |
+| `0x04` | `cmd_bit_test` | `00460570` | 4 | **Cond.** `[op, bank][sel, expect]`. `sel & 0x1F` = bit index, `(sel & 0xE0) >> 3` = byte offset into the bank. Returns `bitIsSet ^ expect`. Banks: 0 `g_PlayerFlags`, 1 `g_PlayerFlags3`, 2 `g_LocksFlags` (0x00be9874 — the same array `door_try_enter` checks), 3 `g_RoomEventFlags`, 4 `g_SysFlags`, 5 `g_main_state_flags`, 6 `g_message_flags`, 7 `g_roomItemsFlags`, 8 `g_RoomFlags`, 9 `DAT_00d213a0`. |
 | `0x05` | `cmd_bit_op` | `00460650` | 4 | `[op, bank][sel, mode]`. `mode` 0=set, 1=clear, 2=toggle. Same bank/sel encoding as `0x04`. |
 | `0x06` | `cmd_obj06_test` | `00460760` | 4 | **Cond.** `[op, fieldIdx][mode, cmpVal]`. Compares the byte at `(&g_stageId)[fieldIdx]`. `mode` 0 `==`, 1 `>`, 2 `>=`, 3 `<`, 4 `<=`, 5 `!=` (relative to `cmpVal`). |
 | `0x07` | `cmd_obj07_test` | `00460800` | 6 | **Cond.** `[op, pad][fieldIdx, mode][cmpVal:u16]`. Compares `((u16*)&g_fading_state)[fieldIdx]`. |

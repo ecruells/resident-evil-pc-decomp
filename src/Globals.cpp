@@ -1810,9 +1810,6 @@ unsigned char* g_RoomScdOpcodes = NULL;                  // 0x00d213b8
 // SCD flag bank 9
 unsigned int   DAT_00d213a0[2] = {};                    // 0x00d213a0
 
-// Desks/locks flags (SCD flag bank 2)
-unsigned int   g_desks_locks_flags[16] = {};            // 0x00be9840
-
 // Player entity fields used by SCD command functions
 unsigned short DAT_00d211c4 = 0;                        // 0x00d211c4
 unsigned short DAT_00d21350 = 0;                        // 0x00d21350

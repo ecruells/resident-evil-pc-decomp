@@ -98,7 +98,7 @@ CMDS = {
     0x50: ('cmd_0x51', 1, ""),
 }
 
-BANKS = {0: "PlayerFlags", 1: "PlayerFlags3", 2: "desks_locks", 3: "RoomEventFlags",
+BANKS = {0: "PlayerFlags", 1: "PlayerFlags3", 2: "locksFlags", 3: "RoomEventFlags",
          4: "SysFlags", 5: "main_state_flags", 6: "message_flags",
          7: "roomItemsFlags", 8: "RoomFlags", 9: "DAT_00d213a0"}
 

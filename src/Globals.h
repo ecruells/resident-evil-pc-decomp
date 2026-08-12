@@ -615,9 +615,6 @@ extern const unsigned char g_ScdAnimRemap[32];          // 0x004bec80
 // SCD flag bank 9 (misc flags)
 extern unsigned int  DAT_00d213a0[2];                  // 0x00d213a0
 
-// Desks/locks flags (SCD flag bank 2)
-extern unsigned int  g_desks_locks_flags[16];          // 0x00be9874
-
 // Player entity fields used by cmd functions
 extern unsigned short DAT_00d211c4;                    // 0x00d211c4
 extern unsigned short DAT_00d21350;                    // 0x00d21350
