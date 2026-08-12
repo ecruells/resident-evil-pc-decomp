@@ -364,10 +364,12 @@ void FrameRateGovernor(void)
                 }
             }
 
+#ifdef _DEBUG
             // Debug-only collision boundary overlay ([Debug] ShowCollision, F5).
             // Between the background and the 3D so characters occlude the
             // outlines and it reads as geometry lying on the floor.
             CollisionDebug_Draw();
+#endif
 
             // Render queued 3D TMD objects (entities, options-menu character)
             FlushTmdObjects();

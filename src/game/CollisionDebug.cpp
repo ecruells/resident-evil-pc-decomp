@@ -29,6 +29,11 @@
 #include "../marni/MarniSystem.h"
 #include <cmath>
 
+// Entire overlay is debug-only: compiled out of release builds. The F5 toggle
+// (WindowProc) and the [Debug] ShowCollision/CollisionY config reads (main.cpp)
+// are gated with the same #ifdef.
+#ifdef _DEBUG
+
 // Set from config.ini by LoadIniConfiguration (main.cpp).
 BOOL g_bShowCollisionDebug = FALSE;
 int  g_iCollisionDebugY    = 0;    // world Y of the plane the overlay is drawn on
@@ -355,3 +360,5 @@ void CollisionDebug_Draw(void)
 
     CollDbg_Flush();
 }
+
+#endif // _DEBUG

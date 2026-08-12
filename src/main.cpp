@@ -46,6 +46,7 @@ static BOOL LoadIniConfiguration(void)
     g_dwScreenHeight = GetPrivateProfileIntA("Display", "Height", 480, foundPath);
     g_dwBitDepth = GetPrivateProfileIntA("Display", "BitDepth", 32, foundPath);
 
+#ifdef _DEBUG
     // Debug-only: draw the room's RDT collision boundaries over the background.
     g_bShowCollisionDebug =
         (GetPrivateProfileIntA("Debug", "ShowCollision", 0, foundPath) != 0);
@@ -53,6 +54,7 @@ static BOOL LoadIniConfiguration(void)
     // for a room whose walkable level is not at y = 0. Note -Y is up.
     g_iCollisionDebugY =
         GetPrivateProfileIntA("Debug", "CollisionY", 0, foundPath);
+#endif
 
 
     // Clamp to reasonable values

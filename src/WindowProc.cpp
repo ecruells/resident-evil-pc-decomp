@@ -161,10 +161,23 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             // Not in the original: F5 toggles the collision boundary overlay.
             // Handled on KEYUP, like PrintScreen above, because that fires once
             // per press - WM_KEYDOWN autorepeats while the key is held and would
-            // flip the toggle every repeat.
+            // flip the toggle every repeat. Debug builds only.
+#ifdef _DEBUG
             else if (wParam == VK_F5) {
                 g_bShowCollisionDebug = g_bShowCollisionDebug ? FALSE : TRUE;
             }
+#endif
+            // Not in the original: debug helpers. F2 requests the save screen,
+            // F3 requests the item box menu. Also KEYUP (single-fire, no
+            // autorepeat); the game loop consumes the flags. Debug builds only.
+#ifdef _DEBUG
+            else if (wParam == VK_F2) {
+                g_debugOpenSaveScreenFlag = 1;
+            }
+            else if (wParam == VK_F3) {
+                g_debugOpenItemboxFlag = 1;
+            }
+#endif
             break;
         
         // --- WM_SYSCOMMAND ---

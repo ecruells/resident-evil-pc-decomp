@@ -400,6 +400,14 @@ extern int           g_displayDebugSaveMenu;           // 0x004d4680 - debug sav
 extern int           g_debugSaveMenuFlag;              // 0x004d4684 - debug save menu state flag
 extern int           DAT_004d228c;                     // 0x004d228c - menu processing active flag
 
+// Port-added debug helpers (no original address; set by F2/F3 in WindowProc,
+// consumed by the game loop). F2 = save screen, F3 = item box menu.
+// Compiled out of release builds.
+#ifdef _DEBUG
+extern int           g_debugOpenSaveScreenFlag;
+extern int           g_debugOpenItemboxFlag;
+#endif
+
 // Room interaction state (0x00be9616-0x00be9618, adjacent to g_eventItemUsedFlag)
 extern unsigned char g_typewriter_state;               // 0x00be9616 - typewriter save-flow state machine
 extern unsigned char g_itembox_state;                  // 0x00be9617 - itembox lid animation state (0-4)
@@ -854,9 +862,12 @@ extern int g_collPushDepthZLo;                         // 0x00be0df0 - push scra
 // --- Debug-only collision overlay (CollisionDebug.cpp, not in the original) ---
 // [Debug] ShowCollision=1 in config.ini draws the room's RDT boundary records
 // over the background, projected through the same path the character model uses.
+// Compiled out of release builds (the F5 toggle and config reads are gated too).
+#ifdef _DEBUG
 extern BOOL g_bShowCollisionDebug;
 extern int  g_iCollisionDebugY;   // [Debug] CollisionY - world Y of the overlay plane
 void CollisionDebug_Draw(void);
+#endif
 
 // --- Room boundary collision (RoomCollision.cpp) ---
 void          Room_SetupCollisionCallbacks(void);                      // 0x0047d140

@@ -27,6 +27,12 @@ extern void run_command_functions(unsigned short* scd_opcodes);
 extern void room_events_check(void);
 extern void room_state_reset(void);
 
+// Debug: F2 save-screen request state machine (0 = idle, 1 = fade out,
+// 2 = save screen open, 3 = fade back in). Port-added, debug builds only.
+#ifdef _DEBUG
+static int g_debugSaveScreenState = 0;
+#endif
+
 // ============================================================================
 // game_loop (0x00480b30)
 // Main gameplay loop: entities, cameras, rooms, menus, combat.
@@ -101,6 +107,46 @@ LAB_00480c33:
             check_typewriter_state();
             check_event_item_usage();
 
+            // ---- Debug: F2 opens the save screen directly (no ink ribbon) ----
+            // Mirrors check_typewriter_state's fade-out -> LoadSaveGameState ->
+            // fade-back-in sequence, with useInkRibbon = 0 so nothing is consumed.
+#ifdef _DEBUG
+            if (g_debugOpenSaveScreenFlag != 0) {
+                g_debugOpenSaveScreenFlag = 0;
+                if ((g_openMenuFlag == 0) && (g_loadSaveStateFlag == 0) &&
+                    ((g_main_state_flags & 0x8000) == 0)) {
+                    g_debugSaveScreenState = 1;
+                }
+            }
+            switch (g_debugSaveScreenState) {
+            case 1: // fade out to black
+                g_fade_type_id = 2;
+                g_fading_counter = 0x1000;
+                fade_update();
+                g_debugSaveScreenState = 2;
+                break;
+            case 2: // black reached: open the save screen (blocking)
+                if ((short)g_fading_state < 0) {
+                    LoadSaveGameState(0, (int)g_loadDataDestPointer, 0, 2, 0);
+                    g_loadSaveStateFlag = 0;
+                    cut_set();
+                    g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x80000000;
+                    StMask(1, 0);
+                    g_fade_type_id = 2;
+                    g_fading_counter = 0xf000;
+                    fade_update();
+                    g_debugSaveScreenState = 3;
+                }
+                break;
+            case 3: // wait for fade back in
+                if ((short)g_fading_state < 0) {
+                    g_debugSaveScreenState = 0;
+                    ((unsigned char*)&g_message_flags)[0] |= 0x45;
+                }
+                break;
+            }
+#endif
+
             // 0x00480c6a-0x00480ca0: Countdown timer management (self-destruct)
             if ((DAT_004d2294 > 29) || (g_CountdownTimer == 0x7FFF)) {
                 DAT_004d2294 = 0;
@@ -154,6 +200,25 @@ LAB_00480d7c:
 
                 // 0x00480de8-0x00480e89: Menu button detection
                 WORD savedMsgFlags = g_message_flags;
+
+                // Debug: F3 opens the item box directly. Sets menu mode 2
+                // (0x1000, consumed by main_menu's mode scan) and requests the
+                // menu through the same g_openMenuFlag path as the START button.
+                // The mode bits are cleared when the menu closes
+                // (menu_restore_game_state: g_main_state_flags &= 0xFFFF00FF).
+#ifdef _DEBUG
+                if (g_debugOpenItemboxFlag != 0) {
+                    g_debugOpenItemboxFlag = 0;
+                    if ((g_openMenuFlag == 0) && (g_loadSaveStateFlag == 0) &&
+                        ((g_main_state_flags & 0x8000) == 0)) {
+                        g_main_state_flags |= 0x1000;
+                        g_openMenuFlag = 1;
+                        g_message_flags &= 0xFF7A;
+                        g_short_message_flags = savedMsgFlags;
+                    }
+                }
+#endif
+
                 if (((g_playerEntity.isBeingAttackedFlag == 0) &&
                      ((g_message_flags & 0x100) != 0) &&
                      ((g_message_flags & 0x40) != 0) &&

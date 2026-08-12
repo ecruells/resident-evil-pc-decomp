@@ -1878,3 +1878,11 @@ int            g_debugSaveMenuFlag = 0;
 
 // 0x004d228c - Menu processing active flag (set during menu open/close)
 int            DAT_004d228c = 0;
+
+// Port-added debug helpers (no original address; set by F2/F3 in WindowProc).
+// F2 requests the save screen, F3 requests the item box menu.
+// Compiled out of release builds.
+#ifdef _DEBUG
+int            g_debugOpenSaveScreenFlag = 0;
+int            g_debugOpenItemboxFlag = 0;
+#endif
