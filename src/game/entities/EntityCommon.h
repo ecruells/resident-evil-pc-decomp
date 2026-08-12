@@ -132,7 +132,9 @@ extern void entity_add_fade_sprite(VECTOR* pos, short* velocity, short yOffset, 
 // ============================================================================
 extern unsigned char FUN_0045f970(int px, int pz, int* a, int* b);            // 0x0045f970
 extern unsigned int FUN_00460230(short x, short z);                           // 0x00460230
-extern void FUN_004602b0(unsigned int zoneA, unsigned int zoneB);             // 0x004602b0
+// Returns 0 when the shared edge runs along X (g_playerDisplacement = crossing
+// x), 1 when along Z or not adjacent - the flag npc_walk_choose_heading uses.
+extern unsigned char FUN_004602b0(unsigned int zoneA, unsigned int zoneB);    // 0x004602b0
 
 // ============================================================================
 // Joint reach hit test (0x0048ae00) - defined in EntityCommon.cpp

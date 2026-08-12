@@ -104,6 +104,9 @@ BANKS = {0: "PlayerFlags", 1: "PlayerFlags3", 2: "desks_locks", 3: "RoomEventFla
 
 
 def u16(data, off):
+    # zero-pad short bodies so detail lines never overrun on odd widths
+    if off + 2 > len(data):
+        return 0
     return struct.unpack_from("<H", data, off)[0]
 
 
@@ -145,7 +148,9 @@ def decode(data, off, length, label):
             flags = body[0x18]
             detail = f"door={door} flags={flags:#x}"
         elif op == 0x01:
-            detail = f"jump+{(u16(body,0)>>8):#x}"
+            # 1-byte body: the jump offset is the byte itself (the u16 read
+            # below used to overrun on short bodies)
+            detail = f"jump+{body[0]:#x}" if body else "jump?"
         elif op == 0x02:
             detail = f"jump+{body[0]:#x}"
         hx = " ".join(f"{b:02X}" for b in body)

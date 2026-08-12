@@ -7,7 +7,11 @@ the function and sum every `ADD dword ptr [0x00bf0800], imm` — that is the tot
 advance of g_ScdOpcodes including the opcode byte. Width of the argument body is
 advance - 1.
 
-Image base mapping: file offset = VA - 0x400000 (PE image base 0x400000).
+Image base mapping: file offset is NOT VA - 0x400000. The PE's sections have
+different raw and virtual offsets (.text is VA 0x401000 at raw 0x600, so .text
+addresses map as VA - 0x400A00). Use va_to_off() below, which walks the section
+table. Disassembling with the naive VA - 0x400000 lands 0xA00 bytes off and
+produces plausible-looking garbage rather than an obvious failure.
 """
 import os
 import struct

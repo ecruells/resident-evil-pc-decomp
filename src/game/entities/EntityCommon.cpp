@@ -908,8 +908,12 @@ unsigned int FUN_00460230(short x, short z)
 // Midpoint of the shared edge between two adjacent zones (given as zone
 // indices), into g_playerDisplacement / player_distance_z. Zones sharing an
 // X edge get the midpoint of the overlapping Z span and vice versa.
+// Returns the edge orientation flag the original leaves in AL: 0 when the
+// shared edge runs along X (g_playerDisplacement is the crossing x), 1 when
+// it runs along Z or the zones are not adjacent. The state-9 walk heading
+// (npc_walk_choose_heading) branches on it.
 // ============================================================================
-void FUN_004602b0(unsigned int zoneA, unsigned int zoneB)
+unsigned char FUN_004602b0(unsigned int zoneA, unsigned int zoneB)
 {
     unsigned short* a = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneA & 0xFFFF) * 0xC);
     unsigned short* b = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneB & 0xFFFF) * 0xC);
@@ -928,12 +932,13 @@ void FUN_004602b0(unsigned int zoneA, unsigned int zoneB)
         unsigned short lo = a[0] > b[0] ? a[0] : b[0];
         unsigned short hi = a[2] < b[2] ? a[2] : b[2];
         g_playerDisplacement = (unsigned int)((lo + hi) >> 1);
-        return;
+        return 1;
     }
 
     unsigned short lo = a[1] > b[1] ? a[1] : b[1];
     unsigned short hi = a[3] < b[3] ? a[3] : b[3];
     player_distance_z = (unsigned int)((lo + hi) >> 1);
+    return 0;
 }
 
 // ============================================================================
@@ -955,9 +960,22 @@ void FUN_004602b0(unsigned int zoneA, unsigned int zoneB)
 // position's candidates are consumed monotonically and the walk terminates;
 // the CCW walk additionally marks fresh positions (g_zonePathIdx = count) so
 // its descending scan starts at the top of the range instead of wrapping.
-// Verified against every shipped RDT: 16,168 (start, target) pairs, zero
-// hangs, 13,382 paths found - the same goals the ascending scan finds on the
-// valid range.
+//
+// THE GOAL-STEP ALIASING (fixed 2026-08-11): the original's scratch arrays
+// overlap - idx[1] IS dir[0] - so when the target is directly adjacent to the
+// start zone (goal at step 0), the goal branch's `best[1] = idx[1]` reads the
+// target zone the branch just wrote into dir[0]. The split arrays lost that
+// and returned a STALE leftover from the previous walk as the first step; the
+// follow-the-player behaviours then steered at a point from an old path and
+// zigzagged between zones. The record loop now spells the aliasing out
+// (best[step+1] = zoneTarget). Verified with tools/sim_zone_walk.py, which
+// previously compared the original model against a HARDCODED start zone 0 -
+// that is fixed too, and the original now agrees with the port on every
+// direct-adjacency pair in every shipped RDT. The remaining divergences are
+// the long-way-around-ring cases, where the original's wrapping scan finds a
+// shorter route through zones past the table; the bounded scan returns a
+// longer valid path or 0xFF (the caller falls back to the direct heading) -
+// both still reach the target zone.
 // ============================================================================
 static unsigned char zone_walk_ccw(unsigned int zoneStart, unsigned char zoneTarget,
                                    short targetX, short targetZ)
@@ -1064,7 +1082,14 @@ static unsigned char zone_walk_ccw(unsigned int zoneStart, unsigned char zoneTar
         if (dist < best) {
             int n = step + 1;
             do {
-                g_zonePathBest[n] = g_zonePathIdx[n];
+                // The original's scratch arrays overlap: idx[n] aliases
+                // dir[n-1], and the goal write above just set dir[i] to
+                // zoneTarget - so best[step+1] comes out as the target zone
+                // itself. Once the arrays were split, reading g_zonePathIdx[n]
+                // here returned a STALE leftover from the previous walk - the
+                // walker then steered at a point from an old path, and the
+                // follow behaviours zigzagged. Spell the aliasing out.
+                g_zonePathBest[n] = (n == step + 1) ? zoneTarget : g_zonePathIdx[n];
                 best = dist;
                 n--;
             } while (n != 0);
@@ -1187,7 +1212,14 @@ static unsigned char zone_walk_cw(unsigned int zoneStart, unsigned char zoneTarg
         if (dist < best) {
             int n = step + 1;
             do {
-                g_zonePathBest[n] = g_zonePathIdx[n];
+                // The original's scratch arrays overlap: idx[n] aliases
+                // dir[n-1], and the goal write above just set dir[i] to
+                // zoneTarget - so best[step+1] comes out as the target zone
+                // itself. Once the arrays were split, reading g_zonePathIdx[n]
+                // here returned a STALE leftover from the previous walk - the
+                // walker then steered at a point from an old path, and the
+                // follow behaviours zigzagged. Spell the aliasing out.
+                g_zonePathBest[n] = (n == step + 1) ? zoneTarget : g_zonePathIdx[n];
                 best = dist;
                 n--;
             } while (n != 0);

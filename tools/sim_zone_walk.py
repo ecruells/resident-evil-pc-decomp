@@ -71,7 +71,7 @@ def _char(v):
     """Signed char wrap, like the original's local_9 (a char)."""
     return ((v + 128) & 0xFF) - 128
 
-def orig_walk(ctx, zones, count, variant, targetZone, targetX, targetZ):
+def orig_walk(ctx, zones, count, variant, startZone, targetZone, targetX, targetZ):
     mem = [0] * 37
     def rd(j):
         if j < 0 or j >= len(mem): return 0
@@ -95,8 +95,11 @@ def orig_walk(ctx, zones, count, variant, targetZone, targetX, targetZ):
     def set_sz(i, v):   wr(31 + i * 4, v & 0xFF); wr(32 + i * 4, (v >> 8) & 0xFF)
     def set_px(i, v):   wr(33 + i * 4, v & 0xFF); wr(34 + i * 4, (v >> 8) & 0xFF)
     def set_pz(i, v):   wr(35 + i * 4, v & 0xFF); wr(36 + i * 4, (v >> 8) & 0xFF)
-    set_idx(0, 0); set_best(0, 0)
+    set_idx(0, startZone); set_best(0, startZone)
     set_dir(0, count if variant == 'ccw' else 0xFF)
+    # NOTE: idx(1) aliases dir(0) - the goal branch writes dir(i) = target
+    # BEFORE recording best(1) = idx(1), which is how the direct-adjacency
+    # case (goal at step 0) reads the target zone as the first step.
     step = 0
     bestd = 0xFFFFFFFF
     dist = 0
@@ -181,6 +184,10 @@ def port_walk(zones, count, variant, targetZone, targetX, targetZ, idx, dir_, be
     dist = 0
     iters = 0
     MAXIT = 200000
+    if variant == 'ccw':
+        # fresh-position marker, mirrors zone_walk_ccw in EntityCommon.cpp
+        for k in range(1, 0x10):
+            idx[k] = count
     while True:
         iters += 1
         if iters > MAXIT: return ('HANG', iters)
@@ -202,7 +209,10 @@ def port_walk(zones, count, variant, targetZone, targetX, targetZ, idx, dir_, be
             if dist < bestd:
                 n = step + 1
                 while n != 0:
-                    best[n] = idx[n]
+                    # mirrors the aliasing repair in EntityCommon.cpp: the
+                    # original's idx[1] IS dir[0] (just written = target), so
+                    # the goal step's first step is the target zone itself
+                    best[n] = targetZone if n == step + 1 else idx[n]
                     bestd = dist
                     n -= 1
             if step != 0:
@@ -297,7 +307,7 @@ def main():
                     # target at the target zone's center, like the SCD path
                     tx = (zones[target][0] + zones[target][2]) >> 1
                     tz = (zones[target][1] + zones[target][3]) >> 1
-                    og = orig_walk(ctx, zones, count, variant, target, tx, tz)
+                    og = orig_walk(ctx, zones, count, variant, start, target, tx, tz)
                     idx = [0]*64; dir_ = [0]*64; best = [0]*64
                     sx = [0]*64; sz = [0]*64; px = [0]*64; pz = [0]*64
                     idx[0] = start; best[0] = start

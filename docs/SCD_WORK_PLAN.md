@@ -167,12 +167,13 @@ address. Behaviour 1 is the remapped-animation player and 5 walks to the scripte
 destination in `unk_c6`/`unk_c8`.
 
 New file `src/game/entities/CharacterNpc.cpp` holds the NPC side: the update
-driver, state 0 init, state 1 idle, state 8, all ten per-character init handlers
-and the two trivial idle handlers. **Not yet transcribed:** the 11 NPC SCD
-behaviour handlers (`0x0047a580`–`0x0047b760`), idle behaviours 0–3
-(`0x0046b580`, `0x0046b620`, `0x0046b800`, `0x0046bb20`) and state 9
-(`0x00471950`, which needs `entity_pathfind_update`, `FUN_00471e70/e90/2570`,
-`FUN_00460230` and `ResolveEntityScaCollision`). All of them log instead.
+driver, state 0 init, state 1 idle, state 8, all ten per-character init handlers,
+the two trivial idle handlers and (since 2026-08-11) the full state-9 pathfind
+layer - the follow-the-player mode - with its four walk behaviours and helpers.
+**Not yet transcribed:** nothing in the NPC set - all 11 SCD behaviour handlers
+(`0x0047a580`–`0x0047b760`) and idle behaviours 0–3 (`0x0046b580`, `0x0046b620`,
+`0x0046b800`, `0x0046bb20`) are in; state 9 was the last remaining log-only
+slot and is now transcribed too.
 
 ### The one-array-three-views dispatch table
 Worth recording as a technique. The original indexes one block of function
@@ -2221,6 +2222,27 @@ Two details worth recording:
 
 **Still stubbed:** NPC state 9 (`0x00471950`, the pathfind layer) and the four unreachable
 SCD behaviours 3/4/5/10. Nothing currently reaches either.
+
+**Updated (2026-08-11):** NPC state 9 is now transcribed in `CharacterNpc.cpp` - the
+follow-the-player mode `cmd_em_set` sub-command 8 selects (Barry after the dining-room
+scene). The driver, the four walk behaviours (0x00471a40/0x00471b80/0x00471c40/0x00471d50),
+the heading/waypoint helpers (0x00471f20, 0x004720d0, 0x00460090, 0x00460180, 0x00460390)
+and the look-at wander (0x00472330) are all in; `FUN_004602b0` now returns the
+shared-edge flag its original leaves in AL (0 = X edge, 1 = Z edge). The 0x004c35f8
+dispatch block and the 0x004c3608/0x004c3618 threshold/swap tables are extracted. Note
+the swap-byte ring from 0x004c3618 is `{3,0,1,3}`/`{1,2,2,0}` - read the dump at
+0x004c3608 with a 4-byte stride before "correcting" it.
+
+**Second fix (2026-08-12, user-tested):** the follow walk zigzagged because the
+ported zone walkers (`zone_walk_cw/ccw` in EntityCommon.cpp) lost the original's
+scratch-array aliasing - `idx[1]` IS `dir[0]`, so the goal branch's
+`best[1] = idx[1]` reads the target zone the branch just wrote, and a direct
+adjacency (goal at step 0) must return the target as the first step. The split
+arrays returned a stale leftover from the previous walk instead, so Barry
+shuffled between zones 6 and 7 forever. Spelled out as
+`best[n] = (n == step+1) ? zoneTarget : idx[n]` in both walkers. The sim
+(`tools/sim_zone_walk.py`) was also fixed - its original-model comparison
+hardcoded start zone 0, which is why the divergence went unnoticed.
 
 **Not run in-game.** Build-verified only (full tree, zero errors). Ghidra updated with all
 four names and saved.

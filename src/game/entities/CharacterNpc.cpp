@@ -50,6 +50,8 @@ extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
 extern void SetSpriteBufferFlag(void);
 extern void EntityUpdateLookAtAngles(void);                              // 0x00459eb0
 extern void Flg_on(int baseAddr, unsigned int bitIndex);                 // 0x00473ef0
+extern int  player_distance_z;                                           // EntityCommon.cpp - 0x00be0de4
+extern void MovePlayerXZ(int angle, SVECTOR* offset, SVECTOR* out);      // WeaponDamage.cpp - 0x0041b350
 
 // g_dwJointAnimCopyBase (0x00be0e00) - scratch base written by the weapon-TMD
 // loader; only ever read back through the joint block it also fills in.
@@ -369,11 +371,10 @@ static void npc_idle_play_anim(void)
 }
 
 // ----------------------------------------------------------------------------
-// NPC state 9 (0x00471950) is the pathfind layer and is still not transcribed -
-// it needs entity_pathfind_update, FUN_00471e70/e90/2570 (FUN_00460230 and
-// ResolveEntityScaCollision are now ported).
-// Logging the index beats a NULL slot: it names the missing handler the moment a
-// script asks for it, instead of faulting with no context.
+// NPC state 9 (0x00471950) is the pathfind layer - the follow-the-player mode
+// that cmd_em_set sub-command 8 selects. Transcribed below, after the SCD
+// behaviours: npc_state9_pathfind plus the four walk behaviours and their
+// helpers.
 // ----------------------------------------------------------------------------
 static void npc_report_missing(const char* what)
 {
@@ -387,7 +388,7 @@ static void npc_report_missing(const char* what)
     }
 }
 
-static void npc_state9_pathfind(void) { npc_report_missing("state 9 (0x00471950)"); }
+static void npc_state9_pathfind(void);
 static void char_init_missing(void) { npc_report_missing("character init"); }
 
 // ============================================================================
@@ -1324,10 +1325,6 @@ static void npc_scd_08(void)
 // step, the blend counter starts at 3 rather than 7, and the terminal state
 // clears action_behavior AND action_state together (`MOV word ptr [..+0x86],0`)
 // before signalling. There is no yaw step at the tail.
-//
-// A sweep of every RDT shows opcode 0x85 only ever selects behaviours 7, 8 and
-// 9, so with this one the whole set the scripts actually reach is implemented;
-// 3/4/5/10 remain stubs because nothing selects them.
 // ============================================================================
 static void npc_scd_09(void)
 {
@@ -1424,6 +1421,684 @@ static void npc_state8_action_update(void)
     if ((ENTITY->scd_entity_flags & 4) != 0) {
         EntityUpdateWeaponJoint((ENTITY->scd_entity_flags >> 3) & 1);
     }
+}
+
+// ============================================================================
+// NPC state 9 - the pathfind layer (0x00471950) and its follow behaviours.
+//
+// cmd_em_set sub-command 8 (`ent->state = 9`) selects this mode: the
+// "character joins the party and follows the player" driver - Barry after the
+// dining-room cutscene, Rebecca and the others later. Before this section was
+// transcribed the state logged "unimplemented state 9" every frame and the
+// character stood frozen in its pose.
+//
+// One frame of the driver (npc_state9_pathfind):
+//   first frame only:  FUN_00471e70 - ignore_player_flag = 1, reset look-at
+//   entity_pathfind_update()        - generic obstacle pathfinder (EntityCommon)
+//   FUN_00471e90                    - behaviour swap by player distance
+//   zone = FUN_00460230(position)   - which RDT+0x58 zone the character is in
+//   dispatch g_npcWalkBehaviors[action_behavior]
+//   Joint_move(...), blend = 0x1000 / (blend_counter + 1) - animate; the return
+//     (animation-done flag) lands in attacking_direction, which the behaviours
+//     test as `& 1`
+//   npc_walk_footstep_sound()       - footsteps on the walk frames
+//   collision tail: SetEntityScaHitData, ResolveEntityScaCollision against the
+//     player, HandleEnemyPlayerCollisions, check_room_collision
+//
+// Behaviour selection is a distance ring (raw game units):
+//   3 face player/retreat  <- too far past 0x09C4 (2500) <---+
+//   ^                                                          |
+//   +-- too near, below 0x0708 (1800)                         v
+//   0 pace (wait + short walk) -- past 0x1194 (4500) --> 1 walk to player
+//   ^                                                     (anim 7, speed 0x5D)
+//   |  too near, below 0x0AF0 (2800)                        |
+//   |                                                      v
+//   +-------------- 2 fast walk (anim 8, speed 0xD2) <- past 0x1964 (6500)
+// Behaviour 3 walks BACKWARD while facing the player, so a close player pushes
+// the character away. The thresholds live at 0x004c3608 (4-byte stride, near/
+// far ushort pairs) and the swap targets at 0x004c3618 (2-byte stride); a zero
+// threshold is disabled. FUN_00471e90 reads them with no bounds check in the
+// original, so behaviour 4+ walks past the near table into the far one -
+// guarded here.
+//
+// Field reuse in this section (documented at each site):
+//   +0x16c attacking_direction   Joint_move's animation-done flag
+//   +0x16d dir_control_flags     Joint_move reverse bit
+//   +0x16e texBank               behaviour 0's wait countdown
+//   +0x16f seq_counter           look-at re-roll countdown
+//   +0x170..0x173                look-at random state (dword writes)
+//   +0x174 splatter_flag         the character's RDT zone index
+//   +0x175 bob_speed             the path result / target zone
+//   +0x176 reaction_timer        the walk heading (target yaw)
+// The look-at writes feed EntityUpdateLookAtAngles, still a no-op in this
+// port - the head-track state is kept faithfully regardless.
+// ============================================================================
+
+// ----------------------------------------------------------------------------
+// FUN_00460390 (0x00460390) - wall probe. Returns the room-collision result at
+// (x, z): non-zero means the point is inside a wall. The scratch player
+// position is reloaded and g_svecScratch zeroed, exactly as the original.
+// ----------------------------------------------------------------------------
+static short FUN_00460390(short x, short z)
+{
+    g_playerPosScratch.x = (int)x;
+    g_playerPosScratch.z = (int)z;
+    g_svecScratch.x = 0;
+    g_svecScratch.y = 0;
+    g_playerPosScratch.y = 0;
+    g_svecScratch.z = 0;
+    return room_collision_check_0047da50(&g_playerPosScratch, (VECTOR*)&g_svecScratch);
+}
+
+// ----------------------------------------------------------------------------
+// FUN_00460180 (0x00460180) - clamp `value` into the corridor span [lo, hi]
+// between two zones, nudging both ends inward by step = (hi-lo)>>3 + 0x280
+// when a wall probe hits them. probeWithFlag's bit 15 picks the probe axis:
+// set = probe (lo, probe) / (hi, probe) along X, clear = (probe, lo) /
+// (probe, hi) along Z. Returns lo/hi when the value sits outside the span, the
+// midpoint when the span has collapsed, the value itself when inside. The
+// final compares are signed words in the original.
+// ----------------------------------------------------------------------------
+static short FUN_00460180(short value, short probeWithFlag, short lo, short hi)
+{
+    short probe = (short)(probeWithFlag & 0x7FFF);
+    short step = (short)((int)((short)hi - (short)lo) >> 3) + 0x280;
+
+    if ((probeWithFlag & 0x8000) != 0) {
+        if (FUN_00460390(lo, probe) != 0) lo = (short)(lo + step);
+        if (FUN_00460390(hi, probe) != 0) hi = (short)(hi - step);
+    } else {
+        if (FUN_00460390(probe, lo) != 0) lo = (short)(lo + step);
+        if (FUN_00460390(probe, hi) != 0) hi = (short)(hi - step);
+    }
+
+    if (hi <= lo) {
+        return (short)(((int)lo + (int)hi) >> 1);
+    }
+    if (value < lo) return lo;
+    if (value > hi) return hi;
+    return value;
+}
+
+// ----------------------------------------------------------------------------
+// FUN_004720d0 (0x004720d0) - corridor-crossing test for the walk heading.
+// Reads the character's zone (+0x174) and the path's next zone (+0x175)
+// straight from the entity, then tests whether the crossing point (pos_x,
+// pos_z) sits inside the overlapping span of the two zones' rectangles - flag
+// 0 means the shared edge runs along X, so the span is the Z overlap, and vice
+// versa. Wall probes nudge the span inward by step = (hi-lo)>>3 + 0x280.
+// Returns 1 when the crossing point is inside [lo, hi) - the corridor between
+// the zones is open at the crossing. All word compares are unsigned.
+// ----------------------------------------------------------------------------
+static unsigned char FUN_004720d0(char flag, int pos_x, int pos_z)
+{
+    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned short* entryA = (unsigned short*)(zoneBase + 2
+                             + (unsigned int)ENTITY->splatter_flag * 0xC);
+    unsigned short* entryB = (unsigned short*)(zoneBase + 2
+                             + (unsigned int)ENTITY->bob_speed * 0xC);
+
+    unsigned short lo, hi, pos;
+    if (flag == 0) {
+        lo  = entryA[1] > entryB[1] ? entryA[1] : entryB[1];   // max z1
+        hi  = entryA[3] < entryB[3] ? entryA[3] : entryB[3];   // min z2
+        pos = (unsigned short)pos_z;
+    } else {
+        lo  = entryA[0] > entryB[0] ? entryA[0] : entryB[0];   // max x1
+        hi  = entryA[2] < entryB[2] ? entryA[2] : entryB[2];   // min x2
+        pos = (unsigned short)pos_x;
+    }
+
+    unsigned short step = (unsigned short)((unsigned short)(((int)hi - (int)lo) >> 3) + 0x280);
+
+    if (flag == 0) {
+        if (FUN_00460390((short)pos_x, (short)lo) != 0) lo = (unsigned short)(lo + step);
+        if (FUN_00460390((short)pos_x, (short)hi) != 0) hi = (unsigned short)(hi - step);
+    } else {
+        if (FUN_00460390((short)lo, (short)pos_z) != 0) lo = (unsigned short)(lo + step);
+        if (FUN_00460390((short)hi, (short)pos_z) != 0) hi = (unsigned short)(hi - step);
+    }
+
+    if (hi < lo) {
+        return 0;
+    }
+    return (unsigned char)((pos >= lo) && (pos < hi));
+}
+
+// ----------------------------------------------------------------------------
+// FUN_00460090 (0x00460090) - path-heading fallback, used when the crossing
+// point FUN_004720d0 accepted is inside a wall. The waypoint is the
+// character's own position clamped into the shared corridor between its zone
+// (entityZone) and the path's next zone (pathZone), with the same wall-probe
+// nudges. Returns the heading angle toward the waypoint; the waypoint itself
+// lands in g_playerDisplacement / player_distance_z.
+// ----------------------------------------------------------------------------
+static unsigned short FUN_00460090(short pos_x, short pos_z,
+                                   char pathZone, unsigned char entityZone)
+{
+    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char count = *zoneBase;
+
+    if ((char)entityZone < 0) {
+        entityZone = (unsigned char)FUN_00460230(pos_x, pos_z);
+    } else {
+        entityZone &= 0xF;
+    }
+
+    // The original sign-extends pathZone and indexes the table with it, so a
+    // failed walk (0xFF) reads one record BEFORE the table. Guarded here.
+    int pathIdx = (char)pathZone;
+    if ((unsigned int)pathIdx >= (unsigned int)count) {
+        return 0;
+    }
+
+    unsigned short* entryE = (unsigned short*)(zoneBase + 2
+                             + (unsigned int)entityZone * 0xC);
+    unsigned short* entryP = (unsigned short*)(zoneBase + 2
+                             + (unsigned int)pathIdx * 0xC);
+
+    unsigned short crossX, crossZ;
+    if (entryP[2] == entryE[0] || entryE[2] == entryP[0]) {
+        // Shared X edge: the crossing is (sharedX, entityZ clamped into the
+        // overlapping Z span).
+        crossX = (entryP[2] == entryE[0]) ? entryE[0] : entryP[0];
+        unsigned short lo = entryE[1] > entryP[1] ? entryE[1] : entryP[1];   // max z1
+        unsigned short hi = entryE[3] < entryP[3] ? entryE[3] : entryP[3];   // min z2
+        crossZ = (unsigned short)FUN_00460180(pos_z, (short)crossX, (short)lo, (short)hi);
+    } else {
+        // No shared X edge: the crossing is (entityX clamped into the
+        // overlapping X span, sharedZ). Not-adjacent zones use entryP.z1 as
+        // the "shared" coordinate, as the original does.
+        unsigned short sharedZ = (entryP[3] == entryE[1]) ? entryE[1] : entryP[1];
+        unsigned short lo = entryE[0] > entryP[0] ? entryE[0] : entryP[0];   // max x1
+        unsigned short hi = entryE[2] < entryP[2] ? entryE[2] : entryP[2];   // min x2
+        crossX = (unsigned short)FUN_00460180(pos_x, (short)(sharedZ | 0x8000), (short)lo, (short)hi);
+        crossZ = sharedZ;
+    }
+
+    g_playerDisplacement = (int)(short)crossX;
+    player_distance_z = (int)(short)crossZ;
+    return CalculateAngleBetweenPointsXZ((int)pos_x, (int)pos_z,
+                                         (int)(short)crossX, (int)(short)crossZ);
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_turn_toward_heading (0x004721e0) - step the yaw toward the heading
+// at +0x176. The step is biased by the id's parity (odd ids turn 8 units
+// faster); while the angular difference is larger than the step the yaw moves
+// by it (reversed when the difference wraps negative), otherwise it snaps to
+// the heading. The step test is an unsigned compare in the original.
+// ----------------------------------------------------------------------------
+static void npc_walk_turn_toward_heading(short angleStep)
+{
+    angleStep = (short)(angleStep + (ENTITY->id & 1) * 8);
+    int delta = (int)*(short*)((char*)ENTITY + 0x176) - (int)ENTITY->angle;
+
+    if ((unsigned int)(angleStep * 2) < (unsigned int)((int)angleStep + delta)) {
+        if ((delta & 0x800) != 0) {
+            angleStep = (short)-angleStep;
+        }
+        ENTITY->angle = (short)(ENTITY->angle + angleStep);
+        *(unsigned short*)&ENTITY->angle = *(unsigned short*)&ENTITY->angle & 0xfff;
+        return;
+    }
+    ENTITY->angle = *(short*)((char*)ENTITY + 0x176);
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_advance_xz (0x00472250) - move `distance` units along the current
+// yaw, straight into the localMatrix position. The X/Z words of the yaw are
+// folded into the scratch SVECTOR by MovePlayerXZ (the same helper the player
+// uses), and the int position components are updated from the result.
+// ----------------------------------------------------------------------------
+static void npc_walk_advance_xz(short distance)
+{
+    g_svecScratch.x = distance;
+    g_svecScratch.y = 0;
+    g_svecScratch.z = 0;
+    MovePlayerXZ((int)*(unsigned short*)&ENTITY->angle, &g_svecScratch, &g_svecScratch);
+    ENTITY->scaMatrixData.localMatrix.t[0] += (int)g_svecScratch.x;
+    ENTITY->scaMatrixData.localMatrix.t[2] += (int)g_svecScratch.z;
+}
+
+// ----------------------------------------------------------------------------
+// Look-at state helpers. The original reseeds a random countdown and repaints
+// the look-at fields on every call; EntityUpdateLookAtAngles consumes them
+// (still a no-op in this port), so the state is kept faithfully regardless.
+// ----------------------------------------------------------------------------
+
+// 0x004722b0 - look at nothing (idle): mode 0x10, all angles zero.
+static void npc_walk_reset_lookat(void)
+{
+    ENTITY->seq_counter = (unsigned char)(((unsigned int)g_RandSeed & 0x18) + 0x30) >> 1;
+    *(unsigned int*)((char*)ENTITY + 0x170) = 0;   // angle_turn_delta..move_max_steps
+    ENTITY->lookAtFlags = 0x10;
+    ENTITY->scd_pos_x = 0;
+    ENTITY->scd_pos_y = 0;
+    ENTITY->scd_pos_z = 0;
+    ENTITY->lookAtYawStep   = 0xc0;
+    ENTITY->lookAtPitchStep = 0x40;
+}
+
+// 0x004724f0 - look at (targetX, targetZ): mode 0x11, target angles set.
+static void npc_walk_set_lookat_target(short targetX, short targetZ)
+{
+    ENTITY->seq_counter = (unsigned char)(((unsigned int)g_RandSeed & 0x18) + 0x30) >> 1;
+    *(unsigned int*)((char*)ENTITY + 0x170) = 0;
+    ENTITY->lookAtFlags = 0x11;
+    ENTITY->scd_pos_x = (int)targetX;
+    ENTITY->scd_pos_y = 0;
+    ENTITY->scd_pos_z = (int)targetZ;
+    ENTITY->lookAtYawStep   = 0xc0;
+    ENTITY->lookAtPitchStep = 0x40;
+}
+
+// ----------------------------------------------------------------------------
+// FUN_00472330 (0x00472330) - random look-at wander. Every call forces mode
+// 0x33 and counts down +0x16f; when it hits zero the look-at angles are
+// repainted from four fresh random draws, masked by the character's parity
+// (7 for even ids, 3 for odd). The yaw/pitch steps are derived from the same
+// draws and written with the byte stores the original uses.
+// ----------------------------------------------------------------------------
+static void FUN_00472330(char param_1)
+{
+    ENTITY->lookAtFlags = 0x33;
+    unsigned char mask = (unsigned char)((~(param_1 << 2) & 4U) + 3U);
+
+    ENTITY->seq_counter = (unsigned char)(ENTITY->seq_counter - 1);
+    if (ENTITY->seq_counter != 0) {
+        return;
+    }
+
+    ENTITY->seq_counter = (unsigned char)(((unsigned int)g_RandSeed & 0x18) + 0x30);
+
+    unsigned int seed = (unsigned int)g_RandSeed;
+    unsigned char b4 = (unsigned char)seed & mask;
+    unsigned char b5 = (unsigned char)((seed >> 4) & 7U);
+    unsigned char b2 = (unsigned char)(seed >> 8);
+    unsigned char local_5 = b2 & 0x18;
+    b2 = (b2 >> 4) & 0x18;
+
+    if (b4 == ENTITY->angle_turn_delta || ((b4 | ENTITY->angle_turn_delta) & 3) == 0) {
+        b4 = (unsigned char)((b4 + 1) & mask);
+    }
+    ENTITY->angle_turn_delta = b4;
+    ENTITY->scd_pos_y = (int)(b4 & 3) * 0x60;
+    if ((b4 & 4) == 0) {
+        ENTITY->scd_pos_y = -ENTITY->scd_pos_y;
+    }
+    ENTITY->scd_pos_y &= 0xfff;
+
+    if (b5 == ENTITY->move_timer || ((b5 | ENTITY->move_timer) & 3) == 0) {
+        b5 = (unsigned char)((b5 + 1) & 7);
+    }
+    ENTITY->move_timer = b5;
+    ENTITY->scd_pos_x = (int)(b5 & 3) * 0xa0;
+    if ((b5 & 4) != 0) {
+        ENTITY->scd_pos_x = -ENTITY->scd_pos_x;
+    }
+    ENTITY->scd_pos_x &= 0xfff;
+
+    if (ENTITY->is_moving == local_5) {
+        local_5 = (unsigned char)((local_5 + 8) & 0x18);
+    }
+    ENTITY->is_moving = local_5;
+    ENTITY->lookAtPitchStep = (unsigned char)(local_5 + 0x14);
+
+    if (ENTITY->move_max_steps == b2) {
+        b2 = (unsigned char)(b2 + 8);
+    }
+    ENTITY->move_max_steps = b2;
+    ENTITY->lookAtYawStep = (unsigned char)(b2 + 0x28);
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_choose_heading (0x00471f20) - pick the walking heading and waypoint.
+// Runs the zone-graph pathfinder from the PLAYER's position (FUN_0045f970
+// seeds the start zone from ENTITY and the target from the given point), then:
+//   - bit 4 of the result set (same zone, or a failed walk): head straight at
+//     the player
+//   - otherwise: the crossing point of the shared edge between the character's
+//     zone and the path's next zone, extrapolated onto the character-player
+//     line (FUN_004602b0's return picks which axis is fixed); if the corridor
+//     test passes and the point is not inside a wall it becomes the waypoint,
+//     else FUN_00460090 clamps the character's own position into the corridor
+// Stores the heading at +0x176 and the waypoint at +0x166/+0x168.
+// ----------------------------------------------------------------------------
+static void npc_walk_choose_heading(void)
+{
+    int* playerT = g_playerEntity.scaMatrixData.localMatrix.t;
+    int* entityT = ENTITY->scaMatrixData.localMatrix.t;
+
+    ENTITY->bob_speed = (unsigned char)FUN_0045f970(
+        playerT[0], playerT[2], (int*)&ENTITY->player_pos_x, (int*)&ENTITY->player_pos_z);
+
+    if ((ENTITY->bob_speed & 0x10) != 0) {
+        *(unsigned short*)((char*)ENTITY + 0x176) = getAngleTowardsTarget(playerT[0], playerT[2]);
+        return;
+    }
+
+    // FUN_004602b0 returns 0 when the shared edge runs along X (the crossing x
+    // is g_playerDisplacement and z is extrapolated onto the character-player
+    // line) and 1 when it runs along Z (the roles swap). The integer division
+    // is the original's - a degenerate line divides by zero.
+    int pos_x, pos_z;
+    char edgeFlag = (char)FUN_004602b0(ENTITY->splatter_flag, ENTITY->bob_speed);
+    if (edgeFlag == 0) {
+        pos_z = entityT[2] + (g_playerDisplacement - entityT[0]) *
+                (playerT[2] - entityT[2]) / (playerT[0] - entityT[0]);
+        pos_x = g_playerDisplacement;
+    } else {
+        pos_z = player_distance_z;
+        pos_x = entityT[0] + (player_distance_z - entityT[2]) *
+                (playerT[0] - entityT[0]) / (playerT[2] - entityT[2]);
+    }
+
+    // Same edge flag selects which span FUN_004720d0 tests. The crossing point
+    // is used when the corridor is open AND the point is not inside a wall;
+    // otherwise FUN_00460090 clamps the character's own position instead.
+    if (FUN_004720d0(edgeFlag, pos_x, pos_z) != 0 &&
+        FUN_00460390((short)pos_x, (short)pos_z) == 0) {
+        *(unsigned short*)((char*)ENTITY + 0x176) = getAngleTowardsTarget(pos_x, pos_z);
+        ENTITY->player_pos_x = (short)pos_x;
+        ENTITY->player_pos_z = (short)pos_z;
+        return;
+    }
+
+    *(unsigned short*)((char*)ENTITY + 0x176) = FUN_00460090(
+        (short)entityT[0], (short)entityT[2],
+        (char)ENTITY->bob_speed, ENTITY->splatter_flag);
+    ENTITY->player_pos_x = (short)g_playerDisplacement;
+    ENTITY->player_pos_z = (short)player_distance_z;
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_footstep_sound (0x00472570) - footsteps for the state-9 walk cycle.
+// Animations 3 and 7 step on frames 8 and 0x16 (sound 0), animation 8 on
+// frames 0 and 0xA (sound 1). The original pushes a second dword (id*2 or
+// id*2-4) that PlayEntitySnd never reads - the same dead push as npc_scd_02.
+// ----------------------------------------------------------------------------
+static void npc_walk_footstep_sound(void)
+{
+    if (ENTITY->animationId == 3 || ENTITY->animationId == 7) {
+        if ((char)ENTITY->animation_frame_id == 8) {
+            PlayEntitySnd(0);
+            return;
+        }
+        if ((char)ENTITY->animation_frame_id == 0x16) {
+            PlayEntitySnd(0);
+        }
+    } else if (ENTITY->animationId == 8) {
+        if ((char)ENTITY->animation_frame_id == 0) {
+            PlayEntitySnd(1);
+            return;
+        }
+        if ((char)ENTITY->animation_frame_id == 0xa) {
+            PlayEntitySnd(1);
+        }
+    }
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_behavior_00 (0x00471a40) - behaviour 0: pace in place. A random
+// wait (texBank countdown seeded with (rand & 0x38) + 0x40), then a short
+// walk: animation 5 until Joint_move reports done (attacking_direction bit 0),
+// then animation 6. The random look-at wander runs during the wait; once the
+// walk starts it uses the parity-dependent mask instead.
+// ----------------------------------------------------------------------------
+static void npc_walk_behavior_00(void)
+{
+    switch (ENTITY->action_state) {
+    case 0:
+        ENTITY->action_state       = 1;
+        ENTITY->animationId        = 0;
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->blend_counter      = 7;
+        ENTITY->texBank = (unsigned char)((g_RandSeed & 0x38) + 0x40);   // wait countdown
+        npc_walk_reset_lookat();
+        return;
+    case 1:
+        ENTITY->texBank = (unsigned char)((char)ENTITY->texBank - 1);
+        if ((char)ENTITY->texBank != 0) {
+            FUN_00472330(0);
+            return;
+        }
+        ENTITY->action_state       = 2;
+        ENTITY->animationId        = 5;
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->blend_counter      = 7;
+        npc_walk_reset_lookat();
+        // fall through - the original's jump table runs the case-2 body after
+        // the setup, so the done-flag test happens on the setup frame too
+    case 2:
+        if ((ENTITY->attacking_direction & 1) != 0) {
+            ENTITY->action_state       = 3;
+            ENTITY->animationId        = 6;
+            ENTITY->animation_frame_id = 0;
+            ENTITY->timing_control     = 0;
+            ENTITY->blend_counter      = 7;
+            FUN_00472330((char)(~(unsigned int)ENTITY->id & 1));
+        }
+        return;
+    case 3:
+        FUN_00472330((char)(~(unsigned int)ENTITY->id & 1));
+        return;
+    default:
+        return;
+    }
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_behavior_01 (0x00471b80) - behaviour 1: walk to the player
+// (animation 7, speed 0x5D). Walks while the heading is within +-0x180 of the
+// current yaw (an unsigned window test); otherwise it only turns, at half the
+// step.
+// ----------------------------------------------------------------------------
+static void npc_walk_behavior_01(void)
+{
+    npc_walk_choose_heading();
+
+    if (ENTITY->action_state == 0) {
+        ENTITY->action_state = 1;
+        if (ENTITY->animationId != 7) {
+            ENTITY->animationId        = 7;
+            ENTITY->animation_frame_id = 0;
+            ENTITY->timing_control     = 0;
+            ENTITY->blend_counter      = 7;
+        }
+    }
+
+    int heading = *(short*)((char*)ENTITY + 0x176);
+    if ((unsigned int)(heading - (int)ENTITY->angle + 0x180) < 0x301) {
+        npc_walk_turn_toward_heading(0x30);
+        entity_apply_walk_speed(0x5d);
+        npc_walk_advance_xz((short)ENTITY->move_speed_current);
+        FUN_00472330(0);
+        return;
+    }
+    npc_walk_turn_toward_heading(0x28);
+    FUN_00472330(0);
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_behavior_02 (0x00471c40) - behaviour 2: fast walk to the player
+// (animation 8, speed 0xD2). Same window test as behaviour 1 with a second,
+// wider test (0x200/0x400) that skips the movement entirely when the heading
+// is far off - the look-at target still gets refreshed.
+// ----------------------------------------------------------------------------
+static void npc_walk_behavior_02(void)
+{
+    npc_walk_choose_heading();
+
+    int heading = *(short*)((char*)ENTITY + 0x176);
+    short move;
+    if ((unsigned int)(heading - (int)ENTITY->angle + 0x180) < 0x301) {
+        if (ENTITY->animationId != 8) {
+            ENTITY->animationId        = 8;
+            ENTITY->animation_frame_id = 0;
+            ENTITY->timing_control     = 0;
+            ENTITY->blend_counter      = 7;
+        }
+        npc_walk_turn_toward_heading(0x60);
+        move = 0xd2;
+    } else {
+        if (ENTITY->animationId != 7) {
+            ENTITY->animationId        = 7;
+            ENTITY->animation_frame_id = 0;
+            ENTITY->timing_control     = 0;
+            ENTITY->blend_counter      = 7;
+        }
+        npc_walk_turn_toward_heading(0x30);
+        if ((unsigned int)(heading - (int)ENTITY->angle + 0x200) > 0x400) {
+            npc_walk_set_lookat_target((short)ENTITY->player_pos_x,
+                                       (short)ENTITY->player_pos_z);
+            return;
+        }
+        entity_apply_walk_speed(0x5d);
+        move = (short)ENTITY->move_speed_current;
+    }
+    npc_walk_advance_xz(move);
+    npc_walk_set_lookat_target((short)ENTITY->player_pos_x,
+                               (short)ENTITY->player_pos_z);
+}
+
+// ----------------------------------------------------------------------------
+// npc_walk_behavior_03 (0x00471d50) - behaviour 3: face the player and back
+// away. While the player is within +-0x200 of straight ahead, walk BACKWARD
+// (animation 3, speed -0x3C) with the look-at locked on the player; otherwise
+// the heading is flipped 180 degrees and the character walks forward
+// (animation 7) with the look-at reset - either way it keeps its distance.
+// ----------------------------------------------------------------------------
+static void npc_walk_behavior_03(void)
+{
+    int* playerT = g_playerEntity.scaMatrixData.localMatrix.t;
+    *(unsigned short*)((char*)ENTITY + 0x176) = getAngleTowardsTarget(playerT[0], playerT[2]);
+
+    int heading = *(short*)((char*)ENTITY + 0x176);
+    if ((unsigned int)(heading - (int)ENTITY->angle + 0x200) < 0x401) {
+        if (ENTITY->animationId != 3) {
+            ENTITY->animationId        = 3;
+            ENTITY->animation_frame_id = 0;
+            ENTITY->timing_control     = 0;
+            ENTITY->blend_counter      = 7;
+        }
+        npc_walk_turn_toward_heading(0x30);
+        npc_walk_advance_xz((short)0xffffffc4);   // -0x3C: backward
+        npc_walk_set_lookat_target((short)playerT[0], (short)playerT[2]);
+        return;
+    }
+    if (ENTITY->animationId != 7) {
+        ENTITY->animationId        = 7;
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->blend_counter      = 7;
+    }
+    *(short*)((char*)ENTITY + 0x176) = (short)(*(short*)((char*)ENTITY + 0x176) + 0x800);
+    *(unsigned short*)((char*)ENTITY + 0x176) = *(unsigned short*)((char*)ENTITY + 0x176) & 0xfff;
+    npc_walk_turn_toward_heading(0x30);
+    entity_apply_walk_speed(0x5d);
+    npc_walk_advance_xz((short)ENTITY->move_speed_current);
+    npc_walk_reset_lookat();
+}
+
+// 0x004c35f8 - the four follow behaviours, indexed by action_behavior.
+static void* const g_npcWalkBehaviors[4] = {
+    (void*)npc_walk_behavior_00,   // 0x00471a40 - pace in place
+    (void*)npc_walk_behavior_01,   // 0x00471b80 - walk to player
+    (void*)npc_walk_behavior_02,   // 0x00471c40 - fast walk to player
+    (void*)npc_walk_behavior_03,   // 0x00471d50 - face player / retreat
+};
+
+// 0x004c3608 - distance thresholds, 4-byte stride (near, far) per behaviour.
+// 0x004c3618 - swap-to behaviour per threshold, 2-byte stride (near, far).
+static const unsigned short g_npcWalkNearThresh[4] = { 0x0708, 0x0AF0, 0x1194, 0x0000 };
+static const unsigned short g_npcWalkFarThresh[4]  = { 0x1194, 0x1964, 0x0000, 0x09C4 };
+static const unsigned char  g_npcWalkNearSwap[4]   = {     3,     0,     1,     3 };
+static const unsigned char  g_npcWalkFarSwap[4]    = {     1,     2,     2,     0 };
+
+// ----------------------------------------------------------------------------
+// FUN_00471e70 (0x00471e70) - one-shot state-9 entry: mark the character as
+// ignoring the player and reset its head tracking. Runs once - the flag it
+// sets is the same one the driver tests.
+// ----------------------------------------------------------------------------
+static void FUN_00471e70(void)
+{
+    ENTITY->ignore_player_flag = 1;
+    npc_walk_reset_lookat();
+}
+
+// ----------------------------------------------------------------------------
+// FUN_00471e90 (0x00471e90) - behaviour swap by player distance. Two
+// thresholds per behaviour: while the player is closer than the near one, or
+// farther than the far one, the character switches to the swap behaviour. The
+// swap is a 16-bit store at +0x86, so action_state is cleared with it. The
+// near test is <, the far test >=, and a zero threshold is disabled. The
+// original indexes the tables with no bounds check - guarded here.
+// ----------------------------------------------------------------------------
+static void FUN_00471e90(void)
+{
+    int dz = ENTITY->scaMatrixData.localMatrix.t[2]
+           - g_playerEntity.scaMatrixData.localMatrix.t[2];
+    int dx = ENTITY->scaMatrixData.localMatrix.t[0]
+           - g_playerEntity.scaMatrixData.localMatrix.t[0];
+    unsigned int dist = SquareRoot0(dz * dz + dx * dx);
+
+    unsigned int behavior = ENTITY->action_behavior;
+    if (behavior >= 4) {
+        npc_report_missing("walk behaviour swap index");
+        return;
+    }
+    if (g_npcWalkNearThresh[behavior] != 0 &&
+        dist < (unsigned int)g_npcWalkNearThresh[behavior]) {
+        *(unsigned short*)&ENTITY->action_behavior = g_npcWalkNearSwap[behavior];
+        return;
+    }
+    if (g_npcWalkFarThresh[behavior] != 0 &&
+        (unsigned int)g_npcWalkFarThresh[behavior] <= dist) {
+        *(unsigned short*)&ENTITY->action_behavior = g_npcWalkFarSwap[behavior];
+    }
+}
+
+// ----------------------------------------------------------------------------
+// npc_state9_pathfind (0x00471950) - NPC state 9, the follow-the-player
+// pathfind layer. See the section header for the frame structure.
+// ----------------------------------------------------------------------------
+static void npc_state9_pathfind(void)
+{
+    if (ENTITY->ignore_player_flag == 0) {
+        FUN_00471e70();
+    }
+
+    entity_pathfind_update();
+    FUN_00471e90();
+
+    ENTITY->splatter_flag = (unsigned char)FUN_00460230(
+        (short)ENTITY->scaMatrixData.localMatrix.t[0],
+        (short)ENTITY->scaMatrixData.localMatrix.t[2]);
+
+    unsigned int behavior = ENTITY->action_behavior;
+    if (behavior < 4) {
+        ((void(*)(void))g_npcWalkBehaviors[behavior])();
+    } else {
+        npc_report_missing("walk behaviour slot");
+    }
+
+    // The Joint_move return (animation done) lands in attacking_direction, and
+    // the blend step derives from blend_counter: 0x1000/(n+1), so the 7 the
+    // behaviours set yields the usual 0x200.
+    ENTITY->attacking_direction = (unsigned char)Joint_move(
+        ENTITY->dir_control_flags & 1,
+        ENTITY->animHeader, ENTITY->animBase,
+        (short)(0x1000 / (ENTITY->blend_counter + 1)));
+
+    npc_walk_footstep_sound();
+    SetEntityScaHitData(ENTITY);
+    ResolveEntityScaCollision((Entity*)&g_playerEntity, ENTITY);
+    HandleEnemyPlayerCollisions();
+    check_room_collision((VECTOR*)ENTITY->scaMatrixData.localMatrix.t,
+                         *(short*)((char*)ENTITY->Sca_info + 10));
 }
 
 // ============================================================================
