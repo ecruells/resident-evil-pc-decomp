@@ -214,10 +214,24 @@ void room_set_visited_flag(unsigned char stageId, unsigned char roomId) {
 
 // ============================================================================
 // room_state_reset (0x00475700)
-// Resets room state: clears SCD system flags word 1 and DAT_00be9830.
-// Called from room_set and game_loop. Note: room_set also clears word 0.
+// Resets room state: clears SCD system flags word 1, the used-item id, the
+// event-item id and DAT_00be9830. Called from room_set and game_loop. Note:
+// room_set also clears SysFlags word 0.
+//
+// Original (00475700):
+//   XOR EAX,EAX
+//   MOV [0x00be9833],AL    <- DAT_00be9833 (event item id) = 0
+//   MOV [0x00be9832],AL    <- g_usedItemId                = 0
+//   MOV [0x00be41cc],EAX   <- g_SysFlags[1]               = 0
+//   MOV [0x00be9830],EAX   <- DAT_00be9830                = 0
+// The port previously omitted the first two clears, so g_usedItemId stayed set
+// after any item use (menu "use", use_room_action_item) and the room SCD's
+// obj10_test item-use dispatch kept firing on later frames - in room10f1 the
+// piano cutscene re-triggered every frame instead of playing once.
 // ============================================================================
 void room_state_reset(void) {
+    DAT_00be9833 = 0;
+    g_usedItemId = 0;
     g_SysFlags[1] = 0;
     DAT_00be9830 = 0;
 }
