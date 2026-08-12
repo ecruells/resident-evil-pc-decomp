@@ -2471,15 +2471,21 @@ static void effect_submit_diag(int stage, Effect* eff, int sheetSlot,
                                short screenX, short screenY, int depth,
                                int scale, unsigned char srvNull)
 {
-    static int lastStage = -1;
-    static int lastSlot = -1;
-    static int lastX = 0x7FFF;
-    static int lastY = 0x7FFF;
-    static int lastDepth = -1;
-    if (stage == lastStage && sheetSlot == lastSlot &&
-        screenX == lastX && screenY == lastY && depth == lastDepth) return;
-    lastStage = stage; lastSlot = sheetSlot;
-    lastX = screenX; lastY = screenY; lastDepth = depth;
+    // Keyed PER EFFECT TYPE. A single last-value key hid the fact that only one
+    // type was ever reaching this function: a second type culled at a different
+    // stage would overwrite the key and then be suppressed on the next frame
+    // when the first type reported again. Per-type makes "type 9 never appears
+    // here at all" readable instead of ambiguous.
+    static int lastStage[256];
+    static int lastSlotT[256];
+    static int inited = 0;
+    if (!inited) {
+        inited = 1;
+        for (int i = 0; i < 256; i++) { lastStage[i] = -1; lastSlotT[i] = -1; }
+    }
+    unsigned char t = eff->effectType;
+    if (stage == lastStage[t] && sheetSlot == lastSlotT[t]) return;
+    lastStage[t] = stage; lastSlotT[t] = sheetSlot;
     dbg_printf("[effect] submit stage=%d type=%u slot=%d srvNull=%u"
                " scr=(%d,%d) depth=%d scale=%d u=%u v=%u w=%u h=%u\n",
                stage, (unsigned int)eff->effectType, sheetSlot, (unsigned int)srvNull,
@@ -2650,7 +2656,28 @@ void EffectActor_UpdateAndRender(void)
     // 2-byte overhang past the first trips the stack guard - the original's
     // assembly uses one dword slot, so model it as an explicit short pair.
     struct { short x; short y; } local_1c = { 0, 0 };
-    VECTOR local_10 = { 0, 0, 0, 0 };
+
+    // Seeded from the slot's LAST KNOWN world position, not zero.
+    //
+    // Only the `animHeader[10] & 2` branch below writes local_10, and the
+    // original leaves it uninitialised otherwise - it reads whatever the stack
+    // slot happens to hold. In practice that is almost always this same
+    // function's previous value, i.e. the last position written for this or a
+    // neighbouring effect, so the original keeps drawing the sprite through
+    // frames whose animation phase has the transform bit clear.
+    //
+    // Zeroing it made the zone test reject those frames outright, and an effect
+    // whose phases alternate between hdr10=0x03 and hdr10=0x00 then FLICKERED -
+    // visible in ROOM1000 as the type-0x0B sprite drawing every other frame:
+    //   hdr10=03 world=(5160,-930,8690) -> DREW
+    //   hdr10=00 world=(0,0,0)          -> outside switch zone
+    // eff->posX/Y/Z is exactly what the transform branch last stored, so it is
+    // the deterministic stand-in for the original's stale stack value.
+    VECTOR local_10;
+    local_10.x = (int)eff->posX;
+    local_10.y = (int)eff->posY;
+    local_10.z = (int)eff->posZ;
+    local_10.pad = 0;
 
     if ((g_message_flags & 8) != 0) {
         g_effectBehaviorTable[eff->animId]();
@@ -2709,6 +2736,40 @@ void EffectActor_UpdateAndRender(void)
 
     if (((eff->animHeader[10] & 1) != 0) && ((g_message_flags & 8) != 0)) {
         Effect_AnimateSprite();
+    }
+
+    // DIAGNOSTIC: why did this slot not draw?
+    //
+    // ROOM1000's opcode-0x2A effects (type 9) spawn and expire without ever
+    // reaching effect_submit_sprite, and none of the cull stages inside that
+    // function fire - so the rejection is one of the two gates below, or the
+    // slot never gets here at all. Static analysis cleared both header bits
+    // (type 9 depth 7 is hdr10=0x03 hdr11=0x70) and the zone quad (the effect's
+    // world XZ 4420,3800 is inside the first switch zone of every ROOM1000
+    // camera), so this reports what the values actually are at runtime.
+    //
+    // Keyed per effectType so each type reports once per changed outcome
+    // instead of once per frame. Remove once the effects render.
+    {
+        static unsigned char lastReason[256] = {};
+        unsigned char reason = 1;                        // 1 = drew
+        if ((eff->animHeader[11] & 0x80) != 0) reason = 2;
+        else if (is_entity_in_switch_zone(&local_10, g_CurrentRdtDataTypePtr) == 0) reason = 3;
+        if (lastReason[eff->effectType] != reason) {
+            lastReason[eff->effectType] = reason;
+            const char* why = (reason == 2) ? "hdr11 bit7 set"
+                            : (reason == 3) ? "outside switch zone"
+                            : "DREW";
+            dbg_printf("[effect] slot %u type=%u anim=%u upd=%u hdr10=%02X hdr11=%02X"
+                       " world=(%d,%d,%d) scr=(%d,%d) projDepth=%u zonePtr=%p -> %s\n",
+                       (unsigned int)g_activeEffectIndex,
+                       (unsigned int)eff->effectType,
+                       (unsigned int)eff->animId, (unsigned int)eff->updateId,
+                       (unsigned int)eff->animHeader[10], (unsigned int)eff->animHeader[11],
+                       (int)local_10.x, (int)local_10.y, (int)local_10.z,
+                       (int)local_1c.x, (int)local_1c.y,
+                       (unsigned int)eff->projDepth, g_CurrentRdtDataTypePtr, why);
+        }
     }
 
     if ((eff->animHeader[11] & 0x80) != 0) return;

@@ -1273,15 +1273,253 @@ void setBackColor(unsigned short r, unsigned short g, unsigned short b) {
 // (0x0040ae40) - Empty function called by LoadRoomRdt
 void empty_40ae40(int param) { }
 
-// (0x00473b10) - Texture bank setup variant
-void FUN_00473b10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6) { }
+// ============================================================================
+// Model colour-tint helpers used by SCD opcode 0x34 variant 0.
+//
+// All three walk the SAME per-object array JointSetColorTint (0x00485ac0) walks:
+// modelObj+0x20 is the CMarniDirect3DTMD, its object count is the dword at
+// +0x4C0, and the objects start at +0x4D0 with a stride of 0x84. The loop bound
+// is count * 2 (each object has a mirrored copy). Within an object,
+// +0x5C/+0x60/+0x64 are the R/G/B tint multipliers as floats and
+// +0x6C/+0x70/+0x74 are the second copy the renderer actually samples.
+//
+// Like the already-ported JointSetColorTint, only the `modelObj+0x10 == 0`
+// branch is transcribed. The original's else-branch drives the complex-TMD
+// staging buffer g_abComplexTmdObjectData (0x008ffd1c), which this port does not
+// model at all - the same omission, and made for the same reason.
+// ============================================================================
+
+// 1/31, the fixed-point scale the two tint helpers share (float at 0x004af2e8).
+static const float kTintScale = 0.032258064f;
+
+// ============================================================================
+// TmdObjectTintAdd (0x00485c60)
+// Adds a signed RGB delta to every object of a model, rebased so the brighter of
+// the R/G deltas becomes zero:
+//
+//   fr = r/31,  fg = g/31,  fmax = max(fr, fg)
+//   dR = fr - fmax,  dG = fg - fmax,  dB = b/31 - fmax
+//
+// so the tint only ever darkens. Each component is accumulated onto the existing
+// multiplier and clamped into [0, 1]; the second copy at +0x6C/+0x70/+0x74 is set
+// to a constant 2.0f rather than mirrored (that is the original's behaviour, not
+// a transcription slip). Green is then forced to 0 unconditionally, and blue is
+// snapped to 0 below 0.36 (double at 0x004af2f0).
+//
+// On the FIRST object only, the resulting tint is packed back into modelObj+0x18
+// as 0x00RRGGBB with each channel scaled by 255.0 (float at 0x004af2f8).
+// ============================================================================
+static void TmdObjectTintAdd(void* modelObj, int r, int g, int b)
+{
+    unsigned char* obj = (unsigned char*)modelObj;
+    if (obj == NULL || *(int*)(obj + 0x10) != 0) {
+        return;   // complex-TMD path, not modelled (see the note above)
+    }
+
+    unsigned char* tmd = *(unsigned char**)(obj + 0x20);
+    if (tmd == NULL || (*(unsigned int*)(tmd + 0x4C0) & 0x7FFFFFFF) == 0) {
+        return;
+    }
+
+    float fr   = (float)r * kTintScale;
+    float fg   = (float)g * kTintScale;
+    float fmax = (fr <= fg) ? fg : fr;
+    float dR   = fr - fmax;
+    float dG   = fg - fmax;
+    float dB   = (float)b * kTintScale - fmax;
+
+    unsigned char* rec = tmd + 0x4D0;
+    unsigned int count = (unsigned int)(*(int*)(tmd + 0x4C0) * 2);
+
+    for (unsigned int i = 0; i < count; i++) {
+        *(unsigned int*)(rec + 0x80) |= 2;
+
+        *(float*)(rec + 0x5C) += dR;
+        *(unsigned int*)(rec + 0x6C) = 0x40000000u;   // 2.0f
+        *(float*)(rec + 0x60) += dG;
+        *(unsigned int*)(rec + 0x70) = 0x40000000u;   // 2.0f
+        *(float*)(rec + 0x64) += dB;
+        *(unsigned int*)(rec + 0x74) = 0x40000000u;   // 2.0f
+
+        // The clamps are integer compares on the float bit patterns, exactly as
+        // the original: signed `> 0x3F800000` catches anything above 1.0f, and
+        // unsigned `> 0x80000000` catches any negative value except -0.0f.
+        for (int off = 0x5C; off <= 0x64; off += 4) {
+            if (*(int*)(rec + off) > 0x3F800000) {
+                *(unsigned int*)(rec + off) = 0x3F800000u;   // 1.0f
+            }
+            if (*(unsigned int*)(rec + off) > 0x80000000u) {
+                *(unsigned int*)(rec + off) = 0;
+            }
+        }
+
+        *(unsigned int*)(rec + 0x60) = 0;                    // 0x00485db3
+        if (*(float*)(rec + 0x64) < 0.36f) {
+            *(unsigned int*)(rec + 0x64) = 0;
+        }
+
+        if (i == 0) {
+            unsigned int pr = (unsigned int)(int)(*(float*)(rec + 0x5C) * 255.0f);
+            unsigned int pg = (unsigned int)(int)(*(float*)(rec + 0x60) * 255.0f);
+            unsigned int pb = (unsigned int)(int)(*(float*)(rec + 0x64) * 255.0f);
+            *(unsigned int*)(obj + 0x18) =
+                ((pr & 0xFF) << 16) | ((pg << 8) & 0xFF00) | (pb & 0xFF);
+        }
+
+        rec += 0x84;
+    }
+}
+
+// ============================================================================
+// TmdObjectTintSet (0x00485fa0)
+// Sets (rather than accumulates) the RGB multipliers from a signed delta scaled
+// by 5/31. The three values are rebased so that every positive component is
+// subtracted from all three - repeated for R, then G, then B - which drives the
+// brightest channel to exactly 0 and leaves the others negative. The stored
+// multiplier is `1.0f + delta`, so the result only ever darkens.
+//
+// Unlike TmdObjectTintAdd this branch does NOT set the +0x80 dirty bit, and it
+// writes the second copy (+0x6C/+0x70/+0x74) with the same value as the first.
+// ============================================================================
+static void TmdObjectTintSet(void* modelObj, int r, int g, int b)
+{
+    unsigned char* obj = (unsigned char*)modelObj;
+    if (obj == NULL || *(int*)(obj + 0x10) != 0) {
+        return;   // complex-TMD path, not modelled
+    }
+
+    unsigned char* tmd = *(unsigned char**)(obj + 0x20);
+    if (tmd == NULL || (*(unsigned int*)(tmd + 0x4C0) & 0x7FFFFFFF) == 0) {
+        return;
+    }
+
+    float fr = (float)(r * 5) * kTintScale;
+    float fg = (float)(g * 5) * kTintScale;
+    float fb = (float)(b * 5) * kTintScale;
+
+    if (fr > 0.0f) { fg -= fr; fb -= fr; fr = 0.0f; }
+    if (fg > 0.0f) { fr -= fg; fb -= fg; fg = 0.0f; }
+    if (fb > 0.0f) { fr -= fb; fg -= fb; fb = 0.0f; }
+
+    unsigned char* rec = tmd + 0x4D0;
+    unsigned int count = (unsigned int)(*(int*)(tmd + 0x4C0) * 2);
+
+    for (unsigned int i = 0; i < count; i++) {
+        *(float*)(rec + 0x5C) = fr + 1.0f;
+        *(float*)(rec + 0x6C) = fr + 1.0f;
+        *(float*)(rec + 0x60) = fg + 1.0f;
+        *(float*)(rec + 0x70) = fg + 1.0f;
+        *(float*)(rec + 0x64) = fb + 1.0f;
+        *(float*)(rec + 0x74) = fb + 1.0f;
+        rec += 0x84;
+    }
+}
+
+// ============================================================================
+// TmdObjectSetLightScale (0x004870a0)
+// Stores a single negated 1/32-scaled value at modelObj+0x14. The original is
+// called with FOUR arguments but its body reads only two - the same dead-argument
+// pattern as JointApplyColorTint / JointSetColorTint.
+// ============================================================================
+static void TmdObjectSetLightScale(void* modelObj, int value)
+{
+    if (modelObj != NULL) {
+        *(float*)((unsigned char*)modelObj + 0x14) = (float)(-value) * 0.03125f;
+    }
+}
+
+// ============================================================================
+// scd_model_tint_apply (0x00473b10) - Accumulate a colour tint on a queue entry and
+// apply it to the live model. SCD opcode 0x34 variant 0.
+//
+// Was an empty stub, so variant 0 of opcode 0x34 - the only variant that
+// actually tints anything - did nothing at all. Variants 1 and 2
+// (FUN_00473d10 / FUN_00473d60) only ever rewrote the queue entry.
+//
+// Finds the g_textureQueueData entry whose id byte matches p6, ADDS the three
+// signed deltas onto bytes +3/+4/+5 (clamping each into [-31, +31]), stores the
+// two 16-bit parameters at +6/+8 and arms the entry via +1. It then pushes the
+// tint straight into the live model:
+//
+//   p6 bit 7 clear -> an ENEMY id. Scan up to 30 entries of g_EnemiesList for a
+//     matching id and tint every joint. Ids 8, 0x0F and 0x12 use the absolute
+//     TmdObjectTintSet with the CLAMPED queue bytes; every other id uses the
+//     accumulating TmdObjectTintAdd with the RAW deltas.
+//   p6 bit 7 set   -> an object index into g_itemboxes_covers_table. When all
+//     three clamped bytes are equal the tint is a pure luminance change and goes
+//     through TmdObjectSetLightScale; otherwise TmdObjectTintAdd.
+//
+// Two original quirks preserved deliberately:
+//   - the enemy bound is `if (0x1d < g_enemy_count) count = 0x1e`, i.e. clamp to
+//     30, not 32.
+//   - the two object branches mask the index differently (0x7f for the
+//     luminance path, 0x3f for the tint path). That asymmetry is the
+//     original's; it is not a transcription slip.
+// ============================================================================
+void scd_model_tint_apply(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6)
+{
+    unsigned char* e = g_textureQueueData;
+    unsigned char slot = 0;
+    while (*e != (unsigned char)p6) {
+        e += 10;
+        slot++;
+        if (slot > 3) {
+            return;
+        }
+    }
+
+    e[3] = (unsigned char)(e[3] + (char)p1);
+    e[4] = (unsigned char)(e[4] + (char)p2);
+    e[5] = (unsigned char)(e[5] + (char)p3);
+    *(unsigned short*)(e + 6) = p4;
+    *(unsigned short*)(e + 8) = p5;
+
+    for (int i = 3; i <= 5; i++) {
+        if ((char)e[i] < -0x1F) e[i] = 0xE1;    // -31
+        if ((char)e[i] >  0x1F) e[i] = 0x1F;    // +31
+    }
+    e[1] = 1;
+
+    if (((unsigned char)p6 & 0x80) == 0) {
+        unsigned char count = g_enemy_count;
+        if (count > 0x1D) {
+            count = 0x1E;
+        }
+        for (unsigned int n = 0; n < (unsigned int)count; n++) {
+            Entity* enemy = &g_EnemiesList[n];
+            if (enemy->id != (unsigned char)p6) {
+                continue;
+            }
+            JointStruct* joints = enemy->jointsStructs;
+            if (enemy->id == 8 || enemy->id == 0x0F || enemy->id == 0x12) {
+                for (int j = 0; j < (int)(unsigned int)enemy->jointCount; j++) {
+                    TmdObjectTintSet(joints[j].anim_object,
+                                     (int)(char)e[3], (int)(char)e[4], (int)(char)e[5]);
+                }
+            } else {
+                for (int j = 0; j < (int)(unsigned int)enemy->jointCount; j++) {
+                    TmdObjectTintAdd(joints[j].anim_object, (int)p1, (int)p2, (int)p3);
+                }
+            }
+        }
+        return;
+    }
+
+    if (e[3] == e[4] && e[3] == e[5]) {
+        int obj = (int)g_itemboxes_covers_table[(unsigned char)p6 & 0x7F];
+        TmdObjectSetLightScale(*(void**)(obj + 0x18), (int)(char)e[3]);
+    } else {
+        int obj = (int)g_itemboxes_covers_table[(unsigned char)p6 & 0x3F];
+        TmdObjectTintAdd(*(void**)(obj + 0x18), (int)p1, (int)p2, (int)p3);
+    }
+}
 
 // ============================================================================
 // FUN_00473d10 (0x00473d10) - Retarget a texture-queue entry with explicit bytes
 // Same scan as FUN_00473d60 (match the id byte at +0 against p6, arm via +1), but
 // stores p1/p2/p3 into bytes +3/+4/+5 instead of clearing them, and p4/p5 into the
 // words at +6/+8. SCD opcode 0x34 variant 1.
-// Every source is a byte in cmd_0x34, so the low byte of the wider parameters is
+// Every source is a byte in cmd_model_tint_set, so the low byte of the wider parameters is
 // what the original actually stores - the declared widths differ from Ghidra's
 // inferred ones but the stored values are identical.
 // ============================================================================
@@ -1802,7 +2040,7 @@ void BuildSndFadeTbl(char distSteps, int fadeType)
 
 // ============================================================================
 // FUN_0040c560 (0x0040c560) - Store the low bit of the parameter into DAT_004d6444
-// SCD opcode 0x4F writes this flag; opcode 0x50 (cmd_0x51) returns it as its
+// SCD opcode 0x4F writes this flag; opcode 0x50 (cmd_script_flag_test) returns it as its
 // condition result, so a script can set a flag with 0x4F and branch on it later.
 // ============================================================================
 void FUN_0040c560(int param)

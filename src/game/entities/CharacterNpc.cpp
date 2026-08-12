@@ -43,6 +43,7 @@
 // FUN_004565f0 all come from EntityCommon.h. Declaring them locally again is
 // how a signature can drift and silently become a do-nothing overload.
 extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData);
+extern void play_sound_and_voice_effect(int type, int id);   // SoundSystem.cpp
 extern void ResetJointTransforms(void);
 extern unsigned int  ProcessTmdTextures(char mode, unsigned int* tmdBase, int bank, int depth);
 extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
@@ -368,10 +369,9 @@ static void npc_idle_play_anim(void)
 }
 
 // ----------------------------------------------------------------------------
-// Idle behaviours 0-3 (0x0046b580, 0x0046b620, 0x0046b800, 0x0046bb20) and NPC
-// state 9 (0x00471950) are the walk/pathfind layer. They are not transcribed
-// yet - state 9 alone needs entity_pathfind_update, FUN_00471e70/e90/2570
-// (FUN_00460230 and ResolveEntityScaCollision are now ported).
+// NPC state 9 (0x00471950) is the pathfind layer and is still not transcribed -
+// it needs entity_pathfind_update, FUN_00471e70/e90/2570 (FUN_00460230 and
+// ResolveEntityScaCollision are now ported).
 // Logging the index beats a NULL slot: it names the missing handler the moment a
 // script asks for it, instead of faulting with no context.
 // ----------------------------------------------------------------------------
@@ -387,12 +387,255 @@ static void npc_report_missing(const char* what)
     }
 }
 
-static void npc_idle_walk_00(void)  { npc_report_missing("idle behavior 0 (0x0046b580)"); }
-static void npc_idle_walk_01(void)  { npc_report_missing("idle behavior 1 (0x0046b620)"); }
-static void npc_idle_walk_02(void)  { npc_report_missing("idle behavior 2 (0x0046b800)"); }
-static void npc_idle_walk_03(void)  { npc_report_missing("idle behavior 3 (0x0046bb20)"); }
 static void npc_state9_pathfind(void) { npc_report_missing("state 9 (0x00471950)"); }
 static void char_init_missing(void) { npc_report_missing("character init"); }
+
+// ============================================================================
+// npc_idle_walk_01 (0x0046b620) - idle 1: walk forward until you hit something,
+// then bang on it.
+//
+// action_state 0 sets animation 0x35 and a starting speed of 1000; state 1 walks
+// (the speed is trimmed by 15 per animation frame so the character decelerates),
+// probes the room collision, and on contact plays voice 0xA9 and advances.
+// State 2 switches to animation 0x36 with a knock sound, state 3 plays it out.
+//
+// The collision probe saves and restores FOUR dwords from entity+0x34: the three
+// translation components of localMatrix (t[0..2]) plus the first dword of
+// worldMatrix at +0x40. check_room_collision writes through the position it is
+// handed, and the original explicitly rolls all four back - so the probe is a
+// test, not a move.
+// ============================================================================
+static void npc_idle_walk_01(void)
+{
+    switch (ENTITY->action_state) {
+    case 0:
+        ENTITY->action_state        = 1;
+        ENTITY->animation_frame_id  = 0;
+        ENTITY->timing_control      = 0;
+        ENTITY->animationId         = 0x35;
+        ENTITY->blend_counter       = 0;
+        ENTITY->move_speed_current  = 1000;
+        // fall through
+    case 1: {
+        *(short*)&ENTITY->move_speed_current =
+            (short)(*(short*)&ENTITY->move_speed_current
+                    - (short)((unsigned int)ENTITY->animation_frame_id * 0xF));
+        Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
+        Add_speedXZ(0x800);
+
+        int* t = ENTITY->scaMatrixData.localMatrix.t;
+        int saved0 = t[0], saved1 = t[1], saved2 = t[2];
+        int saved3 = *(int*)((char*)ENTITY + 0x40);
+        unsigned char hit = check_room_collision(
+            (VECTOR*)t, *(short*)((char*)ENTITY->Sca_info + 10));
+        g_playerDisplacement = (int)(unsigned int)hit;
+        t[0] = saved0; t[1] = saved1; t[2] = saved2;
+        *(int*)((char*)ENTITY + 0x40) = saved3;
+
+        if (g_playerDisplacement != 0) {
+            ENTITY->action_state = (unsigned char)(ENTITY->action_state + 1);
+            play_sound_and_voice_effect(1, 0xA9);
+            g_main_state_flags |= 0x20000;
+            return;
+        }
+        break;
+    }
+
+    case 2:
+        ENTITY->action_state       = (unsigned char)(ENTITY->action_state + 1);
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->animationId        = 0x36;
+        ENTITY->blend_counter      = 3;
+        Play3DSnd(2, 0x1C, 0, (unsigned int)ENTITY->scaMatrixData.localMatrix.t);
+        // fall through
+    case 3: {
+        char done = (char)Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + done);
+        EntityUpdateWeaponJoint(0);
+        break;
+    }
+
+    default:
+        break;
+    }
+}
+
+// ============================================================================
+// npc_idle_walk_02 (0x0046b800) - idle 2: the scripted death with the blood
+// spray and the fading billboard.
+//
+// action_state 0 sets animation 0x33, arms the death timer (0xB4), flags joint 1
+// and spawns two type-0 billboards off g_deadMoveValue. State 1 sprays blood for
+// the first 10 frames, tints three joints red on frame 3, plays the wet sound on
+// frame 0x2A, and advances when the animation ends. State 2 builds the ground
+// billboard from the dead-move matrix and arms a 30-frame grow; state 3 grows it.
+//
+// g_deadMoveValue HOLDS a pointer (see the note in Zombie.cpp) - the spawn
+// position is the 4-dword block at *(g_deadMoveValue + 0x14).
+// ============================================================================
+static void npc_idle_walk_02(void)
+{
+    const int* deadPos = (const int*)((char*)g_deadMoveValue + 0x14);
+
+    switch (ENTITY->action_state) {
+    case 0: {
+        ENTITY->action_state       = (unsigned char)(ENTITY->action_state + 1);
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->animationId        = 0x33;
+        ENTITY->death_timer        = 0xB4;
+        ENTITY->blend_counter      = 3;
+
+        char* joints = (char*)ENTITY->jointsStructs;
+        ((unsigned char*)joints)[0x7C] |= 8;      // joint 1's flags byte
+
+        g_playerPosScratch.x   = deadPos[0];
+        g_playerPosScratch.y   = deadPos[1];
+        g_playerPosScratch.z   = deadPos[2];
+        g_playerPosScratch.pad = deadPos[3];
+        Effect_CreateBillboard(0, 3, 0, (void*)(joints + 0xC0), &g_playerPosScratch, 0);
+        // NOTE: the original passes the dead-move matrix as the sprite space and
+        // joints+0xD4 as the POSITION - the two arguments are swapped relative to
+        // the call above. Faithful; joints+0xD4 is read as a VECTOR.
+        Effect_CreateBillboard(0, 3, 0, (void*)g_deadMoveValue,
+                               (void*)(joints + 0xD4), 0);
+        // fall through
+    }
+    case 1: {
+        if (ENTITY->animation_frame_id < 10) {
+            g_playerPosScratch.x   = deadPos[0];
+            g_playerPosScratch.z   = deadPos[2];
+            g_playerPosScratch.pad = deadPos[3];
+            g_playerPosScratch.y   = -0x898;
+            Effect_CreateBillboard(0, 0, 0,
+                                   &ENTITY->scaMatrixData.localMatrix,
+                                   &g_playerPosScratch, 0);
+        }
+        if ((char)ENTITY->animation_frame_id == 3) {
+            char* joints = (char*)ENTITY->jointsStructs;
+            JointApplyColorTint((JointStruct*)joints,           0x30, 0x80820, (void*)0x606060);
+            JointApplyColorTint((JointStruct*)(joints + 0x45C), 0x30, 0x80820, (void*)0x606060);
+            JointApplyColorTint((JointStruct*)(joints + 0x5D0), 0x30, 0x80820, (void*)0x606060);
+        }
+        if ((char)ENTITY->animation_frame_id == 0x2A) {
+            Play3DSnd(2, 0x2F, 0, (unsigned int)ENTITY->scaMatrixData.localMatrix.t);
+        }
+        char done = (char)Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + done);
+        EntityUpdateWeaponJoint(0);
+        break;
+    }
+
+    case 2: {
+        g_svecScratch.y = 0;
+        g_svecScratch.z = 0;
+        g_svecScratch.x = -900;
+        // copy the dead-move matrix (8 dwords) into the scratch matrix
+        memcpy(&g_matrixScratch, (void*)g_deadMoveValue, 0x20);
+        RotMatrixY((int)ENTITY->angle, &g_matrixScratch);
+        ApplyMatrixSV(&g_matrixScratch, &g_svecScratch, &g_svecScratch);
+
+        short* quad = (short*)((char*)ENTITY + 0xE4);
+        quad[0] = (short)(quad[0] + g_svecScratch.x);
+        quad[1] = (short)(quad[1] + g_svecScratch.y);
+        quad[2] = (short)(quad[2] + g_svecScratch.z);
+        BillboardSetColor(quad, 1, 2, 0x00FFFF50);
+        BillboardAdjSize(quad, (short)-200, (short)-200);
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + 1);
+        ENTITY->action_ticks_counter = 0x1E;
+        return;
+    }
+
+    case 3:
+        BillboardAdjSize((short*)((char*)ENTITY + 0xE4), 0x10, 0x10);
+        ENTITY->action_ticks_counter =
+            (unsigned short)((short)ENTITY->action_ticks_counter - 1);
+        if ((short)ENTITY->action_ticks_counter == 0) {
+            ENTITY->action_state = (unsigned char)(ENTITY->action_state + 1);
+        }
+        return;
+
+    default:
+        return;
+    }
+}
+
+// ============================================================================
+// npc_idle_walk_03 (0x0046bb20) - idle 3: the other scripted death, the one that
+// faces enemy 1 and bleeds out over 250 frames.
+//
+// action_state 0 sets animation 0x30, a 250-frame timer, hit_state 0x80, raises
+// status bits 6, and copies enemy 1's facing. States 0 and 1 share the body:
+// tint five joints red on frame 8, spray blood before frame 9 and after frame
+// 0x5F, run the vertex-animation pass, and on animation end advance and shrink
+// the billboard. State 2 clears status bit 1, forces health to -1, grows the
+// billboard and counts the timer down.
+// ============================================================================
+static void npc_idle_walk_03(void)
+{
+    const int* deadPos = (const int*)((char*)g_deadMoveValue + 0x14);
+    unsigned char st = ENTITY->action_state;
+
+    if (st == 0) {
+        ENTITY->action_state         = 1;
+        ENTITY->animation_frame_id   = 0;
+        ENTITY->timing_control       = 0;
+        ENTITY->animationId          = 0x30;
+        ENTITY->blend_counter        = 0;
+        ENTITY->action_ticks_counter = 0xFA;     // one 16-bit store of 250
+        ENTITY->hit_state            = 0x80;
+        ENTITY->status_flags        |= 6;
+        ENTITY->angle                = (short)g_EnemiesList[1].angle;
+    } else if (st != 1) {
+        if (st != 2) {
+            return;
+        }
+        ENTITY->status_flags &= (unsigned char)0xFD;
+        ENTITY->health = -1;                     // 0x88/0x89 written as 0xFF,0xFF
+        BillboardAdjSize((short*)((char*)ENTITY + 0xE4), 6, 6);
+        ENTITY->action_ticks_counter =
+            (unsigned short)((short)ENTITY->action_ticks_counter - 1);
+        if ((short)ENTITY->action_ticks_counter != 0) {
+            return;
+        }
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + 1);
+        return;
+    }
+
+    if (ENTITY->animation_frame_id == 8) {
+        char* joints = (char*)ENTITY->jointsStructs;
+        JointApplyColorTint((JointStruct*)joints,           0x30, 0x80820, (void*)0x606060);
+        JointApplyColorTint((JointStruct*)(joints + 0x7C),  0x30, 0x80820, (void*)0x606060);
+        JointApplyColorTint((JointStruct*)(joints + 0xF8),  0x30, 0x80820, (void*)0x606060);
+        JointApplyColorTint((JointStruct*)(joints + 0x45C), 0x30, 0x80820, (void*)0x606060);
+        JointApplyColorTint((JointStruct*)(joints + 0x5D0), 0x30, 0x80820, (void*)0x606060);
+    }
+    if (ENTITY->animation_frame_id < 9) {
+        g_playerPosScratch.x   = deadPos[0];
+        g_playerPosScratch.z   = deadPos[2];
+        g_playerPosScratch.pad = deadPos[3];
+        g_playerPosScratch.y   = -0x5DC;
+        Effect_CreateBillboard(0, 0, 0, &ENTITY->scaMatrixData.localMatrix,
+                               &g_playerPosScratch, 0);
+    }
+    if (ENTITY->animation_frame_id > 0x5F) {
+        g_playerPosScratch.x   = deadPos[0];
+        g_playerPosScratch.y   = deadPos[1];
+        g_playerPosScratch.z   = deadPos[2];
+        g_playerPosScratch.pad = deadPos[3];
+        Effect_CreateBillboard(0, 0, 0, &ENTITY->scaMatrixData.localMatrix,
+                               &g_playerPosScratch, 0);
+    }
+
+    entity_apply_anim_vertex(ENTITY, ENTITY->animHeader, ENTITY->animBase);
+    if ((char)Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400) != 0) {
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + 1);
+        short* quad = (short*)((char*)ENTITY + 0xE4);
+        BillboardSetColor(quad, 1, 2, 0x00FFFF50);
+        BillboardAdjSize(quad, (short)-100, (short)-100);
+    }
+}
 
 // ============================================================================
 // SCD-driven animation handlers, dispatched from npc_state8_action_update by
@@ -582,9 +825,214 @@ static void npc_scd_02(void)
         break;
     }
 }
-static void npc_scd_03(void) { npc_scd_report("0x0047a9c0"); }
-static void npc_scd_04(void) { npc_scd_report("0x0047ad30"); }
-static void npc_scd_05(void) { npc_scd_report("0x0047aef0"); }
+// ----------------------------------------------------------------------------
+// Shared tail of behaviours 4 and 5: both walk BACKWARDS to the scripted target.
+//
+// The backward walk is done by flipping the facing 180 degrees, running the
+// normal "rotate toward target" step, then flipping back - so the turn aligns
+// the character's BACK with the target while `Add_speedXZ(0x800)` drives motion
+// along the (also flipped) heading. The `& 0xfff` is the original's; the angle
+// space is 0..0xFFF.
+//
+// Arrival is 100 units. On arrival the completion flag goes up, and unless
+// collisionFlags bit 7 is set the behaviour clears itself - the original writes
+// action_behavior and action_state with ONE 16-bit store at +0x86.
+// ----------------------------------------------------------------------------
+static void npc_walk_backward_step(void)
+{
+    g_playerPosScratch.x = (int)ENTITY->unk_c6;
+    g_playerPosScratch.z = (int)ENTITY->unk_c8;
+    g_playerPosScratch.y = 0;
+
+    *(unsigned short*)&ENTITY->angle =
+        (unsigned short)((*(unsigned short*)&ENTITY->angle + 0x800) & 0xfff);
+    entity_rotate_toward_target(&g_playerPosScratch, ENTITY->scd_timer);
+    ENTITY->angle = (short)(ENTITY->angle - 0x800);
+
+    Joint_move((char)(ENTITY->scd_entity_flags & 1),
+               ENTITY->animHeader, ENTITY->animBase, 0x200);
+    Add_speedXZ(0x800);
+
+    int dz = ENTITY->scaMatrixData.localMatrix.t[2] - (int)ENTITY->unk_c8;
+    int dx = ENTITY->scaMatrixData.localMatrix.t[0] - (int)ENTITY->unk_c6;
+    if ((unsigned int)SquareRoot0(dz * dz + dx * dx) < 100) {
+        Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        if ((ENTITY->collisionFlags & 0x80) == 0) {
+            ENTITY->action_behavior = 0;
+            ENTITY->action_state    = 0;
+        }
+    }
+}
+
+// ============================================================================
+// npc_scd_03 (0x0047a9c0) - behaviour 3: turn to face the target, walk to it,
+// then decelerate to a stop.
+//
+// A six-state machine. 0/1 turn in place with animation 8 until
+// turn_toward_target reports aligned within 0x16A. 2/3 walk with a footstep on
+// frames 0 and 10; on closing to 250 units it moves to state 4 - UNLESS
+// collisionFlags bit 7 is set, in which case it stays in 3 and raises the
+// completion flag immediately (the original writes state 4 first and then
+// overwrites it, which is why the flag path never reaches the deceleration).
+// 4/5 play the idle animation for four ticks while bleeding 30 off the speed
+// each frame, and 6 clears the behaviour and signals.
+// ============================================================================
+static void npc_scd_03(void)
+{
+    switch (ENTITY->action_state) {
+    case 0:
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->animationId        = 8;
+        ENTITY->action_state       = 1;
+        ENTITY->blend_counter      = 7;
+        // fall through
+    case 1: {
+        g_playerPosScratch.x = (int)ENTITY->unk_c6;
+        g_playerPosScratch.z = (int)ENTITY->unk_c8;
+        g_playerPosScratch.y = 0;
+        int turn = turn_toward_target(&g_playerPosScratch, (short)ENTITY->scd_timer);
+        ENTITY->angle = (short)(ENTITY->angle + (short)turn);
+        Joint_move((char)(ENTITY->scd_entity_flags & 1),
+                   ENTITY->animHeader, ENTITY->animBase, 0x200);
+        // second call is a pure alignment TEST at a wider tolerance
+        if ((short)turn_toward_target(&g_playerPosScratch, 0x16a) == 0) {
+            ENTITY->action_state = 2;
+            return;
+        }
+        break;
+    }
+
+    case 2:
+        ENTITY->move_speed_current = 0xd2;
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->animationId        = 8;
+        ENTITY->action_state       = 3;
+        ENTITY->blend_counter      = 7;
+        // fall through
+    case 3: {
+        if ((char)ENTITY->animation_frame_id == 0)  PlayEntitySnd(1);
+        if ((char)ENTITY->animation_frame_id == 10) PlayEntitySnd(1);
+
+        g_playerPosScratch.x = (int)ENTITY->unk_c6;
+        g_playerPosScratch.z = (int)ENTITY->unk_c8;
+        g_playerPosScratch.y = 0;
+        entity_rotate_toward_target(&g_playerPosScratch, ENTITY->scd_timer);
+        Joint_move((char)(ENTITY->scd_entity_flags & 1),
+                   ENTITY->animHeader, ENTITY->animBase, 0x200);
+        Add_speedXZ(0);
+
+        int dz = ENTITY->scaMatrixData.localMatrix.t[2] - (int)ENTITY->unk_c8;
+        int dx = ENTITY->scaMatrixData.localMatrix.t[0] - (int)ENTITY->unk_c6;
+        if ((unsigned int)SquareRoot0(dz * dz + dx * dx) < 0xfa) {
+            ENTITY->action_state = 4;
+            if ((ENTITY->collisionFlags & 0x80) != 0) {
+                ENTITY->action_state = 3;
+                Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+                return;
+            }
+        }
+        break;
+    }
+
+    case 4:
+        ENTITY->animation_frame_id   = 0;
+        ENTITY->timing_control       = 0;
+        ENTITY->animationId          = 0;
+        ENTITY->action_state         = 5;
+        ENTITY->blend_counter        = 7;
+        ENTITY->action_ticks_counter = 0;
+        // fall through
+    case 5:
+        Joint_move((char)(ENTITY->scd_entity_flags & 1),
+                   ENTITY->animHeader, ENTITY->animBase, 0x200);
+        ENTITY->action_ticks_counter =
+            (unsigned short)((short)ENTITY->action_ticks_counter + 1);
+        if ((short)ENTITY->action_ticks_counter > 3) {
+            ENTITY->action_state = 6;
+        }
+        *(short*)&ENTITY->move_speed_current =
+            (short)(*(short*)&ENTITY->move_speed_current - 0x1e);
+        Add_speedXZ(0);
+        break;
+
+    case 6:
+        ENTITY->action_behavior = 0;
+        ENTITY->action_state    = 0;
+        Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        return;
+
+    default:
+        break;
+    }
+}
+
+// ============================================================================
+// npc_scd_04 (0x0047ad30) - behaviour 4: walk backwards to the target at the
+// faster pace (animation 3), with a footstep on frames 8 and 0x16.
+//
+// NOTE the speed line is the original's and is a no-op dressed as a condition:
+// `if (frame > 4 || frame < 8)` is true for every possible byte, so the +4 is
+// applied unconditionally and the speed is always 0x40. Transcribed as written
+// rather than simplified, because it is the kind of thing that looks like a
+// transcription slip when you meet it later.
+// ============================================================================
+static void npc_scd_04(void)
+{
+    if (ENTITY->action_state == 0) {
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->action_state       = 1;
+        ENTITY->blend_counter      = 7;
+        ENTITY->animationId        = 3;
+    } else if (ENTITY->action_state != 1) {
+        return;
+    }
+
+    if ((char)ENTITY->animation_frame_id == 8 ||
+        (char)ENTITY->animation_frame_id == 0x16) {
+        PlayEntitySnd(0);
+    }
+
+    ENTITY->move_speed_current = 0x3c;
+    if (ENTITY->animation_frame_id > 4 || ENTITY->animation_frame_id < 8) {
+        *(short*)&ENTITY->move_speed_current =
+            (short)(*(short*)&ENTITY->move_speed_current + 4);
+    }
+
+    npc_walk_backward_step();
+}
+
+// ============================================================================
+// npc_scd_05 (0x0047aef0) - behaviour 5: walk backwards to the target at the
+// slower pace (animation 2, speed 0x1D).
+//
+// The footstep fires on frames 7 and 0x1B, and only on the tick where
+// timing_control is exactly 2 - so it plays once per frame rather than on every
+// update the frame is held for.
+// ============================================================================
+static void npc_scd_05(void)
+{
+    if (ENTITY->action_state == 0) {
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->action_state       = 1;
+        ENTITY->blend_counter      = 7;
+        ENTITY->animationId        = 2;
+        ENTITY->move_speed_current = 0x1d;
+    } else if (ENTITY->action_state != 1) {
+        return;
+    }
+
+    if (((char)ENTITY->animation_frame_id == 7 ||
+         (char)ENTITY->animation_frame_id == 0x1b) &&
+        (char)ENTITY->timing_control == 2) {
+        PlayEntitySnd(0);
+    }
+
+    npc_walk_backward_step();
+}
 // 0x0047b0a0 - behaviour 6: turn to face the scripted target in place, without
 // walking. Finishes once aligned within 0x28.
 static void npc_scd_06(void)
@@ -619,10 +1067,334 @@ static void npc_scd_06(void)
         ENTITY->action_state = 2;
     }
 }
-static void npc_scd_07(void) { npc_scd_report("0x0047b1c0"); }
-static void npc_scd_08(void) { npc_scd_report("0x0047b280"); }
-static void npc_scd_09(void) { npc_scd_report("0x0047b6b0"); }
-static void npc_scd_10(void) { npc_scd_report("0x0047b760"); }
+// ============================================================================
+// npc_scd_07 (0x0047b1c0) - behaviour 7: play a scripted animation to its end,
+// then release the event script.
+//
+// This is the one the ROOM1051 dining-room scene blocks on. Barry is set up with
+// `85 07 10 21` (state-1 opcode 0x85): action_behavior 7, animationId 0x10,
+// scd_anim_param 0x21 - and the script then spins on
+// `bit_test(g_SysFlags, 0x21)`. action_state walks 0 -> 1 -> 2 because Joint_move
+// returns 1 on the frame the animation loops and that result is ADDED to
+// action_state; at 2 this sets the bit and the script proceeds (to `85 08 11 21`,
+// the firing behaviour npc_scd_08).
+//
+// Structurally identical to npc_scd_06's terminal branch, minus the turning:
+// no target tracking, just play the anim and signal. The yaw step at the tail
+// runs on EVERY path including state 2, which is what lets a script nudge the
+// character's facing while the animation plays.
+// ============================================================================
+static void npc_scd_07(void)
+{
+    char st = (char)ENTITY->action_state;
+
+    if (st == 0) {
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->action_state       = 1;
+        ENTITY->blend_counter      = 7;
+        // falls through into the Joint_move block, as the original does
+    } else if (st != 1) {
+        if (st == 2) {
+            // The completion signal the event script's bit_test is waiting on.
+            Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        }
+        goto tail;
+    }
+
+    {
+        // Ghidra renders the first argument as a CONCAT31(...) & 0xffffff01 -
+        // that is just `scd_entity_flags & 1` widened to the char parameter,
+        // the same idiom npc_scd_06 uses.
+        char done = (char)Joint_move((char)(ENTITY->scd_entity_flags & 1),
+                                     ENTITY->animHeader, ENTITY->animBase, 0x200);
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + done);
+    }
+
+tail:
+    ENTITY->angle = (short)(ENTITY->angle + (short)ENTITY->scd_timer);
+}
+
+// ============================================================================
+// Weapon-FX spawn tables for behaviour 8 (0x004c0dd8 / 0x004c0e68 / 0x004c0ef8)
+//
+// Three parallel tables of 10-byte records, indexed by `behavior_flags - 2`
+// (the weapon the character is holding). Each record names the animation frame
+// that triggers the spawn, the effect type and depth group, and a local offset.
+// 14 records each; the byte after the last record is not part of the table.
+//
+//   A - muzzle flash, spawned in the weapon joint's space
+//   B - ejected shell / smoke, spawned in the ENTITY's own matrix
+//   C - secondary flash, again in the weapon joint's space
+//
+// A frame value of 0x63 (99) is the original's "disabled" marker: no animation
+// reaches frame 99, so the test never fires.
+// ============================================================================
+struct NpcFireFx {
+    unsigned char frame;    // animation_frame_id that triggers this spawn
+    unsigned char type;     // Effect_CreateBillboard type
+    unsigned char depth;    // depth group
+    unsigned char pad;
+    short x, y, z;          // local offset
+};
+
+static const NpcFireFx kFireFxMuzzle[14] = {   // 0x004c0dd8
+    { 0x01, 0x11, 0x00, 0,  110,  540,   0 }, { 0x01, 0x11, 0x01, 0,  640, 1110,   0 },
+    { 0x01, 0x11, 0x02, 0,  160,  610,   0 }, { 0x01, 0x11, 0x0A, 0,  160,  610,   0 },
+    { 0x00, 0x00, 0x00, 0,    0,    0,   0 }, { 0x02, 0x08, 0x07, 0,  400,  660,   0 },
+    { 0x02, 0x08, 0x07, 0,  400,  660,   0 }, { 0x02, 0x08, 0x07, 0,  400,  660,   0 },
+    { 0x01, 0x0B, 0x09, 0, -190, 1020,  90 }, { 0x01, 0x0B, 0x09, 0, -190, 1020, -60 },
+    { 0x01, 0x0B, 0x09, 0,  -60, 1040,  90 }, { 0x01, 0x0B, 0x09, 0,  -60, 1040, -60 },
+    { 0x01, 0x11, 0x00, 0,  110,  540,   0 }, { 0x01, 0x11, 0x00, 0,  600, 1370,   0 },
+};
+
+static const NpcFireFx kFireFxShell[14] = {    // 0x004c0e68
+    { 0x03, 0x05, 0x00, 0,  370, -2870, -220 }, { 0x19, 0x05, 0x09, 0,  360, -2050, -440 },
+    { 0x63, 0x00, 0x00, 0,    0,     0,    0 }, { 0x63, 0x00, 0x00, 0,    0,     0,    0 },
+    { 0x00, 0x00, 0x00, 0,    0,     0,    0 }, { 0x63, 0x00, 0x00, 0,    0,     0,    0 },
+    { 0x63, 0x00, 0x00, 0,    0,     0,    0 }, { 0x63, 0x00, 0x00, 0,    0,     0,    0 },
+    { 0x02, 0x09, 0x0B, 0, 1400, -2800, -300 }, { 0x00, 0x00, 0x00, 0,    0,     0,    0 },
+    { 0x00, 0x00, 0x00, 0,    0,     0,    0 }, { 0x00, 0x00, 0x00, 0,    0,     0,    0 },
+    { 0x03, 0x05, 0x00, 0,  250, -1900, -250 }, { 0x03, 0x05, 0x00, 0,  250, -1900, -250 },
+};
+
+static const NpcFireFx kFireFxFlash2[14] = {   // 0x004c0ef8
+    { 0x02, 0x09, 0x0B, 0, 110,  500,   0 }, { 0x02, 0x09, 0x0B, 0, 640, 1060,   0 },
+    { 0x02, 0x09, 0x0B, 0, 160,  610,   0 }, { 0x02, 0x09, 0x0B, 0, 160,  610,   0 },
+    { 0x00, 0x00, 0x00, 0,   0,    0,   0 }, { 0x02, 0x09, 0x0B, 0, 640, 1060,   0 },
+    { 0x02, 0x09, 0x0B, 0, 640, 1060,   0 }, { 0x02, 0x09, 0x0B, 0, 640, 1060,   0 },
+    { 0x02, 0x08, 0x02, 0, 430, -830,  90 }, { 0x02, 0x08, 0x02, 0, 430, -830, -60 },
+    { 0x02, 0x08, 0x02, 0, 570, -810,  90 }, { 0x02, 0x08, 0x02, 0, 570, -810, -60 },
+    { 0x02, 0x09, 0x0B, 0, 110,  500,   0 }, { 0x02, 0x09, 0x0B, 0, 640, 1500,   0 },
+};
+
+// The original indexes the three tables with a raw byte and never bounds it.
+// The port reports instead of reading past them - a weapon id this high means
+// behavior_flags was never initialised, which is worth seeing in the log.
+static const NpcFireFx* fire_fx_row(const NpcFireFx* table, unsigned int idx)
+{
+    return (idx < 14) ? &table[idx] : NULL;
+}
+
+// Effect_CreateBillboard returns 0xFF when the pool is full, and the original
+// stores that into a SIGNED char before using it as an index - so a full pool
+// writes g_effectPool[-1]. The port's .bss neighbours differ from the original's,
+// so that stray write would corrupt something else entirely here; guarded.
+static void fire_fx_tag(unsigned char slot, unsigned int field, unsigned char value)
+{
+    g_playerDisplacement = (int)(signed char)slot;
+    if (g_playerDisplacement >= 0 && g_playerDisplacement < 64) {
+        g_effectPool[g_playerDisplacement].animHeader[field] = value;
+    }
+}
+
+// ============================================================================
+// npc_scd_08 (0x0047b280) - behaviour 8: fire the equipped weapon.
+//
+// THE cutscene gunfire behaviour. Barry shooting the zombie in the Jill dining
+// room (ROOM1051) is `85 08 11 21` -> state 8, action_behavior 8,
+// animationId 0x11, scd_anim_param 0x21; the script then spins on
+// `bit_test(g_SysFlags, 0x21)` until action_state 2 sets that bit. While this
+// was a stub nothing ever set it, so the scene hung forever with no muzzle
+// flash - both halves of the same missing function.
+//
+// action_state walks 0 -> 1 -> 2 (Joint_move returns 1 on the frame the
+// animation loops, and the result is ADDED to action_state, so the state
+// advances exactly when the anim completes). Weapon id 3 takes the 0/3 path
+// instead, which plays animation 0x17 with no effects at all.
+// States 4/5 are the flamethrower: a continuous type-0x0C billboard every 6th
+// frame plus a looping two-sound burst, and a per-frame yaw sweep.
+// ============================================================================
+static void npc_scd_08(void)
+{
+    unsigned char weapon = (unsigned char)(ENTITY->behavior_flags - 2);
+    unsigned int  idx    = (unsigned int)weapon;
+
+    switch (ENTITY->action_state) {
+    case 0:
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->action_state       = 1;
+        ENTITY->blend_counter      = 3;
+        if (weapon == 3) {
+            ENTITY->action_state = 3;
+            ENTITY->animationId  = 0x17;
+            goto play_anim;
+        }
+        // fall through to the firing frame tests
+    case 1: {
+        char* joints = (char*)ENTITY->jointsStructs;
+        // +0x70C is joint 14's `world` matrix (14 * 0x7C + 0x44) - the weapon hand.
+        void* weaponSpace = (void*)(joints + 0x70C);
+
+        const NpcFireFx* a = fire_fx_row(kFireFxMuzzle, idx);
+        if (a != NULL && ENTITY->animation_frame_id == a->frame) {
+            g_playerPosScratch.x = (int)a->x;
+            g_playerPosScratch.y = (int)a->y;
+            g_playerPosScratch.z = (int)a->z;
+            Effect_CreateBillboard(a->type, a->depth, 0, weaponSpace,
+                                   &g_playerPosScratch, 0);
+            if (weapon == 2) {
+                g_playerPosScratch.x = 0x96;
+                g_playerPosScratch.y = 0x17C;
+                g_playerPosScratch.z = 0;
+                Effect_CreateBillboard(0x11, 0x03, 0, weaponSpace,
+                                       &g_playerPosScratch, 0);
+            }
+        }
+
+        const NpcFireFx* b = fire_fx_row(kFireFxShell, idx);
+        if (b != NULL && ENTITY->animation_frame_id == b->frame) {
+            g_playerPosScratch.x = (int)b->x;
+            g_playerPosScratch.z = (int)b->z;
+            // Odd-id characters get a 300-unit lift, scaled by (1 - weapon) -
+            // which goes NEGATIVE for weapon >= 2. The original computes this in
+            // unsigned arithmetic and stores into an int, so the wrap is the
+            // intended signed result; written signed here for the same bits.
+            g_playerPosScratch.y = (int)(ENTITY->id & 1) * (1 - (int)idx) * 300
+                                 + (int)b->y;
+            unsigned char slot = Effect_CreateBillboard(
+                b->type, b->depth, (short)(((weapon == 8) - 1) & 0x555),
+                &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
+            fire_fx_tag(slot, 3, weapon);
+        }
+
+        const NpcFireFx* c = fire_fx_row(kFireFxFlash2, idx);
+        if (c != NULL && ENTITY->animation_frame_id == c->frame) {
+            g_playerPosScratch.x = (int)c->x;
+            g_playerPosScratch.y = (int)c->y;
+            g_playerPosScratch.z = (int)c->z;
+            unsigned char slot = Effect_CreateBillboard(
+                c->type, c->depth, 0, weaponSpace, &g_playerPosScratch, 0);
+            fire_fx_tag(slot, 0, weapon);
+        }
+        goto play_anim;
+    }
+
+    case 2:
+        // The completion signal the event script is waiting on.
+        Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        return;
+
+    case 3:
+    play_anim: {
+        int done = (int)Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + (char)done);
+        return;
+    }
+
+    case 4:
+        ENTITY->action_state         = 5;
+        ENTITY->timing_control       = 0;
+        ENTITY->animationId          = 0x14;
+        ENTITY->blend_counter        = 3;
+        ENTITY->action_ticks_counter = 0x0F;
+        // fall through
+    case 5: {
+        if (ENTITY->animation_frame_id % 6 == 0) {
+            g_playerPosScratch.x = 0x21C;
+            g_playerPosScratch.y = 0x4EC;
+            g_playerPosScratch.z = 0;
+            Effect_CreateBillboard(0x0C, 0, 0,
+                                   (void*)((char*)ENTITY->jointsStructs + 0x70C),
+                                   &g_playerPosScratch, 0);
+        }
+        short ticks = (short)ENTITY->action_ticks_counter;
+        ENTITY->action_ticks_counter = (unsigned short)(ticks - 1);
+        if (ticks == 0) {
+            ENTITY->action_ticks_counter = 0x0F;
+            Play3DSnd(2, 0x1E, 0, (unsigned int)ENTITY->scaMatrixData.localMatrix.t);
+            Play3DSnd(2, 0x1F, 0, (unsigned int)ENTITY->scaMatrixData.localMatrix.t);
+        }
+        Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
+        ENTITY->angle = (short)(ENTITY->angle + (short)ENTITY->scd_timer);
+        return;
+    }
+
+    default:
+        return;
+    }
+}
+// ============================================================================
+// npc_scd_09 (0x0047b6b0) - behaviour 9: play an animation in REVERSE, then
+// clear the behaviour and release the event script.
+//
+// Same shape as npc_scd_07 with three differences: Joint_move is called with
+// reverse = 1 (a hard-coded 1, not `scd_entity_flags & 1`) and a 0x400 blend
+// step, the blend counter starts at 3 rather than 7, and the terminal state
+// clears action_behavior AND action_state together (`MOV word ptr [..+0x86],0`)
+// before signalling. There is no yaw step at the tail.
+//
+// A sweep of every RDT shows opcode 0x85 only ever selects behaviours 7, 8 and
+// 9, so with this one the whole set the scripts actually reach is implemented;
+// 3/4/5/10 remain stubs because nothing selects them.
+// ============================================================================
+static void npc_scd_09(void)
+{
+    char st = (char)ENTITY->action_state;
+
+    if (st == 0) {
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->action_state       = 1;
+        ENTITY->blend_counter      = 3;
+        // falls through into the Joint_move block
+    } else if (st != 1) {
+        if (st != 2) {
+            return;
+        }
+        // One 16-bit store at +0x86 clears action_behavior and action_state.
+        ENTITY->action_behavior = 0;
+        ENTITY->action_state    = 0;
+        Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        return;
+    }
+
+    {
+        char done = (char)Joint_move(1, ENTITY->animHeader, ENTITY->animBase, 0x400);
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + done);
+    }
+}
+// ============================================================================
+// npc_scd_10 (0x0047b760) - behaviour 10: play the animation, signal, and
+// optionally LOOP.
+//
+// npc_scd_07 with two differences: the entry state zeroes move_speed_current and
+// uses blend counter 7, and the terminal state re-arms itself. At action_state 2
+// it raises the completion flag every frame, and when scd_entity_flags bit 4 is
+// set it resets action_state to 0 so the whole animation replays - a scripted
+// idle loop that keeps the event VM's wait satisfied. Without bit 4 it parks at
+// state 2 and just keeps re-raising the flag.
+// ============================================================================
+static void npc_scd_10(void)
+{
+    char st = (char)ENTITY->action_state;
+
+    if (st == 0) {
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->action_state       = 1;
+        ENTITY->blend_counter      = 7;
+        ENTITY->move_speed_current = 0;
+        // fall through into the animation step
+    } else if (st != 1) {
+        if (st != 2) {
+            return;
+        }
+        Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        if ((ENTITY->scd_entity_flags & 0x10) == 0) {
+            return;
+        }
+        ENTITY->action_state = 0;   // loop
+        return;
+    }
+
+    {
+        char done = (char)Joint_move((char)(ENTITY->scd_entity_flags & 1),
+                                     ENTITY->animHeader, ENTITY->animBase, 0x200);
+        ENTITY->action_state = (unsigned char)(ENTITY->action_state + done);
+    }
+}
 
 // 0x004c4780 - 11 entries, indexed by action_behavior.
 static void* const g_npcScdBehaviors[11] = {
@@ -660,11 +1432,17 @@ static void npc_state8_action_update(void)
 // ============================================================================
 static void npc_state0_init(void);
 static void npc_state1_idle(void);
+static void npc_idle_walk_00(void);   // indexes the table below - see its body
 
 #define NPC_DISPATCH_BASE_ID 22
 #define NPC_IDLE_VIEW_ID     48
 
-static void* const g_npcDispatch[42] = {
+// 45 entries, not 42: the idle view runs to index 18 in the original (array
+// slots 48-66 are all real handlers, and 67 onward are NULL). Scripts do set
+// action_behavior as high as 0x17 via cmd_enemy_0x28 sub-command 2, which would
+// be a NULL call in the original too - npc_state1_idle reports those rather than
+// jumping to address 0.
+static void* const g_npcDispatch[45] = {
     // --- states 0..9, reached as g_npcDispatch[state] (base 0x004c2c50) ---
     /* id 22 / state 0 */ (void*)npc_state0_init,          // 0x0046ad80
     /* id 23 / state 1 */ (void*)npc_state1_idle,          // 0x0046b560
@@ -708,9 +1486,14 @@ static void* const g_npcDispatch[42] = {
     /* id 58 / idle 10 */ (void*)npc_idle_play_anim,
     /* id 59 / idle 11 */ (void*)npc_idle_nop,
     /* id 60 / idle 12 */ (void*)npc_idle_nop,
-    /* id 61 / idle 13 */ (void*)npc_idle_play_anim,
-    /* id 62 / idle 14 */ (void*)npc_idle_nop,
+    /* id 61 / idle 13 */ (void*)npc_idle_play_anim,       // 0x0046b5b0
+    /* id 62 / idle 14 */ (void*)npc_idle_nop,             // 0x0046b5a0
     /* id 63 / idle 15 */ (void*)npc_idle_nop,
+    /* id 64 / idle 16 */ (void*)npc_idle_nop,
+    /* id 65 / idle 17 */ (void*)npc_idle_nop,
+    /* id 66 / idle 18 */ (void*)npc_idle_nop,             // last real entry;
+                                                           // 67+ are NULL in the
+                                                           // original
 };
 
 // ============================================================================
@@ -720,8 +1503,54 @@ static void* const g_npcDispatch[42] = {
 static void npc_state1_idle(void)
 {
     unsigned int idx = (NPC_IDLE_VIEW_ID - NPC_DISPATCH_BASE_ID) + ENTITY->action_behavior;
-    if (idx >= 42 || g_npcDispatch[idx] == nullptr) {
+    if (idx >= 45 || g_npcDispatch[idx] == nullptr) {
+        // action_behavior above 18 is a NULL slot in the original's table too, so
+        // this reports what would have been a jump to address 0.
         npc_report_missing("idle behavior slot");
+        return;
+    }
+    ((void(*)(void))g_npcDispatch[idx])();
+}
+
+// ============================================================================
+// npc_idle_walk_00 (0x0046b580) - idle behaviour 0.
+//
+// Not a behaviour at all: a bare tail-jump that re-dispatches on the ENTITY'S ID
+// through the SAME overlapping pointer block, at id-space index 20 + id.
+//
+//   0046b580: MOV EAX,[0x00bebcd4]          ; ENTITY
+//             XOR ECX,ECX
+//             MOV CL,byte ptr [EAX+0x1]     ; ENTITY->id
+//             JMP dword ptr [ECX*0x4 + 0x004c2c48]
+//
+// 0x004c2c48 is the block base + 20*4, so the slot reached is array[20 + id],
+// i.e. g_npcDispatch[id - 2] in this file's id-space numbering. For the ids the
+// scripts actually spawn (32-41) that lands in the idle tail: Chris/Jill/Barry/
+// Rebecca/Wesker (32-36) and 39/40 resolve to the no-op, while 37, 38 and 41
+// resolve to the play-animation handler. That is why an idling Rebecca produced
+// "unimplemented idle behavior 0" and yet nothing looked wrong - the correct
+// behaviour for her IS to do nothing.
+//
+// Ids 28-31 map back onto idle 0-3, so id 28 re-enters this function forever.
+// No script uses those ids; guarded rather than reproduced, because unbounded
+// recursion here takes the whole process down instead of hanging one actor.
+// ============================================================================
+static void npc_idle_walk_00(void)
+{
+    unsigned int id = ENTITY->id;
+
+    if (id == 28) {
+        npc_report_missing("idle behavior 0 self-recursion (id 28)");
+        return;
+    }
+    if (id < 2) {
+        npc_report_missing("idle behavior 0 with id < 2");
+        return;
+    }
+
+    unsigned int idx = id - 2;   // array[20 + id] in g_npcDispatch's numbering
+    if (idx >= 45 || g_npcDispatch[idx] == nullptr) {
+        npc_report_missing("idle behavior 0 id slot");
         return;
     }
     ((void(*)(void))g_npcDispatch[idx])();

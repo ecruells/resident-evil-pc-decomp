@@ -525,7 +525,7 @@ extern unsigned int  ROOM_ID_00ac9cf4;                 // 0x00ac9cf4
 // Bullet effect parent sprite info pointer (set by cmd_bullet_0x3d)
 extern int           DAT_00bf0a34;                     // 0x00bf0a34
 
-// Special room lighting globals (accessed by cmd_0x1c and main_loop)
+// Special room lighting globals (accessed by cmd_room_light_fade_set and main_loop)
 extern int           g_SpecialR1;                      // 0x00be961d [.gwipe]
 extern int           g_SpecialG1;                      // 0x00be961e [.gwipe]
 extern int           g_SpecialB1;                      // 0x00be961f [.gwipe]
@@ -1463,7 +1463,7 @@ void room_transition_load(void);                      // 0x004813c0 - room/stage
 void door_system_load_data(void);                     // FUN_00412300 - .dor + texture page
 void door_system_start_animation(void);               // Task_execute(1, FUN_00444770)
 void set_fading(int type, int counter);               // 0x0047b980
-int  cmd_0x4c(void);                                  // 0x00460b80 - stop sound banks
+int  cmd_bgm_stop_all(void);                                  // 0x00460b80 - stop sound banks
 void display_die_screen(void);                        // 0x004... - death screen display
 void FUN_0047eb60(void);                              // 0x0047eb60 - post-death cleanup
 unsigned int set_message_display(unsigned short msgId, unsigned short flags); // 0x00455670

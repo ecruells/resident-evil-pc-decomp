@@ -1772,3 +1772,455 @@ printClutTint to 0 to match its page; the zoom-in/park/cancel/zoom-out/close
 state machine (verified against the original, including the "highlight wait"
 that is a cosmetic no-op in the original too) then completes and the menu
 closes with menu_restore_game_state clearing msf 0x100-0x8000.
+
+### Twentieth run: event-VM state-2 audit, the last empty SCD leaf, and naming
+
+Re-audited the two halves of the SCD system against the original. The **command**
+side (81 opcodes) and the **event-VM** side (control flow 0xF6-0xFF, state 0, state 1,
+state 3) are all faithful — `room_events_check` (`0x0041d6a0`) and
+`scd_event_state1_anim` (`0x0041da30`) were re-decompiled instruction-for-instruction
+and the port matches, including state-1's exact opcode set (0x00, 0x80-0x8B) and
+state-0's `default: deactivate`. No missing opcodes anywhere.
+
+**State 2 (`scd_event_state2_movement`, `0x0041e1a0`) had two real defects.**
+
+*Case 0x08 wrote the wrong field, at the wrong width.* The original is
+`MOV DL,[ECX+2] / MOVZX EBX,[ECX+1] / MOV byte ptr [EBX+ECX*1+0x84],DL` — a single
+BYTE store at **entity + 0x84 + script[1]**, i.e. into the state block
+(`state` / `ignore_player_flag` / `action_behavior` / `action_state` / `health` /
+`hit_state`). The port used base **0x34** (`localMatrix.t`) and a 32-bit store, so
+this opcode overwrote four bytes of the entity transform instead of one state byte.
+
+*Case 0x0B was merged into case 0x0A and desynced the script stream.* In the original
+these are separate cases: 0x0A runs a 6-way field selector and advances 4; 0x0B
+(`0x0041e486`) is the rotation sibling of case 0x07 — three WORD stores at entity
++0x72 / +0x74 / +0x76 from the script words at +2 / +4 / +6, then advance **8**. The
+port ran 0x0A's parametric store *first*, advanced 4, then read the angles from
+`scriptPtr + 4` (already-advanced, so effectively +8) and advanced 8 more. Every use
+of opcode 0x0B therefore performed a spurious write and left the instruction pointer
+**4 bytes past** where it should be — from there the VM decodes garbage.
+
+Also recorded while transcribing 0x0A: for a selector **above 5** the original does
+`MOV EDX,dword ptr [ESP+0x4]` and stores through it, but that stack slot is never
+written on this path (cases 0-2 set EDX directly and jump past it). The original has a
+latent **wild pointer write** here. Deliberately not reproduced — the port skips the
+store and advances like every other path.
+
+**`scd_model_tint_apply` (`0x00473b10`, was `FUN_00473b10`) was an empty stub.** It is
+SCD opcode 0x34 **variant 0** — the only variant of that opcode that actually tints
+anything. Variants 1 and 2 (`FUN_00473d10` / `FUN_00473d60`) were already implemented
+but they only ever rewrite the `g_textureQueueData` entry. Variant 0 accumulates the
+three signed deltas onto queue bytes +3/+4/+5 (clamping each into ±31) **and** pushes
+the result into the live model. Three leaves had to be written for it, none of which
+existed in the port:
+
+| New | Original | Role |
+|---|---|---|
+| `TmdObjectTintAdd` | `0x00485c60` | accumulate an RGB delta, rebased so `max(R,G)` becomes 0 |
+| `TmdObjectTintSet` | `0x00485fa0` | set the multipliers absolutely at 5/31 scale |
+| `TmdObjectSetLightScale` | `0x004870a0` | store one negated 1/32 value at modelObj+0x14 |
+
+All three walk the same per-object array `JointSetColorTint` walks (TMD at
+modelObj+0x20, count at +0x4C0, objects from +0x4D0 stride 0x84, bound `count * 2`).
+As with the already-ported `JointSetColorTint`, only the `modelObj+0x10 == 0` branch is
+transcribed; the original's else-branch drives the complex-TMD staging buffer
+`g_abComplexTmdObjectData` (`0x008ffd1c`), which this port does not model at all.
+
+Two original quirks kept deliberately: the enemy scan clamps to **30**, not 32
+(`if (0x1d < g_enemy_count) count = 0x1e`), and the two object branches mask the
+table index differently — `& 0x7f` on the luminance path, `& 0x3f` on the tint path.
+
+**Fixed on the way: `JointSetColorTint` scaled by 1/255 instead of 1/128.** The
+original multiplies by the float `0.0078125` at all three channel stores. `1/255` is
+not a constant this function uses at all — `0x004af2f8` (255.0f) belongs to
+`0x00485c60`'s pack-back step. Every SCD-driven joint tint was coming out at roughly
+half its intended intensity, and a tint byte of 0x80 — which the original saturates to
+1.0 — landed at 0.5.
+
+**Naming: every numeric `cmd_0xNN` is gone (29 functions).** The old names were also
+**off by one against their own table slot** — `cmd_0x3f` sat at slot 0x3E, `cmd_0x42`
+at 0x41, and so on through `cmd_0x51` at 0x50 — so the name actively misled about which
+opcode it served. All 81 dispatch-table addresses were re-read straight out of
+`0x004c1110` to confirm each slot before renaming.
+
+| Slot | Was | Now |
+|---|---|---|
+| 0x13 | `cmd_0x13` | `cmd_item_event_set` |
+| 0x14 | `cmd_0x14` | `cmd_scd_event_create` |
+| 0x1C | `cmd_0x1c` | `cmd_room_light_fade_set` |
+| 0x22 | `cmd_item_cmd_0x22` | `cmd_item_count_test` |
+| 0x2F | `cmd_0x2f` | `cmd_snd_pan_vol_set` |
+| 0x31 | `cmd_0x31` | `cmd_fade_state_set` |
+| 0x34 | `cmd_0x34` | `cmd_model_tint_set` |
+| 0x35 | `cmd_0x35` | `cmd_obj_flag_set` |
+| 0x36 | `cmd_0x36` | `cmd_obj_field_test` |
+| 0x37 | `cmd_0x37` | `cmd_room_bgm_state_set` |
+| 0x38 | `cmd_0x38` | `cmd_dpad_test` |
+| 0x39 | `cmd_0x39` | `cmd_enemy_flags_get` |
+| 0x3B | `cmd_0x3b` | `cmd_obj_rotation_set` |
+| 0x3C | `cmd_0x3c` | `cmd_player_dist_test` |
+| 0x3E | `cmd_0x3f` | `cmd_bullet_effect_clear` |
+| 0x41 | `cmd_0x42` | `cmd_entity_unk8e_set` |
+| 0x42 | `cmd_0x43` | `cmd_effect_clear_typed` |
+| 0x43 | `cmd_0x44` | `cmd_bgm_volume_ramp` |
+| 0x44 | `cmd_0x45` | `cmd_scd_event_kill` |
+| 0x45 | `cmd_0x46` | `cmd_entity_unk8e_add` |
+| 0x47 | `cmd_0x48` | `cmd_obj_transform_set` |
+| 0x48 | `cmd_0x49` | `cmd_effect_pool_clear` |
+| 0x49 | `cmd_0x4a` | `cmd_room_bitmask_set` |
+| 0x4B | `cmd_0x4c` | `cmd_bgm_stop_all` |
+| 0x4C | `cmd_0x4d` | `cmd_item_record_transfer` |
+| 0x4D | `cmd_0x4e` | `cmd_player_joint_tint` |
+| 0x4E | `cmd_0x4f` | `cmd_effect_flags_modify` |
+| 0x4F | `cmd_0x50` | `cmd_script_flag_set` |
+| 0x50 | `cmd_0x51` | `cmd_script_flag_test` |
+
+All mirrored into the Ghidra project and saved, with one exception:
+**Ghidra has `0x004323a0` (slot 0x4D) defined as DATA, not code**, so no function
+object exists there to rename. The bytes are unambiguously code —
+`PUSH 0x606060 / MOV ESI,[0x00be637c] / PUSH 0x080820 / PUSH 0x30 / PUSH ESI /
+CALL 0x0048a190`, then `LEA EAX,[ESI+0x7C]` and `LEA EAX,[ESI+0xF8]` — which also
+independently confirms the port's `cmd_player_joint_tint` (base is the
+`jointsStructs` pointer at `0x00be637c`, stride 0x7C). Worth clearing that data
+definition in Ghidra at some point; other functions in the same region may be missing
+from the DB for the same reason.
+
+**Not run in-game.** Build-verified only (per-file `cl /Zs`). The state-2 fixes need a
+room whose scripts actually use opcodes 0x08 and 0x0B to be exercised; the tint work
+needs a room that runs opcode 0x34.
+
+### Twenty-first run: the Barry-shoots-the-zombie freeze, and an FX pool leak
+
+Two reports from a ROOM1051 (Jill dining room) test: no SCD effects render anywhere,
+and the scene where Barry shoots the zombie freezes.
+
+**New tool: `tools/evt_disasm.py`.** The project could decode the SCD *command* stream
+(`mine_room_scd.py`) and `.dor` scripts (`dor_disasm.py`) but not the **event VM** - the
+outer cutscene state machine. It now disassembles the RDT+0x68 script table, tracking
+`state` across transitions so the same byte decodes correctly in states 0/1/2/3, and
+decoding the SCD payloads of opcodes 0x06/0x07 inline.
+
+One trap worth recording: **event opcode 0x06 (`run_scd`) payloads begin with a u16
+BLOCK SIZE, not an opcode.** `run_command_functions` is handed `scriptPtr + 2` and reads
+the length from there before stepping to the first command at +2. Decoding `payload[0]`
+as the opcode makes `0C 00 ...` read as a bogus `door_set`. Opcode 0x07 (`exec_scd`) is
+different - its command really does start at +2.
+
+#### The freeze: `npc_scd_08` (0x0047b280) was a stub - implemented
+
+The chain is now proven end to end, not inferred:
+
+1. ROOM1051 script 15 runs `85 08 11 21` (state-1 opcode 0x85) on enemy 0 (Barry):
+   `state = 8`, `action_behavior = 8`, `animationId = 0x11`, `scd_anim_param = 0x21`.
+2. It then spins on `FC 06 04 04 21 01 / FE / FD` - the VM's wait idiom: run the SCD
+   command on the call stack each frame and loop while it returns non-zero. The command
+   is `cmd_bit_test` with bank `0x04` = **`g_SysFlags`**, and operand `0x0121` decodes to
+   byte offset 4, bit 1, condition 1 - i.e. **"block until g_SysFlags bit 0x21 is set."**
+3. `state = 8` dispatches `npc_state8_action_update` -> `g_npcScdBehaviors[8]` ->
+   `npc_scd_08`, whose `action_state == 2` branch is
+   `Flg_on(g_SysFlags, ENTITY->scd_anim_param)` - and `scd_anim_param` is the **0x21**
+   from step 1. That is the exact bit step 2 polls.
+4. `npc_scd_08` was `npc_scd_report("0x0047b280")`, a no-op. The bit was never set, so
+   the wait never released. **Freeze.** The same function is what spawns the muzzle
+   flash, so "Barry never shoots" and "no flash" were one missing function.
+
+The already-implemented sibling `npc_scd_06` uses the identical
+`Flg_on(g_SysFlags, scd_anim_param)` release signal, which independently confirms the
+idiom.
+
+Now implemented, with the three 10-byte weapon-FX tables byte-transcribed from
+`0x004c0dd8` / `0x004c0e68` / `0x004c0ef8` (14 records each, indexed by
+`behavior_flags - 2`): muzzle flash and secondary flash in the weapon joint's space
+(`jointsStructs + 0x70C` = joint 14's `world` matrix), ejected shell/smoke in the
+entity's own matrix. Frame value `0x63` is the original's "disabled" marker. States 4/5
+are the flamethrower path (a type-0x0C billboard every 6th frame, a looping 0x1E/0x1F
+sound pair, and a per-frame yaw sweep).
+
+Two guards added where the original is unsafe, both documented in place: the table index
+is a raw byte with no bound in the original, and `Effect_CreateBillboard`'s 0xFF
+"pool full" return is stored into a **signed** char and used as an index, so a full pool
+writes `g_effectPool[-1]`. Our `.bss` neighbours differ from the original's, so that
+stray write would corrupt something different here.
+
+Useful property of the result: if `behavior_flags` is ever wrong, the row lookup reports
+and returns NULL, the animation still advances, `action_state` still reaches 2, and the
+scene **unfreezes anyway** - only the effects are missing. A data bug can no longer hang
+the game here.
+
+**Still stubs** (other cutscenes will need them): `npc_scd_03` (0x0047a9c0),
+`npc_scd_04` (0x0047ad30), `npc_scd_05` (0x0047aef0), `npc_scd_07` (0x0047b1c0),
+`npc_scd_09` (0x0047b6b0), `npc_scd_10` (0x0047b760).
+
+#### The FX: a pool-counter leak that disables effects permanently
+
+ROOM1051 declares no `effect_spawn` at all (its only SCD FX opcode is `cmd_enemy_0x28`),
+so "no FX in this room" was partly expected - the flash there comes from `npc_scd_08`
+above. ROOM1000 is the room that does use opcode 0x2A, five times in one cutscene.
+
+`Effect_CreateBillboard`'s "sprite not loaded for this room" guard returned **after** the
+slot-search loop had already done `g_freeEffectSlots--`, and without ever setting
+`eff->animId`. So the slot stayed free in the pool while the counter said it was taken -
+one leaked slot per skipped billboard. After 64 skipped spawns `g_freeEffectSlots`
+reaches 0 and the `if (g_freeEffectSlots == 0) return type;` at the top of the function
+**rejects every effect for the rest of the session**, including ones whose sprites are
+perfectly valid. One missing sprite turned into "no FX anywhere, permanently". Fixed by
+handing the slot back; the diagnostic now prints the running free count.
+
+Worth noting for the sprite-table question itself: room effect sprites are declared by
+the RDT (`ROOM1000` declares exactly one, index 0x26; `ROOM1051` declares 0x03 and 0x04)
+and land in `g_effectSpriteInfo[declared_index]`, while `g_abEffSpriteIndexTable` slots
+[8..15] track them. The **global** weapon FX come from `CORE00.ESP`, whose index table is
+`05 09 0C 11 00 0E 08 0B` - so ROOM1000's `type 9` spawn is a CORE00 sprite, not a room
+one. A room that ever declares an index colliding with that set would have its
+`InitRoomEffSprite` teardown invalidate a global weapon-FX slot; none of the rooms
+checked so far do, but it is a real hazard.
+
+**Not run in-game.** Build-verified only.
+
+### Twenty-second run: it was behaviour 7, not 8 - and a tooling trap that hid it
+
+The dining-room scene still froze after the previous run. The log named it outright:
+
+```
+[npc] unimplemented SCD behavior 0x0047b1c0 (id=34 anim=16 frame=0 action=0)
+[scd] slot 0 PARKED op=0xFD state=0 depth=0 ...
+```
+
+id 34 is Barry, and `0x0047b1c0` is **`npc_scd_07`**. The previous run implemented
+`npc_scd_08`. The wait-mechanism analysis was right, the link in the chain was wrong:
+the sequence is `85 07 10 21` (behaviour 7 - raise/aim) **then** `85 08 11 21`
+(behaviour 8 - fire), so behaviour 7 blocks before 8 is ever reached. Both share
+`scd_anim_param = 0x21`, which is why the same `bit_test(g_SysFlags, 0x21)` wait serves
+the whole sequence.
+
+**Why the wrong one was picked: `evt_disasm.py` mislabelled opcode 0x85's operands.**
+0x85 takes the behaviour from +1 and the animation from +2, but the tool printed
+`(anim <byte at +1>)` - so `85 07 10 21` read as "anim 0x7" instead of
+"behaviour 7, anim 0x10". Opcode 0x84 is the one where +1 really is the animation
+(it forces behaviour 1). Both now print `behavior= anim= scd_param=` explicitly.
+
+`npc_scd_07` (0x0047b1c0) is now implemented: play the animation to completion
+(action_state 0 -> 1 -> 2 via Joint_move's loop return being ADDED to action_state),
+then `Flg_on(g_SysFlags, scd_anim_param)`. A per-frame yaw step from `scd_timer` runs on
+every path including the terminal one.
+
+**`npc_scd_09` (0x0047b6b0) implemented too.** A sweep of every RDT with the fixed
+disassembler shows opcode 0x85 selects only three behaviours across the whole game:
+
+| behaviour | uses | status |
+|---|---|---|
+| 8 | 20 | implemented (previous run) |
+| 7 | 15 | implemented (this run) |
+| 9 |  4 | implemented (this run) |
+
+So the set the scripts can actually reach is complete. `npc_scd_03/04/05/10` remain
+stubs and are unreachable - nothing selects them. (Behaviour 1 is reached separately via
+opcode 0x84 and was already implemented.) Behaviour 9 is behaviour 7 with `Joint_move`
+reversed, blend counter 3, no yaw step, and a terminal `MOV word ptr [..+0x86],0` that
+clears action_behavior and action_state together.
+
+#### Tooling trap: the PE section map, and a misleading comment that caused a wrong turn
+
+While chasing this I disassembled the exe locally with `file_offset = VA - 0x400000` and
+got coherent-looking garbage that "proved" the behaviour table pointed into the middle of
+functions. It does not. **`.text` is VA `0x401000` at raw `0x600`, so text addresses map
+as `VA - 0x400A00`** - the naive mapping lands 0xA00 bytes off, which is small enough to
+resync into plausible instructions rather than fail loudly. It briefly looked like the
+dispatch table was corrupt or that the local exe differed from the Ghidra one; neither
+was true, and a byte-for-byte compare of `0x0047b280` between Ghidra's `read_memory` and
+the correctly-mapped file confirmed they are the same binary.
+
+`tools/scd_widths.py` was never actually broken - its `va_to_off()` walks the section
+table properly - but its **docstring claimed the naive mapping**, which is what sent me
+down this path. Comment corrected in place to say the opposite, loudly.
+
+Rule worth keeping: when a dispatch table appears to point into the middle of functions,
+suspect the address mapping before suspecting the data.
+
+**Not run in-game.** Build-verified only (full tree, zero errors).
+
+### Twenty-third run: dining room confirmed working; ROOM1000 effect cull narrowed
+
+The ROOM1051 dining-room scene now plays correctly - `npc_scd_07` was the fix. What
+remains is ROOM1000's opcode-0x2A effects, which spawn but never draw.
+
+**What the log establishes.** Effects reach the pool and animate: the active count ramps
+1 -> 5 and drains back, matching the script's five `effect_spawn` calls, and the pool
+counter is healthy (`free=63`, no leak, no `not loaded` lines). One effect renders
+successfully:
+
+```
+[effect] submit stage=5 type=11 slot=10 srvNull=0 scr=(-37,123) depth=818 scale=4148
+```
+
+`stage = 4 + submitted`, so **stage 5 means SubmitEffectSprite accepted it** with a live
+SRV - the render tail works end to end. But `type=11` (decimal) is effect type **0x0B**,
+which comes from `cmd_item_model_set`, *not* the type **9** the room's `cmd_effect_spawn`
+spawns. `slot=10` is texSlot = 3 + sheetSlot, and CORE00.ESP's index order
+(`05 09 0C 11 00 0E 08 0B`) puts 0x0B at sheet slot 7, which confirms the identification.
+
+So: the type-9 effects live, animate and expire without ever reaching
+`effect_submit_sprite` - and none of that function's own cull stages (1/2/3) fire either.
+
+**Ruled out statically, so the next run does not have to re-check them:**
+
+- *Both animation-header gates.* Parsing CORE00.ESP's effect blocks directly
+  (`tools/` scratch script; the layout is index table at the file head, data offsets
+  hanging off the file end read backward) gives type 9 / depth 7:
+  `animId=0x02 updateId=0x00 hdr10=0x03 hdr11=0x70`. `hdr10 & 2` is SET (so the
+  transform/projection branch runs and `local_10` is a real world position, not the
+  zeroed scratch), and `hdr11 & 0x80` is CLEAR (no early return).
+- *The switch-zone cull.* The effect's world XZ is (4420, 3800), and
+  `is_entity_in_switch_zone` tests it against the FIRST zone record whose `camFrom`
+  matches the current camera. Replaying that exact test - including the original's
+  zero-extension of every zone coordinate - against ROOM1000's 14 zone records shows the
+  point is inside the first zone of **every one of the six cameras**. It cannot be culled
+  here regardless of which camera is live.
+- *Sprite availability.* Type 9 is a CORE00.ESP global sprite (not a room one), the
+  room's own declaration is index 0x26, and there is no collision between the two.
+
+**A diagnostic honesty problem found and fixed.** `effect_submit_diag` keyed its
+dedupe on a single last-value tuple, so two effect types alternating would suppress each
+other - "only one submit line" could have meant "only one type reaches here" *or* "the
+key kept getting overwritten". It is now keyed **per effect type**, so the absence of a
+type-9 line is real evidence rather than an artifact. Worth generalising: a
+print-on-change diagnostic with a single shared key cannot distinguish "never happened"
+from "kept being overwritten", and that ambiguity wastes a whole test round.
+
+**Added for the next run:** a gate-level report in `EffectActor_UpdateAndRender` that
+fires for every slot reaching the end of the update, keyed per effect type, printing the
+slot, type, animId/updateId, both header bytes, the world position fed to the zone test,
+the projected screen coordinates, projDepth, the live zone pointer, and which of the two
+gates rejected it (or `DREW`). Between that and the per-type submit diag, the next log
+says definitively whether type 9 reaches the gates at all - and if it does, whether the
+projection is the problem.
+
+**One value worth watching in that output.** The single effect that does draw reports
+`scr=(-37,123)`, which is *after* the `-0xA0/-0x78` centring, i.e. raw screen
+(123, 243) on a 320x240 frame - three pixels below the bottom edge. If the type-9
+effects report similar Y values, the fault is the projection rather than the culling:
+their world Y is -2500 (2500 units **up**), which should project well above centre, not
+below the bottom.
+
+**Not run in-game.** Build-verified only.
+
+### Twenty-fourth run: ROOM1000 effects - a VECTOR built from three separate locals
+
+The gate diagnostic answered it in one line:
+
+```
+[effect] slot 62 type=9  hdr10=03 hdr11=70 world=(4420,-13108,7)   -> outside switch zone
+[effect] slot 63 type=11 hdr10=03 hdr11=40 world=(5160,-930,8690)  -> DREW
+```
+
+Type 9's world position should be **(4420, -2500, 3800)**. X is correct and Y/Z are
+garbage - and **-13108 is `(short)0xCCCC`**, the /RTC uninitialised-stack fill.
+
+**Root cause: `cmd_effect_spawn` passed the address of three separate `int` locals as a
+`VECTOR*`.** `Effect_CreateBillboard` casts its `pos` argument to `VECTOR*` and reads
+x/y/z/pad at +0/+4/+8/+12. The original (0x004316c0) uses `local_10` / `local_c` /
+`local_8`, which are **adjacent** stack dwords, so `&local_10` really is a VECTOR. Three
+separate `int` locals in C are under no such obligation, and with /RTC MSVC inserts guard
+bytes between them - so only `x` landed and `y`/`z` read the fill pattern. The corrupt
+position then failed the camera-zone test, which is why the effect was culled before
+drawing. That also retro-explains the previous run's static analysis: testing the
+*correct* position against the zone quads said "passes for every camera", and it does -
+the runtime was never using that position.
+
+The effects that always worked are exactly the ones passing the global
+`g_playerPosScratch` rather than a local, which is why type 0x0B rendered and type 9
+never did.
+
+Fixed in `cmd_effect_spawn` (0x2A) and `cmd_bullet_0x3d` (0x3D), both of which had it.
+An audit of every `Effect_CreateBillboard` call site in the tree confirms all others pass
+a real `VECTOR` local or the global scratch.
+
+This is the third instance of the same trap in this port - the packed screen-coordinate
+pair in `EffectActor_UpdateAndRender` and `ApplyMatrix`'s VECTOR-vs-SVECTOR destination
+were the first two. **Whenever the original passes `&local_N` into something that reads a
+struct, the locals were adjacent by the compiler's layout; a C transcription must declare
+the actual struct.** Separate scalars are a silent corruption, not a compile error.
+
+**Second defect, found by the same diagnostic: the type-0x0B effect was flickering.**
+
+```
+type=11 hdr10=03 world=(5160,-930,8690) -> DREW
+type=11 hdr10=00 world=(0,0,0)          -> outside switch zone
+```
+
+alternating frame to frame. `local_10` is written *only* inside the
+`animHeader[10] & 2` branch; the original leaves it uninitialised otherwise and in
+practice reads its own previous value, so it keeps drawing through phases with the
+transform bit clear. The port zeroed it, so those frames were culled outright and any
+effect whose phases alternate drew every other frame. Now seeded from
+`eff->posX/Y/Z` - exactly what the transform branch last stored, so it is the
+deterministic stand-in for the original's stale stack slot.
+
+**Diagnostics.** The gate report in `EffectActor_UpdateAndRender` and the per-type
+`effect_submit_diag` are both still in place; they cost one line per changed outcome per
+effect type. Worth keeping until a couple more rooms are confirmed, then removing.
+
+**Not run in-game.** Build-verified only (full tree, zero errors).
+
+### Twenty-fifth run: 2D effects confirmed; the idle-behaviour layer
+
+All cutscene 2D effects render correctly - the VECTOR-from-separate-locals fix was it.
+The remaining log noise was `[npc] unimplemented idle behavior 0 (0x0046b580)` from an
+idling Rebecca (id 35), and the four idle stubs behind it are now implemented.
+
+**Idle behaviour 0 is not a behaviour - it is a second-level jump table on entity id.**
+
+```
+0046b580: MOV EAX,[0x00bebcd4]        ; ENTITY
+          XOR ECX,ECX
+          MOV CL,byte ptr [EAX+0x1]   ; ENTITY->id
+          JMP dword ptr [ECX*0x4 + 0x004c2c48]
+```
+
+0x004c2c48 is the shared dispatch block's base + 20*4, so it re-enters the SAME
+overlapping array at `array[20 + id]` - a fourth view of the block already documented at
+the top of CharacterNpc.cpp (state / per-character init / idle, now also id-from-idle-0).
+For the ids scripts actually spawn (32-41) it lands in the idle tail: Chris, Jill, Barry,
+Rebecca and Wesker (32-36) plus 39/40 resolve to the **no-op**, while 37, 38 and 41
+resolve to the play-animation handler. So the reported behaviour for an idling Rebecca
+genuinely is "do nothing" - the message was noise, not a missing feature, which is why
+nothing ever looked wrong on screen.
+
+Ids 28-31 map back onto idle 0-3, so id 28 would re-enter idle 0 forever. No script uses
+those ids; guarded rather than reproduced, because unbounded recursion takes the process
+down instead of hanging one actor.
+
+**The idle table was also three entries short.** The original's idle view runs to index
+**18** (array slots 48-66 are all real handlers; 67 onward are NULL). The port declared
+16. A sweep of every RDT shows scripts set `action_behavior` via `cmd_enemy_0x28`
+sub-command 2 to values 0x0A, 0x0D (30 times), 0x0E, 0x0F, 0x14, 0x15 and 0x17 - so
+0x14/0x15/0x17 were landing outside the declared array. They are NULL in the original
+too, so `npc_state1_idle` now reports them instead of jumping to address 0, and the
+array covers 0-18 to match. Entries 4-15 were verified against the original byte for
+byte and all already matched.
+
+**The three real handlers, transcribed:**
+
+| Idle | Address | What it does |
+|---|---|---|
+| 1 | `0x0046b620` | Walk forward (anim 0x35, speed 1000 decaying 15/frame) until `check_room_collision` hits, then voice 0xA9 and a knock animation 0x36 with sound 0x1C |
+| 2 | `0x0046b800` | Scripted death: anim 0x33, death timer 0xB4, blood spray for 10 frames, three joints tinted red on frame 3, wet sound on frame 0x2A, then a ground billboard that grows over 30 frames |
+| 3 | `0x0046bb20` | The other scripted death: anim 0x30, 250-frame timer, `hit_state` 0x80, copies enemy 1's facing, five joints tinted on frame 8, blood before frame 9 and after 0x5F, health forced to -1 |
+
+Two details worth recording:
+
+- Idle 1's collision probe saves and restores **four** dwords from entity+0x34 - the three
+  `localMatrix.t` components *plus* the first dword of `worldMatrix` at +0x40.
+  `check_room_collision` writes through the position it is handed, and the original rolls
+  all four back, so the probe is a test and not a move. Restoring only three would leave
+  the world matrix corrupted.
+- Idle 2's second `Effect_CreateBillboard` call passes the dead-move matrix as the sprite
+  space and `jointsStructs + 0xD4` as the **position** - the two arguments are swapped
+  relative to the call immediately above it. That is the original's, and it is reproduced;
+  it reads joints+0xD4 as a VECTOR.
+
+**Still stubbed:** NPC state 9 (`0x00471950`, the pathfind layer) and the four unreachable
+SCD behaviours 3/4/5/10. Nothing currently reaches either.
+
+**Not run in-game.** Build-verified only (full tree, zero errors). Ghidra updated with all
+four names and saved.

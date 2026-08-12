@@ -28,7 +28,7 @@ extern void FUN_004805d0(short param1, unsigned int param2, unsigned int param3,
 extern void FUN_004804a0(short param1, unsigned int param2, short param3, unsigned int param4);
 extern void FUN_0047cf80(int param1, unsigned int param2, unsigned int param3, unsigned int param4, MATRIX* param5);
 extern void FUN_00473ea0(int param1, void* param2, ScaMatrixData* param3);
-extern void FUN_00473b10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6);
+extern void scd_model_tint_apply(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6);
 extern void FUN_00473d10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6);
 extern void FUN_00473d60(char p1, unsigned char p2, unsigned char p3);
 extern void RoomSpr_SetInactive(char id);  // 0x00476130
@@ -439,10 +439,10 @@ int cmd_item_flag_0x12(void)
 }
 
 // ============================================================================
-// 0x13 - cmd_0x13 (0x00461010)
+// 0x13 - cmd_item_event_set (0x00461010)
 // Update item event table entry (simpler version).
 // ============================================================================
-int cmd_0x13(void)
+int cmd_item_event_set(void)
 {
     int base = (unsigned int)g_ScdOpcodes[1] * 0xc;
     g_ScdOpcodes += 4;
@@ -452,10 +452,10 @@ int cmd_0x13(void)
 }
 
 // ============================================================================
-// 0x14 - cmd_0x14 (0x00461040)
+// 0x14 - cmd_scd_event_create (0x00461040)
 // Create a new SCD event from the command stream.
 // ============================================================================
-int cmd_0x14(void)
+int cmd_scd_event_create(void)
 {
     // The original reads a 16-bit operand here (g_ScdOpcodes is a ushort* in
     // this function): low byte = slot, high byte = event script index. Reading
@@ -846,10 +846,10 @@ int cmd_em_set(void)
 }
 
 // ============================================================================
-// 0x1C - cmd_0x1c (0x00462210)
+// 0x1C - cmd_room_light_fade_set (0x00462210)
 // Set up special room lighting effects.
 // ============================================================================
-int cmd_0x1c(void)
+int cmd_room_light_fade_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1189,10 +1189,13 @@ int cmd_enemy_pos_set(void)
 }
 
 // ============================================================================
-// 0x22 - cmd_item_cmd_0x22 (0x00431100)
-// Complex item inventory search and comparison.
+// 0x22 - cmd_item_count_test (0x00431100)
+// Sum the quantities of an item GROUP held in the inventory and compare the
+// total against a value. searchId selects the group (0x0A = any, 0x0B = item 2,
+// 0x0C = item 3, 0x0D = items 4/5, 0x0F = item 6, 0x10-0x12 = items 7/8/9);
+// op2 low byte selects the comparison. Returns 0 when the group is not held.
 // ============================================================================
-int cmd_item_cmd_0x22(void)
+int cmd_item_count_test(void)
 {
     unsigned short op1 = scd_read_u16(0);
     int count = 0;
@@ -1428,9 +1431,28 @@ int cmd_effect_spawn(void)
 {
     unsigned short typeParam = scd_read_u16(0);
     unsigned short parentParam = scd_read_u16(2);
-    int posX = (int)scd_read_s16(4);
-    int posY = (int)scd_read_s16(6);
-    int posZ = (int)scd_read_s16(8);
+    // ONE VECTOR, not three separate ints.
+    //
+    // Effect_CreateBillboard casts this argument to VECTOR* and reads x/y/z (and
+    // the pad) at +0/+4/+8/+12. The original's three locals (`local_10`,
+    // `local_c`, `local_8` at 0x004316c0) are ADJACENT stack dwords, so passing
+    // &local_10 is a valid VECTOR. Three separate `int` locals here are not
+    // guaranteed adjacent - and under /RTC MSVC inserts guard bytes between
+    // them, so `vPos->y` and `vPos->z` read the uninitialised-stack fill
+    // instead of the operands. That is exactly what ROOM1000 showed:
+    //   world=(4420,-13108,7)   with -13108 == (short)0xCCCC
+    // X was correct and Y/Z were garbage, which put the effect outside every
+    // camera switch zone and got it culled before it could ever draw. The
+    // effects that always worked are the ones passing the global
+    // g_playerPosScratch rather than a local.
+    // Same trap as the packed screen-coordinate pair in
+    // EffectActor_UpdateAndRender - see the note there.
+    VECTOR spawnPos;
+    spawnPos.x = (int)scd_read_s16(4);
+    spawnPos.y = (int)scd_read_s16(6);
+    spawnPos.z = (int)scd_read_s16(8);
+    spawnPos.pad = 0;   // the original leaves this stack slot uninitialised;
+                        // it only ends up in the unread Effect::spawnPosW
     unsigned short effectFlags = scd_read_u16(10);
     g_ScdOpcodes += 12;
 
@@ -1457,7 +1479,7 @@ int cmd_effect_spawn(void)
         (unsigned char)parentParam,
         effectFlags,
         spriteInfo,
-        &posX,
+        &spawnPos,
         0);
     return 1;
 }
@@ -1522,10 +1544,10 @@ int cmd_nop_0x2e(void)
 }
 
 // ============================================================================
-// 0x2F - cmd_0x2f (0x00460c00)
+// 0x2F - cmd_snd_pan_vol_set (0x00460c00)
 // Set up screen effect parameters.
 // ============================================================================
-int cmd_0x2f(void)
+int cmd_snd_pan_vol_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1570,10 +1592,10 @@ int cmd_boundaries_0x30(void)
 }
 
 // ============================================================================
-// 0x31 - cmd_0x31 (0x004608d0)
+// 0x31 - cmd_fade_state_set (0x004608d0)
 // Set a fading state value.
 // ============================================================================
-int cmd_0x31(void)
+int cmd_fade_state_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short value = scd_read_u16(2);
@@ -1687,10 +1709,10 @@ int cmd_damage_set(void)
 }
 
 // ============================================================================
-// 0x34 - cmd_0x34 (0x00431b10)
+// 0x34 - cmd_model_tint_set (0x00431b10)
 // Modify lighting/texture parameters.
 // ============================================================================
-int cmd_0x34(void)
+int cmd_model_tint_set(void)
 {
     g_ScdOpcodes++;
     char param1 = (char)*g_ScdOpcodes; g_ScdOpcodes++;
@@ -1702,7 +1724,7 @@ int cmd_0x34(void)
     unsigned short p7 = *g_ScdOpcodes; g_ScdOpcodes++;
 
     if (param1 == 0) {
-        FUN_00473b10(p5, p6, p7, p3, p4, param2);
+        scd_model_tint_apply(p5, p6, p7, p3, p4, param2);
     } else if (param1 == 1) {
         FUN_00473d10(p5, p6, p7, p3, p4, param2);
     } else if (param1 == 2) {
@@ -1712,10 +1734,10 @@ int cmd_0x34(void)
 }
 
 // ============================================================================
-// 0x35 - cmd_0x35 (0x00431bf0)
+// 0x35 - cmd_obj_flag_set (0x00431bf0)
 // Modify object entity flags/state.
 // ============================================================================
-int cmd_0x35(void)
+int cmd_obj_flag_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1738,10 +1760,10 @@ int cmd_0x35(void)
 }
 
 // ============================================================================
-// 0x36 - cmd_0x36 (0x00431c90)
+// 0x36 - cmd_obj_field_test (0x00431c90)
 // Compare an object entity field against a value.
 // ============================================================================
-int cmd_0x36(void)
+int cmd_obj_field_test(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1765,10 +1787,10 @@ int cmd_0x36(void)
 }
 
 // ============================================================================
-// 0x37 - cmd_0x37 (0x00460a30)
+// 0x37 - cmd_room_bgm_state_set (0x00460a30)
 // Set room BGM state data.
 // ============================================================================
-int cmd_0x37(void)
+int cmd_room_bgm_state_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1783,10 +1805,10 @@ int cmd_0x37(void)
 }
 
 // ============================================================================
-// 0x38 - cmd_0x38 (0x00431dc0)
+// 0x38 - cmd_dpad_test (0x00431dc0)
 // Test player D-pad held state.
 // ============================================================================
-int cmd_0x38(void)
+int cmd_dpad_test(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1800,10 +1822,10 @@ int cmd_0x38(void)
 }
 
 // ============================================================================
-// 0x39 - cmd_0x39 (0x00431e10)
+// 0x39 - cmd_enemy_flags_get (0x00431e10)
 // Read enemy behavior_flags into DAT_00be982a.
 // ============================================================================
-int cmd_0x39(void)
+int cmd_enemy_flags_get(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1827,10 +1849,10 @@ int cmd_cut_0x3a(void)
 }
 
 // ============================================================================
-// 0x3B - cmd_0x3b (0x00431ea0)
+// 0x3B - cmd_obj_rotation_set (0x00431ea0)
 // Set object animation parameters.
 // ============================================================================
-int cmd_0x3b(void)
+int cmd_obj_rotation_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1858,10 +1880,10 @@ int cmd_0x3b(void)
 }
 
 // ============================================================================
-// 0x3C - cmd_0x3c (0x00431f20)
+// 0x3C - cmd_player_dist_test (0x00431f20)
 // Test distance between player and an entity/object.
 // ============================================================================
-int cmd_0x3c(void)
+int cmd_player_dist_test(void)
 {
     g_ScdOpcodes += 6;
     unsigned short targetSpec = scd_read_u16(-4);
@@ -1895,9 +1917,15 @@ int cmd_bullet_0x3d(void)
     // Unlike opcode 0x2A, the original ZERO-extends the position words here
     // (`(int)g_ScdOpcodes[2]` on a ushort*, not `(int)(short)...`). Sign-extending
     // them made negative coordinates spawn effects at the wrong place.
-    int posX = (int)scd_read_u16(4);
-    int posY = (int)scd_read_u16(6);
-    int posZ = (int)scd_read_u16(8);
+    //
+    // ONE VECTOR, not three separate ints - see the note in cmd_effect_spawn.
+    // Effect_CreateBillboard reads this as a VECTOR*, and separate locals are not
+    // guaranteed adjacent, so y/z would read the uninitialised-stack fill.
+    VECTOR spawnPos;
+    spawnPos.x = (int)scd_read_u16(4);
+    spawnPos.y = (int)scd_read_u16(6);
+    spawnPos.z = (int)scd_read_u16(8);
+    spawnPos.pad = 0;
     unsigned short effectFlags = scd_read_u16(10);
     g_ScdOpcodes += 12;
 
@@ -1920,17 +1948,17 @@ int cmd_bullet_0x3d(void)
     }
 
     unsigned char effectType = (unsigned char)(typeParam >> 8);
-    Effect_CreateBillboard(effectType, (unsigned char)parentParam, effectFlags, spriteInfo, &posX, 0);
+    Effect_CreateBillboard(effectType, (unsigned char)parentParam, effectFlags, spriteInfo, &spawnPos, 0);
     DAT_00be982b = effectType;
     DAT_00bf0a34 = (int)spriteInfo;
     return 1;
 }
 
 // ============================================================================
-// 0x3E - cmd_0x3f (0x00431840)
+// 0x3E - cmd_bullet_effect_clear (0x00431840)
 // Trigger a previously set up bullet effect.
 // ============================================================================
-int cmd_0x3f(void)
+int cmd_bullet_effect_clear(void)
 {
     FUN_0047cf80(9, DAT_00be982b, 0, 0, (MATRIX*)DAT_00bf0a34);
     g_ScdOpcodes += 2;
@@ -1971,10 +1999,10 @@ int cmd_lights_0x41(void)
 }
 
 // ============================================================================
-// 0x41 - cmd_0x42 (0x00432090)
+// 0x41 - cmd_entity_unk8e_set (0x00432090)
 // Set an entity unk_8e field.
 // ============================================================================
-int cmd_0x42(void)
+int cmd_entity_unk8e_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1989,10 +2017,10 @@ int cmd_0x42(void)
 }
 
 // ============================================================================
-// 0x42 - cmd_0x43 (0x00431870)
+// 0x42 - cmd_effect_clear_typed (0x00431870)
 // Trigger effect type 3.
 // ============================================================================
-int cmd_0x43(void)
+int cmd_effect_clear_typed(void)
 {
     unsigned short type = scd_read_u16(0);
     unsigned short param = scd_read_u16(2);
@@ -2002,10 +2030,10 @@ int cmd_0x43(void)
 }
 
 // ============================================================================
-// 0x43 - cmd_0x44 (0x00460d20)
+// 0x43 - cmd_bgm_volume_ramp (0x00460d20)
 // Modify BGM sound parameters if track is playing.
 // ============================================================================
-int cmd_0x44(void)
+int cmd_bgm_volume_ramp(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -2019,10 +2047,10 @@ int cmd_0x44(void)
 }
 
 // ============================================================================
-// 0x44 - cmd_0x45 (0x00461080)
+// 0x44 - cmd_scd_event_kill (0x00461080)
 // Deactivate a specific SCD event slot.
 // ============================================================================
-int cmd_0x45(void)
+int cmd_scd_event_kill(void)
 {
     g_ScdEventTable[scd_read_u16(0) >> 8].active = 0;
     g_ScdOpcodes += 2;
@@ -2030,10 +2058,10 @@ int cmd_0x45(void)
 }
 
 // ============================================================================
-// 0x45 - cmd_0x46 (0x004320f0)
+// 0x45 - cmd_entity_unk8e_add (0x004320f0)
 // Add to player unk_8e field.
 // ============================================================================
-int cmd_0x46(void)
+int cmd_entity_unk8e_add(void)
 {
     unsigned short val = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -2081,10 +2109,10 @@ int cmd_light_set_0x47(void)
 }
 
 // ============================================================================
-// 0x47 - cmd_0x48 (0x00431080)
+// 0x47 - cmd_obj_transform_set (0x00431080)
 // Set object position and rotation offsets.
 // ============================================================================
-int cmd_0x48(void)
+int cmd_obj_transform_set(void)
 {
     unsigned short slot = scd_read_u16(0);
     g_ScdOpcodes += 14;
@@ -2105,10 +2133,10 @@ int cmd_0x48(void)
 }
 
 // ============================================================================
-// 0x48 - cmd_0x49 (0x004318a0)
+// 0x48 - cmd_effect_pool_clear (0x004318a0)
 // Clear all effect pool entries.
 // ============================================================================
-int cmd_0x49(void)
+int cmd_effect_pool_clear(void)
 {
     g_freeEffectSlots = 0;
     g_ScdOpcodes += 2;   // original advances 2, not 4
@@ -2121,10 +2149,10 @@ int cmd_0x49(void)
 }
 
 // ============================================================================
-// 0x49 - cmd_0x4a (0x00432290)
+// 0x49 - cmd_room_bitmask_set (0x00432290)
 // Set or clear DAT_00d22770 flags.
 // ============================================================================
-int cmd_0x4a(void)
+int cmd_room_bitmask_set(void)
 {
     unsigned short val = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -2158,10 +2186,10 @@ int cmd_snd_set0x4b(void)
 }
 
 // ============================================================================
-// 0x4B - cmd_0x4c (0x00460b80)
+// 0x4B - cmd_bgm_stop_all (0x00460b80)
 // Stop all sound banks and shift BGM state.
 // ============================================================================
-int cmd_0x4c(void)
+int cmd_bgm_stop_all(void)
 {
     // Original advances 2, not 4; same g_targetBgmState byte guard as 0x4A.
     g_ScdOpcodes += 2;
@@ -2176,10 +2204,10 @@ int cmd_0x4c(void)
 }
 
 // ============================================================================
-// 0x4C - cmd_0x4d (0x004322d0)
+// 0x4C - cmd_item_record_transfer (0x004322d0)
 // Item slot data transfer operations.
 // ============================================================================
-int cmd_0x4d(void)
+int cmd_item_record_transfer(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short op2 = scd_read_u16(2);
@@ -2213,10 +2241,10 @@ int cmd_0x4d(void)
 }
 
 // ============================================================================
-// 0x4D - cmd_0x4e (0x004323a0)
+// 0x4D - cmd_player_joint_tint (0x004323a0)
 // Reset player entity lighting/palette to default grey.
 // ============================================================================
-int cmd_0x4e(void)
+int cmd_player_joint_tint(void)
 {
     // Applies a joint colour tint to the player via JointApplyColorTint
     // (0x0048a190). The tint actually applied is the SECOND argument, 0x30
@@ -2242,10 +2270,10 @@ int cmd_0x4e(void)
 }
 
 // ============================================================================
-// 0x4E - cmd_0x4f (0x00431910)
+// 0x4E - cmd_effect_flags_modify (0x00431910)
 // Modify flags on all active effect pool entries.
 // ============================================================================
-int cmd_0x4f(void)
+int cmd_effect_flags_modify(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -2271,10 +2299,10 @@ int cmd_0x4f(void)
 }
 
 // ============================================================================
-// 0x4F - cmd_0x50 (0x004622b0)
+// 0x4F - cmd_script_flag_set (0x004622b0)
 // Call FUN_0040c560 with parameter.
 // ============================================================================
-int cmd_0x50(void)
+int cmd_script_flag_set(void)
 {
     extern void FUN_0040c560(int param);
     FUN_0040c560(scd_read_u16(0) >> 8);
@@ -2283,10 +2311,12 @@ int cmd_0x50(void)
 }
 
 // ============================================================================
-// 0x50 - cmd_0x51 (0x004622e0)
-// Call cmd_0x51_inner with 2-byte parameter.
+// 0x50 - cmd_script_flag_test (0x004622e0)
+// Return the flag byte that opcode 0x4F (cmd_script_flag_set) wrote, so a
+// script can set a condition and branch on it later. The original consumes the
+// 2-byte instruction and returns DAT_004d6444 directly - there is no callee.
 // ============================================================================
-int cmd_0x51(void)
+int cmd_script_flag_test(void)
 {
     g_ScdOpcodes += 2;
     return (int)DAT_004d6444;
@@ -2318,8 +2348,8 @@ void* script_command_funcs_table[256] = {
     /* 0x10 */ (void*)cmd_obj10_test,        // 0x00460f30
     /* 0x11 */ (void*)cmd_obj11_test,        // 0x00460f10
     /* 0x12 */ (void*)cmd_item_flag_0x12,    // 0x00460fc0
-    /* 0x13 */ (void*)cmd_0x13,              // 0x00461010
-    /* 0x14 */ (void*)cmd_0x14,              // 0x00461040
+    /* 0x13 */ (void*)cmd_item_event_set,              // 0x00461010
+    /* 0x14 */ (void*)cmd_scd_event_create,              // 0x00461040
     /* 0x15 */ (void*)cmd_bgm_0x15,          // 0x00460a80
     /* 0x16 */ (void*)cmd_volume_set,        // 0x00460c70
     /* 0x17 */ (void*)cmd_player_pos_0x17,   // 0x00460d80
@@ -2327,13 +2357,13 @@ void* script_command_funcs_table[256] = {
     /* 0x19 */ (void*)cmd_obj19_set,         // 0x00460f50
     /* 0x1A */ (void*)cmd_item_search,       // 0x00460f80
     /* 0x1B */ (void*)cmd_em_set,            // 0x004617d0
-    /* 0x1C */ (void*)cmd_0x1c,              // 0x00462210
+    /* 0x1C */ (void*)cmd_room_light_fade_set,              // 0x00462210
     /* 0x1D */ (void*)cmd_weapon_set,        // 0x00460ee0
     /* 0x1E */ (void*)cmd_sfx_set,           // 0x00461a80
     /* 0x1F */ (void*)cmd_omodel_set,        // 0x00461ac0
     /* 0x20 */ (void*)cmd_player_pos_set,    // 0x00430f60
     /* 0x21 */ (void*)cmd_enemy_pos_set,     // 0x00430fe0
-    /* 0x22 */ (void*)cmd_item_cmd_0x22,     // 0x00431100
+    /* 0x22 */ (void*)cmd_item_count_test,     // 0x00431100
     /* 0x23 */ (void*)cmd_cut_toogle,        // 0x00431280
     /* 0x24 */ (void*)cmd_room_action,       // 0x004312b0
     /* 0x25 */ (void*)cmd_rdt_0x25,          // 0x004621d0
@@ -2346,40 +2376,40 @@ void* script_command_funcs_table[256] = {
     /* 0x2C */ (void*)cmd_item_remove,       // 0x004319e0
     /* 0x2D */ (void*)cmd_got_item,          // 0x00431a20
     /* 0x2E */ (void*)cmd_nop_0x2e,          // 0x00460a70
-    /* 0x2F */ (void*)cmd_0x2f,              // 0x00460c00
+    /* 0x2F */ (void*)cmd_snd_pan_vol_set,              // 0x00460c00
     /* 0x30 */ (void*)cmd_boundaries_0x30,   // 0x00431a40
-    /* 0x31 */ (void*)cmd_0x31,              // 0x004608d0
+    /* 0x31 */ (void*)cmd_fade_state_set,              // 0x004608d0
     /* 0x32 */ (void*)cmd_skip_4bytes,       // 0x00431b00
     /* 0x33 */ (void*)cmd_damage_set,        // 0x004314b0
-    /* 0x34 */ (void*)cmd_0x34,              // 0x00431b10
-    /* 0x35 */ (void*)cmd_0x35,              // 0x00431bf0
-    /* 0x36 */ (void*)cmd_0x36,              // 0x00431c90
-    /* 0x37 */ (void*)cmd_0x37,              // 0x00460a30
-    /* 0x38 */ (void*)cmd_0x38,              // 0x00431dc0
-    /* 0x39 */ (void*)cmd_0x39,              // 0x00431e10
+    /* 0x34 */ (void*)cmd_model_tint_set,              // 0x00431b10
+    /* 0x35 */ (void*)cmd_obj_flag_set,              // 0x00431bf0
+    /* 0x36 */ (void*)cmd_obj_field_test,              // 0x00431c90
+    /* 0x37 */ (void*)cmd_room_bgm_state_set,              // 0x00460a30
+    /* 0x38 */ (void*)cmd_dpad_test,              // 0x00431dc0
+    /* 0x39 */ (void*)cmd_enemy_flags_get,              // 0x00431e10
     /* 0x3A */ (void*)cmd_cut_0x3a,          // 0x00431e50
-    /* 0x3B */ (void*)cmd_0x3b,              // 0x00431ea0
-    /* 0x3C */ (void*)cmd_0x3c,              // 0x00431f20
+    /* 0x3B */ (void*)cmd_obj_rotation_set,              // 0x00431ea0
+    /* 0x3C */ (void*)cmd_player_dist_test,              // 0x00431f20
     /* 0x3D */ (void*)cmd_bullet_0x3d,       // 0x00431770
-    /* 0x3E */ (void*)cmd_0x3f,              // 0x00431840
+    /* 0x3E */ (void*)cmd_bullet_effect_clear,              // 0x00431840
     /* 0x3F */ (void*)cmd_player_dir_set,    // 0x00431fd0
     /* 0x40 */ (void*)cmd_lights_0x41,       // 0x00432010
-    /* 0x41 */ (void*)cmd_0x42,              // 0x00432090
-    /* 0x42 */ (void*)cmd_0x43,              // 0x00431870
-    /* 0x43 */ (void*)cmd_0x44,              // 0x00460d20
-    /* 0x44 */ (void*)cmd_0x45,              // 0x00461080
-    /* 0x45 */ (void*)cmd_0x46,              // 0x004320f0
+    /* 0x41 */ (void*)cmd_entity_unk8e_set,              // 0x00432090
+    /* 0x42 */ (void*)cmd_effect_clear_typed,              // 0x00431870
+    /* 0x43 */ (void*)cmd_bgm_volume_ramp,              // 0x00460d20
+    /* 0x44 */ (void*)cmd_scd_event_kill,              // 0x00461080
+    /* 0x45 */ (void*)cmd_entity_unk8e_add,              // 0x004320f0
     /* 0x46 */ (void*)cmd_light_set_0x47,    // 0x00432110
-    /* 0x47 */ (void*)cmd_0x48,              // 0x00431080
-    /* 0x48 */ (void*)cmd_0x49,              // 0x004318a0
-    /* 0x49 */ (void*)cmd_0x4a,              // 0x00432290
+    /* 0x47 */ (void*)cmd_obj_transform_set,              // 0x00431080
+    /* 0x48 */ (void*)cmd_effect_pool_clear,              // 0x004318a0
+    /* 0x49 */ (void*)cmd_room_bitmask_set,              // 0x00432290
     /* 0x4A */ (void*)cmd_snd_set0x4b,       // 0x00460ae0
-    /* 0x4B */ (void*)cmd_0x4c,              // 0x00460b80
-    /* 0x4C */ (void*)cmd_0x4d,              // 0x004322d0
-    /* 0x4D */ (void*)cmd_0x4e,              // 0x004323a0
-    /* 0x4E */ (void*)cmd_0x4f,              // 0x00431910
-    /* 0x4F */ (void*)cmd_0x50,              // 0x004622b0
-    /* 0x50 */ (void*)cmd_0x51,              // 0x004622e0
+    /* 0x4B */ (void*)cmd_bgm_stop_all,              // 0x00460b80
+    /* 0x4C */ (void*)cmd_item_record_transfer,              // 0x004322d0
+    /* 0x4D */ (void*)cmd_player_joint_tint,              // 0x004323a0
+    /* 0x4E */ (void*)cmd_effect_flags_modify,              // 0x00431910
+    /* 0x4F */ (void*)cmd_script_flag_set,              // 0x004622b0
+    /* 0x50 */ (void*)cmd_script_flag_test,              // 0x004622e0
     // Opcodes 0x51-0xFF: fill with cmd_nop as safe default
     // (entries 0x51-0xF5 may be accessed; 0xF6-0xFF are handled by room_events_check)
 };

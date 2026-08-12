@@ -1138,7 +1138,7 @@ DWORD         g_scaPoolBase = 0;
 // 0x00be995c - Per-room BGM state table (7 stages x 32 rooms, 224 bytes)
 // Each byte is a BGM state descriptor: bits 0-2 = track index, bits 3-5 = secondary slot enables,
 // bits 6-7 = transition mode (0=normal, 1=always reload, 2=force restart), 0xFF = no BGM.
-// Modified at runtime by SCD opcode cmd_0x37 and preserved in save files.
+// Modified at runtime by SCD opcode cmd_room_bgm_state_set and preserved in save files.
 // 0x00be995c to 0x00be9a3c - g_roomBgmState is a macro to g_BioCard.roomBgmState (see Items.h)
 
 // 0x00be98d0 - Room flags bitfield (set by Flg_on via room_set_visited_flag)

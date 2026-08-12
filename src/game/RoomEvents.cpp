@@ -24,7 +24,7 @@ static void ScdEventEntry_Init(ScdEventEntry* entry, int scriptIndex)
 // ============================================================================
 // ScdEventEntry_Create (0x0041d650)
 // Creates a new SCD event entry. If slot > 7, finds the first free slot.
-// Externally visible: SCD command opcode 0x14 (cmd_0x14) calls this. It must
+// Externally visible: SCD command opcode 0x14 (cmd_scd_event_create) calls this. It must
 // NOT be static - an empty placeholder in GameState.cpp used to satisfy that
 // call instead, so opcode 0x14 silently created no event.
 // ============================================================================
@@ -265,11 +265,19 @@ static void scd_event_state2_movement(void)
         g_pScdEventCurrent->scriptPtr += 8;
         return;
 
-    case 0x08: // Set single transform component
-        {
-            int component = g_pScdEventCurrent->scriptPtr[1];
-            *(int*)((char*)ent->scaMatrixData.localMatrix.t + component) = (int)(short)opcodes[1];
-        }
+    case 0x08: // Store one byte into the entity's state block
+        // 0x0041e3b6:
+        //   MOV DL,byte ptr [ECX + 0x2]          ; value  = script[2]
+        //   MOVZX EBX,byte ptr [ECX + 0x1]       ; offset = script[1]
+        //   MOV ECX,dword ptr [EAX + 0x4]        ; ECX    = entity
+        //   MOV byte ptr [EBX + ECX*0x1 + 0x84],DL
+        // A single BYTE store at entity + 0x84 + script[1] - the state block
+        // (state / ignore_player_flag / action_behavior / action_state / health /
+        // hit_state / ...). The old code used base 0x34 (localMatrix.t) and a
+        // 32-bit store, so this opcode overwrote four bytes of the transform
+        // instead of one state byte.
+        ((unsigned char*)ent)[0x84 + g_pScdEventCurrent->scriptPtr[1]] =
+            g_pScdEventCurrent->scriptPtr[2];
         g_pScdEventCurrent->scriptPtr += 3;
         return;
 
@@ -278,36 +286,43 @@ static void scd_event_state2_movement(void)
         g_pScdEventCurrent->scriptPtr += 2;
         return;
 
-    case 0x0A: // Set position/health/field from opcodes (parametric)
-    case 0x0B:
-        {
-            int* target;
-            switch (*opcodes >> 8) {
-            case 0: target = &ent->scaMatrixData.localMatrix.t[0]; break;
-            case 1: target = &ent->scaMatrixData.localMatrix.t[1]; break;
-            case 2: target = &ent->scaMatrixData.localMatrix.t[2]; break;
-            case 3:
-                ent->health = opcodes[1];
-                goto advance4;
-            case 4:
-                ent->unk_c6 = opcodes[1];
-                goto advance4;
-            case 5:
-                ent->unk_c8 = opcodes[1];
-                goto advance4;
-            default:
-                goto advance4;
-            }
-            *target = (int)(short)opcodes[1];
+    case 0x0A: // Store one entity field selected by the operand byte
+        // Inner switch at 0x0041e3fa: selector = script[1] (`MOV AX,[ECX] / SHR
+        // AX,0x8`), value = the word at script+2. Selectors 0-2 store a
+        // SIGN-EXTENDED 32-bit value (`MOVSX EAX,word ptr [ECX+0x2]`); selectors
+        // 3-5 store the raw 16-bit word (`MOV word ptr [EDX],AX`). Every path
+        // advances 4.
+        switch (*opcodes >> 8) {
+        case 0: ent->scaMatrixData.localMatrix.t[0] = (int)(short)opcodes[1]; break;
+        case 1: ent->scaMatrixData.localMatrix.t[1] = (int)(short)opcodes[1]; break;
+        case 2: ent->scaMatrixData.localMatrix.t[2] = (int)(short)opcodes[1]; break;
+        case 3: ent->health = (short)opcodes[1];   break;   // entity +0x88
+        case 4: ent->unk_c6 = opcodes[1];          break;   // entity +0xC6
+        case 5: ent->unk_c8 = opcodes[1];          break;   // entity +0xC8
+        default:
+            // `CMP EAX,0x5 / JA 0x0041e46e`, and 0x0041e46e is
+            // `MOV EDX,dword ptr [ESP+0x4]` - the destination pointer is read
+            // from a stack slot that is NEVER written on this path (only the
+            // in-range cases 0-2 reach the store, and they set EDX directly).
+            // The original therefore stores through an uninitialised pointer for
+            // any selector above 5. Deliberately NOT reproduced: the port skips
+            // the store and advances like every other path.
+            break;
         }
-    advance4:
         g_pScdEventCurrent->scriptPtr += 4;
-        if ((unsigned char)*opcodes == 0x0B) {
-            ent->position.pad = opcodes[1];
-            *(unsigned short*)&ent->angle = *(unsigned short*)(g_pScdEventCurrent->scriptPtr + 4);
-            *((unsigned short*)&ent->angle + 1) = *(unsigned short*)(g_pScdEventCurrent->scriptPtr + 6);
-            g_pScdEventCurrent->scriptPtr += 8;
-        }
+        return;
+
+    case 0x0B: // Set the entity's rotation SVECTOR absolutely
+        // 0x0041e486: three WORD stores at entity +0x72 / +0x74 / +0x76 from the
+        // script words at +2 / +4 / +6, then `ADD dword ptr [EAX+0x8],0x8`.
+        // This is the rotation sibling of case 0x07 (absolute position) and is a
+        // case of its OWN - it does not share case 0x0A's field-selector path.
+        // The old code ran 0x0A's parametric store first and then advanced
+        // 4 + 8 = 12, desyncing the script stream by 4 bytes for every use.
+        ent->position.pad               = opcodes[1];   // +0x72 rotation .x
+        *(unsigned short*)&ent->angle   = opcodes[2];   // +0x74 rotation .y (yaw)
+        *(unsigned short*)&ent->angle_z = opcodes[3];   // +0x76 rotation .z
+        g_pScdEventCurrent->scriptPtr += 8;
         return;
 
     default:

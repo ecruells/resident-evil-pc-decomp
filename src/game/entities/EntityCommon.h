@@ -135,10 +135,20 @@ extern unsigned int FUN_00460230(short x, short z);                           //
 extern void FUN_004602b0(unsigned int zoneA, unsigned int zoneB);             // 0x004602b0
 
 // ============================================================================
+// Joint reach hit test (0x0048ae00) - defined in EntityCommon.cpp
+// Composes a joint's world matrix with a translation of `pos` (callers pass
+// a zero vector for the joint's own position, or an offset along its local X
+// axis), then tests both horizontal axes of the player position against
+// `radius` - a square reach box, not a circle. Returns 1 when both axes hit.
+// Used by the unported monster attack states (Yawn 0x00405e00, tyrant
+// 0x00422c70, hunter 0x00417xxx); the zombie uses its own grab path instead.
+// ============================================================================
+extern unsigned char FUN_0048ae00(MATRIX* jointMtx, VECTOR* pos, short radius, int* playerT);
+
+// ============================================================================
 // Remaining engine dependencies (still stubs pending decompilation)
 // ============================================================================
 extern void FUN_0040a380(VECTOR* v0, VECTOR* v1);
-extern unsigned char FUN_0048ae00(int joint, VECTOR* pos, int radius, int playerPtr);
 extern unsigned int is_facing_toward_entity(void* player);
 extern char reduce_attack_time_by_btn_press(void);
 extern void set_next_entity_data_buffer(int count);                           // 0x00457070

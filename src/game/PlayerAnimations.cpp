@@ -739,9 +739,15 @@ void JointSetColorTint(int modelObjPtr, unsigned int packedColor)
         unsigned int idx = 0;
         do {
             *(unsigned int*)(entry + 0x80) |= 2;
-            *(float*)(entry + 0x5c) = (float)r * (1.0f / 255.0f);
-            *(float*)(entry + 0x60) = (float)g * (1.0f / 255.0f);
-            *(float*)(entry + 0x64) = (float)b * (1.0f / 255.0f);
+            // 1/128, not 1/255. The original multiplies by the float 0.0078125
+            // (0x3C000000) at all three sites - `FMUL float ptr [0x004af2f8]`
+            // is a DIFFERENT constant (255.0f, used by the 0x00485c60 pack-back).
+            // Scaling by 1/255 made every SCD-driven tint come out at roughly
+            // half the intended intensity, and a tint of 0x80 - which the
+            // original saturates to 1.0 - landed at 0.5.
+            *(float*)(entry + 0x5c) = (float)r * (1.0f / 128.0f);
+            *(float*)(entry + 0x60) = (float)g * (1.0f / 128.0f);
+            *(float*)(entry + 0x64) = (float)b * (1.0f / 128.0f);
             *(float*)(entry + 0x6c) = *(float*)(entry + 0x5c);
             *(int*)(entry + 0x70) = *(int*)(entry + 0x60);
             *(int*)(entry + 0x74) = *(int*)(entry + 0x64);
@@ -965,9 +971,21 @@ unsigned char Effect_CreateBillboard(
         // The original does not guard this either; it would fault the same way. The
         // guard is port-only so a data-ordering bug reports instead of crashing.
         if (spriteInfoBase == NULL || (DWORD)spriteInfoBase == 0xFFFFFFFF) {
+            // Hand the slot BACK. The search loop above already claimed it with
+            // `g_freeEffectSlots--`, but this path never sets eff->animId, so the
+            // slot stays free in the pool while the counter says it is taken.
+            // Without this the counter leaks one slot per skipped billboard, and
+            // a room that spawns an undeclared type repeatedly (ROOM1000 fires
+            // opcode 0x2A five times in one cutscene) drives g_freeEffectSlots to
+            // 0 - after which the `if (g_freeEffectSlots == 0) return type;` at
+            // the top of this function rejects EVERY effect for the rest of the
+            // session, including the ones whose sprites are perfectly valid.
+            // That turns one missing sprite into "no FX anywhere, permanently".
+            g_freeEffectSlots++;
             dbg_printf("[effect] g_effectSpriteInfo[%u] not loaded for this room"
-                       " - billboard skipped (depthGroup=%u)\n",
-                       typeIdx, (unsigned int)depthGroup);
+                       " - billboard skipped (depthGroup=%u free=%u)\n",
+                       typeIdx, (unsigned int)depthGroup,
+                       (unsigned int)g_freeEffectSlots);
             return 0;
         }
 

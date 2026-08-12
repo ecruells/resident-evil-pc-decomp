@@ -433,14 +433,14 @@ void DrawFadeSpr(void)
             static int lastAlpha = -1;
             if ((int)alpha != lastAlpha) {
                 lastAlpha = alpha;
-                dbg_printf("[shadow] n=%d prm=%u flag=%u alpha=%u force=%u depth=%u"
-                           " u=%d clut=%d x=%d rgb=%u,%u,%u corners=(%d,%d)(%d,%d)\n",
-                           g_FadeSprCount, fade_spr_param_index(),
-                           (unsigned int)prm->flag, (unsigned int)alpha,
-                           (unsigned int)forceAlpha, depth, arg_u, arg_clut, arg_x,
-                           (unsigned int)rgb[0], (unsigned int)rgb[1], (unsigned int)rgb[2],
-                           (int)quad[0x2C], (int)quad[0x2E],
-                           (int)quad[0x30], (int)quad[0x32]);
+                // dbg_printf("[shadow] n=%d prm=%u flag=%u alpha=%u force=%u depth=%u"
+                //            " u=%d clut=%d x=%d rgb=%u,%u,%u corners=(%d,%d)(%d,%d)\n",
+                //            g_FadeSprCount, fade_spr_param_index(),
+                //            (unsigned int)prm->flag, (unsigned int)alpha,
+                //            (unsigned int)forceAlpha, depth, arg_u, arg_clut, arg_x,
+                //            (unsigned int)rgb[0], (unsigned int)rgb[1], (unsigned int)rgb[2],
+                //            (int)quad[0x2C], (int)quad[0x2E],
+                //            (int)quad[0x30], (int)quad[0x32]);
             }
         }
 

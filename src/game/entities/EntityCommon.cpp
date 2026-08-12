@@ -440,7 +440,11 @@ void SetEntityScaHitData(Entity* ent)
 
     RotMatrix(&g_svecScratch, &g_matrixScratch);
 
-    while (*srcVol >= 0) {
+    // The terminating `srcVol[0] < 0` test happens AFTER the entry is written,
+    // so a record is always walked at least once. The player/zombie records
+    // pack their single volume into the same 16 bytes as the terminator (slot 0
+    // is 0x8000|id), so a test-first loop would never write anything at all.
+    for (;;) {
         SVECTOR localVertex;
         localVertex.x = srcVol[1];
         localVertex.z = srcVol[3];
@@ -455,6 +459,7 @@ void SetEntityScaHitData(Entity* ent)
         dstVol[1] = srcVol[2];
         dstVol[2] = (short)worldVertex.z;
 
+        if (srcVol[0] < 0) break;
         dstVol += 3;
         srcVol += 6;
     }
@@ -473,34 +478,40 @@ unsigned int ResolveEntityScaCollision(Entity* entA, Entity* entB)
     if (entB->state == 4) return 0;       // eating/headless state - skip collision
     if ((entA->status_flags | entB->status_flags) & 2) return 0;  // one is deactivated
 
-    short* volAStart = *(short**)((char*)entA + 4);   // SCA volume list start
-    short* volAEnd   = *(short**)((char*)entA + 8);   // SCA volume list end
+    // The world-space geometry lives at +8 (pSca_hit_data, rotated by
+    // SetEntityScaHitData) while the radius/height and the terminator live at
+    // +4 (Sca_info). Like SetEntityScaHitData, the terminating tests happen
+    // AFTER each volume pair is processed, so a record is always walked at
+    // least once - the player/zombie records carry their single volume in the
+    // same 16 bytes as the terminator.
+    short* volAWorld = *(short**)((char*)entA + 8);
+    short* volALocal = *(short**)((char*)entA + 4);
     unsigned char hitFlag = 0;
 
-    while (*volAStart >= 0) {                          // terminate on negative first short
-        short* volBStart = *(short**)((char*)entB + 4);
-        short* volBEnd   = *(short**)((char*)entB + 8);
+    for (;;) {
+        short* volBWorld = *(short**)((char*)entB + 8);
+        short* volBLocal = *(short**)((char*)entB + 4);
 
-        while (*volBStart >= 0) {
-            int dx = ((int)volBStart[0] - (int)volAStart[0])
+        for (;;) {
+            int dx = ((int)volBWorld[0] - (int)volAWorld[0])
                    - *(int*)&entA->scaMatrixData.localMatrix.t[0]
                    + *(int*)&entB->scaMatrixData.localMatrix.t[0];
-            int dz = ((int)volBStart[2] - (int)volAStart[2])
+            int dz = ((int)volBWorld[2] - (int)volAWorld[2])
                    - *(int*)&entA->scaMatrixData.localMatrix.t[2]
                    + *(int*)&entB->scaMatrixData.localMatrix.t[2];
 
-            unsigned short radiusA = volAStart[5];  // cylinder radius
-            unsigned short radiusB = volBStart[5];
-            unsigned short heightA = volAStart[4];  // cylinder half-height
-            unsigned short heightB = volBStart[4];
+            unsigned short radiusA = volALocal[5];  // cylinder radius
+            unsigned short radiusB = volBLocal[5];
+            unsigned short heightA = volALocal[4];  // cylinder half-height
+            unsigned short heightB = volBLocal[4];
 
             int dist = SquareRoot0(dz * dz + dx * dx);
             int penetration = (unsigned int)(radiusA + radiusB) - (dist + 1);
 
             if (penetration > 0) {
-                int dy = (int)volBStart[1]
-                       + (*(int*)&entA->scaMatrixData.localMatrix.t[1] - (int)volAStart[1])
-                       - *(int*)&entB->scaMatrixData.localMatrix.t[1];
+                int dy = (int)volBWorld[1]
+                       + (*(int*)&entB->scaMatrixData.localMatrix.t[1] - (int)volAWorld[1])
+                       - *(int*)&entA->scaMatrixData.localMatrix.t[1];
 
                 int maxHeight = (unsigned int)(unsigned short)heightA
                               + (unsigned int)(unsigned short)heightB;
@@ -509,9 +520,9 @@ unsigned int ResolveEntityScaCollision(Entity* entA, Entity* entB)
                     int pushX = (penetration * dx) / (dist + 1);
                     int pushZ = (penetration * dz) / (dist + 1);
 
-                    int dy2 = (int)volBStart[1]
-                            + ((int)entA->position.y - (int)volAStart[1])
-                            - *(int*)&entB->scaMatrixData.localMatrix.t[1];
+                    int dy2 = (int)volBWorld[1]
+                            + ((int)entB->position.y - (int)volAWorld[1])
+                            - *(int*)&entA->scaMatrixData.localMatrix.t[1];
 
                     if (dy2 <= -maxHeight || maxHeight <= dy2) {
                         int posXA = *(int*)&entA->scaMatrixData.localMatrix.t[0];
@@ -538,10 +549,14 @@ unsigned int ResolveEntityScaCollision(Entity* entA, Entity* entB)
                 }
             }
 
-            volBStart += 3;       // next volume: advance 3 shorts (6 bytes)
+            if (*volBLocal < 0) break;
+            volBWorld += 3;       // next volume: world geometry advances 3 shorts
+            volBLocal += 6;       // local metadata advances 6 shorts
         }
 
-        volAStart += 3;           // next volume: advance 3 shorts (6 bytes)
+        if (*volALocal < 0) break;
+        volAWorld += 3;
+        volALocal += 6;
     }
 
     return hitFlag;
@@ -800,16 +815,45 @@ void FUN_004565f0(SVECTOR* pos, SVECTOR* quad, int halfW, int halfH)
 }
 
 // ============================================================================
-// Remaining engine dependencies (pending full decompilation)
+// FUN_0048ae00 @ 0x0048ae00
+// "Can the player be hit here" test used by monster attack behaviours
+// (enemy-type-9 states 0x00439ad0, tyrant claw 0x00422c70, hunters 0x00417xxx,
+// Yawn 0x00405e00 - none of those state machines are ported yet).
 //
-// A stub whose parameter list differs from the real implementation elsewhere
-// does not collide at link time - it becomes a distinct OVERLOAD, and every
-// call site that includes this header silently binds to the do-nothing one.
-// That is what happened to BillboardSetColor (now in PlayerAnimations.cpp) and
-// to entity_add_fade_sprite (now in FadeSprite.cpp). The stubs below are not
-// used by the zombie path.
+// Composes the joint's world matrix with a translation of `pos`, then tests
+// whether the player is within `radius` of the composed point on BOTH
+// horizontal axes - a square reach box, not a circle. Callers pass either a
+// zero vector (tyrant claw: test against the joint's own world position) or
+// an offset along the joint's local X axis (Yawn bite: (1000,0,0), the point
+// 1000 units in front of the head). Returns 1 when both axes hit, 0 otherwise.
+//
+// The old stub returned 0 unconditionally, so no monster attack could ever
+// connect; changing the parameter types at the same time is safe because no
+// ported caller existed (see the overload trap note in CharacterNpc.h).
 // ============================================================================
-unsigned char FUN_0048ae00(int joint, VECTOR* pos, int radius, int playerPtr) { return 0; }
+unsigned char FUN_0048ae00(MATRIX* jointMtx, VECTOR* pos, short radius, int* playerT)
+{
+    // 0x0048ae03-0x0048ae14: g_matrixScratch = g_identityMatrixData (8 dwords)
+    for (int i = 0; i < 8; i++) {
+        ((int*)&g_matrixScratch)[i] = ((int*)&g_identityMatrixData)[i];
+    }
+
+    g_matrixScratch.t[0] = pos->x;
+    g_matrixScratch.t[1] = pos->y;
+    g_matrixScratch.t[2] = pos->z;
+
+    MATRIX local;
+    ApplyLVAndMul0Matrix(jointMtx, &g_matrixScratch, &local);
+
+    // Both subtractions run in 16-bit ALU (SUB AX / ADD AX before the MOVZX),
+    // so each sum truncates through (unsigned short); the compare against
+    // radius*2 is then signed. Both quirks are load-bearing for exact parity.
+    int dx = (unsigned short)((short)playerT[0] - (short)local.t[0] + radius);
+    if (radius * 2 < dx) return 0;
+
+    int dz = (unsigned short)((short)playerT[2] - (short)local.t[2] + radius);
+    return (unsigned char)(dz <= radius * 2);
+}
 
 // ============================================================================
 // Zone-graph pathfinding scratch (0x00be0ee0-0x00be0f03), used by FUN_0045f970
