@@ -332,8 +332,17 @@ void FlushTmdObjects(void)
             DWORD tex = (*(DWORD*)(e->slot + e->objIndex * 0x4C + 0x48) != 0)
                         ? *(DWORD*)(e->objData + 0x58) : 0;
             // Render flags at +0x80: bit 2 = unlit, take the vertex colour as
-            // it stands (see the layout note at the top of this file).
+            // it stands (see the layout note at the top of this file). The same
+            // bit marks semi-transparent models (CreateTmdObjectInternal ORs it
+            // when any TMD polygon has the 0x02000000 transparency bit); those
+            // carry their blend alpha in the record at +0x68, which the original
+            // draw also treats as the unlit path. Opaque objects keep alpha 1.
             bool unlit = (*(DWORD*)(e->objData + 0x80) & 2) != 0;
+            float triAlpha = 1.0f;
+            if (unlit) {
+                float a = *(float*)(e->objData + 0x68);
+                if (a > 0.0f && a <= 1.0f) triAlpha = a;
+            }
 
             // Transform + project + light every vertex
             // (heap-allocate per object; vertex counts are small)
@@ -430,15 +439,15 @@ void FlushTmdObjects(void)
                     o[0]  = x0; o[1]  = y0; o[2]  = TmdDepthNdc(vzArr[i0]);
                     o[3]  = vzArr[i0];
                     o[4]  = v0[9];  o[5]  = v0[10];
-                    o[6]  = cr[i0]; o[7]  = cg[i0]; o[8]  = cb[i0]; o[9]  = 1.0f;
+                    o[6]  = cr[i0]; o[7]  = cg[i0]; o[8]  = cb[i0]; o[9]  = triAlpha;
                     o[10] = x1; o[11] = y1; o[12] = TmdDepthNdc(vzArr[i1]);
                     o[13] = vzArr[i1];
                     o[14] = v1[9];  o[15] = v1[10];
-                    o[16] = cr[i1]; o[17] = cg[i1]; o[18] = cb[i1]; o[19] = 1.0f;
+                    o[16] = cr[i1]; o[17] = cg[i1]; o[18] = cb[i1]; o[19] = triAlpha;
                     o[20] = x2; o[21] = y2; o[22] = TmdDepthNdc(vzArr[i2]);
                     o[23] = vzArr[i2];
                     o[24] = v2[9];  o[25] = v2[10];
-                    o[26] = cr[i2]; o[27] = cg[i2]; o[28] = cb[i2]; o[29] = 1.0f;
+                    o[26] = cr[i2]; o[27] = cg[i2]; o[28] = cb[i2]; o[29] = triAlpha;
                     t3->depth = (vzArr[i0] + vzArr[i1] + vzArr[i2]) * (1.0f / 3.0f);
                     t3->tex   = tex;
                     g_tmdTriOrder[collected] = collected;
@@ -1009,16 +1018,6 @@ static void RoomObjectRender(unsigned char* obj)
 // and 3D objects never appeared.
 void room_camera_and_lighting_update(void)
 {
-    // One-shot per room: report the item/desk pass totals so a room with no
-    // models is distinguishable from one whose models fail to bind.
-    static int s_lastDiagRoom = -1;
-    if (s_lastDiagRoom != g_roomId) {
-        s_lastDiagRoom = g_roomId;
-        dbg_printf("[roomobj] stage %d room %d: %d items, %d desks\n",
-                   g_stageId, g_roomId,
-                   g_RdtPointer->sound_banks_count, g_RdtPointer->unknown_03[0]);
-    }
-
     for (int pass = 0; pass < 2; pass++) {
         int count = (pass == 0)
             ? g_RdtPointer->sound_banks_count

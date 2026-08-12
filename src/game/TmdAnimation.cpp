@@ -424,11 +424,30 @@ slotFound:
                             }
 
                             if (hasTransparency) {
-                                // Mark transparent polygons (slot+0x550, stride 0x84, 32 entries)
-                                DWORD* flags = (DWORD*)(objSlot + 0x550);
-                                for (int k = 0x20; k != 0; k--) {
-                                    *flags = *flags | 2;
-                                    flags += 0x21;
+                                // Mark the records transparent (render-flag bit 2 at
+                                // +0x80) and stash the blend alpha at +0x68, where
+                                // FlushTmdObjects reads them. Do it for both buffers
+                                // (m_objectData and m_objectDataCopy, 0x840 apart) so
+                                // the draw works whichever side Transform queues. An
+                                // earlier loop treated the 32 records as contiguous,
+                                // which ran the last write into m_objectHandles[11]
+                                // and 4 bytes past the slot.
+                                int recordCount = *(int*)(objSlot + 0x4C0); // m_objectCount
+                                if (recordCount < 0 || recordCount > 16) recordCount = 16;
+                                for (int buf = 0; buf < 2; buf++) {
+                                    DWORD* flags = (DWORD*)(objSlot + 0x4D0 + buf * 0x840 + 0x80);
+                                    float* alpha = (float*)(objSlot + 0x4D0 + buf * 0x840 + 0x68);
+                                    for (int k = 0; k < recordCount; k++) {
+                                        *flags = *flags | 2;
+                                        // Bitwise reinterpret, NOT a numeric cast:
+                                        // animObjPtr+0x14 holds float bits (0x3F000000
+                                        // = 0.5f). (float)0x3F000000 converts the DWORD
+                                        // VALUE (1056964608.0f), which trips the draw's
+                                        // a>0 && a<=1 guard and leaves the water opaque.
+                                        *alpha = *(float*)(animObjPtr + 0x14);
+                                        flags += 0x21;
+                                        alpha += 0x21;
+                                    }
                                 }
                             }
 
