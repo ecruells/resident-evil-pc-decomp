@@ -555,6 +555,14 @@ LAB_00463a53:
                 g_playerEntity.action_behavior = 1;
                 g_playerEntity.action_state = 0;
                 g_playerEntity.attackAnim = 0x37;
+                // 0x00463bc8: the crank-use exit also raises the completion flag the
+                // room SCD event script spins on: MOV EAX,0x20 /
+                // MOV [0x00be63bf],AL (unk_db = 0x20). player_scd_behavior_01's
+                // completion then does Flg_on(g_SysFlags, unk_db) = SysFlags bit
+                // 0x20, which the courtyard drain scripts (room3010 script 1/2's
+                // FC/FD wait) test before the FMV. Without it the wait never
+                // resolves and the player is stuck in the crank pose forever.
+                g_playerEntity.scd_anim_param = 0x20;
                 // Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
             }
 

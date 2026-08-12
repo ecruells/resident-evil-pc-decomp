@@ -4914,7 +4914,7 @@ static void player_scd_behavior_01(void)
     case 5:
         // Raise the completion flag the script is waiting on, then loop back to
         // state 0 when unk_e0 bit 4 asks for a repeat.
-        Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+        Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
         g_playerEntity.unk_de = 0;
         if ((g_playerEntity.unk_e0 & 0x10) != 0) {
             g_playerEntity.action_state = 0;
@@ -4969,7 +4969,7 @@ static void player_scd_behavior_05(void)
     int dz = g_playerEntity.scaMatrixData.localMatrix.t[2] - (int)g_playerEntity.unk_c8;
     int dx = g_playerEntity.scaMatrixData.localMatrix.t[0] - (int)g_playerEntity.unk_c6;
     if (SquareRoot0(dz * dz + dx * dx) < 100) {
-        Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+        Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
         if ((g_playerEntity.healthStatusFlags & 0x80) == 0) {
             // 0x0044dc35: MOV dword ptr [EAX+0x84],1 - back to state 1 with
             // animFrameId, action_behavior and action_state all cleared
@@ -5000,7 +5000,7 @@ static void player_scd_behavior_07(void)
             g_playerEntity.jointMoveData1, 0x400);
     }
     else if (st == 2) {
-        Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+        Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
     }
     g_playerEntity.directionAngle += (short)g_playerEntity.unk_de;
 }
@@ -5018,7 +5018,7 @@ static void player_scd_behavior_08(void)
     }
     else if (st != 1) {
         if (st == 2) {
-            Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+            Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
         }
         return;
     }
@@ -5046,7 +5046,7 @@ static void player_scd_behavior_09(void)
         g_playerEntity.animFrameId     = 0;
         g_playerEntity.action_behavior = 0;
         g_playerEntity.action_state    = 0;
-        Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+        Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
         return;
     }
     g_playerEntity.action_state += (unsigned char)Joint_move(
@@ -5124,7 +5124,7 @@ static void player_scd_behavior_02(void)
             int dz = g_playerEntity.scaMatrixData.localMatrix.t[2] - (int)g_playerEntity.unk_c8;
             int dx = g_playerEntity.scaMatrixData.localMatrix.t[0] - (int)g_playerEntity.unk_c6;
             if (SquareRoot0(dz * dz + dx * dx) < 0x96) {
-                Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+                Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
                 if ((g_playerEntity.healthStatusFlags & 0x80) == 0) {
                     g_playerEntity.animationId     = 1;
                     g_playerEntity.animFrameId     = 0;
@@ -5215,7 +5215,7 @@ static void player_scd_behavior_03(void)
                 if ((g_playerEntity.healthStatusFlags & 0x80) == 0) {
                     g_playerEntity.action_state = 4;
                 } else {
-                    Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+                    Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
                 }
                 return;
             }
@@ -5248,7 +5248,7 @@ static void player_scd_behavior_03(void)
         g_playerEntity.animFrameId     = 0;
         g_playerEntity.action_behavior = 0;
         g_playerEntity.action_state    = 0;
-        Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+        Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
         return;
     }
 }
@@ -5275,7 +5275,7 @@ static void player_scd_behavior_06(void)
         g_playerEntity.animFrameId     = 0;
         g_playerEntity.action_behavior = 0;
         g_playerEntity.action_state    = 0;
-        Flg_on((int)g_SysFlags, g_playerEntity.unk_db);
+        Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
         return;
     }
 

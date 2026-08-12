@@ -113,7 +113,10 @@ struct PlayerEntity {
     unsigned char  lookAtFlags;         // 0xD8
     unsigned char  lookAtYawStep;       // 0xD9
     unsigned char  lookAtPitchStep;     // 0xDA
-    unsigned char  unk_db;              // 0xDB
+    unsigned char  scd_anim_param;      // 0xDB - SCD event animation parameter;
+                                        //        the player's pose-completion code
+                                        //        raises Flg_on(g_SysFlags, this) when
+                                        //        an SCD-driven animation ends
     unsigned char  healthStatusFlags;   // 0xDC
     unsigned char  lookAtJointIdx;      // 0xDD
     unsigned short unk_de;              // 0xDE
