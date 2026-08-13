@@ -171,6 +171,17 @@ public:
                        MarniSampler sampler = MARNI_SAMPLER_POINT,
                        MarniBlend  blend   = MARNI_BLEND_ALPHA);
 
+    // Perspective-correct textured triangles WITHOUT depth testing. verts use
+    // the Model3DVertex layout { x, y (screen px), z (unused), w (view-space
+    // Z), u, v, r, g, b, a }: the perspective VS multiplies the ortho-mapped
+    // screen position by w and hands the rasteriser that w, so after the
+    // divide the position is unchanged but UV/colour interpolate
+    // perspective-correctly. Used by the ground-shadow quads, where
+    // screen-space (affine) interpolation sheared the two halves oppositely.
+    void DrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex,
+                            MarniSampler sampler = MARNI_SAMPLER_POINT,
+                            MarniBlend  blend   = MARNI_BLEND_ALPHA);
+
     // Depth-buffered variant of DrawTriangles for 3D models: 9 floats per
     // vertex, { x, y (screen px, Y-down), z (normalised [0,1] depth), u, v,
     // r, g, b, a }. Writes and tests the depth buffer (LESS_EQUAL) so faces of

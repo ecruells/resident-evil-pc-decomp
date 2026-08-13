@@ -385,7 +385,22 @@ void FlushTmdObjects(void)
                     // lights, the vertex colour becomes the primitive colour.
                     // PSXObject_Store writes 1.0 for textured primitives, so a
                     // door renders at full texture brightness every time.
-                    cr[v] = vtx[6]; cg[v] = vtx[7]; cb[v] = vtx[8];
+                    //
+                    // The death-wound tint (JointSetColorTint) writes the
+                    // object entry's colour floats at +0x5C and sets the unlit
+                    // bit at +0x80 at runtime; the vertex buffer is built once
+                    // at load and never re-synced, so an unlit entry with a
+                    // tinted colour reads it here (the wounds on the corpse).
+                    // Untinted entries keep 0 there and fall back to the
+                    // buffered colour.
+                    float tr = *(float*)(e->objData + 0x5C);
+                    float tg = *(float*)(e->objData + 0x60);
+                    float tb = *(float*)(e->objData + 0x64);
+                    if (tr != 0.0f || tg != 0.0f || tb != 0.0f) {
+                        cr[v] = tr; cg[v] = tg; cb[v] = tb;
+                    } else {
+                        cr[v] = vtx[6]; cg[v] = vtx[7]; cb[v] = vtx[8];
+                    }
                 }
                 else {
                     // Lighting: vertices without a normal (flat prims) reuse

@@ -400,12 +400,15 @@ extern int           g_displayDebugSaveMenu;           // 0x004d4680 - debug sav
 extern int           g_debugSaveMenuFlag;              // 0x004d4684 - debug save menu state flag
 extern int           DAT_004d228c;                     // 0x004d228c - menu processing active flag
 
-// Port-added debug helpers (no original address; set by F2/F3 in WindowProc,
-// consumed by the game loop). F2 = save screen, F3 = item box menu.
-// Compiled out of release builds.
+// Port-added debug helpers (no original address; set by F2/F3/F6 in WindowProc,
+// consumed by the game loop). F2 = save screen, F3 = item box menu,
+// F6 = texture viewer overlay. Compiled out of release builds.
 #ifdef _DEBUG
 extern int           g_debugOpenSaveScreenFlag;
 extern int           g_debugOpenItemboxFlag;
+extern int           g_debugTextureViewerFlag;   // F6: request the overlay (edge)
+extern int           g_debugTextureViewerOpen;   // 1 while the overlay is active
+int texture_viewer_overlay(void);                 // GameState.cpp - per-frame overlay; 0 when closed
 #endif
 
 // Room interaction state (0x00be9616-0x00be9618, adjacent to g_eventItemUsedFlag)
@@ -1472,7 +1475,10 @@ void door_system_load_data(void);                     // FUN_00412300 - .dor + t
 void door_system_start_animation(void);               // Task_execute(1, FUN_00444770)
 void set_fading(int type, int counter);               // 0x0047b980
 int  cmd_bgm_stop_all(void);                                  // 0x00460b80 - stop sound banks
-void display_die_screen(void);                        // 0x004... - death screen display
+void display_die_screen(void);                        // 0x00443090 - death screen display
+void update_image_fading_(const void* param1, short param2);  // 0x00443500 - fill g_TextureDesc from a 0x10-byte template
+void image_update(int param);                         // 0x00443550 - wavy died.tim strip effect
+int  _fsin(int angle);                                // 0x0040a960 - fix12 sine (angle 0..32768 = 2pi)
 void FUN_0047eb60(void);                              // 0x0047eb60 - post-death cleanup
 unsigned int set_message_display(unsigned short msgId, unsigned short flags); // 0x00455670
 unsigned int set_item_description_message(unsigned short descIndex, unsigned short pauseGame); // 0x00455730

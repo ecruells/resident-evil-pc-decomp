@@ -10,7 +10,7 @@ struct TextureDesc;
 
 // TextureDraw (0x008ec900) - Sprite command buffer entry (0x34 bytes)
 struct TextureDraw {
-    unsigned int type;          // 0x00 (always 10 for textured quads)
+    unsigned int type;          // 0x00 (10 = textured quad, 12 = 4-corner quad)
     unsigned int renderFlags;   // 0x04 (filled by SetTexture vtable call)
     short x0;                   // 0x08
     short y0;                   // 0x0a
@@ -27,8 +27,23 @@ struct TextureDraw {
     float b;                    // 0x28
     int texturePage;            // 0x2c
     unsigned int extraFlags;    // 0x30
+    // Type 12 (4-corner quad) only: corners 2 and 3 plus their UVs.
+    // UVs are 0..4096 fixed point (0..1 of the texture page).
+    short x2;                   // 0x34
+    short y2;                   // 0x36
+    short x3;                   // 0x38
+    short y3;                   // 0x3a
+    short u2;                   // 0x3c
+    short v2;                   // 0x3e
+    short u3;                   // 0x40
+    short v3;                   // 0x42
+    // Type 12: per-corner view-space Z (the perspective-divide w).
+    short wz0;                  // 0x44
+    short wz1;                  // 0x46
+    short wz2;                  // 0x48
+    short wz3;                  // 0x4a
 };
-static_assert(sizeof(TextureDraw) == 0x34, "TextureDraw size mismatch");
+static_assert(sizeof(TextureDraw) == 0x4C, "TextureDraw size mismatch");
 
 struct OTEntry {
     int   type;
@@ -57,14 +72,16 @@ void BuildSpriteRenderFlags(unsigned int textureFlags, unsigned int* outFlags);
 int  GetTextureVariant(unsigned int textureFlags);
 void SpriteQueue_Reset(void);
 void FlushSpriteCommands(void);
+void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth);
 
 int draw_texture(TextureDesc* texture, unsigned short depth);
 int SubmitLine(short x0, short y0, short x1, short y1, unsigned short depth,
                float r, float g, float b, float alpha);
 int AddSprite(TextureDesc* texture, short depth, int tpage, int fade);
 int AddTintSprite(TextureDesc* texture, unsigned short fade);
-int AddFadePoly(unsigned short alpha, int tpage, int u, int v, int clut, unsigned char* rgb,
-                int x, int y, int z, unsigned short forceAlpha);
+int AddFadePoly(unsigned short alpha, int tpage, unsigned char* rgb,
+                const int* px, const int* py, const int* wz,
+                const int* cu, const int* cv, int count);
 int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
                        unsigned char r, unsigned char g, unsigned char b,
                        int scaleX, int scaleY, int blendMode, short brightness);

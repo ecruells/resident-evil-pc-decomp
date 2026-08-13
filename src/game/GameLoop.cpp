@@ -217,6 +217,20 @@ LAB_00480d7c:
                         g_short_message_flags = savedMsgFlags;
                     }
                 }
+
+                // Debug: F6 toggles the in-game texture viewer overlay. The
+                // overlay draws through the pending-sprite queue each frame
+                // (FrameRateGovernor flushes it with the rest of the frame)
+                // and freezes the player by blanking the pad state.
+                if (g_debugTextureViewerFlag != 0) {
+                    g_debugTextureViewerFlag = 0;
+                    g_debugTextureViewerOpen = 1;
+                }
+                if (g_debugTextureViewerOpen) {
+                    if (texture_viewer_overlay() == 0) {
+                        g_debugTextureViewerOpen = 0;
+                    }
+                }
 #endif
 
                 if (((g_playerEntity.isBeingAttackedFlag == 0) &&

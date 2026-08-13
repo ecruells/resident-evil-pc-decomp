@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include "../DebugPrint.h"
+#include "entities/EntityCommon.h"
 
 // ============================================================================
 // Player animation function stubs (populated into g_playerAnimFunctions by set_player_animations_functions)
@@ -1258,13 +1259,15 @@ void EntityUpdateLookAtAngles(void)
 
 // ----------------------------------------------------------------------------
 // FUN_00456a10 (0x00456a10) — DEFERRED, 785 bytes.
-// Builds the player ground shadow / fade sprite. Blocked on RotAverage4
-// (0x0040ab00), a PSX GTE routine with no counterpart in the port yet.
-// Cosmetic only: nothing reads back the state it produces.
+// Builds the player ground shadow / fade sprite (0x00456a10). Queues the
+// player's quad at entity+0xE4 (the shadow, or the death blood-puddle after
+// the death anim re-colours and resizes it) through the FadeSpr system, the
+// same path entity_add_fade_sprite uses for the enemies and NPCs. This was
+// an empty stub blocked on RotAverage4, which the port now implements.
 // ----------------------------------------------------------------------------
 static void player_update_shadow_sprite(int posPtr, int sprPtr, int height, int angle)
 {
-    (void)posPtr; (void)sprPtr; (void)height; (void)angle;
+    entity_add_fade_sprite((VECTOR*)posPtr, (short*)sprPtr, (short)height, (short)angle);
 }
 
 // ----------------------------------------------------------------------------
@@ -1418,8 +1421,74 @@ static void player_state_report_missing(const char* addr)
 }
 
 static void player_state_02(void)         { player_state_report_missing("0x00495250"); }
-static void player_state_03(void)         { player_state_report_missing("0x00495270"); }
 static void player_state_null(void)       { player_state_report_missing("NULL in original"); }
+
+// ============================================================================
+// Player state 3 — death fall (0x00495270 -> FUN_00459be0)
+//
+// Set up by player_state_01_control when health < 0 (animationId 3). Runs the
+// death sequence: scream, the fall motion via Joint_move, the sliding
+// corpse, then the blood billboard (or the scripted-death rooms skip it and
+// jump straight to state 4). State 3 counts attackDirection down from 0xB4
+// to 0x20 while the billboard grows, then hands to animationId 4 (state 4 =
+// player_state_block_input - the death screen takes over from there).
+//
+// The word compare at 0x00be9820 spans g_stageId (low byte) and g_roomId
+// (high byte), the same pattern as the zombie revive check in Zombie.cpp.
+// ============================================================================
+static void player_state_03(void)
+{
+    // (0x00459be3): [scream frame, slide speed] per player id 0/1
+    static const unsigned short s_deathFallTable[4] = { 0x19, 0, 0xF, 0x400 };
+
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.action_state = 1;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.move_speed_current = s_deathFallTable[(g_playerEntity.id & 1) * 2];
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 4;
+        Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);  // death scream
+        g_playerEntity.isBeingAttackedFlag = 1;
+        g_playerEntity.unk_8c = 0;
+        g_playerEntity.attackDirection = 0xB4;
+        g_message_flags = (WORD)(g_message_flags & 0xFFBF);
+        // fall through
+    case 1:
+        // Body thud at motion frame 0x19 (checks before Joint_move advances it).
+        if ((g_playerEntity.animation_frame_id == 0x19) && (g_playerEntity.unk_bf == 1)) {
+            PlayEntitySnd(2);
+        }
+        {
+            char cVar1 = Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
+            g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + cVar1);
+            Add_speedXZ(s_deathFallTable[(g_playerEntity.id & 1) * 2 + 1]);
+        }
+        break;
+    case 2:
+        // Scripted-death rooms (stage 1 room 5, stage 3 room 9, stage 4 room 7)
+        // skip the blood billboard and go straight to state 4.
+        if ((*(unsigned short*)&g_stageId != 0x501) &&
+            (*(unsigned short*)&g_stageId != 0x903) &&
+            (*(unsigned short*)&g_stageId != 0x704)) {
+            BillboardSetColor(&g_playerEntity.pushVelocity, 1, 2, 0xFFFF50);
+            BillboardAdjSize(&g_playerEntity.pushVelocity, -0x64, -0x64);
+            g_playerEntity.action_state = 3;
+            g_playerEntity.isBeingAttackedFlag = 0x80;
+            return;
+        }
+        g_playerEntity.animationId = 4;
+        return;
+    case 3:
+        BillboardAdjSize(&g_playerEntity.pushVelocity, 0x10, 0x10);
+        g_playerEntity.attackDirection = (unsigned short)(g_playerEntity.attackDirection - 1);
+        if (g_playerEntity.attackDirection == 0x20) {
+            g_playerEntity.animationId = 4;
+            return;
+        }
+        break;
+    }
+}
 
 // ============================================================================
 // Player state 1 — normal player control (0x00495180)

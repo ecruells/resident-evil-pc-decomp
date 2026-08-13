@@ -417,6 +417,154 @@ void texture_viewer_state(void)
 }
 
 // ============================================================================
+// texture_viewer_overlay — per-frame in-game texture inspector (F6, debug only)
+//
+// Rendered as an overlay on top of the normal frame: the game loop calls this
+// once per frame while g_debugTextureViewerOpen is set; it draws the loaded
+// texture-page list and a preview through the pending-sprite queue, which
+// FrameRateGovernor flushes with the rest of the frame. Unlike the boot-time
+// texture_viewer_state this returns to the caller each frame — gameplay
+// resumes as soon as F6/ESC closes it (no task chain).
+//
+// Controls (GetAsyncKeyState, edge-detected like texture_viewer_state):
+//   Arrows        : navigate the page list
+//   A+Arrows      : move the preview offset
+//   R             : reset the preview offset
+//   F6 / ESC      : close and return to gameplay
+//
+// Returns 1 while the overlay should stay open, 0 when it closed. While open
+// the game's own pad state is zeroed so the player does not move underneath.
+// ============================================================================
+#ifdef _DEBUG
+int texture_viewer_overlay(void)
+{
+    static int      initialized = 0;
+    static int      selectedPage = 0;
+    static int      validPages[256];
+    static int      foundCount = 0;
+    static float    texOffsetX = 0.0f;
+    static float    texOffsetY = 0.0f;
+    static int      prevKeys = 0;
+
+    if (!initialized) {
+        // Rescan the SRV table on entry so slots loaded after boot (item
+        // icons, room pages) show up.
+        foundCount = 0;
+        for (int i = 0; i < 256; i++) {
+            if (g_TexturePageSRV[i] != MARNI_NULL_HANDLE) {
+                validPages[foundCount++] = i;
+            }
+        }
+        selectedPage = (foundCount > 0) ? 0 : -1;
+        texOffsetX = 0.0f;
+        texOffsetY = 0.0f;
+        prevKeys = 0;
+        initialized = 1;
+    }
+
+    // Freeze the player while the overlay is up: the frame's pad state was
+    // already latched, so blank the movement/action inputs for this frame.
+    g_PlayerDpadHeld = 0;
+    g_PlayerPadHeld = 0;
+    g_PlayerPadPressed = 0;
+    g_button_pressed_id = 0;
+
+    // --- Background (draw_rect goes through the pending sprite queue) ---
+    g_window_rect.w = 320;
+    g_window_rect.textureId = 0;
+    g_window_rect.r = 0;
+    g_window_rect.g = 0;
+    g_window_rect.b = 0;
+    g_window_rect.x = -g_ScreenOffsetX;
+    g_window_rect.h = 240;
+    g_window_rect.y = -g_ScreenOffsetY;
+    draw_rect(&g_window_rect, 100, 1);
+
+    sprintf(PRINT_TEXT_BUFFER, "TEXTURE VIEWER [%d]  F6/ESC:exit", foundCount);
+    PrintText8x14(2, 2, 0x8F, 0);
+
+    if (foundCount == 0) {
+        sprintf(PRINT_TEXT_BUFFER, "No textures loaded!");
+        PrintText8x14(2, 18, 0x4F, 0);
+    } else {
+        int pageIdx = validPages[selectedPage];
+        int texW = g_TexturePageWidth[pageIdx];
+        int texH = g_TexturePageHeight[pageIdx];
+        int texBpp = g_TexturePageBpp[pageIdx];
+
+        sprintf(PRINT_TEXT_BUFFER, "[%d/%d] slot=%d %dx%d %dbpp off=(%d,%d)",
+                selectedPage + 1, foundCount, pageIdx, texW, texH, texBpp,
+                (int)texOffsetX, (int)texOffsetY);
+        PrintText8x14(2, 18, 0x7F, 0);
+
+        // Page list: rows of slot numbers, 6 columns
+        int listY = 34;
+        for (int i = 0; i < foundCount && i < 60; i++) {
+            int col = i % 6;
+            int row = i / 6;
+            unsigned char color = (i == selectedPage) ? 0x8F : 0x5F;
+            sprintf(PRINT_TEXT_BUFFER, "%d", validPages[i]);
+            PrintText8x14((short)(2 + col * 52), (short)(listY + row * 14), color, 0);
+        }
+
+        // Preview: native size, downscaled only to fit
+        if (texW > 0 && texH > 0) {
+            float availW = 310.0f;
+            float availH = 236.0f - (float)listY - 70.0f;
+            float scX = availW / (float)texW;
+            float scY = availH / (float)texH;
+            float sc = (scX < scY) ? scX : scY;
+            if (sc > 1.0f) sc = 1.0f;
+            if (sc < 0.01f) sc = 0.01f;
+
+            float drawW = (float)texW * sc;
+            float drawH = (float)texH * sc;
+            float drawX = 5.0f + (availW - drawW) * 0.5f + texOffsetX;
+            float drawY = (float)listY + 70.0f + texOffsetY;
+
+            QueueTexturedSprite(drawX, drawY, drawW, drawH,
+                                g_TexturePageSRV[pageIdx], 200);
+        }
+    }
+
+    // --- Input (direct GetAsyncKeyState with edge detection) ---
+    int keys = 0;
+    int aHeld = (GetAsyncKeyState('A') & 0x8000) ? 1 : 0;
+    if (GetAsyncKeyState(VK_LEFT)   & 0x8000) keys |= 0x001;
+    if (GetAsyncKeyState(VK_RIGHT)  & 0x8000) keys |= 0x002;
+    if (GetAsyncKeyState(VK_UP)     & 0x8000) keys |= 0x004;
+    if (GetAsyncKeyState(VK_DOWN)   & 0x8000) keys |= 0x008;
+    if (GetAsyncKeyState('R')       & 0x8000) keys |= 0x010;
+    if (GetAsyncKeyState(VK_F6)     & 0x8000) keys |= 0x020;
+    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) keys |= 0x040;
+
+    int newKeys = keys & ~prevKeys;
+    prevKeys = keys;
+
+    if (aHeld) {
+        float moveSpeed = 1.0f;
+        if (keys & 0x001) texOffsetX -= moveSpeed;
+        if (keys & 0x002) texOffsetX += moveSpeed;
+        if (keys & 0x004) texOffsetY -= moveSpeed;
+        if (keys & 0x008) texOffsetY += moveSpeed;
+    } else if (foundCount > 0) {
+        if (newKeys & 0x001) { selectedPage--; if (selectedPage < 0) selectedPage = foundCount - 1; }
+        if (newKeys & 0x002) { selectedPage++; if (selectedPage >= foundCount) selectedPage = 0; }
+        if (newKeys & 0x004) { selectedPage--; if (selectedPage < 0) selectedPage = foundCount - 1; }
+        if (newKeys & 0x008) { selectedPage++; if (selectedPage >= foundCount) selectedPage = 0; }
+    }
+
+    if (newKeys & 0x010) { texOffsetX = 0.0f; texOffsetY = 0.0f; }
+
+    if (newKeys & (0x020 | 0x040)) {   // F6 or ESC: close
+        initialized = 0;
+        return 0;
+    }
+    return 1;
+}
+#endif
+
+// ============================================================================
 // logos_state (0x00442bb0)
 // Logos/opening state: plays intro videos then chains to title_state.
 // ============================================================================

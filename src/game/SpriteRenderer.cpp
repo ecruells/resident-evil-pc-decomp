@@ -1,5 +1,6 @@
 #include "SpriteRenderer.h"
 #include "../Globals.h"
+#include "../DebugPrint.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "../marni/MarniBits.h"
@@ -59,12 +60,16 @@ void SpriteQueue_Reset(void) {
 }
 
 // ============================================================================
-// FlushSpriteCommands
-// Converts TextureDraw entries (in PS1 absolute screen coordinates, 0-319 x 0-239)
-// to D3D11 draw calls at the current display resolution.
+// FlushSpriteCommandsRange
+// Converts TextureDraw entries whose depthSort falls in [minDepth, maxDepth)
+// to D3D11 draw calls at the current display resolution. The PS1 ordering
+// table (OT) is emulated with a single stable sort inside
+// FlushSpriteCommands, so the range split preserves the global order:
+// the death screen's base died.tim image (depthSort 0x10194) is flushed
+// before the 3D TMD pass and the wavy strip (660) after it.
 // ============================================================================
-void FlushSpriteCommands(void) {
-
+void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
+{
     if (g_SpriteQueueCount == 0) {
         return;
     }
@@ -74,7 +79,9 @@ void FlushSpriteCommands(void) {
     // (nearer the camera). Without this, sprites are drawn in submission order,
     // which makes later-drawn frames occlude the icons/textures they should sit
     // behind (e.g. the equipped-weapon frame covering the weapon texture).
-    // Stable sort so equal-depth draws keep their submission order.
+    // Stable sort so equal-depth draws keep their submission order. The two
+    // range flushes (FrameRateGovernor) each re-sort the untouched queue, so
+    // both halves come out in the same global order.
     std::stable_sort(
         g_SpriteCommandBuffer,
         g_SpriteCommandBuffer + g_SpriteQueueCount,
@@ -91,6 +98,7 @@ void FlushSpriteCommands(void) {
 
     for (int i = 0; i < g_SpriteQueueCount; i++) {
         TextureDraw* cmd = &g_SpriteCommandBuffer[i];
+        if (cmd->depthSort < minDepth || cmd->depthSort >= maxDepth) continue;
 
         // Line primitives (type 11): used by the menu EKG health bar.
         // The original FUN_00470c60 built a line primitive and inserted it
@@ -115,6 +123,92 @@ void FlushSpriteCommands(void) {
             if (ca > 255) ca = 255; if (ca < 0) ca = 0;
             DWORD color = ((DWORD)ca << 24) | ((DWORD)cr << 16) | ((DWORD)cg << 8) | (DWORD)cb;
             MarniDrawLine(sx0, sy0, sx1, sy1, 1.0f, color);
+            continue;
+        }
+        if (cmd->type == 12) {
+            // 4-corner textured quad (ground shadows / death blood pool).
+            // The original rendered the quad through a Marni viewport, so its
+            // footprint follows the rotated quad exactly; an axis-aligned
+            // sprite can't (its bbox oscillates with the entity angle and
+            // over-stretches the texture), so the clipped projected polygon
+            // is drawn as two triangles with per-corner UVs.
+            int texSlot = cmd->extraFlags;
+            MarniHandle srv = MARNI_NULL_HANDLE;
+            float pageW = 0.0f;
+            float pageH = 0.0f;
+            if (texSlot >= 0 && texSlot < 256) {
+                srv = g_TexturePageSRV[texSlot];
+                if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
+                if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
+            }
+            if (srv == MARNI_NULL_HANDLE) {
+                texSlot = cmd->texturePage;
+                if (texSlot >= 0 && texSlot < 256) {
+                    srv = g_TexturePageSRV[texSlot];
+                    if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
+                    if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
+                }
+            }
+            if (srv == MARNI_NULL_HANDLE) {
+                continue;
+            }
+            if (pageW <= 0.0f || pageH <= 0.0f) {
+                continue;
+            }
+
+            int cr = (int)(cmd->r * 255.0f);
+            int cg = (int)(cmd->g * 255.0f);
+            int cb = (int)(cmd->b * 255.0f);
+            if (cr > 255) cr = 255; if (cr < 0) cr = 0;
+            if (cg > 255) cg = 255; if (cg < 0) cg = 0;
+            if (cb > 255) cb = 255; if (cb < 0) cb = 0;
+            float alpha = 1.0f;
+            if (cmd->unk1c > 0.0f && cmd->unk1c < 1.0f) {
+                alpha = cmd->unk1c;
+            }
+            int ca = (int)(alpha * 255.0f);
+            if (ca > 255) ca = 255; if (ca < 0) ca = 0;
+
+            // Two triangles, drawn PERSPECTIVE-CORRECT: the per-corner
+            // view-space z goes in as w, so the UVs interpolate with the
+            // perspective divide the way the original's D3D7 hardware did.
+            //
+            // The fan MUST be (0,1,2) + (0,2,3). DrawFadeSpr's near-plane
+            // clipper walks the quad's edges in ring order (0->1->3->2) and
+            // emits its vertices in that sequence, so cmd->x0..x3 are a CYCLIC
+            // polygon, not the TL/TR/BL/BR strip that a (0,1,2)+(2,1,3) fan
+            // assumes. Fanning a ring that way splits the first triangle along
+            // the 0-2 diagonal and the second along the 1-3 diagonal: the two
+            // halves then OVERLAP down the middle (drawn twice, so twice as
+            // dark) and leave a sliver at each end uncovered. That is the
+            // long-running "the oval is cut in half and both halves are
+            // rotated and overlap" artifact - it was never the projection or
+            // the texture.
+            const short cxy[4][2] = {
+                { cmd->x0, cmd->y0 }, { cmd->x1, cmd->y1 },
+                { cmd->x2, cmd->y2 }, { cmd->x3, cmd->y3 },
+            };
+            const short cuv[4][2] = {
+                { cmd->u0, cmd->v0 }, { cmd->u1, cmd->v1 },
+                { cmd->u2, cmd->v2 }, { cmd->u3, cmd->v3 },
+            };
+            const short cwz[4] = { cmd->wz0, cmd->wz1, cmd->wz2, cmd->wz3 };
+            float verts[6][10];
+            const int idx[6] = { 0, 1, 2, 0, 2, 3 };
+            for (int t = 0; t < 6; t++) {
+                int k = idx[t];
+                verts[t][0] = (float)cxy[k][0] * scaleX;
+                verts[t][1] = (float)cxy[k][1] * scaleY;
+                verts[t][2] = 0.0f;                            // NDC z (unused)
+                verts[t][3] = (float)cwz[k];                   // view z = w
+                verts[t][4] = (float)cuv[k][0] * (1.0f / 4096.0f);
+                verts[t][5] = (float)cuv[k][1] * (1.0f / 4096.0f);
+                verts[t][6] = (float)cr * (1.0f / 255.0f);
+                verts[t][7] = (float)cg * (1.0f / 255.0f);
+                verts[t][8] = (float)cb * (1.0f / 255.0f);
+                verts[t][9] = (float)ca * (1.0f / 255.0f);
+            }
+            MarniDrawTrianglesPersp((const float*)verts, 2, srv);
             continue;
         }
         if (cmd->type != 10) continue;
@@ -163,10 +257,29 @@ void FlushSpriteCommands(void) {
             }
         }
         if (srv == MARNI_NULL_HANDLE) {
+#ifdef _DEBUG
+            // Menu sprites sort at depth*16+500 (depths 0x10-0x30 = 660-1300).
+            if (cmd->depthSort >= 600 && cmd->depthSort <= 1400) {
+                dbg_printf("[tex] FLUSH SKIP (no SRV) depthSort=%u slot=%d texPage=%d"
+                           " u=%d v=%d w=%d h=%d\n",
+                           cmd->depthSort, (int)cmd->extraFlags, (int)cmd->texturePage,
+                           (int)cmd->u0, (int)cmd->v0, (int)(cmd->x1 - cmd->x0 + 1),
+                           (int)(cmd->y1 - cmd->y0 + 1));
+            }
+#endif
             continue;
         }
         if (pageW <= 0.0f || pageH <= 0.0f) {
             // SRV exists but its dimensions are unknown — can't normalize UVs.
+#ifdef _DEBUG
+            if (cmd->depthSort >= 600 && cmd->depthSort <= 1400) {
+                dbg_printf("[tex] FLUSH SKIP (bad dims) depthSort=%u slot=%d"
+                           " W=%d H=%d\n",
+                           cmd->depthSort, (int)cmd->extraFlags,
+                           (int)g_TexturePageWidth[texSlot],
+                           (int)g_TexturePageHeight[texSlot]);
+            }
+#endif
             continue;
         }
 
@@ -189,13 +302,20 @@ void FlushSpriteCommands(void) {
 
         MarniDrawSprite(x, y, w, h, u0, v0, u1, v1, color, srv);
     }
-
-    g_SpriteQueueCount = 0;
 }
 
 // ============================================================================
-// draw_texture (0x0046e410)
+// FlushSpriteCommands
+// Sorts the full queue like the original OT (lower depthSort = nearer, drawn
+// last), then flushes everything. FrameRateGovernor splits the flush around
+// the 3D TMD pass at depth 0x1000 instead (see Rendering.cpp) so the death
+// screen's background image sorts behind the entities.
 // ============================================================================
+void FlushSpriteCommands(void) {
+
+    FlushSpriteCommandsRange(0, 0xFFFFFFFFu);
+    g_SpriteQueueCount = 0;
+}
 int draw_texture(TextureDesc* texture, unsigned short depth) {
     if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return 0;
 
@@ -452,34 +572,101 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
 
 // ============================================================================
 // AddFadePoly (0x0046fea0) - simplified for D3D11 port
+//
+// The original built a 4-vertex Marni OT primitive carrying the shadow's
+// composed matrix (columns + translation in 4.12 fixed point), the viewport
+// and texture-page handles, and inserted it with the fade value as the OT
+// depth; the hardware rendered the quad through the viewport, so its
+// footprint followed the rotated quad exactly. The port draws the same quad
+// as TWO textured triangles over the clipped projected polygon: DrawFadeSpr
+// clips the world-space corners against the near plane, projects them, and
+// passes the 3..5-corner polygon (px/py, PS1 screen coords) with per-corner
+// UVs (cu/cv, 0..4096 over the whole kage page) here. `alpha` is the OT depth
+// and nothing else: it becomes the sprite's depthSort so farther shadows draw
+// first (see the note on the vertex alpha below).
+//
+// `rgb` is the quad's primitive-header tint (0x00808080 shadow grey,
+// 0x00FFFF50 blood-pool red). The original's byte conversion is b/256 below
+// 0x80 and (256-b)/256 above it, with an all-equal special case that
+// collapses to near-black (0x3b83126f == 0.004f): the grey shadow hits the
+// special case and multiplies the texture to black, the blood pool's
+// (0x50, 0xFF, 0xFF) comes out (0.31, 0.004, 0.004) dark red.
 // ============================================================================
-int AddFadePoly(unsigned short alpha, int tpage, int u, int v, int clut,
-                unsigned char* rgb, int x, int y, int z, unsigned short forceAlpha) {
-    if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return 0;
+int AddFadePoly(unsigned short alpha, int tpage, unsigned char* rgb,
+                const int* px, const int* py, const int* wz,
+                const int* cu, const int* cv, int count) {
+    // A clipped convex quad has 3..5 corners; a TextureDraw carries 4, so the
+    // pentagon (one corner behind the camera) is split into (0,1,2,3) plus
+    // the triangle (0,3,4). Fewer than 4 corners repeat the last one.
+    int cmds = (count > 4) ? 2 : 1;
+    if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - cmds) return 0;
 
-    TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
-    cmd->type = 10;
+    // `alpha` is the ORDERING-TABLE key only - it never reaches the blend.
+    // The original inserts the primitive with (alpha >> 2) - g_OTIndex as its
+    // OT depth (0x00470100) and hands the hardware a texture page created in
+    // mode 1, whose blend is dst * brightness with brightness coming purely
+    // from the kage CLUT. Scaling the sprite's opacity by alpha/g_MaxFadeValue
+    // was a port invention: it faded the shadow to ~25% wherever the camera
+    // sat a few thousand units away, which is every in-game camera. The
+    // texture's own alpha (255 - brightness, baked by LoadShadowMaskTexture)
+    // must be the whole story, so the vertex alpha stays at full strength.
+    const float a = 1.0f;
 
-    float a = (float)alpha / (float)g_MaxFadeValue;
+    float r, g, b;
+    if (rgb[1] == rgb[0] && rgb[2] == rgb[0]) {
+        r = 0.0f;
+        g = 0.0f;
+        b = 0.004f;
+    } else {
+        r = (float)(rgb[0] < 0x80 ? rgb[0] : 256 - rgb[0]) * 0.00390625f;
+        g = (float)(rgb[1] < 0x80 ? rgb[1] : 256 - rgb[1]) * 0.00390625f;
+        b = (float)(rgb[2] < 0x80 ? rgb[2] : 256 - rgb[2]) * 0.00390625f;
+    }
 
-    cmd->r = (float)rgb[0] * g_ColorScaleFactor;
-    cmd->g = (float)rgb[1] * g_ColorScaleFactor;
-    cmd->b = (float)rgb[2] * g_ColorScaleFactor;
-    cmd->unk1c = a;
-    cmd->texturePage = 0;
+    static const int quadIdx[2][4] = { { 0, 1, 2, 3 }, { 0, 3, 4, 4 } };
+    for (int q = 0; q < cmds; q++) {
+        int k0 = quadIdx[q][0];
+        int k1 = quadIdx[q][1];
+        int k2 = quadIdx[q][2] > count - 1 ? count - 1 : quadIdx[q][2];
+        int k3 = quadIdx[q][3] > count - 1 ? count - 1 : quadIdx[q][3];
 
-    cmd->x0 = (short)x;
-    cmd->y0 = (short)y;
-    cmd->x1 = (short)(x + 64);
-    cmd->y1 = (short)(y + 64);
-    cmd->u0 = (short)u;
-    cmd->v0 = (short)v;
-    cmd->u1 = (short)(u + 64);
-    cmd->v1 = (short)(v + 64);
-    cmd->depthSort = z;
-    cmd->extraFlags = tpage;
+        TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
+        cmd->type = 12;
+        cmd->renderFlags = 0;
+        cmd->x0 = (short)px[k0];
+        cmd->y0 = (short)py[k0];
+        cmd->x1 = (short)px[k1];
+        cmd->y1 = (short)py[k1];
+        cmd->x2 = (short)px[k2];
+        cmd->y2 = (short)py[k2];
+        cmd->x3 = (short)px[k3];
+        cmd->y3 = (short)py[k3];
+        cmd->u0 = (short)cu[k0];
+        cmd->v0 = (short)cv[k0];
+        cmd->u1 = (short)cu[k1];
+        cmd->v1 = (short)cv[k1];
+        cmd->u2 = (short)cu[k2];
+        cmd->v2 = (short)cv[k2];
+        cmd->u3 = (short)cu[k3];
+        cmd->v3 = (short)cv[k3];
+        int w0 = wz[k0] > 30000 ? 30000 : wz[k0];
+        int w1 = wz[k1] > 30000 ? 30000 : wz[k1];
+        int w2 = wz[k2] > 30000 ? 30000 : wz[k2];
+        int w3 = wz[k3] > 30000 ? 30000 : wz[k3];
+        cmd->wz0 = (short)w0;
+        cmd->wz1 = (short)w1;
+        cmd->wz2 = (short)w2;
+        cmd->wz3 = (short)w3;
+        cmd->depthSort = (unsigned int)alpha;
+        cmd->unk1c = a;
+        cmd->r = r;
+        cmd->g = g;
+        cmd->b = b;
+        cmd->texturePage = 0;
+        cmd->extraFlags = (unsigned int)tpage;
 
-    g_SpriteQueueCount++;
+        g_SpriteQueueCount++;
+    }
     return 1;
 }
 

@@ -576,6 +576,20 @@ void MarniDrawSprite(float x, float y, float w, float h,
                              MARNI_BLEND_ALPHA);
 }
 
+// Only the ground shadow / blood pool (AddFadePoly, type 12) draws through
+// here, and it stretches a 26x29 gradient over a quad several times that size.
+// Point sampling turned the soft blob into visible texel blocks with straight
+// faceted edges; the original's D3D7 device filtered it, which is what makes
+// the shadow in the retail game a smooth oval. Everything else in the sprite
+// path stays POINT on purpose - that is the PS1 look for the 2D art.
+void MarniDrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex)
+{
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (!pD3D || !pD3D->m_isInitialized) return;
+    pD3D->m_pDX->DrawTrianglesPersp(verts, triCount, tex,
+                                    MARNI_SAMPLER_LINEAR, MARNI_BLEND_ALPHA);
+}
+
 // ============================================================================
 // MarniGetRenderScale
 // Game-space -> backbuffer scale factors. The original Marni layer applied

@@ -616,12 +616,16 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
     }
 }
 
+// The single colour every non-transparent CLUT entry is flattened to before
+// the page is built (0x0046cd88). RGB555 (15,15,15) - a 48% grey, which is
+// exactly how dark the ground shadow can ever make the floor.
+#define SHADOW_PAGE_COLOUR  0x3DEF
+
 // ============================================================================
 // LoadShadowMaskTexture (0x0046ccd0)
-// Shadow/mask texture loader. Reads 16-bit palette from image offset +0x14,
-// replaces non-transparent colors with black for alpha-mask effect,
-// then creates shadow-optimized texture pages (mode=1).
-// Slot shifted by +0x2F.
+// Shadow/mask texture loader. Reads the 16-bit palette from image offset
+// +0x14, flattens every non-transparent colour to SHADOW_PAGE_COLOUR, then
+// creates shadow-optimized texture pages (mode=1). Slot shifted by +0x2F.
 // ============================================================================
 void LoadShadowMaskTexture(void* imageBuffer, int slotBase)
 {
@@ -634,8 +638,27 @@ void LoadShadowMaskTexture(void* imageBuffer, int slotBase)
     int slotOffset = slotIndex * 0x37C;
     int texCheckOffset = slotIndex * 0xDF;
 
-    int textureCount = *(int*)((BYTE*)&g_VideoDriverArray_814 + texCheckOffset);
-    if (textureCount != 0) {
+    // The legacy page tables below are byte-offset indexed by slot (0xDF per
+    // slot for the counts/handles, 0x37C for the work buffers), but the
+    // port's arrays are only 1-4KB fragments of the original's ~393KB
+    // descriptor region. Slot 0x2F's offsets (texCheckOffset 10481,
+    // slotOffset 41924) exceed every one of them, so the destruction block
+    // would read a count ~9KB out of bounds and call destroy_texture_page on
+    // arbitrary DWORDs found there - the mechanism that can kill the boot-time
+    // menu textures (status.tim @15, statface.tim @24, blue.tim @25,
+    // staitem.tim @45), which nothing ever reloads. The port's D3D11 SRVs
+    // live in g_TexturePageSRV, not these tables, so the legacy block is only
+    // run when its offsets actually land inside the arrays.
+    int legacyInRange = (texCheckOffset >= 0) &&
+        (texCheckOffset + 8 * (int)sizeof(DWORD) <= (int)sizeof(g_TexturePageTable_DAT)) &&
+        (texCheckOffset + 8 * (int)sizeof(DWORD) <= (int)sizeof(g_VideoDriverArray_814)) &&
+        (slotOffset + 8 * 0x68 <= (int)sizeof(g_VideoDriverArray_4d0));
+
+    int textureCount = 0;
+    if (legacyInRange) {
+        textureCount = *(int*)((BYTE*)&g_VideoDriverArray_814 + texCheckOffset);
+    }
+    if (textureCount != 0 && legacyInRange) {
         DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
         for (int i = 0; i < textureCount; i++) {
             if (pageTable[i] != 0) { destroy_texture_page(pageTable[i]); pageTable[i] = 0; }
@@ -649,40 +672,102 @@ void LoadShadowMaskTexture(void* imageBuffer, int slotBase)
     for (int i = 0; i < 256; i++) {
         WORD color = srcPalette[i];
         paletteEntries[i] = color;
-        // Non-transparent, non-zero colors → black (0x3DEF = RGB555 black)
+        // Every non-transparent entry collapses to the single page colour
+        // 0x3DEF. That is NOT black: RGB555 0x3DEF is (15,15,15) of 31, a
+        // 48% grey - the shade the shadow multiplies the floor down to. See
+        // the SRV build below, which needs it.
         if (color != 0 && color != 0x8000) {
-            srcPalette[i] = 0x3DEF;
+            srcPalette[i] = SHADOW_PAGE_COLOUR;
         }
     }
 
     PSXTexture psxTex;
     if (psxTex.Store((int*)imageBuffer, 1) == 0) return;
 
-    // Create shadow-optimized texture pages with mode=1
+    // --- D3D11 SRV at the page slot (0x2F) ---
+    // The legacy create_texture_page call below only updates the PSX handle
+    // table; nothing built the D3D11 SRV DrawFadeSpr samples, and a NULL SRV
+    // makes FlushSpriteCommandsRange skip the sprite (no ground shadows, no
+    // death blood pool).
+    //
+    // The original (0x0046ce90) builds this page in two steps. It first draws
+    // the BLACKENED image into a work bitmap - every disc pixel becomes the
+    // flat 48% grey 0x3DEF, everything outside stays the 0xFFFFFF the bitmap
+    // was filled with - and then overwrites each pixel's ALPHA (declared 8
+    // bits at shift 24 by the m_alphaShift/Mask/Width stores) from the SAVED,
+    // UNBLACKENED palette:
+    //     alpha = ((255 - r*8) * 2) & 0xFF          (LEA ECX*2 / SHL 0x18)
+    // Note every value in KAGE wraps that mask, so it is a contrast stretch:
+    // alpha = 254 - 16r, running 254 at the transparent border down to 62 at
+    // the disc core. It is a COVERAGE value, not the shade: the page colour
+    // is what the destination gets multiplied toward, and the alpha says how
+    // far. So the multiplier the mode-1 page applies is
+    //     F = lerp(1.0, 15/31, coverage),   coverage = (255 - alpha) / 255
+    // i.e. the shadow bottoms out at 48% of the background, reaching 61% at
+    // the disc core (coverage 0.757).
+    //
+    // This port draws it as a src-alpha sprite over a near-black texel, where
+    // out = src*A + dst*(1-A) ~= dst*(1-A), so A must be 1 - F. Baking the
+    // raw coverage instead (A = 255 - alpha, giving out = dst*alpha/255 = 24%
+    // at the core) threw away the page colour entirely and made the shadow
+    // about 2.4x too opaque.
+    {
+        int w = psxTex.m_WidthPixels;
+        int h = psxTex.m_Height;
+        BYTE* src = (BYTE*)psxTex.m_pPixelData;
+        if (w > 0 && h > 0 && src != NULL) {
+            // 1 - 15/31, as 5-bit levels: how much of the destination the
+            // page colour can take away at full coverage.
+            const unsigned int darken = 31u - (SHADOW_PAGE_COLOUR & 0x1Fu);
+            DWORD* rgba = new DWORD[w * h];
+            for (int i = 0; i < w * h; i++) {
+                unsigned int r = (unsigned int)paletteEntries[src[i]] & 0x1F;
+                unsigned int alpha = ((255u - r * 8u) * 2u) & 0xFFu;
+                unsigned int coverage = 255u - alpha;
+                rgba[i] = (((coverage * darken) / 31u) << 24) | 0x00202020u;
+            }
+            if (g_TexturePageSRV[slotIndex] != MARNI_NULL_HANDLE) {
+                Marni_DX()->DestroyTexture(g_TexturePageSRV[slotIndex]);
+                g_TexturePageSRV[slotIndex] = MARNI_NULL_HANDLE;
+            }
+            MarniCreateTexture(w, h, 32, rgba, &g_TexturePageSRV[slotIndex]);
+            delete[] rgba;
+
+            g_TexturePageWidth[slotIndex]  = w;
+            g_TexturePageHeight[slotIndex] = h;
+            g_TexturePageBpp[slotIndex]    = 8;
+        }
+    }
+
+    // Create shadow-optimized texture pages with mode=1. Same bounds guard as
+    // the destruction block above: slot 0x2F's legacy offsets are far past the
+    // port's arrays, and these writes would land in unrelated .bss globals.
     int pageIndex = 0;
     int pageCount = 1;
-    BYTE* pageData = (BYTE*)&g_VideoDriverArray_4d0 + slotOffset;
-    DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
+    if (legacyInRange) {
+        BYTE* pageData = (BYTE*)&g_VideoDriverArray_4d0 + slotOffset;
+        DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
 
-    for (int page = 0; page < pageCount; page++) {
-        *(DWORD*)(pageData + 0x50) = 1;
-        *(DWORD*)(pageData + 0x54) = 0;
-        *(DWORD*)(pageData + 0x58) = 0;
-        *(DWORD*)(pageData + 0x5C) = 0;
-        *(DWORD*)(pageData + 0x60) = 0;
-        *pageTable = (DWORD)create_texture_page(pageData, 1);  // mode=1 = shadow/alpha blend
-        pageData += 0x68;
-        pageTable++;
-        pageIndex++;
+        for (int page = 0; page < pageCount; page++) {
+            *(DWORD*)(pageData + 0x50) = 1;
+            *(DWORD*)(pageData + 0x54) = 0;
+            *(DWORD*)(pageData + 0x58) = 0;
+            *(DWORD*)(pageData + 0x5C) = 0;
+            *(DWORD*)(pageData + 0x60) = 0;
+            *pageTable = (DWORD)create_texture_page(pageData, 1);  // mode=1 = shadow/alpha blend
+            pageData += 0x68;
+            pageTable++;
+            pageIndex++;
+        }
+
+        if (pageIndex < 8) {
+            DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset + pageIndex * sizeof(DWORD));
+            for (int i = 8 - pageIndex; i > 0; i--) { *pageTable = 0; pageTable++; }
+        }
+
+        *(DWORD*)((BYTE*)&g_VideoDriverArray_810 + slotOffset) = pageIndex;
+        *(DWORD*)((BYTE*)&g_VideoDriverArray_814 + slotOffset) = 1;
     }
-
-    if (pageIndex < 8) {
-        DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset + pageIndex * sizeof(DWORD));
-        for (int i = 8 - pageIndex; i > 0; i--) { *pageTable = 0; pageTable++; }
-    }
-
-    *(DWORD*)((BYTE*)&g_VideoDriverArray_810 + slotOffset) = pageIndex;
-    *(DWORD*)((BYTE*)&g_VideoDriverArray_814 + slotOffset) = 1;
 }
 
 // ============================================================================

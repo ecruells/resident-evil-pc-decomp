@@ -1,6 +1,7 @@
 // Rendering.cpp - Frame rendering, present, sprite drawing
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "../DebugPrint.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "SpriteRenderer.h"
@@ -350,10 +351,28 @@ void FrameRateGovernor(void)
                 }
             }
 
-            // Render high-depth pending sprites first (background, room lighting)
-            // Threshold: depth >= 500 are scene elements, depth < 500 are screen overlays (fade, color rects)
+            // Command-buffer sprites with depthSort >= 0x10000 are background
+            // elements (the death screen's base died.tim image at
+            // 0xFFA*16+500 = 0x10194) that must draw BEHIND both the pending
+            // overlays and the 3D TMD pass - the original sorted everything in
+            // a single OT, where 0x10194 was the farthest primitive.
+            // Effect sprites sort at depthSort = projected_z (up to 0xFFC0,
+            // culled at 0x3FFF), so 0x10000 keeps them in the on-top half.
+            FlushSpriteCommandsRange(0x10000, 0xFFFFFFFFu);
+
+            // Render high-depth pending sprites (background, room lighting)
+            // Threshold: depth >= 0x300 are scene elements (room BG 0xFFF,
+            // the death screen's black rect 0xFC00, the menu's dark panels at
+            // 980-1300 from draw_rect's blend*16+500), depth < 0x300 are
+            // screen overlays (the fade rects at 450-550 must cover the 3D
+            // models, so they draw AFTER the TMD pass).
+            //
+            // 0x800 was used here once: it moved the menu's dark panels
+            // (980) into the on-top bucket, where they covered the frame,
+            // item icons and character portrait - only the text (also an
+            // overlay, drawn after them) stayed visible.
             for (int i = 0; i < g_pendingSpriteCount; i++) {
-                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth >= 500) {
+                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth >= 0x300) {
                     MarniDrawSprite(
                         g_pendingSprites[i].x, g_pendingSprites[i].y,
                         g_pendingSprites[i].w, g_pendingSprites[i].h,
@@ -374,12 +393,18 @@ void FrameRateGovernor(void)
             // Render queued 3D TMD objects (entities, options-menu character)
             FlushTmdObjects();
 
-            // Render command buffer sprites (game objects, title text, etc.)
-            FlushSpriteCommands();
+            // Render command buffer sprites (game objects, title text, etc.).
+            // The >= 0x10000 half already drew before the TMD pass.
+            FlushSpriteCommandsRange(0, 0x10000);
+            // Both range flushes above drew; clear the queue now (the original
+            // reset it inside the single flush). Without this the command
+            // buffer accumulates across frames and display_texture returns 0
+            // on overflow - every 2D effect stops rendering.
+            g_SpriteQueueCount = 0;
 
             // Render low-depth pending sprites last (fade overlays, color tinting)
             for (int i = 0; i < g_pendingSpriteCount; i++) {
-                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth < 500) {
+                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth < 0x300) {
                     MarniDrawSprite(
                         g_pendingSprites[i].x, g_pendingSprites[i].y,
                         g_pendingSprites[i].w, g_pendingSprites[i].h,
@@ -525,6 +550,14 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
     int foundOriginX = 0, foundOriginY = 0;
     int foundDepth   = 0;
 
+    // DEBUG: remember the first loaded slot in range so a failed search can
+    // report what was checked against what. The menu textures (frame 15,
+    // portrait 24, items 16-23) live in 15-30; a failure there with loaded
+    // SRVs means the page-bounds/clut metadata does not contain the desc.
+    int firstLoaded = -1;
+    int firstMeta[6] = { 0, 0, 0, 0, 0, 0 };   // oX, oY, depth, bpp, W, H
+    int firstBw = 1;
+
     for (int i = 0; i < pageCount; i++) {
         int cur = shiftedSlot + i;
         if (cur >= 256) break;
@@ -536,6 +569,13 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
         int   bpp = g_TexturePageBpp[cur];
         if (bpp <= 0) bpp = 16;
         int bw = bpp == 4 ? 4 : bpp == 8 ? 2 : 1;
+        if (firstLoaded < 0) {
+            firstLoaded = cur;
+            firstMeta[0] = oX; firstMeta[1] = oY; firstMeta[2] = d;
+            firstMeta[3] = bpp; firstMeta[4] = g_TexturePageWidth[cur];
+            firstMeta[5] = g_TexturePageHeight[cur];
+            firstBw = bw;
+        }
 
         // VRAM page corner from pageDepth (tpage code):
         int pX = (int)(d & 15) * 0x40;

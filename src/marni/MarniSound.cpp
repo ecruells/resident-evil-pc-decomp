@@ -780,6 +780,16 @@ void UpdateSoundFade(int steps)
             g_SndFadeStepTbl[i]--;
         }
     }
+
+    // Original (0x004802a0): once ALL three step counts run out, move the fade
+    // into its negative ramp. The byte store 0xE2 is -30 as a signed byte;
+    // UpdateSoundFadeState then counts -30 -> -29 -> ... -> -1 -> 0, at which
+    // point the fade is done. Without this, g_SndFadeType stays at 0x2B
+    // forever and die_state's `while (g_SndFadeType != 0)` hangs on a black
+    // screen after the game-over fade-out.
+    if ((g_SndFadeStepTbl[0] < 1) && (g_SndFadeStepTbl[1] < 1) && (g_SndFadeStepTbl[2] < 1)) {
+        g_SndFadeType = (signed char)0xE2;
+    }
 }
 
 // ============================================================================

@@ -168,14 +168,18 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             }
 #endif
             // Not in the original: debug helpers. F2 requests the save screen,
-            // F3 requests the item box menu. Also KEYUP (single-fire, no
-            // autorepeat); the game loop consumes the flags. Debug builds only.
+            // F3 requests the item box menu, F6 the texture viewer overlay.
+            // Also KEYUP (single-fire, no autorepeat); the game loop consumes
+            // the flags. Debug builds only.
 #ifdef _DEBUG
             else if (wParam == VK_F2) {
                 g_debugOpenSaveScreenFlag = 1;
             }
             else if (wParam == VK_F3) {
                 g_debugOpenItemboxFlag = 1;
+            }
+            else if (wParam == VK_F6) {
+                g_debugTextureViewerFlag = 1;
             }
 #endif
             break;

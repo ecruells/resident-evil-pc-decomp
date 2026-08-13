@@ -21,7 +21,6 @@
 // ============================================================================
 #include "../Globals.h"
 #include "SpriteRenderer.h"
-#include "../DebugPrint.h"
 #include <cstring>
 
 extern void SetRotAndTransMatrix(MATRIX* m);
@@ -54,10 +53,16 @@ static const int g_FadeSprLayerStep = 2;    // 0x004c0d20
 static const int g_FadeSprAlphaBias = 0;    // 0x004c0624
 static const int g_FadeSprOffsetX   = 0;    // 0x004c0620
 
+// Near-plane distance (view z) the shadow quad is clipped against before
+// projection. The original's hardware clip did this for the Marni quad;
+// the port's sprite approximation needs it so behind-camera corners don't
+// divide by a negative z (which wraps the screen coords and the depth).
+static const int FADE_NEAR = 128;
+
 struct FadeSprParam {
     unsigned char flag;      // +0x00  selects which alpha branch DrawFadeSpr takes
     int           sortBias;  // +0x04
-    int           offsetX;   // +0x08
+    int           offsetY;   // +0x08  view-space Y offset, NOT a screen X shift
     int           unk_0c;    // +0x0C  16 in every record; unread on this path
     int           forceFlag; // +0x10  0 in every record; unread on this path
 };
@@ -240,7 +245,7 @@ static const unsigned char g_FadeSprParamIndex[5 * 0x20 * 8] = {
 
 // ============================================================================
 // g_FadeSprParams (0x004c0b30): 20 records of 0x14 bytes. DrawFadeSpr reads
-// the flag at +0, the sort bias at +4 and the screen offsets at +8 and +0x10;
+// the flag at +0, the sort bias at +4 and the view-space Y offset at +8;
 // entity_add_fade_sprite reads the +4 bias too. +0xC is 16 in every record and
 // +0x10 is 0 in every record - neither is read by any call site reached from
 // the shadow path, so a non-zero +0x10 (which would force the alpha) never
@@ -372,7 +377,6 @@ void DrawFadeSpr(void)
 
     for (int i = 0; i < g_FadeSprCount; i++) {
         MATRIX local, composed;
-        int discard0 = 0, discard1 = 0;
 
         short* quad = FS_QUAD(i);
 
@@ -388,14 +392,133 @@ void DrawFadeSpr(void)
         GetMatrixTranslation(&composed);
 
         unsigned int slot = (unsigned int)g_spriteAnimActive;
-        unsigned int depth = (unsigned int)RotAverage4(
-            (SVECTOR*)(quad + 0x2C), (SVECTOR*)(quad + 0x30),
-            (SVECTOR*)(quad + 0x34), (SVECTOR*)(quad + 0x38),
-            (int*)(quad + slot * 0x14 + 8),    (int*)(quad + slot * 0x14 + 0xC),
-            (int*)(quad + slot * 0x14 + 0x10), (int*)(quad + slot * 0x14 + 0x14),
-            &discard0, &discard1);
 
+        // The per-room placement record. Its +8 field is a VIEW-SPACE Y
+        // offset, not a screen X shift: the original writes the primitive's
+        // translation row as (t[0], t[1] + prm[8] + DAT_004c0620, t[2])
+        // (0x0046ffc0), so it lifts or drops the shadow relative to the
+        // entity - which is what the -200 / +100 / +120 values in the table
+        // are for.
         const FadeSprParam* prm = &g_FadeSprParams[fade_spr_param_index()];
+        int offY = prm->offsetY + g_FadeSprOffsetX;
+
+        // Transform the four world-space corners to view space, clip the quad
+        // against the near plane, and project the clipped polygon. The
+        // original handed the composed matrix to a Marni viewport quad and
+        // let the hardware clip it; RotAverage4's raw outputs are poisoned by
+        // behind-camera corners (dividing by a negative z wraps the screen
+        // coordinates and the mean depth), which stretched the sprite into a
+        // screen-sized square anchored at one correct corner and forced the
+        // alpha to fully opaque. With a close camera the clipped corners land
+        // far off-screen and the sprite spills over the screen edge - the
+        // same spill the original's clipped quad produced.
+        //
+        // Footprint: the original passes AddFadePoly a SCALE triple built
+        // from this record's own corner 1 -
+        //   u = quad[0x30] * 0.0025, v = 1.0f, clut = quad[0x32] * 0.0025
+        // (0x00456ec8; 0.0025 == 1/400 at 0x004af290) - and AddFadePoly
+        // stores it as the primitive's (sx, sy, sz), the same slot the fire
+        // effect fills with (2.0, 2.0, 1.0). The quad it scales is the fixed
+        // rectConfig registered by CreateTexturedQuad(0, 0x2F, ...):
+        // (-400,0,+400)(+400,0,+400)(-400,0,-400)(+400,0,-400). So the drawn
+        // footprint is exactly ±halfW × ±halfH in the entity's own frame -
+        // 500 × 700 for the player (FUN_004565f0(&scratch, quad, 500, 700)
+        // at 0x00494ef7), 400 × 400 for a zombie. The hardcoded 400/200 pair
+        // this used to carry made the shadow a third of its depth.
+        int halfW = (int)quad[0x30];
+        int halfH = (int)quad[0x32];
+        if (halfW <= 0 || halfH <= 0) {
+            continue;   // corner 1 is (+halfW, y, +halfH); a degenerate quad
+        }               // would divide by zero in the UV below
+        int cvx[4], cvy[4], cvz[4];
+        int cu[4], cv2[4];
+        for (int c = 0; c < 4; c++) {
+            // The viewport quad's corners, in the same (-w,+h)..(+w,-h)
+            // arrangement as the entity corners below.
+            int cx = (c == 0 || c == 2) ? -halfW : halfW;
+            int cz = (c == 0 || c == 1) ?  halfH : -halfH;
+            int rx = (int)composed.m[0][0] * cx + (int)composed.m[0][2] * cz;
+            int ry = (int)composed.m[1][0] * cx + (int)composed.m[1][2] * cz;
+            int rz = (int)composed.m[2][0] * cx + (int)composed.m[2][2] * cz;
+            cvx[c] = ((rx + (rx >> 31 & 0xFFF)) >> 12) + (int)composed.t[0];
+            cvy[c] = ((ry + (ry >> 31 & 0xFFF)) >> 12) + (int)composed.t[1];
+            cvz[c] = ((rz + (rz >> 31 & 0xFFF)) >> 12) + (int)composed.t[2];
+            // Texture UV over the whole kage page in 0..4096 fixed point:
+            // u = (x + w) / 2w, v = (h - z) / 2h - v=0 at +z, the same
+            // corner orientation as the original viewport quad's UVs.
+            cu[c]  = ((cx + halfW) << 12) / (2 * halfW);
+            cv2[c] = ((halfH - cz) << 12) / (2 * halfH);
+        }
+        // Quad edge order 0->1->3->2: the corners are laid out
+        // (-w,+h) (+w,+h) (-w,-h) (+w,-h), the same arrangement as the
+        // viewport quad whose index list is 0,1,3,2 - NOT the bowtie
+        // 0->1->2->3, whose diagonals would clip at the wrong places.
+        static const int edge[4] = { 0, 1, 3, 2 };
+        int n = 0;
+        int vx[8], vy[8], vz[8];
+        int vu[8], vv[8];
+        for (int e = 0; e < 4; e++) {
+            int a = edge[e], b = edge[(e + 1) & 3];
+            int za = cvz[a], zb = cvz[b];
+            int ain = (za >= FADE_NEAR) ? 1 : 0;
+            int bin = (zb >= FADE_NEAR) ? 1 : 0;
+            if (ain) { vx[n] = cvx[a]; vy[n] = cvy[a]; vz[n] = za;
+                       vu[n] = cu[a]; vv[n] = cv2[a]; n++; }
+            if (ain != bin) {
+                int t = ((FADE_NEAR - za) << 12) / (zb - za);   // 4.12 lerp
+                vx[n] = cvx[a] + (((cvx[b] - cvx[a]) * t) >> 12);
+                vy[n] = cvy[a] + (((cvy[b] - cvy[a]) * t) >> 12);
+                vz[n] = FADE_NEAR;
+                // UVs lerp along the edge with the same t, so the texture
+                // stays glued to the world quad across the clip.
+                vu[n] = cu[a] + (((cu[b] - cu[a]) * t) >> 12);
+                vv[n] = cv2[a] + (((cv2[b] - cv2[a]) * t) >> 12);
+                n++;
+            }
+        }
+        if (n == 0) {
+            continue;   // whole quad behind the camera
+        }
+
+        int px[8], py[8];
+        for (int c = 0; c < n; c++) {
+            // Same projection as ProjectEffectSprite (0x0040aa50):
+            //   sx = (viewX * f) / z + 160
+            //   sy = ((matrix_t1 - rotatedY) * f) / z + 120
+            // where rotatedY is the corner's y WITHOUT the translation.
+            //
+            // The subtraction is NOT a mirror, however much it reads like one:
+            // this engine's rotation rows produce a Y-UP value while the
+            // translation is Y-DOWN, so the two must be combined with opposite
+            // signs. The TMD path - the one that demonstrably renders models
+            // correctly - does exactly the same thing by another route:
+            // sy = cy - vy*f/vz over a matrix whose t[1] SetRotAndTransMatrix
+            // has already negated, i.e. cy + (t1 - rotY)*f/vz. Rewriting this
+            // as the "true" view y (t1 + rotY) mirrored the ground quad and the
+            // shadow oval visibly counter-rotated against the character.
+            //
+            // prm->offsetY joins t1, matching the original's primitive
+            // translation row (t[0], t[1] + prm[8] + DAT_004c0620, t[2]).
+            px[c] = (vx[c] * g_sceneRenderParam) / vz[c] + 160;
+            py[c] = ((matrix_t1 + offY - (vy[c] - matrix_t1)) * g_sceneRenderParam)
+                    / vz[c] + 120;
+        }
+        // Depth (the sort key / alpha) comes from the ENTITY corners at
+        // quad+0x2C - the original's RotAverage4 input - not the drawn
+        // viewport quad. The entity rectangle is the actual ground footprint
+        // of the character (player 500x700, zombie 400x400), so its mean
+        // view-z is the meaningful depth.
+        int depthSum = 0;
+        for (int c = 0; c < 4; c++) {
+            const SVECTOR* sv = (const SVECTOR*)(quad + 0x2C + c * 4);
+            int rz = (int)composed.m[2][0] * (int)sv->x
+                   + (int)composed.m[2][2] * (int)sv->z;
+            int ez = ((rz + (rz >> 31 & 0xFFF)) >> 12) + (int)composed.t[2];
+            depthSum += ez >> 2;
+        }
+        unsigned int depth =
+            (unsigned int)((depthSum + (depthSum >> 31 & 3U)) >> 2);
+
         unsigned short forceAlpha =
             (unsigned short)(prm->sortBias + 100 + g_FadeSprAlphaBias);
 
@@ -412,40 +535,21 @@ void DrawFadeSpr(void)
             alpha = (unsigned short)((short)depth + forceAlpha);
         }
 
-        // The colour is read as three bytes out of the primitive header of the
-        // half g_spriteAnimActive selects. Record +0x10 is quad[0]; the original
-        // biases by -8 bytes from there, landing on the position dword's tail.
-        unsigned char* rgb = (unsigned char*)FS_REC(i) + 0x10
-                           + (unsigned int)g_spriteAnimActive * 0x28 - 8;
+        // The tint is three bytes of the quad's primitive header, i.e. the
+        // packed 0xRRGGBB the caller left in g_animFrameIdSave and
+        // FUN_004565f0 copied into quad[1].z/.pad: 0x00808080 for a normal
+        // shadow, 0x00FFFF50 for the death blood pool. The original reads
+        // record + 0x1C + slot*0x28 (the double-buffered half's copy of the
+        // same header, memcpy'd by FUN_004565f0), not any position bytes.
+        unsigned char* rgb = (unsigned char*)FS_REC(i) + 0x1C + slot * 0x28;
 
-        int arg_u    = (int)((float)(int)quad[0x30] * 0.0025f);
-        int arg_clut = (int)((float)(int)quad[0x32] * 0.0025f);
-        int arg_x    = prm->offsetX + g_FadeSprOffsetX;
-
-        // DIAGNOSTIC: the values handed to AddFadePoly for the first sprite of a
-        // frame. This is the one seam that could not be checked statically - the
-        // port's AddFadePoly is a D3D11 reimplementation whose parameter names
-        // (u/v/clut/x/y/z) were inferred, and the original passes a float bit
-        // pattern (0x3f800000 == 1.0f) in the `v` slot. If shadows appear in the
-        // wrong place, at the wrong size or not at all, compare these against what
-        // the renderer does with them. Remove once verified.
-        if (i == 0) {
-            static int lastAlpha = -1;
-            if ((int)alpha != lastAlpha) {
-                lastAlpha = alpha;
-                // dbg_printf("[shadow] n=%d prm=%u flag=%u alpha=%u force=%u depth=%u"
-                //            " u=%d clut=%d x=%d rgb=%u,%u,%u corners=(%d,%d)(%d,%d)\n",
-                //            g_FadeSprCount, fade_spr_param_index(),
-                //            (unsigned int)prm->flag, (unsigned int)alpha,
-                //            (unsigned int)forceAlpha, depth, arg_u, arg_clut, arg_x,
-                //            (unsigned int)rgb[0], (unsigned int)rgb[1], (unsigned int)rgb[2],
-                //            (int)quad[0x2C], (int)quad[0x2E],
-                //            (int)quad[0x30], (int)quad[0x32]);
-            }
-        }
-
-        AddFadePoly(alpha, 0, arg_u, 0x3f800000, arg_clut, rgb,
-                    arg_x, 0, prm->forceFlag, forceAlpha);
+        // The tpage parameter becomes the SRV slot in AddFadePoly. The
+        // original looked the texture up by tpage in its page descriptor
+        // table; in the port the shadow texture (kage.tim) is created at
+        // slot 0x2F by LoadShadowMaskTexture, so pass that slot here or the
+        // sprite looks up a NULL SRV and is skipped (no shadows / no blood
+        // puddle on the corpse).
+        AddFadePoly(alpha, 0x2F, rgb, px, py, vz, vu, vv, n);
     }
 
     g_FadeSprCount = 0;

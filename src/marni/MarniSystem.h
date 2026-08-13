@@ -133,6 +133,14 @@ void  MarniDrawSprite(float x, float y, float w, float h,
                       float u0, float v0, float u1, float v1,
                       DWORD color, MarniHandle tex);
 
+// Draw perspective-correct textured triangles without depth testing.
+// verts: triCount*3 vertices, each 10 floats { x, y (screen px, Y-down),
+// z (unused), w (view-space Z), u, v, r, g, b, a (0..1) }. Used for the
+// ground-shadow quads, whose clipped projected polygon an axis-aligned
+// sprite cannot reproduce and whose screen-space (affine) interpolation
+// sheared the two halves oppositely.
+void  MarniDrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex);
+
 // Game-space (320x240) -> real D3D11 backbuffer scale factors. Use this for
 // ALL game-space -> screen-space conversion; never derive the scale from
 // CMarniDirect3D::m_width/m_height (SetVideoResolution stomps those with the

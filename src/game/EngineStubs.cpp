@@ -91,22 +91,11 @@ void DrawRoomSpr(void) { }
 // (0x00494050) - Debug save menu (F5 key)
 void DebugSaveMenu(void) { }
 
-// (0x00481310) - Player death sequence state machine
-void die_state(void) { }
-
-// (0x00481250) - Death fade-out transition
-void TimeoutDeathFadeOut(void) { }
-
 // (0x004818b0) - Start attract mode demo playback
 void StartAttractDemo(void) { }
 
-// (0x0047b980) - Set screen fade transition parameters
-void set_fading(int type, int counter) { }
-
-// (0x004...) - Display death/game-over screen
-void display_die_screen(void) { }
-
 // (0x0047eb60) - Post-death cleanup
+// Genuinely empty in the original (single RET at 0x0047eb60).
 void FUN_0047eb60(void) { }
 
 // (0x0042a030) - Check and display interactive screen (item pickup, etc.)
