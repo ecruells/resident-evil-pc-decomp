@@ -780,7 +780,12 @@ BYTE   g_complexTmdObjectData[0x10800] = {};
 int*   g_objectDeletePtr = g_tmdObjectSlotAnimPtrs;  // 0x004d2bf8 (static init → 0x00aabd6c)
 int    g_objectListCleanupFlag = 0;           // 0x004d2fb4
 int    g_objectListCleanupCount = 0;          // 0x004d2fb0
-DWORD  g_objectListPtrArray[512] = {};        // 0x008fc430 area
+// 0x008fc430 - 256 CMarniViewport2 entries x 0x38 = 0x3800 bytes. The original
+// placement-news CMarniViewport2[256] here at boot (ctor 0x004272e0); the
+// entries are seeded on first use by MarniViewport2_InitEntry (see
+// ComplexTmdObjectSetup). ComplexTmdObjectSetup walks this array in 0x38-byte
+// steps with a hard bound of +0x3800.
+DWORD  g_objectListPtrArray[0xE00] = {};      // 0x008fc430 - 256 x 0x38 entries
 
 // 0x00a75168 - PSXTexture array. Ghidra confirms this spans exactly 32 banks
 // (0xa75168..0xaabd68 = 0x36c00 bytes = 32 * 0x1b60), ending precisely at

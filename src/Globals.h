@@ -1071,7 +1071,7 @@ extern BYTE          g_complexTmdObjectData[0x10800];  // 0x008ffcc0 - complex T
 extern int*          g_objectDeletePtr;                // 0x004d2bf8 - statically points to g_tmdObjectSlotAnimPtrs
 extern int           g_objectListCleanupFlag;          // 0x004d2fb4
 extern int           g_objectListCleanupCount;         // 0x004d2fb0
-extern DWORD         g_objectListPtrArray[512];        // 0x008fc430 area
+extern DWORD         g_objectListPtrArray[0xE00];      // 0x008fc430 - 256 CMarniViewport2 entries x 0x38 bytes (0x3800)
 
 
 // TMD buffers

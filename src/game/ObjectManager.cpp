@@ -24,10 +24,13 @@ void ObjectList_Cleanup(void)
                 ((void(*)(void*))d3dVtable[9])((void*)countPtr[0x15]);
                 countPtr[0x15] = 0;
 
-                // Call function pointer from basePtr
+                // Call Release (vtable[0]) on the entry. Original 0x0048707f:
+                // mov ecx, edi (this = the entry); call [vtable]. The port's
+                // adapters are __stdcall with self as the first stack argument,
+                // so self must be basePtr (the entry), not the vtable.
                 void** funcPtr = (void**)*basePtr;
                 if (funcPtr) {
-                    ((void(*)())*funcPtr)();
+                    ((void (__stdcall*)(void*))*funcPtr)(basePtr);
                 }
 
                 basePtr = basePtr + 0xe;     // advance by 14 DWORDs (0x38 bytes)

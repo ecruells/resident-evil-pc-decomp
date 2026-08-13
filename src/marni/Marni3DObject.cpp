@@ -409,6 +409,22 @@ static void* g_CMarniViewport2VTable[8] = {
     (void*)VP2_Unlock_Adapter       // [7] 0x00427250
 };
 
+// ============================================================================
+// MarniViewport2_InitEntry - raw constructor for a CMarniViewport2 element in
+// unconstructed BSS memory. The original ctor (0x004272e0) stores vtable
+// 0x004af0f8 at +0x00, zeroes +0x04..+0x34, and sets +0x1C (m_unknown1C,
+// the base-init marker) to 1. The 256-entry object list at 0x008fc430 and the
+// embedded TMD slot elements are never C++-constructed in this port, so the
+// same byte pattern is applied on first use.
+// ============================================================================
+void MarniViewport2_InitEntry(void* entry)
+{
+    DWORD* e = (DWORD*)entry;
+    e[0] = (DWORD)g_CMarniViewport2VTable;   // 0x004af0f8
+    for (int i = 1; i < 14; i++) e[i] = 0;   // +0x04 .. +0x34
+    e[7] = 1;                                // m_unknown1C (+0x1C)
+}
+
 // Debug print helper (matches MarniDebugPrint used by the original)
 static void PSXObjDebugPrint(const char* fmt, ...)
 {

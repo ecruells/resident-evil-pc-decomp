@@ -1,6 +1,7 @@
 // TmdAnimation.cpp - TMD animation pipeline (decompiled from Ghidra)
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
+#include "../marni/Marni3DObject.h"
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include <cstdio>
@@ -98,6 +99,9 @@ unsigned int FindMinClutDepth(AnimSlot* slot)
     return minDepth;
 }
 
+// FUN_00483eb0 - declared here (defined below) so SetupTextureBank can call it
+unsigned int FixClutVertexData(BYTE* texPtr);
+
 // ============================================================================
 // FUN_00483fc0 (0x00483fc0) - Setup texture bank for rendering
 // Prepares a PSXTexture bank entry for D3D rendering.
@@ -123,7 +127,13 @@ void SetupTextureBank(DWORD** param_1, int param_2)
 
     PSXTexture* dst = (PSXTexture*)dstTex;
     PSXTexture* src = (PSXTexture*)srcTex;
-    *dst = *src;
+    // Deep copy — the original 0x00484030 calls PSXTexture::operator=
+    // (0x0041f9c0), which copies each ACTIVE CMarniBits sub-object through
+    // CMarniBits_CopyFrom (0x004034d0) so dst gets its own pixel/CLUT heap
+    // buffers. A raw struct copy would ALIAS src's heap pointers into dst;
+    // the room-exit cleanup then freed the same pixel data twice
+    // (RtlValidateHeap: invalid address on leaving ROOM40F0).
+    dst->CopyFrom(src);
 
     DWORD* dstFlag = (DWORD*)(dstTex + 0x348);
     DWORD* srcFlag = (DWORD*)(srcTex + 0x348);
@@ -143,7 +153,12 @@ void SetupTextureBank(DWORD** param_1, int param_2)
     }
     *dstFlag = 0;
 
-    ResolveAnimPointers(dstTex);
+    // Original 0x00484088 calls FUN_00483eb0 (FixClutVertexData) here, NOT
+    // ResolveAnimPointers. The bank slot is a PSXTexture (vtable, pixel
+    // pointer at +0x04), not an animation header — feeding it to
+    // ResolveAnimPointers read the heap pixel pointer as the entry count and
+    // walked 2M entries past the array (AV at 0x01B8C7B0 on ROOM40F0 entry).
+    FixClutVertexData(dstTex);
 
     int matCount = *(int*)(dstTex + 0x340);
     if (matCount != 0) {
@@ -512,6 +527,17 @@ void ComplexTmdObjectSetup(int* param_1)
     memset(g_complexTmdObjectArray, 0, sizeof(g_complexTmdObjectArray));
     for (int i = 0; i < 256; i++) g_complexTmdObjectIds[i] = -1;
 
+    // Seed the 256 object-list entries once. The original placement-news
+    // CMarniViewport2[256] at 0x008fc430 at boot (ctor 0x004272e0 sets the
+    // 0x004af0f8 vtable, zeroes the fields, m_unknown1C = 1); the port's raw
+    // BSS array is never C++-constructed, and *ptrArray is dereferenced as a
+    // function table below (NULL here was the ROOM40F0 crash at vtable[0]).
+    if (g_objectListPtrArray[0] == 0) {
+        for (int i = 0; i < 256; i++) {
+            MarniViewport2_InitEntry(&g_objectListPtrArray[i * 0x0E]);
+        }
+    }
+
     // Get TMD data from the animation object
     int* tmdData = (int*)*param_1;
     int vertexBase = *tmdData;                                // [ESI+0x00] vertex data base
@@ -561,23 +587,30 @@ void ComplexTmdObjectSetup(int* param_1)
             deleteHandle(g_pMarniDirect3D, *d3dHandle);
             *d3dHandle = 0;
 
-            // Set up rendering state from function table
+            // Set up rendering state from function table. The table lives in
+            // the CMarniViewport2 entry (this = the entry at *ptrArray, ECX in
+            // the original, e.g. 0x00486aba) — the vtable methods read the
+            // entry's buffers/flags, so self MUST be ptrArray, not funcPtrs.
             void** funcPtrs = (void**)*ptrArray;
 
-            // Call Release/reset [vtable[0]]
-            typedef void (*VoidFn)(void);
-            ((VoidFn)funcPtrs[0])();
+            // Call Release/reset [vtable[0]] (0x00486aba: ecx = entry)
+            typedef void (__stdcall *ReleaseFn)(void*);
+            ((ReleaseFn)funcPtrs[0])(ptrArray);
 
             // Call CreateWork(3 vertices, 2 primitives, type 3=triangles) [vtable[1]]
-            typedef int (*CreateWorkFn)(void*, int, int, int);
-            ((CreateWorkFn)funcPtrs[1])(funcPtrs, 3, 2, 3);
+            typedef int (__stdcall *CreateWorkFn)(void*, int, int, int);
+            ((CreateWorkFn)funcPtrs[1])(ptrArray, 3, 2, 3);
 
             // Call Lock(NULL, NULL) [vtable[6]]
-            typedef int (*LockFn)(void*, void*, void*);
-            ((LockFn)funcPtrs[6])(funcPtrs, NULL, NULL);
+            typedef int (__stdcall *LockFn)(void*, void*, void*);
+            ((LockFn)funcPtrs[6])(ptrArray, NULL, NULL);
 
-            // Find matching texture/material entry
-            unsigned int texID = ptrArray[1] >> 16;
+            // Find matching texture/material entry.
+            // texID comes from the TMD OBJECT entry's texture word
+            // (0x00486ae3: mov esi, [objTable+4]; shr esi, 0x10), NOT from the
+            // ptrArray entry (its +4 is m_pVertexBuffer, always 0 here — that
+            // source made the matcher always pick material 0).
+            unsigned int texID = objTable[1] >> 16;
             int matCount = *(int*)(texBank + 0x340) - 1;
             int matIdx = 0;
             int matOffset = 0;
@@ -594,7 +627,7 @@ void ComplexTmdObjectSetup(int* param_1)
             }
 
             // Get vertex callback [vtable[3]]
-            typedef int (*SetVertexFn)(void*, int, float*);
+            typedef int (__stdcall *SetVertexFn)(void*, int, float*);
             SetVertexFn setVertex = (SetVertexFn)funcPtrs[3];
 
             // Process 3 vertices
@@ -634,8 +667,8 @@ void ComplexTmdObjectSetup(int* param_1)
                 if (texWidth > 0) vertBuf[9] = (float)uVal / (float)texWidth;
                 if (texHeight > 0) vertBuf[10] = (float)vVal / (float)texHeight;
 
-                // Set vertex
-                setVertex(funcPtrs, vertexCount, vertBuf);
+                // Set vertex (this = the entry, matching the original)
+                setVertex(ptrArray, vertexCount, vertBuf);
 
                 // Store position for normal calculation
                 vertexPositions[v][0] = pos[0];
@@ -652,13 +685,13 @@ void ComplexTmdObjectSetup(int* param_1)
             normalOut[2] = (short)((int)vertexPositions[0][2] + (int)vertexPositions[1][2] + (int)vertexPositions[2][2]) / 3;
 
             // Call SetList for both primitives [vtable[5]]
-            typedef int (*SetListFn)(void*, int, void*);
+            typedef int (__stdcall *SetListFn)(void*, int, void*);
             SetListFn setList = (SetListFn)funcPtrs[5];
-            setList(funcPtrs, 0, objTable);
-            setList(funcPtrs, 1, objTable);
+            setList(ptrArray, 0, objTable);
+            setList(ptrArray, 1, objTable);
 
-            // Call Unlock [vtable[7]]
-            ((VoidFn)funcPtrs[7])();
+            // Call Unlock [vtable[7]] (this = the entry)
+            ((ReleaseFn)funcPtrs[7])(ptrArray);
 
             // Set object properties
             d3dHandle[-0x15] = 4;   // object type = 4

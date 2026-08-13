@@ -123,6 +123,15 @@ public:
 int TriangleDivideMarniPolyhedra(CMarniViewport2* polyArray, int count);
 
 // ============================================================================
+// MarniViewport2_InitEntry - raw constructor for a CMarniViewport2 element in
+// unconstructed BSS memory. Mirrors the original ctor (0x004272e0): vtable
+// 0x004af0f8, all fields zeroed, m_unknown1C = 1.
+// Used to seed the g_objectListPtrArray entries (original: placement-new of
+// CMarniViewport2[256] at 0x008fc430) and the embedded TMD slot elements.
+// ============================================================================
+void MarniViewport2_InitEntry(void* entry);
+
+// ============================================================================
 // CMarniDirect3DTMD - TMD 3D model renderer
 // Original class: MarniSystem::Direct3DTMD
 // Object size: 0x1594+ bytes
