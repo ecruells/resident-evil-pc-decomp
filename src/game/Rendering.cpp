@@ -124,7 +124,12 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
         // Text pass: opaque color, brightness dims RGB (original PS1 CLUT-based dimming)
         unsigned int brightnessScale = ((unsigned int)brightness * 255) / 30;
         if (brightnessScale > 255) brightnessScale = 255;
-        if (brightness == 2) brightnessScale = 255;
+        // The original AddTintSprite (0x0046e0a0) collapses fade 2 -> 0 before
+        // the draw, so 0 and 2 are the SAME full-brightness render. The
+        // room-4110 special case (stage 3 room 0x11 cams 4/0: message glyphs,
+        // yes/no cursor, PrintText8x14) passes 0; without this it scaled the
+        // RGB to black and every message glyph in that room rendered black.
+        if (brightness == 0 || brightness == 2) brightnessScale = 255;
         r = (r * brightnessScale) / 255;
         g = (g * brightnessScale) / 255;
         b = (b * brightnessScale) / 255;
@@ -214,6 +219,17 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     case 1:
         // Special room lighting — tinted overlay, alpha = max component
         a = r; if (g > a) a = g; if (b > a) a = b;
+        break;
+    case 4:
+        // Special room lighting with the R byte's bits 0-1 set (R=3, e.g. the
+        // stage-4 room-0x11 emergency light): textureId 0x70000000. The
+        // original's draw_rect case 4 (0x004705c8) is the same tinted overlay
+        // at HALF opacity - texturePage = (0x100 - (bVar4 >> 1)) / 256 vs
+        // case 1's (0x100 - bVar4) / 256. Dropping this case made the
+        // emergency-light flash fall into the opaque default: a solid red
+        // rect over the room instead of the red tint.
+        a = r; if (g > a) a = g; if (b > a) a = b;
+        a = a >> 1;
         break;
     default:
         // Variant 0 or unknown: fully opaque (g_window_rect, etc.)
