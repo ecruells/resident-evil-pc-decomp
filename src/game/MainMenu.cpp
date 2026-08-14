@@ -145,8 +145,8 @@ extern int   FUN_00470e60(void* prim, int depth);
 extern void  FUN_00438800(int a, int b, int c);
 extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex); // 0x00473f10
 extern void Flg_on(int baseAddr, unsigned int bitIndex);         // 0x00473ef0
-extern void FUN_00481ab0(void* fileState);                       // file dialog init
-extern void FUN_00482250(void* fileState);                       // file dialog update
+static void FUN_00481ab0(unsigned char* state);                  // 0x00481ab0 - file book selector
+static void pickup_list_advance(unsigned char* state);           // 0x00482250 - file reading mode advance
 extern unsigned char* message_item_name_lookup(unsigned char itemId); // 0x00455140
 void FUN_00454fd0(int itemId, int mode, short x, short y);            // 0x00454fd0
 
@@ -160,7 +160,7 @@ extern const char DAT_004bd348[];
 extern const char DAT_004bd5a0[];
 extern const char DAT_004bd5a8[];
 extern const unsigned char DAT_004b92c8[];
-extern const unsigned char* g_ItemNamePointers[77];
+extern const unsigned char* g_ItemNamePointers[128];
 extern const unsigned char* g_UnknownItemNamePointers[16];
 extern const char* PTR_DAT_004b9278[];
 extern const unsigned char DAT_004b92d8[];
@@ -246,7 +246,7 @@ static void map_display_update(unsigned char* state);   // 0x00487640
 // Menu tab action table (0x004ba1e0), indexed by (cursor position >> 1)
 static void (*const g_MenuTabActions[4])(void) = {
     menu_tab_map,    // tab 0: map
-    menu_tab_file,   // tab 2: file (save/load)
+    menu_tab_file,   // tab 2: file (file book / document reader)
     menu_tab_radio,  // tab 4: radio
     menu_tab_exit    // tab 6: exit
 };
@@ -463,10 +463,17 @@ LAB_00463a53:
         case 1:
             // Status screen + inventory navigation
             {
-                // Original: (g_PlayerDpadPressed._1_1_ & 0x80) = REMAPPED cancel
-                // (Square/action=0x4000, Cross/cancel=0x8000 in the remapped
-                // word). The raw word's byte 1 bit 0x80 is the D-pad LEFT,
-                // which must NOT close the menu.
+                // cond1 (0x00463a6b): the REMAPPED cancel button, and only
+                // while the cursor owns the screen (mode 1). g_PlayerDpadPressed
+                // byte 1 bit 0x80 is cancel, 0x40 is confirm; do NOT confuse it
+                // with the RAW word, whose byte 1 is the D-pad itself.
+                //
+                // cond2 (0x00463a7d): the RAW word's 0x0800 = START, i.e. the
+                // inventory toggle ('Z' in g_keyBindingData). This deliberately
+                // has NO mode check - START closes the whole menu from any
+                // submenu, which is why a "cancel closes everything" report is
+                // usually the user pressing Z rather than a cancel key
+                // (V / Left Ctrl / Esc).
                 bool cond1 = (((g_PlayerDpadPressed >> 8) & 0x80) == 0) || (DAT_00ae9f20 != 1);
                 bool cond2 = (((g_PlayerPadHeld >> 8) & 8) == 0) || (DAT_00ae9f4a != 0) || (DAT_00ae9f12 != 0);
                 if (cond1 && cond2) {
@@ -1122,16 +1129,17 @@ static unsigned char  DAT_00ac368c;                 // 0x00ac368c
 static unsigned short DAT_00ac3690;                 // 0x00ac3690
 static unsigned char  DAT_00ac3694;                 // 0x00ac3694
 
-// File tab (save/load dialog) state block (0x00ac98b0)
+// File tab state block (0x00ac98b0) - shared by the file book selector
+// (FUN_00481ab0 family) and the file reading mode (pickup_list_advance).
 static unsigned char DAT_00ac98b0[0x20]; // 0x00ac98b0
-#define FILE_STATE      DAT_00ac98b0[0x00]
-#define FILE_SUBSTATE   DAT_00ac98b0[0x01]
-#define FILE_REQUEST    DAT_00ac98b0[0x02]
-#define FILE_MODE       DAT_00ac98b0[0x03]
-#define FILE_SLOT       DAT_00ac98b0[0x05]
-#define FILE_EXITFLAG   DAT_00ac98b0[0x08]
-#define FILE_BUSY       DAT_00ac98b0[0x09]
-#define FILE_SAVEFLAG   DAT_00ac98b0[0x10]
+#define FILE_STATE      DAT_00ac98b0[0x00]   // 0 = book selector, 1 = reading mode
+#define FILE_SUBSTATE   DAT_00ac98b0[0x01]   // selector: 0 = init, 1 = input
+#define FILE_REQUEST    DAT_00ac98b0[0x02]   // selector render sub-state / requests
+#define FILE_MODE       DAT_00ac98b0[0x03]   // fade mode byte (1 = fade in, 2 = fade out)
+#define FILE_SLOT       DAT_00ac98b0[0x05]   // selected file slot (0-7, 0xff = none)
+#define FILE_EXITFLAG   DAT_00ac98b0[0x08]   // close the file tab
+#define FILE_BUSY       DAT_00ac98b0[0x09]   // input lock
+#define FILE_SAVEFLAG   DAT_00ac98b0[0x10]   // reading mode: cursor at the last page
 
 // (0x00420b80) - Update selected item id from the slot under the cursor
 static void menu_update_selected_item(void)
@@ -2103,11 +2111,32 @@ static void menu_tab_map(void)
 }
 
 // (0x00481980) - File tab state machine (returns non-zero when exiting)
+//
+// FILE_STATE 0 = file book selector (FUN_00481ab0 drives the book render and
+// input); confirming a file (byte1 & 0x40 with a slot selected) sets
+// FILE_MODE = 1, which makes the selector's renderer fade to white and set
+// FILE_STATE = 1. FILE_STATE 1 = file reading mode (pickup_list_advance
+// shows the filem pages); Square (byte1 & 0x80) cancels it and confirming on
+// the last page (FILE_SAVEFLAG) closes it too.
+// FILE_BUSY is only an INPUT LOCK, never an exit condition: the ONLY thing
+// that closes the tab is FILE_EXITFLAG (state[8]), raised by the selector's
+// cancel slide-out (FUN_00481d00 case 2) - verified against 0x00481a93:
+//   cmp byte [0xac98b8],0 / je -> xor eax,eax / ret
+// An earlier port also returned -1 whenever FILE_BUSY was set, which broke
+// three things at once:
+//   * menu_init_status_screen sets state[9] = 1 when the pause menu opens, so
+//     the FIRST frame of the file tab returned -1 and bounced straight back to
+//     the tab row (the book only appeared on a second confirm press);
+//   * every book change sets state[9] = 1 to lock input during the slide, so
+//     pressing left/right closed the tab instead of turning the page;
+//   * confirming a file sets state[9] = 1 too.
 static int menu_file_state_machine(void)
 {
-    unsigned int uVar1 = 0;
-
     if (FILE_STATE == 0) {
+        // Cancel is checked BEFORE the selector runs (0x004819a0 precedes the
+        // call at 0x004819d9). There is no conflict with the book-change keys:
+        // cancel is bit 0x80 of the REMAPPED dpad byte 1 (raw byte 0 bit 6 via
+        // g_padRemapSubTable0[15]), while the book keys are raw D-pad bits.
         if ((FILE_BUSY == 0) && ((dpad_pressed_byte1() & 0x80) != 0)) {
             if ((FILE_MODE != 1) && (FILE_MODE != 2)) {
                 play_sfx(3, 5, 0);
@@ -2116,46 +2145,39 @@ static int menu_file_state_machine(void)
             FILE_BUSY = 1;
         }
         FUN_00481ab0(&DAT_00ac98b0[0]);
-        if ((((FILE_BUSY != 0) || ((dpad_pressed_byte1() & 0x40) == 0)) ||
-             (FILE_REQUEST != 1)) || (FILE_SLOT == 0xff)) {
-            goto file_end;
-        }
-        FILE_MODE = 1;
-        uVar1 = 6;
-    } else {
-        if ((FILE_STATE != 1) || (FUN_00482250(&DAT_00ac98b0[0]), FILE_BUSY != 0)) {
-            goto file_end;
-        }
-        if ((dpad_pressed_byte1() & 0x80) != 0) {
-            FILE_REQUEST = 0xd;
+        if ((FILE_BUSY == 0) && ((dpad_pressed_byte1() & 0x40) != 0) &&
+            (FILE_REQUEST == 1) && (FILE_SLOT != 0xff)) {
+            FILE_MODE = 1;
             FILE_BUSY = 1;
-            play_sfx(3, 5, 0);
+            play_sfx(3, 6, 0);
         }
-        if (((dpad_pressed_byte1() & 0x40) == 0) || (FILE_SAVEFLAG != 1)) {
-            goto file_end;
+    } else if (FILE_STATE == 1) {
+        pickup_list_advance(&DAT_00ac98b0[0]);
+        if (FILE_BUSY == 0) {
+            // Cancel and confirm-on-last-page both start the same slide-out
+            // (0x00481a40 / 0x00481a65 - the second test is NOT re-gated on
+            // FILE_BUSY in the original either).
+            if ((dpad_pressed_byte1() & 0x80) != 0) {
+                FILE_REQUEST = 0xd;
+                FILE_BUSY = 1;
+                play_sfx(3, 5, 0);
+            }
+            if (((dpad_pressed_byte1() & 0x40) != 0) && (FILE_SAVEFLAG == 1)) {
+                FILE_REQUEST = 0xd;
+                FILE_BUSY = 1;
+                play_sfx(3, 5, 0);
+            }
         }
-        FILE_REQUEST = 0xd;
-        uVar1 = 5;
     }
-    FILE_BUSY = 1;
-    play_sfx(3, uVar1, 0);
-file_end:
-    if (FILE_EXITFLAG == 0) {
-        // The save/load dialog subsystem (FUN_00481ab0) is still pending; the
-        // cancel request alone closes the file tab so the menu cannot lock.
-        if (FILE_BUSY != 0) {
-            FILE_BUSY = 0;
-            FILE_STATE = 0;
-            FILE_REQUEST = 0;
-            return -1;
-        }
-        return 0;
+
+    if (FILE_EXITFLAG != 0) {
+        FILE_EXITFLAG = 0;
+        return -1;
     }
-    FILE_EXITFLAG = 0;
-    return -1;
+    return 0;
 }
 
-// (0x00420ff0) - Top tab: File (save / load)
+// (0x00420ff0) - Top tab: File (file book / document reader)
 static void menu_tab_file(void)
 {
     if (menu_file_state_machine() != 0) {
@@ -3577,7 +3599,12 @@ static unsigned char DAT_004d2a36;
 static unsigned char DAT_004d2a38;              // arrow texture loaded flag
 
 // 0x004d2a28 - fullscreen fade rect (r/g/b animated by FUN_00482800)
-static RectDrawDesc g_pickupFadeRect = { 0x60, 0, 0, 0x140, 0xf0, 0, 0, 0 };
+// textureId is 0x60000000, not 0x60: the original dword at 0x004d2a28 is
+// 0x60000000, which GetTextureVariant reads as variant 3 = "fade to black"
+// (black overlay, alpha = max(r,g,b)). With 0x60 the variant came out 0, i.e.
+// an OPAQUE fill of the literal r/g/b - so the 0xff the ramp drives it to
+// painted the screen solid WHITE instead of solid black.
+static RectDrawDesc g_pickupFadeRect = { 0x60000000, 0, 0, 0x140, 0xf0, 0, 0, 0 };
 
 // 0x004d2620 - per-item stack counts for the list navigation. The original
 // reads it unguarded by the item id (0xfe/0xff ids hit the following .data,
@@ -3593,22 +3620,35 @@ static const unsigned int g_pickupPageOffsets[8] = {
     0x1c, 0x01c00140, 0x00080010, 0x1c, 0x01000140, 0x00c00080, 0x1d, 0,
 };
 
-// 0x004d2350 - per-list-item background files (filem_l0.pix .. filem_x0.pix,
-// fixed 0x2a-byte entries as the original indexes them)
-static const char g_filemPixNames[13][0x2a] = {
-    ".\\usa\\item_m2\\filem_l0.pix",
-    ".\\usa\\item_m2\\filem_m0.pix",
-    ".\\usa\\item_m2\\filem_n0.pix",
-    ".\\usa\\item_m2\\filem_o0.pix",
-    ".\\usa\\item_m2\\filem_p0.pix",
-    ".\\usa\\item_m2\\filem_q0.pix",
-    ".\\usa\\item_m2\\filem_r0.pix",
-    ".\\usa\\item_m2\\filem_s0.pix",
-    ".\\usa\\item_m2\\filem_t0.pix",
-    ".\\usa\\item_m2\\filem_u0.pix",
-    ".\\usa\\item_m2\\filem_v0.pix",
-    ".\\usa\\item_m2\\filem_w0.pix",
-    ".\\usa\\item_m2\\filem_x0.pix",
+// 0x004d2350 - per-file page backgrounds (filem_l0.pix .. filem_z0.pix,
+// filem_00.pix, fixed 0x2a-byte entries as the original indexes them).
+// Indexed by the byte tables at 0x004d2a08 (book slots) with *0x2a.
+// The original's literal ".\\usa\\item_m2\\" prefix is the GAME_DATA_ROOT
+// at compile time (see system/AssetPath.h).
+static const char g_filemPixNames[16][0x2a] = {
+    GAME_DATA_ROOT "item_m2/filem_l0.pix",
+    GAME_DATA_ROOT "item_m2/filem_m0.pix",
+    GAME_DATA_ROOT "item_m2/filem_n0.pix",
+    GAME_DATA_ROOT "item_m2/filem_o0.pix",
+    GAME_DATA_ROOT "item_m2/filem_p0.pix",
+    GAME_DATA_ROOT "item_m2/filem_q0.pix",
+    GAME_DATA_ROOT "item_m2/filem_r0.pix",
+    GAME_DATA_ROOT "item_m2/filem_s0.pix",
+    GAME_DATA_ROOT "item_m2/filem_t0.pix",
+    GAME_DATA_ROOT "item_m2/filem_u0.pix",
+    GAME_DATA_ROOT "item_m2/filem_v0.pix",
+    GAME_DATA_ROOT "item_m2/filem_w0.pix",
+    GAME_DATA_ROOT "item_m2/filem_x0.pix",
+    GAME_DATA_ROOT "item_m2/filem_y0.pix",
+    GAME_DATA_ROOT "item_m2/filem_z0.pix",
+    GAME_DATA_ROOT "item_m2/filem_00.pix",
+};
+
+// 0x004d2308 - file book cover names (file000.tim / file001.tim), fixed
+// 0x24-byte entries. The original indexes them with *0x24.
+static const char g_fileCoverNames[2][0x24] = {
+    GAME_DATA_ROOT "item_m2/file000.tim",
+    GAME_DATA_ROOT "item_m2/file001.tim",
 };
 
 // Static TextureDescs for the list screen, transcribed byte-for-byte from
@@ -3618,20 +3658,106 @@ static unsigned char DAT_004d2888[0x20] = {
     0x15,0x00,0x00,0x00, 0x00,0x00,0xfd,0x01, 0x80,0x80,0x80,0x00,
     0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
 };
-static unsigned char DAT_004d2988[0x20] = {
-    0x00,0x00,0x00,0x00, 0x51,0x30,0x00,0x30, 0x00,0xd0,0x00,0x78,
-    0x00,0x15,0x00,0x00, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-};
-static unsigned char DAT_004d29ac[0x24] = {
-    0x00,0x00,0x00,0x00, 0x51,0x30,0x00,0xa8, 0x00,0x30,0x00,0x18,
-    0x00,0x15,0x00,0xd0, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+// 0x004d2988 - "previous page" arrow (8x8 at texU 0x00, screen 0x18,0x74)
+static unsigned char DAT_004d2988[0x24] = {
+    0x00,0x00,0x00,0x01, 0x18,0x00,0x74,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0x00,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
     0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
 };
-static unsigned char DAT_004d29d0[0x20] = {
-    0x00,0x00,0x00,0x00, 0x51,0x60,0x00,0xa8, 0x00,0x30,0x00,0x18,
-    0x00,0x15,0x00,0xd0, 0x18,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
-    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+// 0x004d29ac - "next page" arrow (8x8 at texU 0x10, screen 0x110,0x74)
+static unsigned char DAT_004d29ac[0x24] = {
+    0x00,0x00,0x00,0x01, 0x10,0x01,0x74,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0x10,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+// 0x004d29d0 - the "EXIT" label on the last page. Note this one lives on the
+// MENU UI page (tim 0x1c, texU 0x80 / texV 0x88, clut 0x1e4), not the arror
+// page, and its base colour is 0x40 (the renderer raises it to 0x50 while the
+// last-page flag is set).
+static unsigned char DAT_004d29d0[0x24] = {
+    0x00,0x00,0x00,0x01, 0x18,0x01,0x6f,0x00, 0x18,0x00,0x10,0x00,
+    0x1c,0x00,0x80,0x88, 0x00,0x00,0xe4,0x01, 0x40,0x40,0x40,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+
+// ============================================================================
+// File book selector textures (FUN_00481d00). Transcribed byte-for-byte from
+// 0x004d2668 / 0x004d268c / 0x004d27d0 / 0x004d27f4 / 0x004d2818 /
+// 0x004d283c / 0x004d2860. All reference texture page 0x15 (the arror.tim
+// page loaded by pickup_load_texture mode 1 into SRV slot 0x1c) and the
+// 0x1fc CLUT base (pageOffset 0x1c + 0x1E0).
+// ============================================================================
+
+// 0x004d2668 - the book page texture (160x104, drawn at slide pos + 0x20/+0x18)
+static unsigned char DAT_004d2668[0x24] = {
+    0x00,0x00,0x00,0x01, 0x20,0x00,0x18,0x00, 0xa0,0x00,0x68,0x00,
+    0x15,0x00,0x00,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+
+// 0x004d268c + i*0x24 - per-slot page icons (4x8 at texU 0xa8). X alternates
+// every two slots (0x8c/0x8d/0x8e/0x8f), Y steps by 9 from 0x29. The renderer
+// overwrites X/Y per frame, so only the base positions matter.
+static unsigned char g_fileSlotDescs[8][0x24] = {
+    { 0x00,0x00,0x00,0x01, 0x8c,0x00,0x29,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x01, 0x8c,0x00,0x32,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x01, 0x8d,0x00,0x3b,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x01, 0x8d,0x00,0x44,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x01, 0x8e,0x00,0x4d,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x01, 0x8e,0x00,0x56,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x01, 0x8f,0x00,0x5f,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x01, 0x8f,0x00,0x68,0x00, 0x04,0x00,0x08,0x00,
+      0x15,0x00,0xa8,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+};
+
+// 0x004d27d0 - the cursor arrow (4x8 at texU 0xa0); X/Y set per frame
+static unsigned char DAT_004d27d0[0x24] = {
+    0x00,0x00,0x00,0x01, 0x00,0x00,0x00,0x00, 0x04,0x00,0x08,0x00,
+    0x15,0x00,0xa0,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+
+// 0x004d27f4 / 0x004d2818 - the "other book" indicator icons (8x8 at
+// texU 0xb0 / 0xc0). The current book's icon is hidden; the other blinks
+// via the texU animation at DAT_004d2802 / 0x004d2826.
+static unsigned char DAT_004d27f4[0x24] = {
+    0x00,0x00,0x00,0x01, 0x3c,0x00,0x48,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0xb0,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+static unsigned char DAT_004d2818[0x24] = {
+    0x00,0x00,0x00,0x01, 0x9c,0x00,0x48,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0xc0,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+
+// 0x004d283c / 0x004d2860 - up/down scroll arrows (8x8 at texU 0xd0 / 0xe0).
+// X/Y are set per frame (0x004d2840/2842 and 0x004d2864/2866) and the
+// texU blinks via DAT_004d284a / 0x004d286e.
+static unsigned char DAT_004d283c[0x24] = {
+    0x00,0x00,0x00,0x01, 0x00,0x00,0x00,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0xd0,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+static unsigned char DAT_004d2860[0x24] = {
+    0x00,0x00,0x00,0x01, 0x00,0x00,0x00,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0xe0,0x00, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
 };
 
 // 0x00482c50 - initialize the key-item list table
@@ -3688,6 +3814,10 @@ static int pickup_fade_update(int mode)
         }
         break;
     case 2:
+        // Reading mode: hold the overlay at full strength. Variant 3 makes
+        // that an OPAQUE BLACK fullscreen fill (0xff is the alpha, not a
+        // colour), which is what the document pages are read against - their
+        // own background colour is the CLUT's 0x0000 transparent key.
         DAT_004d2a36 = 0xff;
         DAT_004d2a35 = 0xff;
         DAT_004d2a34 = 0xff;
@@ -3701,6 +3831,10 @@ static int pickup_fade_update(int mode)
     g_pickupFadeRect.r = DAT_004d2a34;
     g_pickupFadeRect.g = DAT_004d2a35;
     g_pickupFadeRect.b = DAT_004d2a36;
+    // blend 3 -> depth 548, exactly as the original (0x004828bf). The
+    // renderer interleaves overlays in this depth range with the command
+    // sprites, so 548 lands between the pause-menu frame (1060-1140) that it
+    // must cover and the reading page/arrows/EXIT (500-516) that draw over it.
     draw_rect(&g_pickupFadeRect, 3, 1);
     return (int)result;
 }
@@ -3730,34 +3864,51 @@ static void pickup_mark_seen(unsigned char* state)
 // 0x00482710 - load a pickup-screen texture file and page it in. mode 0 loads
 // the file only; mode 1/2 additionally LoadTexturePage with the page offset at
 // g_pickupPageOffsets[mode*0xc/4] (0x1c / 0x1d).
+//
+// The original loads into 0x00d022ac (g_TimImageBuffer__bitmap + 0x10000),
+// NOT the PAK buffer - verified against the 0x004827c0 disassembly, which
+// pushes 0xd022ac for both the unpack destination and the LoadTexturePage
+// source. The PAK buffer (0x00aea0d0) is only for the filem_*.pix container.
 static void pickup_load_texture(const char* path, unsigned int texId, int mode)
 {
+    void* loadBuffer = (void*)((int)g_TimImageBuffer__bitmap + 0x10000);
     if (SUBMENU_STATE_ID != texId) {
         SUBMENU_STATE_ID = (unsigned char)texId;
         empty_483510();
-        LoadFile(path, g_bgPakLoadBuffer, 0x20);
+        LoadFile(path, loadBuffer, 0x20);
         if (mode == 0) {
+            // 0x00482783 / 0x0048278d: mode 0 only clears the loaded flag and
+            // then FALLS THROUGH to the same slot-0xd page load as mode 1.
+            // That is how the file book covers (file000/001.tim) get paged
+            // into SRV slot 0x1c (clut 0x1fc) - the whole book UI (page,
+            // cursor, slot icons, book indicators, scroll arrows) is baked
+            // into the cover at texU 0xa0-0xe8. Skipping the page load (the
+            // port's earlier structure) left the book selector with nothing
+            // to draw.
             DAT_004d2a38 = 0;
         } else if (mode != 1) {
-            LoadTexturePage(g_bgPakLoadBuffer, 0x15,
+            LoadTexturePage(loadBuffer, 0x15,
                             (short)g_pickupPageOffsets[(mode * 0xc) / 4],
                             0xe, 0, 0, 0, 0);
             DAT_004d2a38 = 1;
             return;
-        } else {
-            LoadTexturePage(g_bgPakLoadBuffer, 0x15,
-                            (short)g_pickupPageOffsets[0xc / 4],
-                            0xd, 0, 0, 0, 0);
         }
+        LoadTexturePage(loadBuffer, 0x15,
+                        (short)g_pickupPageOffsets[0xc / 4],
+                        0xd, 0, 0, 0, 0);
     }
 }
 
-// 0x004827c0 - unpack the item-list PAK file and page it in
+// 0x004827c0 - unpack one page of the filem PAK file and page it in. The
+// decompressed page (a TIM image) lands at g_TimImageBuffer__bitmap + 0x10000
+// and LoadTexturePage parses THAT, not the PAK buffer (0x004827c0 disasm:
+// PUSH 0xd022ac before both calls).
 static void pickup_unpack_list(int index)
 {
+    void* pageBuffer = (void*)((int)g_TimImageBuffer__bitmap + 0x10000);
     unpack_pakfile_(g_bgPakLoadBuffer + *(int*)(g_bgPakLoadBuffer + index * 4),
-                    (void*)((int)g_TimImageBuffer__bitmap + 0x10000));
-    LoadTexturePage(g_bgPakLoadBuffer, 0x15, (short)g_pickupPageOffsets[6],
+                    pageBuffer);
+    LoadTexturePage(pageBuffer, 0x15, (short)g_pickupPageOffsets[6],
                     0xe, 0, 0, 0, 0);
 }
 
@@ -3928,14 +4079,18 @@ static void pickup_screen_render(unsigned char* state)
 {
     switch (state[2]) {
     case 0:
-        pickup_load_texture(".\\usa\\item_m2\\arror.tim", 0x96, 1);
+        pickup_load_texture(GAME_DATA_ROOT "item_m2/arror.tim", 0x96, 1);
         *(unsigned short*)(state + 0xc) = 0x128;
         state[9] = 1;
         state[2] = 1;
         *(unsigned short*)(state + 0xe) = 0;
         // fall through
     case 1:
-        LoadFile((const char*)&g_filemPixNames[g_pickupKeyItemList[((int)state[1] + state[7] * 2) * 8 + state[5]]],
+        // The file to read = table[(book + char*2)*8 + slot] - the book is
+        // state[4] (0x004823e7 in the original: MOVSX EAX,[ESI+4]), which the
+        // Ghidra decomp mislabeled as state[1]. The port's earlier state[1]
+        // made book 2's files load regardless of the selected book.
+        LoadFile((const char*)&g_filemPixNames[g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]]],
                  g_bgPakLoadBuffer, 0x20);
         state[2] = 2;
         return;
@@ -3943,17 +4098,17 @@ static void pickup_screen_render(unsigned char* state)
         pickup_unpack_list((int)state[6]);
         *(unsigned short*)(state + 0xc) = 0x128;
         state[2] = 3;
-        *(unsigned short*)(state + 0xe) = 300;
+        *(unsigned short*)(state + 0xa) = 300;
         // fall through
     case 3:
         {
-            short sVar5 = *(short*)(state + 0xe) / 2;
+            short sVar5 = *(short*)(state + 0xa) / 2;
             short sVar4 = *(short*)(state + 0xc) - sVar5;
-            *(short*)(state + 0xe) = sVar5;
+            *(short*)(state + 0xa) = sVar5;
             *(short*)(state + 0xc) = sVar4;
             if (sVar4 < 1) {
                 *(unsigned short*)(state + 0xc) = 0;
-                *(unsigned short*)(state + 0xe) = 1;
+                *(unsigned short*)(state + 0xa) = 1;
                 state[2] = state[2] + 1;
             }
         }
@@ -3963,14 +4118,14 @@ static void pickup_screen_render(unsigned char* state)
         break;
     case 5:
         *(unsigned short*)(state + 0xc) = 0;
-        *(unsigned short*)(state + 0xe) = 1;
+        *(unsigned short*)(state + 0xa) = 1;
         state[2] = state[2] + 1;
         // fall through
     case 6:
         {
-            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xe);
+            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xa);
             *(short*)(state + 0xc) = sVar5;
-            *(short*)(state + 0xe) = *(short*)(state + 0xe) * 2;
+            *(short*)(state + 0xa) = *(short*)(state + 0xa) * 2;
             if (sVar5 < -0x127) {
                 state[2] = state[2] + 1;
                 state[6] = state[6] + 1;
@@ -3982,14 +4137,14 @@ static void pickup_screen_render(unsigned char* state)
         break;
     case 8:
         *(unsigned short*)(state + 0xc) = 0;
-        *(unsigned short*)(state + 0xe) = 1;
+        *(unsigned short*)(state + 0xa) = 1;
         state[2] = state[2] + 1;
         // fall through
     case 9:
         {
-            short sVar5 = *(short*)(state + 0xc) + *(short*)(state + 0xe);
+            short sVar5 = *(short*)(state + 0xc) + *(short*)(state + 0xa);
             *(short*)(state + 0xc) = sVar5;
-            *(short*)(state + 0xe) = *(short*)(state + 0xe) * 2;
+            *(short*)(state + 0xa) = *(short*)(state + 0xa) * 2;
             if (0x127 < sVar5) {
                 state[2] = state[2] + 1;
                 state[6] = state[6] - 1;
@@ -4003,13 +4158,13 @@ static void pickup_screen_render(unsigned char* state)
         pickup_unpack_list((int)state[6]);
         *(unsigned short*)(state + 0xc) = 0xfed8;
         state[2] = state[2] + 1;
-        *(unsigned short*)(state + 0xe) = 300;
+        *(unsigned short*)(state + 0xa) = 300;
         // fall through
     case 0x0c:
         {
-            short sVar5 = *(short*)(state + 0xe) / 2;
+            short sVar5 = *(short*)(state + 0xa) / 2;
             short sVar4 = *(short*)(state + 0xc) + sVar5;
-            *(short*)(state + 0xe) = sVar5;
+            *(short*)(state + 0xa) = sVar5;
             *(short*)(state + 0xc) = sVar4;
             if (-1 < sVar4) {
                 state[2] = 4;
@@ -4019,14 +4174,14 @@ static void pickup_screen_render(unsigned char* state)
         break;
     case 0x0d:
         *(unsigned short*)(state + 0xc) = 0;
-        *(unsigned short*)(state + 0xe) = 1;
+        *(unsigned short*)(state + 0xa) = 1;
         state[2] = state[2] + 1;
         // fall through
     case 0x0e:
         {
-            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xe);
+            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xa);
             *(short*)(state + 0xc) = sVar5;
-            *(short*)(state + 0xe) = *(short*)(state + 0xe) * 2;
+            *(short*)(state + 0xa) = *(short*)(state + 0xa) * 2;
             if (!(-0x128 < sVar5)) {
                 state[2] = state[2] + 1;
             }
@@ -4037,8 +4192,9 @@ static void pickup_screen_render(unsigned char* state)
         state[2] = state[2] + 1;
         break;
     case 0x11:
-        pickup_load_texture(".\\usa\\item_m2\\file000.tim" + (int)state[1] * 0x24,
-                            state[1] + 0x90, 0);
+        // The cover to load is the book the reader came from (state[4]),
+        // not state[1] - the original indexes 0x4d2308 with state[4]*0x24.
+        pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
         state[2] = state[2] + 1;
         break;
     case 0x12:
@@ -4047,16 +4203,21 @@ static void pickup_screen_render(unsigned char* state)
         break;
     }
 
-    // Item-name strip position follows the slide
+    // Item-name strip position follows the slide (0x0048258e also clears the
+    // strip's texV before the draw)
     *(short*)(DAT_004d2888 + 4) = *(short*)(state + 0xc) + 0x18;
     *(short*)(DAT_004d2888 + 6) = *(short*)(state + 0xe) + 0x18;
+    DAT_004d2888[0x0f] = 0;
     display_texture((TextureDesc*)DAT_004d2888, 0, 0xe, 1);
 
     if (state[2] == 4) {
         unsigned char blink = state[0x12] + 1;
         state[0x12] = blink;
         state[0x11] = ((blink & 0x30) == 0);
-        if (state[4] == 1) {
+        // On the last page (state[0x10] = "no more pages") the arrows stay
+        // lit - 0x00482607 compares state[0x10], which the Ghidra decomp
+        // mislabeled as state[4].
+        if (state[0x10] == 1) {
             state[0x12] = 0;
             state[0x11] = 1;
         }
@@ -4068,7 +4229,10 @@ static void pickup_screen_render(unsigned char* state)
         display_texture((TextureDesc*)DAT_004d29ac, 0, 0xd, 1);
         if ((unsigned int)g_itemMaxCounts[g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]]] -
             (unsigned int)state[6] == 1) {
-            if (state[4] == 1) {
+            // 0x00482685 compares state[0x10] (the last-page flag), not
+            // state[4]: the EXIT label lights up (0x50) once the reader has
+            // acknowledged the last page and dims (0x20) until then.
+            if (state[0x10] == 1) {
                 DAT_004d29d0[0x14] = 0x50;
             } else {
                 DAT_004d29d0[0x14] = 0x20;
@@ -4078,6 +4242,392 @@ static void pickup_screen_render(unsigned char* state)
             draw_texture((TextureDesc*)DAT_004d29d0, 1);
         }
     }
+}
+
+// ============================================================================
+// File book selector (0x00481ab0 family)
+//
+// The FILE tab (menu_file_state_machine / 0x00481980) drives this while
+// FILE_STATE (state[0]) is 0: a book selector showing Book 1 or Book 2
+// (file000.tim / file001.tim covers). Each book has 8 file slots; a slot is
+// only selectable when its room flag is raised (pickup_item_seen). Pressing
+// confirm (byte1 & 0x40) with a slot selected sets the MODE byte (state[3])
+// to 1, which makes the renderer fade to white and set FILE_STATE = 1 - the
+// handoff to the file READING mode (pickup_list_advance / pickup_screen_render,
+// which also handles files found in rooms via menu_update_status_screen).
+//
+// State block (0x00ac98b0 - the same block as the FILE_* macros):
+//   +0x00 FILE_STATE (0 = book, 1 = reading)   +0x01 sub-step (0/1)
+//   +0x02 REQUEST/sub-state                    +0x03 MODE byte (fade mode)
+//   +0x04 book index (0/1)                     +0x05 selected slot (0-7, ff)
+//   +0x07 Chris/Jill half (g_main_state_flags bit 0x800000)
+//   +0x08 EXITFLAG                             +0x09 BUSY
+//   +0x0a slide speed (short)                  +0x0c slide X (short)
+//   +0x0e slide Y (short)                      +0x11 blink phase
+//   +0x12 blink counter                        +0x13 button hold counter
+// ============================================================================
+
+// (0x00481d00) - File book renderer + state machine. Sub-states:
+//   0 = slide in, 1 = display, 2 = cancel slide out (EXITFLAG on completion),
+//   3-7 = book change right (slide, next book, cover, slide back),
+//   8-12 = book change left. MODE 1/2 = fade in/out (FILE_STATE handoff).
+// The render block runs in the display state (slots, cursor, title, arrows).
+static void FUN_00481d00(unsigned char* state)
+{
+    switch (state[2]) {
+    case 0:
+        // Slide in: Y eases from 0xff81 (-127) up to 0
+        {
+            short speed = *(short*)(state + 0xa) / 2;
+            short y = *(short*)(state + 0xe) + speed;
+            *(short*)(state + 0xa) = speed;
+            *(short*)(state + 0xe) = y;
+            if (y < 0) break;
+            *(short*)(state + 0xe) = 0;
+            *(short*)(state + 0xa) = 1;
+            state[2] = state[2] + 1;
+        }
+        break;
+    case 1:
+        // Display: release the busy lock so input runs
+        state[9] = 0;
+        *(short*)(state + 0xa) = 1;
+        break;
+    case 2:
+        // Cancel: slide out, then raise the exit flag and clear the block.
+        // (The disassembly writes state[8]=1 and a DWORD 0 at state+0; the
+        // decompiler's "state[2]=1; state[0]=0" reading was wrong.)
+        {
+            short speed = *(short*)(state + 0xa);
+            short y = *(short*)(state + 0xe) - speed;
+            *(short*)(state + 0xe) = y;
+            *(short*)(state + 0xa) = speed * 2;
+            if (y > -0x68) break;
+            state[8] = 1;
+            *(unsigned int*)state = 0;
+        }
+        break;
+    case 3:
+        // Book change right: lock input and start the slide
+        state[9] = 1;
+        *(short*)(state + 0xa) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 4:
+        // Slide the current book out to the left
+        {
+            short speed = *(short*)(state + 0xa);
+            short x = *(short*)(state + 0xc) - speed;
+            *(short*)(state + 0xc) = x;
+            *(short*)(state + 0xa) = speed * 2;
+            if (x > -0x78) break;
+            *(short*)(state + 0xc) = 0x7f;
+            *(short*)(state + 0xa) = 0x80;
+            state[2] = state[2] + 1;
+        }
+        break;
+    case 5:
+        // Enter the next book: find the first seen file slot
+        state[4] = state[4] + 1;
+        {
+            unsigned char book = state[4];
+            int i = 0;
+            while (i < 8) {
+                if (pickup_item_seen(g_pickupKeyItemList[((int)book + state[7] * 2) * 8 + i]) != 0) {
+                    state[5] = (unsigned char)i;
+                    break;
+                }
+                if (i == 7) {
+                    state[5] = 0xff;
+                }
+                i = i + 1;
+            }
+            state[2] = state[2] + 1;
+        }
+        break;
+    case 6:
+        // Load the new book cover
+        pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+        state[2] = state[2] + 1;
+        break;
+    case 7:
+        // Slide the new book in from the right
+        {
+            short speed = *(short*)(state + 0xa) / 2;
+            short x = *(short*)(state + 0xc) - speed;
+            *(short*)(state + 0xa) = speed;
+            *(short*)(state + 0xc) = x;
+            if (x > 0) break;
+            state[2] = 1;
+            *(short*)(state + 0xc) = 0;
+        }
+        break;
+    case 8:
+        // Book change left: lock input and start the slide
+        state[9] = 1;
+        *(short*)(state + 0xa) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 9:
+        // Slide the current book out to the right
+        {
+            short speed = *(short*)(state + 0xa);
+            short x = *(short*)(state + 0xc) + speed;
+            *(short*)(state + 0xc) = x;
+            *(short*)(state + 0xa) = speed * 2;
+            if (x < 0x78) break;
+            *(short*)(state + 0xc) = 0xff81;
+            *(short*)(state + 0xa) = 0x80;
+            state[2] = state[2] + 1;
+        }
+        break;
+    case 10:
+        // Enter the previous book: find the first seen file slot
+        state[4] = state[4] - 1;
+        {
+            unsigned char book = state[4];
+            int i = 0;
+            while (i < 8) {
+                if (pickup_item_seen(g_pickupKeyItemList[((int)book + state[7] * 2) * 8 + i]) != 0) {
+                    state[5] = (unsigned char)i;
+                    break;
+                }
+                if (i == 7) {
+                    state[5] = 0xff;
+                }
+                i = i + 1;
+            }
+            state[2] = state[2] + 1;
+        }
+        break;
+    case 11:
+        // Load the previous book cover
+        pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+        state[2] = state[2] + 1;
+        break;
+    case 12:
+        // Slide the previous book in from the left
+        {
+            short speed = *(short*)(state + 0xa) / 2;
+            short x = *(short*)(state + 0xc) + speed;
+            *(short*)(state + 0xa) = speed;
+            *(short*)(state + 0xc) = x;
+            if (x < 0) break;
+            state[2] = 1;
+            *(short*)(state + 0xc) = 0;
+        }
+        break;
+    }
+
+    // MODE byte (state[3]) 1 = fade in and switch to reading mode, 2 = fade
+    // out after reading. Both hold the busy lock while fading.
+    if (state[3] == 1) {
+        if (pickup_fade_update(0) != 0) {
+            *(unsigned int*)state = 1;   // FILE_STATE = 1 -> reading mode
+        }
+        state[9] = 1;
+    } else if (state[3] == 2) {
+        if (pickup_fade_update(1) != 0) {
+            state[3] = 0;
+            *(short*)(state + 0xc) = 0;
+            *(short*)(state + 0xe) = 0;
+        }
+        state[9] = 1;
+    }
+
+    // ---- Display render (always draws the page; the rest is gated) ----
+    if (state[2] == 1) {
+        // Blink animation and the "other book" indicator icons. The current
+        // book's icon is hidden; the other one blinks by animating its texU.
+        unsigned char blink = state[0x12] + 1;
+        state[0x12] = blink;
+        state[0x11] = ((blink & 0x30) == 0);
+        DAT_004d27f4[0x0e] = (unsigned char)(state[0x11] * 8 - 0x50);
+        DAT_004d2818[0x0e] = (unsigned char)(state[0x11] * 8 - 0x40);
+        if (state[4] != 0) {
+            display_texture((TextureDesc*)DAT_004d27f4, 0x28, 0xd, 1);
+        }
+        if (state[4] != 1) {
+            display_texture((TextureDesc*)DAT_004d2818, 0x28, 0xd, 1);
+        }
+    }
+
+    // The book page texture follows the slide position
+    *(short*)(DAT_004d2668 + 4) = *(short*)(state + 0xc) + 0x20;
+    *(short*)(DAT_004d2668 + 6) = *(short*)(state + 0xe) + 0x18;
+    display_texture((TextureDesc*)DAT_004d2668, 0x28, 0xd, 1);
+
+    if (state[5] != 0xff) {
+        // Per-slot page icons for the files that have been found
+        for (int i = 0; i < 8; i++) {
+            unsigned char entry = g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + i];
+            if (pickup_item_seen(entry) != 0) {
+                unsigned char* desc = g_fileSlotDescs[i];
+                *(short*)(desc + 4) = *(short*)(state + 0xc) + (i >> 1) + 0x8c;
+                *(short*)(desc + 6) = *(short*)(state + 0xe) + i * 9 + 0x29;
+                display_texture((TextureDesc*)desc, 0x28, 0xd, 1);
+            }
+        }
+        // Cursor (the arror.tim arrow)
+        *(short*)(DAT_004d27d0 + 4) = (short)((state[5] >> 1) + *(short*)(state + 0xc) + 0x8c);
+        *(short*)(DAT_004d27d0 + 6) = (short)(state[5] * 9 + *(short*)(state + 0xe) + 0x29);
+        display_texture((TextureDesc*)DAT_004d27d0, 0x27, 0xd, 1);
+
+        if (state[2] == 1) {
+            // File title text (message id = filem index + 0x5f). The x
+            // offset table DAT_004d2630 aliases g_itemMaxCounts[0x10].
+            unsigned char entry = g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]];
+            FUN_00454fd0(entry + 0x5f, 0x80,
+                         (short)(g_itemMaxCounts[entry + 0x10] - g_ScreenOffsetX + 0x1e),
+                         0xc1 - g_ScreenOffsetY);
+
+            // Up/down scroll arrows (positions and blink texU)
+            *(short*)(DAT_004d283c + 4) = (short)(0x67 - g_ScreenOffsetX);
+            DAT_004d283c[0x0e] = (unsigned char)(state[0x11] * 8 - 0x30);
+            *(short*)(DAT_004d283c + 6) = (short)(0xb7 - g_ScreenOffsetY);
+            *(short*)(DAT_004d2860 + 4) = (short)(0x67 - g_ScreenOffsetX);
+            DAT_004d2860[0x0e] = (unsigned char)(state[0x11] * 8 - 0x20);
+            *(short*)(DAT_004d2860 + 6) = (short)(0xcf - g_ScreenOffsetY);
+
+            // Up arrow shows when a seen file exists above the cursor
+            for (int i = 0; i < 8; i++) {
+                int cand = (int)state[5] - 1 - i;
+                if (cand < 0) break;
+                if (pickup_item_seen(g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + cand]) != 0) {
+                    display_texture((TextureDesc*)DAT_004d283c, 0xa, 0xd, 1);
+                    break;
+                }
+            }
+            // Down arrow shows when a seen file exists below the cursor
+            for (int i = 0; i < 8; i++) {
+                int cand = (int)state[5] + 1 + i;
+                if (cand > 7) break;
+                if (pickup_item_seen(g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + cand]) != 0) {
+                    display_texture((TextureDesc*)DAT_004d2860, 0xa, 0xd, 1);
+                    break;
+                }
+            }
+        }
+    }
+}
+
+// (0x00481ae0) - File book init: reset the state, pick the Chris/Jill half,
+// mark new files seen, select the first seen slot, load the book cover.
+static void FUN_00481ae0(unsigned char* state)
+{
+    *(short*)(state + 0xc) = 0;
+    state[8] = 0;
+    state[4] = 0;
+    *(short*)(state + 0xa) = 0x80;
+    *(short*)(state + 0xe) = 0xff81;
+    state[7] = (((unsigned char*)&g_main_state_flags)[2] & 0x80) != 0;
+    pickup_mark_seen(state);
+
+    // First seen file slot of book 1 (0xff = none found yet)
+    int i = 0;
+    do {
+        if (pickup_item_seen(g_pickupKeyItemList[state[7] * 0x10 + i]) != 0) {
+            state[5] = (unsigned char)i;
+            break;
+        }
+        if (i == 7) {
+            state[5] = 0xff;
+        }
+        i = i + 1;
+    } while (i < 8);
+
+    DAT_004d2a34 = 0;
+    DAT_004d2a35 = 0;
+    DAT_004d2a36 = 0;
+    pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+    FUN_00481d00(state);
+}
+
+// (0x00481b90) - File book input: cursor up/down (Triangle/Cross held, with
+// auto-repeat) through the seen slots; Circle/Square switch books. The X
+// confirm and Square cancel are handled by menu_file_state_machine.
+static void FUN_00481b90(unsigned char* state)
+{
+    if (state[9] == 0) {
+        if (state[5] != 0xff) {
+            unsigned char* hold = &state[0x13];
+            if (((g_button_pressed_id >> 8) & 0x50) == 0) {
+                *hold = 0;
+            } else {
+                *hold = *hold + 1;
+            }
+            unsigned char dir = 0;
+            if (((g_PlayerPadHeld >> 8) & 0x10) != 0) dir = 1;
+            if (((g_PlayerPadHeld >> 8) & 0x40) != 0) dir = 2;
+            if ((0x14 < *hold) && (*hold % 3 == 0)) {
+                // Auto-repeat every 3rd frame after 20 held frames
+                if (((g_button_pressed_id >> 8) & 0x10) != 0) dir = 1;
+                if (((g_button_pressed_id >> 8) & 0x40) != 0) dir = 2;
+            }
+            if (dir == 1) {
+                // Up: nearest seen file above the cursor
+                for (int i = 0; i < 8; i++) {
+                    int cand = (int)state[5] - 1 - i;
+                    if (cand < 0) break;
+                    if (pickup_item_seen(g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + cand]) != 0) {
+                        state[5] = (unsigned char)cand;
+                        play_sfx(3, 4, 0);
+                        break;
+                    }
+                }
+            }
+            if (dir == 2) {
+                // Down: nearest seen file below the cursor
+                for (int i = 0; i < 8; i++) {
+                    int cand = (int)state[5] + 1 + i;
+                    if (cand > 7) break;
+                    if (pickup_item_seen(g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + cand]) != 0) {
+                        state[5] = (unsigned char)cand;
+                        play_sfx(3, 4, 0);
+                        break;
+                    }
+                }
+            }
+        }
+        // Next / previous book: RIGHT (raw byte1 0x20) and LEFT (raw byte1
+        // 0x80). The raw pad word's byte 1 is the D-pad in PSX order -
+        // 0x10 = up, 0x20 = right, 0x40 = down, 0x80 = left - which is exactly
+        // what g_padRemapSubTable0[0..3] (0x1000/0x2000/0x4000/0x8000 -> dpad
+        // bits 0-3, with up cancelling down and right cancelling left) maps.
+        // These bits do NOT collide with confirm/cancel: those live in the
+        // REMAPPED word (dpad byte1 0x40/0x80 <- raw byte 0 bits 7/6).
+        if (((g_PlayerPadHeld >> 8) & 0x20) != 0) {
+            if ((int)state[4] + 1 <= 1) {
+                state[2] = 3;
+                play_sfx(3, 4, 0);
+            } else {
+                state[4] = 1;
+            }
+        }
+        if (((g_PlayerPadHeld >> 8) & 0x80) != 0) {
+            if ((int)state[4] - 1 < 0) {
+                state[4] = 0;
+            } else {
+                state[2] = 8;
+                play_sfx(3, 4, 0);
+            }
+        }
+    }
+    FUN_00481d00(state);
+}
+
+// (0x00481ab0) - File book selector dispatcher: state[1] 0 = init, 1 = input
+static void FUN_00481ab0(unsigned char* state)
+{
+    if (state[1] == 0) {
+        FUN_00481ae0(state);
+        state[1] = state[1] + 1;
+        return;
+    }
+    if (state[1] != 1) {
+        return;
+    }
+    FUN_00481b90(state);
 }
 
 // ============================================================================

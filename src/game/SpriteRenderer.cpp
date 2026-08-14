@@ -257,29 +257,10 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
             }
         }
         if (srv == MARNI_NULL_HANDLE) {
-#ifdef _DEBUG
-            // Menu sprites sort at depth*16+500 (depths 0x10-0x30 = 660-1300).
-            if (cmd->depthSort >= 600 && cmd->depthSort <= 1400) {
-                dbg_printf("[tex] FLUSH SKIP (no SRV) depthSort=%u slot=%d texPage=%d"
-                           " u=%d v=%d w=%d h=%d\n",
-                           cmd->depthSort, (int)cmd->extraFlags, (int)cmd->texturePage,
-                           (int)cmd->u0, (int)cmd->v0, (int)(cmd->x1 - cmd->x0 + 1),
-                           (int)(cmd->y1 - cmd->y0 + 1));
-            }
-#endif
             continue;
         }
         if (pageW <= 0.0f || pageH <= 0.0f) {
             // SRV exists but its dimensions are unknown — can't normalize UVs.
-#ifdef _DEBUG
-            if (cmd->depthSort >= 600 && cmd->depthSort <= 1400) {
-                dbg_printf("[tex] FLUSH SKIP (bad dims) depthSort=%u slot=%d"
-                           " W=%d H=%d\n",
-                           cmd->depthSort, (int)cmd->extraFlags,
-                           (int)g_TexturePageWidth[texSlot],
-                           (int)g_TexturePageHeight[texSlot]);
-            }
-#endif
             continue;
         }
 

@@ -284,8 +284,34 @@ static constexpr auto s_itemBlueHerb      = STR("BLUE HERB\x07");       // +0x2d
 static constexpr auto s_itemMixedHerbs    = STR("MIXED HERBS\x07");     // +0x2e2
 static constexpr auto s_itemComRadio      = STR("COM. RADIO\x07");      // +0x2ef
 
+// --- File (document) names, PTR_DAT_004bf0a0 entries 77-127 (item ids 0x4e-0x80) ---
+// The original's pointer table extends to 128 entries; the files the book
+// list refers to (item ids 0x5f-0x70) sit at entries 94-111. Missing entries
+// made the "has been filed" \i insert read out of bounds and crash
+// message_render_chars. Offsets are relative to the string block.
+static constexpr auto s_itemResearchersWill = STR("RESEARCHER'S WILL\x07");  // +0x2f1
+static constexpr auto s_itemKeepersDiary    = STR("KEEPER'S DIARY\x07");     // +0x303
+static constexpr auto s_itemOrders          = STR("ORDERS\x07");             // +0x312
+static constexpr auto s_itemPassNumber      = STR("PASS NUMBER\x07");        // +0x319
+static constexpr auto s_itemPlant42Report   = STR("PLANT42 REPORT\x07");     // +0x325
+static constexpr auto s_itemFax             = STR("FAX\x07");                // +0x334
+static constexpr auto s_itemScrapbook       = STR("SCRAPBOOK\x07");          // +0x338
+static constexpr auto s_itemSecuritySystem  = STR("SECURITY SYSTEM\x07");    // +0x342
+static constexpr auto s_itemResearchersLtr  = STR("RESEARCHER'S LETTER\x07");// +0x352
+// The opening quote is glyph index 0x9C (fontus region 2, row 6 col 12 is a
+// solid block despite the 0x78 index the original's bytes use - user-verified
+// the true double-quote glyph sits two rows lower).
+static constexpr auto s_itemVJoltReport     = STR("\x9CV-JOLT\" REPORT\x07");// +0x366
+static constexpr auto s_itemBarrysPicture   = STR("BARRY'S PICTURE\x07");    // +0x376
+static constexpr auto s_itemPassCode01      = STR("PASS CODE01\x07");        // +0x386
+static constexpr auto s_itemPassCode02      = STR("PASS CODE02\x07");        // +0x392
+static constexpr auto s_itemPassCode03      = STR("PASS CODE03\x07");        // +0x39e
+static constexpr auto s_itemBotanyBook      = STR("BOTANY BOOK\x07");        // +0x3aa
+static constexpr auto s_itemIngram          = STR("INGRAM\x07");             // +0x3b6
+static constexpr auto s_itemMinimi          = STR("MINIMI\x07");             // +0x3bd
+
 // PTR_DAT_004bf0a0: item name pointers, indexed by (itemId - 1)
-extern const unsigned char* g_ItemNamePointers[77] = {
+extern const unsigned char* g_ItemNamePointers[128] = {
     (unsigned char*)s_itemCombatKnife.bytes,     // [ 0] COMBAT KNIFE (+0x000)
     (unsigned char*)s_itemBeretta.bytes,         // [ 1] BERETTA (+0x00d)
     (unsigned char*)s_itemShotgun.bytes,         // [ 2] SHOTGUN (+0x015)
@@ -363,6 +389,62 @@ extern const unsigned char* g_ItemNamePointers[77] = {
     (unsigned char*)s_itemMixedHerbs.bytes,      // [74] MIXED HERBS (+0x2e2)
     (unsigned char*)s_itemEmpty.bytes,           // [75] (empty name, +0x2ee)
     (unsigned char*)s_itemComRadio.bytes,        // [76] COM. RADIO (+0x2ef)
+    // [77]-[93]: unexamined/special items and the first Doom Book medal
+    // file (item 0x5d) - all empty names in the original (pointers into the
+    // 0x07 padding before "RESEARCHER'S WILL").
+    (unsigned char*)s_itemEmpty.bytes,           // [77]
+    (unsigned char*)s_itemEmpty.bytes,           // [78]
+    (unsigned char*)s_itemEmpty.bytes,           // [79]
+    (unsigned char*)s_itemEmpty.bytes,           // [80]
+    (unsigned char*)s_itemEmpty.bytes,           // [81]
+    (unsigned char*)s_itemEmpty.bytes,           // [82]
+    (unsigned char*)s_itemEmpty.bytes,           // [83]
+    (unsigned char*)s_itemEmpty.bytes,           // [84]
+    (unsigned char*)s_itemEmpty.bytes,           // [85]
+    (unsigned char*)s_itemEmpty.bytes,           // [86]
+    (unsigned char*)s_itemEmpty.bytes,           // [87]
+    (unsigned char*)s_itemEmpty.bytes,           // [88]
+    (unsigned char*)s_itemEmpty.bytes,           // [89]
+    (unsigned char*)s_itemEmpty.bytes,           // [90]
+    (unsigned char*)s_itemEmpty.bytes,           // [91]
+    (unsigned char*)s_itemEmpty.bytes,           // [92] item 0x5d (second medal file)
+    (unsigned char*)s_itemEmpty.bytes,           // [93] item 0x5e
+    // [94]-[111]: the files (documents), item ids 0x5f-0x70
+    (unsigned char*)s_itemResearchersWill.bytes, // [94] 0x5f RESEARCHER'S WILL
+    (unsigned char*)s_itemResearchersWill.bytes, // [95] 0x60 (same name in the original)
+    (unsigned char*)s_itemKeepersDiary.bytes,    // [96] 0x61 KEEPER'S DIARY
+    (unsigned char*)s_itemOrders.bytes,          // [97] 0x62 ORDERS
+    (unsigned char*)s_itemPassNumber.bytes,      // [98] 0x63 PASS NUMBER
+    (unsigned char*)s_itemPlant42Report.bytes,   // [99] 0x64 PLANT42 REPORT
+    (unsigned char*)s_itemFax.bytes,             // [100] 0x65 FAX
+    (unsigned char*)s_itemScrapbook.bytes,       // [101] 0x66 SCRAPBOOK
+    (unsigned char*)s_itemSecuritySystem.bytes,  // [102] 0x67 SECURITY SYSTEM
+    (unsigned char*)s_itemResearchersLtr.bytes,  // [103] 0x68 RESEARCHER'S LETTER
+    (unsigned char*)s_itemVJoltReport.bytes,     // [104] 0x69 "V-JOLT" REPORT
+    (unsigned char*)s_itemBarrysPicture.bytes,   // [105] 0x6a BARRY'S PICTURE
+    (unsigned char*)s_itemPassCode01.bytes,      // [106] 0x6b PASS CODE01
+    (unsigned char*)s_itemPassCode02.bytes,      // [107] 0x6c PASS CODE02
+    (unsigned char*)s_itemPassCode03.bytes,      // [108] 0x6d PASS CODE03
+    (unsigned char*)s_itemBotanyBook.bytes,      // [109] 0x6e BOTANY BOOK
+    (unsigned char*)s_itemIngram.bytes,          // [110] 0x6f INGRAM
+    (unsigned char*)s_itemMinimi.bytes,          // [111] 0x70 MINIMI
+    // [112]-[127]: later special items reuse earlier name strings
+    (unsigned char*)s_itemCrank.bytes,           // [112] CRANK (original: 0x004bedc3)
+    (unsigned char*)s_itemCrank.bytes,           // [113] CRANK
+    (unsigned char*)s_itemChemical.bytes,        // [114] CHEMICAL (original: 0x004bee2c)
+    (unsigned char*)s_itemMansionKey.bytes,      // [115] MANSION KEY
+    (unsigned char*)s_itemMansionKey.bytes,      // [116]
+    (unsigned char*)s_itemMansionKey.bytes,      // [117]
+    (unsigned char*)s_itemMansionKey.bytes,      // [118]
+    (unsigned char*)s_itemLabKey.bytes,          // [119] LAB KEY
+    (unsigned char*)s_itemSpecialKey.bytes,      // [120] SPECIAL KEY
+    (unsigned char*)s_itemDormitoryKey.bytes,    // [121] DORMITORY KEY
+    (unsigned char*)s_itemDormitoryKey.bytes,    // [122]
+    (unsigned char*)s_itemLabKey.bytes,          // [123] LAB KEY
+    (unsigned char*)s_itemSmallKey.bytes,        // [124] SMALL KEY
+    (unsigned char*)s_itemRedBook.bytes,         // [125] RED BOOK
+    (unsigned char*)s_itemDoomBook2.bytes,       // [126] DOOM BOOK 2
+    (unsigned char*)s_itemDoomBook1.bytes,       // [127] DOOM BOOK 1
 };
 
 // PTR_DAT_004bf260: unexamined-item generic names (category = item lookup byte 2)

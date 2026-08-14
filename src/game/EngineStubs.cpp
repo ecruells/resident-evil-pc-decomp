@@ -123,14 +123,8 @@ void FUN_00482c50(void) { }
 // (0x00482800) - Status screen input check
 int  FUN_00482800(int param) { return 0; }
 
-// (0x00482250) - Status screen update sub
-void FUN_00482250(void* data) { }
-
 // (0x00482be0) - Status screen init sub
 void FUN_00482be0(void* data) { }
-
-// (0x00481ab0) - File (save/load) dialog sub-function
-void FUN_00481ab0(void* data) { }
 
 // (0x00443040) - Load item box item image
 void FUN_00443040(int imgType, int slot) { }

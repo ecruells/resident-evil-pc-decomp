@@ -480,11 +480,28 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             // colours: the map screen's textures (Map_blue grid, floor maps)
             // carry it on their fills, and rendering those opaque made the
             // grid solid instead of the PS1's 50% transparency.
+            // PS1 transparency is keyed on the COLOUR VALUE (0x0000, and
+            // 0x8000 = STP-black), not on the index. Nearly every RE1 page
+            // does put that key at index 0, and on those pages the remaining
+            // STP bits are genuine semi-transparency flags (Map_blue's grid
+            // fill: indices 1-3 all carry STP), so they keep the rule above
+            // unchanged.
+            //
+            // A page whose index 0 is a REAL colour is not using index 0 as a
+            // key at all - the filem_*.pix document pages are exactly that:
+            // [0] = 0xffff (the bright text), [1..6] = the grey antialias
+            // ramp (all STP-set), [7] = 0x0000 (the page background). Keying
+            // on the index punched holes through the brightest text pixels and
+            // the STP rule washed the rest out to 50%, which is the "the file
+            // page renders with transparency" bug.
+            bool indexZeroIsKey = (clut[0] == 0x0000 || clut[0] == 0x8000);
             for (int c = 0; c < numClutEntries; c++) {
                 WORD clr = clut[c];
                 DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
-                DWORD a = (c == 0) ? 0x00 : ((clr & 0x8000) ? 0x80 : 0xFF);
+                DWORD a = indexZeroIsKey
+                            ? ((c == 0) ? 0x00 : ((clr & 0x8000) ? 0x80 : 0xFF))
+                            : ((clr == 0x0000 || clr == 0x8000) ? 0x00 : 0xFF);
                 DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
                 // R8G8B8A8_UNORM wants R in the lowest byte
                 clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;

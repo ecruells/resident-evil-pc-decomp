@@ -742,7 +742,12 @@ extern const unsigned char g_MenuFrameDataBlock[712];  // 0x004c26d0
 #define g_MainMenuTopOptionsPos (g_MenuFrameDataBlock + 312)   // 0x004c2808 top options buttons frame parts
 #define g_MainMenuFrames3Pos    (g_MenuFrameDataBlock + 368)   // 0x004c2840 frame border segments
 #define g_MainMenuFrames4Pos    (g_MenuFrameDataBlock + 506)   // 0x004c28c0 alternate border
-#define DAT_004c2940            (g_MenuFrameDataBlock + 634)   // 0x004c2940 rect outline end marker
+// 0x004c2940 = base 0x004c26d0 + 0x270 = +624, NOT +634. The mask loop at
+// 0x00464510 (ESI = 0x004c2940, verified in the original) walks the four black
+// masking rects backwards from g_inventorySlotsPos and stops when the pointer
+// reaches this marker; ten bytes too high ended it one rect early, dropping the
+// top strip (0,0,320,12).
+#define DAT_004c2940            (g_MenuFrameDataBlock + 624)   // 0x004c2940 rect outline end marker
 #define g_inventorySlotsPos     (g_MenuFrameDataBlock + 656)   // 0x004c2960 inventory slot positions
 
 // EKG line drawing data (primary line at 0x00be1198, secondary at 0x00be1184)
@@ -756,7 +761,7 @@ extern unsigned char g_EkgSecondaryLine[24];           // 0x00be1184
 // binary .rdata section). The item name strings (originally one flat 984-byte
 // block at 0x004becc8) are STR()-encoded per name in MenuData.cpp; the pointer
 // tables below reference them.
-extern const unsigned char* g_ItemNamePointers[77];    // 0x004bf0a0 (indexed by itemId-1)
+extern const unsigned char* g_ItemNamePointers[128];   // 0x004bf0a0 (indexed by itemId-1)
 extern const unsigned char* g_UnknownItemNamePointers[16]; // 0x004bf260
 extern const unsigned char g_ItemModelFileNames[75][8]; // 0x004bd348 (75 x 8-byte names)
 extern const unsigned char g_ItemModelFileNameING[8];  // 0x004bd5a0

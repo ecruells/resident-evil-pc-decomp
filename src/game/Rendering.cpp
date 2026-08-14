@@ -26,6 +26,13 @@ extern void rearrange_item_slots(void);
 // ============================================================================
 #define MAX_PENDING_SPRITES 300
 
+// Pending sprites at or above this depth are scene elements drawn BEFORE the
+// 3D TMD pass (room backgrounds, window fills); below it they are overlays that
+// FrameRateGovernor orders against the command-buffer sprites. The boundary
+// must sit above the pause menu's black masking rects (blend 0x1e -> 980) and
+// below the menu window fills and room background (2100 / 0xFFF).
+#define PENDING_SCENE_DEPTH 0x400u
+
 struct PendingSprite {
     float x, y, w, h;
     float u0, v0, u1, v1;
@@ -376,19 +383,21 @@ void FrameRateGovernor(void)
             // culled at 0x3FFF), so 0x10000 keeps them in the on-top half.
             FlushSpriteCommandsRange(0x10000, 0xFFFFFFFFu);
 
-            // Render high-depth pending sprites (background, room lighting)
-            // Threshold: depth >= 0x300 are scene elements (room BG 0xFFF,
-            // the death screen's black rect 0xFC00, the menu's dark panels at
-            // 980-1300 from draw_rect's blend*16+500), depth < 0x300 are
-            // screen overlays (the fade rects at 450-550 must cover the 3D
-            // models, so they draw AFTER the TMD pass).
+            // Render high-depth pending sprites (background, room lighting).
+            // At/above this threshold are scene elements that must sit behind
+            // the 3D pass: the room BG (0xFFF), the death screen's black rect
+            // (0xFC00), the menu's window fills (2100). Below it are overlays,
+            // which are ordered against the command sprites further down.
             //
-            // 0x800 was used here once: it moved the menu's dark panels
-            // (980) into the on-top bucket, where they covered the frame,
-            // item icons and character portrait - only the text (also an
-            // overlay, drawn after them) stayed visible.
+            // 0x800 was used here once: it moved the menu's black masking
+            // rects (980) into the on-top bucket, where they covered the
+            // frame, item icons and character portrait - only the text (also
+            // an overlay, drawn after them) stayed visible. That is what the
+            // interleaved pass below fixes properly: at 980 the masks cover
+            // the sliding file book and map pages (1060-1140) while the frame
+            // parts (820-964) and everything nearer still draw on top.
             for (int i = 0; i < g_pendingSpriteCount; i++) {
-                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth >= 0x300) {
+                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth >= PENDING_SCENE_DEPTH) {
                     MarniDrawSprite(
                         g_pendingSprites[i].x, g_pendingSprites[i].y,
                         g_pendingSprites[i].w, g_pendingSprites[i].h,
@@ -411,16 +420,55 @@ void FrameRateGovernor(void)
 
             // Render command buffer sprites (game objects, title text, etc.).
             // The >= 0x10000 half already drew before the TMD pass.
-            FlushSpriteCommandsRange(0, 0x10000);
+            //
+            // An overlay whose depth falls INSIDE the command-sprite range has
+            // to be interleaved, not deferred to the pass below. Two cases:
+            //   * the file reader's fullscreen black (548) must cover the
+            //     pause-menu frame (command sprites at 1060-1140) while the
+            //     document page, its page arrows and the EXIT label (500-516)
+            //     draw on top of it;
+            //   * the pause menu's four black masking rects (980) must cover
+            //     the sliding file book / map pages (1060-1140) - otherwise
+            //     those show through the gaps between the frame panels - while
+            //     the frame parts (820-964), item icons, portrait and text all
+            //     stay above them.
+            // The pending list is already sorted far-to-near, so walking it and
+            // flushing the sprites behind each overlay reproduces the
+            // original's single ordering table.
+            //
+            // 500 is the floor because a command sprite's depthSort is
+            // depth*16 + 500: nothing from display_texture/draw_texture can
+            // land below it, so overlays under 500 (every screen fade, at
+            // 450-499) keep drawing after ALL of them exactly as before. Only
+            // effect sprites, which sort by projected Z, can go lower - those
+            // are deliberately left under the fades.
+            unsigned int spriteCursor = 0x10000;
+            for (int i = 0; i < g_pendingSpriteCount; i++) {
+                if (!g_pendingSprites[i].valid) continue;
+                unsigned int d = g_pendingSprites[i].depth;
+                if (d >= PENDING_SCENE_DEPTH || d < 500) continue;
+                FlushSpriteCommandsRange(d, spriteCursor);
+                spriteCursor = d;
+                MarniDrawSprite(
+                    g_pendingSprites[i].x, g_pendingSprites[i].y,
+                    g_pendingSprites[i].w, g_pendingSprites[i].h,
+                    g_pendingSprites[i].u0, g_pendingSprites[i].v0,
+                    g_pendingSprites[i].u1, g_pendingSprites[i].v1,
+                    g_pendingSprites[i].color,
+                    g_pendingSprites[i].tex);
+            }
+            FlushSpriteCommandsRange(0, spriteCursor);
             // Both range flushes above drew; clear the queue now (the original
             // reset it inside the single flush). Without this the command
             // buffer accumulates across frames and display_texture returns 0
             // on overflow - every 2D effect stops rendering.
             g_SpriteQueueCount = 0;
 
-            // Render low-depth pending sprites last (fade overlays, color tinting)
+            // Render the remaining low-depth pending sprites last (the screen
+            // fade overlays and colour tinting under depth 500; the
+            // 500-PENDING_SCENE_DEPTH band already drew, interleaved, above).
             for (int i = 0; i < g_pendingSpriteCount; i++) {
-                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth < 0x300) {
+                if (g_pendingSprites[i].valid && g_pendingSprites[i].depth < 500) {
                     MarniDrawSprite(
                         g_pendingSprites[i].x, g_pendingSprites[i].y,
                         g_pendingSprites[i].w, g_pendingSprites[i].h,
