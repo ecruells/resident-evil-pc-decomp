@@ -1168,6 +1168,7 @@ void*         g_RoomItemEventHead = NULL;
 // 0x00d22790 - Lab slides state block (reset by lab_slides_reset)
 unsigned char g_labSlidesFuncIndex = 0;
 unsigned char g_labSlidesAnimState = 0;     // 0x00d22791
+unsigned char g_passcodePanelAnimationState = 0; // 0x00d22792
 int           g_labSlidesScrollX = 0;       // 0x00d22794
 unsigned int  g_labSlidesScrollY = 0;       // 0x00d22798
 unsigned char g_labSlidesSlideIndex = 0;    // 0x00d227a0
@@ -1176,6 +1177,14 @@ unsigned char g_labSlidesMsgId = 0;         // 0x00d227a2
 unsigned char g_labSlidesCountdown = 0;     // 0x00d227a3
 // 0x007d9120 - Lab slides state (reset by lab_slides_reset)
 int           g_labSlidesState = 0;
+
+// Passcode panel state. The original overlays these fields with the lab-slide
+// block depending on which interactive screen is active.
+unsigned char  g_interactiveScreenSavedCameraId = 0; // 0x00d2278a
+unsigned char  g_passcodePanelActive = 0;            // 0x007d9124
+unsigned char  g_passcodePanelSprites[9] = {};       // 0x007d9128
+unsigned short g_passcodePanelTimer = 0;              // 0x00d227a0 (overlaid)
+unsigned short g_passcodePanelPatternIndex = 0;       // 0x00d227a2 (overlaid)
 
 // 0x00d226a4 - Room event index (SCD event pointer for current room entity)
 void*         g_room_event_index = NULL;

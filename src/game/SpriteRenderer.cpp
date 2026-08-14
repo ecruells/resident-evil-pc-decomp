@@ -462,12 +462,33 @@ int AddSprite(TextureDesc* texture, short depth, int tpage, int fade) {
 
     cmd->depthSort = (depth == 0) ? 550 : (fade * 16);
 
-    cmd->u0 = (unsigned short)texture->texU;
-    cmd->v0 = (unsigned short)texture->texV;
+    // Room sprites use PS1 VRAM-page coordinates. The original AddSprite
+    // combines the descriptor's texture depth with the local U coordinate and
+    // moves pages above depth 0x10 into the next 0x100-pixel V band. Using the
+    // raw descriptor U/V values samples unrelated art from the room page.
+    static const int pageWidthFactor[4] = { 1, 2, 4, 8 };
+    const int factor = pageWidthFactor[(texture->flags & 0x03000000) >> 24];
+    unsigned short textureDepth = (unsigned short)texture->depth;
+    short vPageOffset = 0;
+    if (textureDepth > 0x10) {
+        textureDepth = (unsigned short)(textureDepth - 0x10);
+        vPageOffset = 0x100;
+    }
+
+    // The original tpage+4 selects the legacy texture-set metadata. The port
+    // stores the resulting D3D room-mask SRV at the direct tpage slot.
+    const int textureSlot = tpage;
+    const short pageOriginX = (textureSlot >= 0 && textureSlot < 256)
+        ? g_TexturePageOriginX[textureSlot] : 0;
+    const short pageOriginY = (textureSlot >= 0 && textureSlot < 256)
+        ? g_TexturePageOriginY[textureSlot] : 0;
+    cmd->u0 = (unsigned short)(factor *
+        ((int)textureDepth * 0x40 + ((unsigned int)texture->texU / factor) - pageOriginX));
+    cmd->v0 = (unsigned short)(vPageOffset + texture->texV - pageOriginY);
     cmd->u1 = cmd->u0 + texture->width - 1;
     cmd->v1 = cmd->v0 + texture->height - 1;
 
-    cmd->extraFlags = tpage + 4;
+    cmd->extraFlags = textureSlot;
 
     g_SpriteQueueCount++;
     return 1;
@@ -717,6 +738,18 @@ void TexturePage_Create(int slotIndex) {
 
 void TexturePage_SetupFull(void* imageData, short bankID, short pageOffset, int slotIndex) {
     ProcessTextureImage(imageData, bankID, pageOffset, slotIndex);
+    // ProcessTextureImage rebuilds the legacy Marni page, but the DX11 path
+    // needs an explicit SRV as well. Room masks are loaded through this entry
+    // point and AddSprite samples the resulting page directly.
+    LoadEffectTextureSheet(slotIndex, imageData);
+    if (slotIndex >= 0 && slotIndex < 256) {
+        // This is the same origin written by ProcessTextureImage's original
+        // descriptor at 0x008ed838/0x008ed83a. AddSprite subtracts it after
+        // adding the descriptor's bank/depth page offset.
+        g_TexturePageOriginX[slotIndex] =
+            (short)(bankID * 0x40 - ((bankID < 0x10) ? 0 : 0x400));
+        g_TexturePageOriginY[slotIndex] = (bankID < 0x10) ? 0 : 0x100;
+    }
 }
 
 void TexturePage_Refresh(int slotIndex, int mode) {

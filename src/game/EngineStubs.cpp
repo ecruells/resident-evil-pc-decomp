@@ -85,9 +85,6 @@ int  empty_483510(void) { return 0; }
 // These functions are called per-frame from game_loop (0x00480b30).
 // ---------------------------------------------------------------------------
 
-// (0x00475b80) - Draw room sprites (background overlays)
-void DrawRoomSpr(void) { }
-
 // (0x00494050) - Debug save menu (F5 key)
 void DebugSaveMenu(void) { }
 
@@ -97,9 +94,6 @@ void StartAttractDemo(void) { }
 // (0x0047eb60) - Post-death cleanup
 // Genuinely empty in the original (single RET at 0x0047eb60).
 void FUN_0047eb60(void) { }
-
-// (0x0042a030) - Check and display interactive screen (item pickup, etc.)
-void check_and_display_interactive_screen(void) { }
 
 // ---------------------------------------------------------------------------
 // MainMenu.cpp dependency stubs (pending full decompilation)

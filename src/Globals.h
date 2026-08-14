@@ -715,6 +715,7 @@ extern char          g_pakStringBuf[512];              // 0x00d227d0
 // --- Lab slides state (reset by lab_slides_reset) ---
 extern unsigned char g_labSlidesFuncIndex;             // 0x00d22790
 extern unsigned char g_labSlidesAnimState;             // 0x00d22791 - animation phase (0-3)
+extern unsigned char g_passcodePanelAnimationState;    // 0x00d22792 - passcode panel animation phase
 extern int           g_labSlidesScrollX;               // 0x00d22794 - slide scroll X position
 extern unsigned int  g_labSlidesScrollY;               // 0x00d22798
 extern unsigned char g_labSlidesSlideIndex;            // 0x00d227a0 - current slide frame
@@ -722,6 +723,15 @@ extern unsigned char g_labSlidesLoopDone;              // 0x00d227a1 - loop comp
 extern unsigned char g_labSlidesMsgId;                 // 0x00d227a2 - current slide message id
 extern unsigned char g_labSlidesCountdown;             // 0x00d227a3 - delay countdown timer
 extern int           g_labSlidesState;                 // 0x007d9120
+
+// The passcode panel reuses the lab-slide state block at runtime. These fields
+// occupy the same original storage as the slide fields above, but are kept as
+// separate port globals so the two state machines remain readable.
+extern unsigned char  g_interactiveScreenSavedCameraId; // 0x00d2278a
+extern unsigned char  g_passcodePanelActive;            // 0x007d9124
+extern unsigned char  g_passcodePanelSprites[9];        // 0x007d9128
+extern unsigned short g_passcodePanelTimer;             // 0x00d227a0 (overlaid)
+extern unsigned short g_passcodePanelPatternIndex;      // 0x00d227a2 (overlaid)
 
 // Character switch backup globals (used by room_set when switching between Jill/Chris and Rebecca)
 extern short          HEALTH_BKP;                      // 0x008f87b0 - backup of player health
