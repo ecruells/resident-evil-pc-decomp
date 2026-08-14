@@ -525,6 +525,12 @@ extern unsigned char g_effectSpriteSheetSlot[50];
 // carried separately or every one of them picks band 0. Zero for room sprites -
 // they share a page, so the offset is already baked into their UV records.
 extern unsigned char g_effectSpriteBandV[50];
+// Room sprites only: the page V offset at which setup_effect_sprite_textures
+// placed the sprite's RDT-embedded TIM. load_effect_sprites uses it to blit the
+// per-room art back into the page at the same place the page-absolute UVs point.
+// Distinct from g_effectSpriteBandV (which stays 0 for room sprites - their UV
+// records are edited in place) so the blend band scan is unaffected.
+extern unsigned char g_effectSpritePageV[50];
 
 // Entity joint animation copy base (set by SetupEntityJointAnimation)
 extern int           DAT_00be0e00;                     // 0x00be0e00

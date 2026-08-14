@@ -3,6 +3,7 @@
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
 #include "../marni/MarniDX.h"
+#include "../marni/MarniSystem.h"
 #include <cstdio>
 #include <cstring>
 #include "../system/AssetPath.h"
@@ -72,20 +73,20 @@ extern const unsigned char g_RoomEffectSpriteTable[5 * 32 * 4] = {
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x13,0xFF,0xFF,
     // Stage 3 (32 rooms x 4 bytes)
-    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x15,0x16,0xFF, 0x00,0x18,0xFF,0xFF,
-    0x00,0x18,0xFF,0xFF, 0x00,0x18,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x19,0xFF,0xFF,
-    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
+    0x00,0x13,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF,
+    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x04,0xFF,0xFF,
+    0x00,0x15,0x16,0xFF, 0x00,0x18,0xFF,0xFF, 0x00,0x18,0xFF,0xFF, 0x00,0x18,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x19,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
+    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
+    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
+    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     // Stage 4 (32 rooms x 4 bytes)
-    0x00,0x03,0x1A,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x03,0x1A,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x01,0xFF,0xFF, 0x00,0x19,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x19,0xFF,0xFF, 0x00,0x1B,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x04,0x1C,0xFF, 0x00,0x04,0x1C,0xFF, 0x00,0x04,0x1C,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x01,0x1D,0x1E, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
+    0x00,0x19,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x03,0x1A,0xFF,
+    0x00,0x01,0xFF,0xFF, 0x00,0x03,0x1A,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
+    0x00,0x19,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x19,0xFF,0xFF,
+    0x00,0x1B,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x04,0x1C,0xFF,
+    0x00,0x04,0x1C,0xFF, 0x00,0x04,0x1C,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0x1D,0x1E,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
@@ -305,7 +306,12 @@ void setup_effect_sprite_textures(unsigned char startSlot)
             for (unsigned int u = 0; u < uvCount; u++) {
                 uvPtr[u * 4 + 1] = (unsigned char)(uvPtr[u * 4 + 1] + vAdd);
             }
-            // Already absolute after the loop above, so no extra band bias.
+            // The page V offset is carried in g_effectSpritePageV so
+            // load_effect_sprites can blit this sprite's RDT-embedded TIM (the
+            // per-room art with its own CLUT) back into the page at the same
+            // place the UVs point. The band scan keeps reading the edited
+            // (page-absolute) texV, so bandV itself stays 0 for room sprites.
+            g_effectSpritePageV[spriteIdx] = (unsigned char)curU;
             g_effectSpriteBandV[spriteIdx] = 0;
         }
 
@@ -324,13 +330,75 @@ void setup_effect_sprite_textures(unsigned char startSlot)
 }
 
 // ============================================================================
-// load_effect_sprites (0x0047d020) - Load room effect sprite TIM files
-// Looks up effect sprites for the current room and loads their TIM textures.
+// load_effect_sprites (0x0047d020) - Build room effect sprite texture pages
+//
+// The room's effect sprites are TIMs embedded in the RDT (DAT_00ac9cd0,
+// resolved by InitRoomEffSprite). Each carries the PER-ROOM art with its own
+// CLUT - the flooded rooms' type-0x17 ripple is a light-blue 64x64 sheet that
+// exists ONLY in the RDT (the shared effspr\esp*.tim files hold the default
+// warm art, which is why the port's water rendered in the wrong palette).
+//
+// setup_effect_sprite_textures already placed every declared sprite at page
+// (spriteInfo[3] - 0x18) and page-V g_effectSpritePageV; here each TIM is
+// converted with ITS OWN CLUT (4bpp, CLUT row 0) and blitted into a 256x256
+// page buffer at that offset. The renderer keeps sampling page-absolute UVs,
+// so nothing else in the effect path changes.
 // ============================================================================
+static void blit_effect_tim_at(DWORD* page, const unsigned char* tim,
+                               unsigned int yOff)
+{
+    if (tim == NULL) return;
+    if (*(const unsigned int*)tim != 0x10) return;   // TIM magic
+
+    const unsigned char* p = tim + 8;
+    unsigned int flags = *(const unsigned int*)(tim + 4);
+    unsigned short clutW = 0, clutH = 0;
+    if (flags & 8) {
+        p += 4;                                      // CLUT data size
+        p += 4;                                      // CLUT origin
+        clutW = *(const unsigned short*)p;
+        clutH = *(const unsigned short*)(p + 2);
+        p += 4;
+    }
+    if (clutW == 0 || clutH == 0 || clutW * clutH > 64) return;
+
+    // 4bpp sheets: CLUT row 0 (16 entries), entry 0 = transparent.
+    unsigned short clut[16];
+    for (int i = 0; i < 16 && i < clutW * clutH; i++) {
+        clut[i] = *(const unsigned short*)(p + i * 2);
+    }
+    p += clutW * clutH * 2;
+
+    p += 4;                                          // image data size
+    p += 4;                                          // image origin
+    unsigned short imgW = *(const unsigned short*)p; // width in 16-bit words
+    unsigned short imgH = *(const unsigned short*)(p + 2);
+    p += 4;
+    if (imgW == 0 || imgH == 0 || imgW > 64 || imgH > 0x100) return;
+
+    unsigned int w = (unsigned int)imgW * 4;         // 4bpp -> 4 px per word
+    unsigned int h = imgH;
+    if (w == 0 || h == 0) return;
+
+    // Blit into the page at (0, yOff); the page is 256x256.
+    if (yOff >= 256) return;
+    unsigned int hClip = (h + yOff <= 256) ? h : (256 - yOff);
+    for (unsigned int y = 0; y < hClip; y++) {
+        for (unsigned int x = 0; x < w; x++) {
+            const unsigned char* src = p + y * imgW * 2 + x / 2;
+            unsigned int idx = (x & 1) ? ((*src >> 4) & 0xF) : (*src & 0xF);
+            if (idx == 0) continue;                  // transparent key
+            unsigned short c = clut[idx];
+            unsigned int r = ((c >> 0)  & 0x1F) * 255 / 31;
+            unsigned int g = ((c >> 5)  & 0x1F) * 255 / 31;
+            unsigned int b = ((c >> 10) & 0x1F) * 255 / 31;
+            page[(y + yOff) * 256 + x] = 0xFF000000u | (b << 16) | (g << 8) | r;
+        }
+    }
+}
+
 static void load_effect_sprites(void)
 {
-    char pathBuf[256];
-
     // The room's esp sprites use sheet slots 8-11 (the weapon FX hold 0-7),
     // mapped to SRV slots 11-14. Free exactly those four on each room change.
     for (int i = 0; i < 4; i++) {
@@ -341,13 +409,38 @@ static void load_effect_sprites(void)
         }
     }
 
+    // Composite each declared room sprite into its page buffer.
+    static DWORD s_pageBuffer[4][256 * 256];
     for (int i = 0; i < 4; i++) {
-        unsigned int relIdx = (unsigned int)g_RoomEffectSpriteTable[
-            ((unsigned int)g_stageId * 32 + (unsigned int)g_roomId) * 4 + i];
-        if (relIdx != 0xFF) {
-            sprintf(pathBuf, GAME_DATA_ROOT "effspr\\%s.tim", g_EffectSpriteNames[relIdx]);
-            LoadFile(pathBuf, g_TimImageBuffer__bitmap, 0x20);
-            LoadEffectTextureSheet(11 + i, g_TimImageBuffer__bitmap);
+        memset(s_pageBuffer[i], 0, sizeof(s_pageBuffer[i]));
+    }
+    for (unsigned int slot = 0; slot < 8; slot++) {
+        unsigned char type = g_abEffSpriteIndexTable[8 + slot];
+        if (type == 0xFF) continue;
+        unsigned char sheetSlot = g_effectSpriteSheetSlot[type];
+        if (sheetSlot == 0xFF) continue;             // page > 3, unmapped
+        unsigned int page = sheetSlot - 8;
+        if (page >= 4) continue;
+        // Blit at the sprite's page V (g_effectSpritePageV); the UV records
+        // were already made page-absolute with the same offset, so the render
+        // samples exactly the blitted region.
+        blit_effect_tim_at(s_pageBuffer[page],
+                           (const unsigned char*)DAT_00ac9cd0[slot],
+                           g_effectSpritePageV[type]);
+    }
+
+    // Upload the pages that got content (some pages may stay empty).
+    for (int i = 0; i < 4; i++) {
+        int slot = 11 + i;
+        bool hasContent = false;
+        for (int px = 0; px < 256 * 256; px++) {
+            if (s_pageBuffer[i][px] != 0) { hasContent = true; break; }
+        }
+        if (hasContent) {
+            MarniCreateTexture(256, 256, 32, s_pageBuffer[i], &g_TexturePageSRV[slot]);
+            g_TexturePageWidth[slot] = 256;
+            g_TexturePageHeight[slot] = 256;
+            g_TexturePageBpp[slot] = 16;
         }
     }
 
@@ -447,9 +540,10 @@ void InitRoomEffSprite(void)
             g_effectSpriteInfo[spriteIdx] = 0xFFFFFFFF;
             g_effectAnimData[spriteIdx] = 0xFFFFFFFF;
             g_abEffSpriteIndexTable[idx + 8] = 0xFF;
-            // Port-only companion table - keep it in step so a departing room's
-            // sheet mapping cannot be reached from the next room.
+            // Port-only companion tables - keep them in step so a departing
+            // room's sheet mapping cannot be reached from the next room.
             g_effectSpriteSheetSlot[spriteIdx] = 0xFF;
+            g_effectSpritePageV[spriteIdx] = 0;
         }
     } while (i < 8);
 
