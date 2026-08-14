@@ -741,7 +741,14 @@ extern const unsigned char g_MenuFrameDataBlock[712];  // 0x004c26d0
 #define g_MainMenuFrames2Pos    (g_MenuFrameDataBlock + 264)   // 0x004c27d8 bottom frame decoration
 #define g_MainMenuTopOptionsPos (g_MenuFrameDataBlock + 312)   // 0x004c2808 top options buttons frame parts
 #define g_MainMenuFrames3Pos    (g_MenuFrameDataBlock + 368)   // 0x004c2840 frame border segments
-#define g_MainMenuFrames4Pos    (g_MenuFrameDataBlock + 506)   // 0x004c28c0 alternate border
+// 0x004c28c0 = base 0x004c26d0 + 0x1f0 = +496, NOT +506 (verified: the original
+// at 0x0046440e loads the literal 0x004c28c0). This is the 8-slot inventory
+// border - the one Jill uses, selected by DAT_00ae9f19 bit 1 - and it is exactly
+// 126 bytes (9 entries x 14) ending where g_MainMenuFrames4Pos begins, which the
+// +0x7e / 9-iteration backward walk in menu_draw_inventory depends on. Ten bytes
+// too high fed that walk garbage geometry, so Jill's inventory panel drew with no
+// border at all while Chris's (g_MainMenuFrames3Pos, correct) looked right.
+#define g_MainMenuFrames4Pos    (g_MenuFrameDataBlock + 496)   // 0x004c28c0 alternate border
 // 0x004c2940 = base 0x004c26d0 + 0x270 = +624, NOT +634. The mask loop at
 // 0x00464510 (ESI = 0x004c2940, verified in the original) walks the four black
 // masking rects backwards from g_inventorySlotsPos and stops when the pointer

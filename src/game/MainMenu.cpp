@@ -2680,7 +2680,13 @@ static TextureDesc g_MapSprites[8] = {
 // and the map never drew - the [MAP] log showed r=0 for zoom0. The desc is
 // retargeted to the page's actual CLUT base (0) so the map sprite is accepted.
 static TextureDesc g_MapZoomDesc[3] = {
-    { 0x51000000, 16, 0, 128, 100, 0x15, 0x00, 0x88, 0, 0x000, 0x80, 0x80, 0x80, 0, 80, 50, 0x1000, 0x1000 },
+    // printClutTint is 0x1ff, not 0 - all three records at 0x004d3370 / 0x394 /
+    // 0x3b8 (stride 0x24) carry it. display_texture derives the palette as
+    // `printClutTint - g_TexturePageClutBase[slot]` and rejects anything outside
+    // 0..7, so a 0 here gave 0 - 0x1ff = -511 and the base map layer silently
+    // returned 0: the map drew its blue grid and floor label (entries 1 and 2,
+    // which had the right tint) but never the room layout.
+    { 0x51000000, 16, 0, 128, 100, 0x15, 0x00, 0x88, 0, 0x1ff, 0x80, 0x80, 0x80, 0, 80, 50, 0x1000, 0x1000 },
     { 0x41000000, 0, 0, 80, 104, 0x15, 0x00, 0x88, 0, 0x1ff, 0x80, 0x80, 0x80, 0, 80, 52, 0x1000, 0x1000 },
     { 0x41000000, 0, 0, 80, 104, 0x15, 0x00, 0x88, 0, 0x1ff, 0x80, 0x80, 0x80, 0, 0, 52, 0x1000, 0x1000 }
 };
@@ -2708,21 +2714,26 @@ static unsigned char g_MapDotBlink;
 // stack and returns 0 in practice.
 static int map_area_known(unsigned char area)
 {
-    int flag;
+    // 0x004885c0: the original picks an index off a jump table and adds 0x7c to
+    // it, so consecutive areas do NOT share a flag - area 1 is 0x7d, which the
+    // port had as 0x7c (a copy of area 0's). Verified target by target:
+    //   0 -> 0   1 -> 1   2 -> ret 0   3 -> 2   4 -> 3   5 -> 4
+    //   6 -> 4   7 -> ret 0   8 -> 5   9 -> 5   10 -> ret 0
+    int idx;
     switch (area) {
-    case 0:
-    case 1: flag = 0x7c; break;
+    case 0: idx = 0; break;
+    case 1: idx = 1; break;
     case 2: return 0;
-    case 3: flag = 0x7e; break;
-    case 4: flag = 0x7f; break;
+    case 3: idx = 2; break;
+    case 4: idx = 3; break;
     case 5:
-    case 6: flag = 0x80; break;
+    case 6: idx = 4; break;
     case 7: return 0;
     case 8:
-    case 9: flag = 0x81; break;
-    default: return 0;
+    case 9: idx = 5; break;
+    default: return 0;      // area 10 returns 0; >10 is out of the table
     }
-    return Flg_ck((int)g_RoomFlags, flag);
+    return Flg_ck((int)g_RoomFlags, idx + 0x7c);
 }
 
 // (0x00487540) - Map tab: draw the base map, markers, dot and floor glyph
@@ -2814,12 +2825,18 @@ static void map_tab_load_map(unsigned char* state)
         SUBMENU_STATE_ID = (unsigned char)(uVar2 + 0x80);
         strcpy(DAT_008e1cb0, GAME_DATA_ROOT);
         strcat(DAT_008e1cb0, g_MapTabFileNames[uVar2]);
-        LoadFile(DAT_008e1cb0, g_TimImageBuffer__bitmap, 0x20);
+        // Map files load to 0x00d022ac = g_TimImageBuffer__bitmap + 0x10000, not
+        // the buffer base (0x0048726d / 0x00487280 push 0xd022ac for both the
+        // LoadFile destination and the LoadTexturePage source). Loading at the
+        // base overwrote the first 40 KB of the shared TIM staging buffer, which
+        // the original deliberately leaves alone.
+        void* mapBuf = (void*)((unsigned char*)g_TimImageBuffer__bitmap + 0x10000);
+        LoadFile(DAT_008e1cb0, mapBuf, 0x20);
         DAT_00ac98a8[0] = 0x140;    // dead stores, see declaration
         DAT_00ac98a8[1] = 0x0001;
         DAT_00ac98a8[2] = 0x0080;
         DAT_00ac98a8[3] = 0x0088;
-        LoadTexturePage(g_TimImageBuffer__bitmap, 0x15, 0x1c, 0xc, 0, 0, 0, 0);
+        LoadTexturePage(mapBuf, 0x15, 0x1c, 0xc, 0, 0, 0, 0);
     }
     map_update_layout_state(state);
 }
@@ -3161,20 +3178,28 @@ static void map_display_load_textures(unsigned char* state)
         SUBMENU_STATE_ID = (unsigned char)(state[6] + 0x84);
         strcpy(DAT_008e1cb0, GAME_DATA_ROOT);
         strcat(DAT_008e1cb0, g_MapFileNames[state[6]]);
-        size_t fileSize = LoadFile(DAT_008e1cb0, g_TimImageBuffer__bitmap, 0x20);
+        // 0x004876da / 0x00487867 / 0x004879d0: the map file loads to
+        // 0x00d022ac == g_TimImageBuffer__bitmap + 0x10000, and that same
+        // pointer is the LoadTexturePage source. Every marker offset below is
+        // absolute and assumes it: +0x10014 == 0x00d022c0 == load + 0x14, the
+        // TIM's first CLUT entry (0x00487809 reads word [edx*2 + 0xd022c0]).
+        void* mapBuf = (void*)((unsigned char*)g_TimImageBuffer__bitmap + 0x10000);
+        size_t fileSize = LoadFile(DAT_008e1cb0, mapBuf, 0x20);
 
         unsigned int group = g_MapAreaGroups[state[6]];
         unsigned int roomCount = g_MapRoomCounts[group];
 
-        // The PS1 map TIMs carried a room-marker patch section (12-byte
-        // entries at +0x1002e, colour table at +0x10014, index table at
-        // +0x10220, count at +0x10214) that the PC repacks lack - the GOG
-        // map files are ~0x4200 bytes with the markers already baked in.
-        // Only patch when the section actually exists: reading the count
-        // field unconditionally (as the original does) picks up stale
-        // buffer data, and the marker-clear loop then runs for billions of
-        // iterations - a hard freeze.
-        bool hasMarkerSection = (fileSize != (size_t)-1) && (fileSize > 0x10220);
+        // The "room-marker patch section" is simply the map TIM's own CLUT, so
+        // it is always present: load + 0x14 is CLUT entry 0, load + 0x22 is
+        // entry 7, load + 0x2e is entry 13 (6 entries = 12 bytes per room),
+        // load + 0x214 is the image block's length field and load + 0x220 the
+        // 8bpp pixel data. Recolouring those entries is how unvisited rooms are
+        // hidden. An earlier revision tested `fileSize > 0x10220` and concluded
+        // the section was absent - that was the wrong base (the file was being
+        // loaded 64 KB below these offsets), and it silently disabled all marker
+        // tinting. The 41504-byte map files clear 0x220 with 0xa000 of pixels,
+        // which is exactly what the count field reports.
+        bool hasMarkerSection = (fileSize != (size_t)-1) && (fileSize > 0x220);
         if (hasMarkerSection) {
             int known = map_area_known(state[6]);
             if (known == 0) {
@@ -3202,8 +3227,10 @@ static void map_display_load_textures(unsigned char* state)
                 pEntry += 3;
             }
             // Drop dead marker indices (their colour-table entry is zero)
+            // Port safety net only - the original (0x004877ef) trusts the
+            // count field. Clamp against the pixel data's real extent.
             int count = *(int*)((unsigned char*)g_TimImageBuffer__bitmap + 0x10214) - 0xc;
-            if (count > (int)(fileSize - 0x10220)) count = (int)(fileSize - 0x10220);
+            if (count > (int)(fileSize - 0x220)) count = (int)(fileSize - 0x220);
             for (int i = 0; i < count; i++) {
                 unsigned char* idx = (unsigned char*)g_TimImageBuffer__bitmap + 0x10220 + i;
                 if (*(short*)((unsigned char*)g_TimImageBuffer__bitmap + (unsigned int)*idx * 2 + 0x10014) == 0) {
@@ -3215,10 +3242,10 @@ static void map_display_load_textures(unsigned char* state)
         DAT_00ac98a8[1] = 0x188;
         DAT_00ac98a8[2] = 0x80;
         DAT_00ac98a8[3] = 0x70;
-        LoadTexturePage(g_TimImageBuffer__bitmap, 0x15, 0x1f, 0xd, 4, 0, 0x88, 0);
+        LoadTexturePage(mapBuf, 0x15, 0x1f, 0xd, 4, 0, 0x88, 0);
 
         // Reload: the highlight page shows only the current room's marker
-        LoadFile(DAT_008e1cb0, g_TimImageBuffer__bitmap, 0x20);
+        LoadFile(DAT_008e1cb0, mapBuf, 0x20);
         if (hasMarkerSection) {
             int known = map_area_known(state[6]);
             if (known == 0) {
@@ -3236,8 +3263,10 @@ static void map_display_load_textures(unsigned char* state)
                 }
                 pEntry += 3;
             }
+            // Port safety net only - the original (0x004877ef) trusts the
+            // count field. Clamp against the pixel data's real extent.
             int count = *(int*)((unsigned char*)g_TimImageBuffer__bitmap + 0x10214) - 0xc;
-            if (count > (int)(fileSize - 0x10220)) count = (int)(fileSize - 0x10220);
+            if (count > (int)(fileSize - 0x220)) count = (int)(fileSize - 0x220);
             for (int i = 0; i < count; i++) {
                 unsigned char* idx = (unsigned char*)g_TimImageBuffer__bitmap + 0x10220 + i;
                 if (*(short*)((unsigned char*)g_TimImageBuffer__bitmap + (unsigned int)*idx * 2 + 0x10014) == 0) {
@@ -3249,12 +3278,12 @@ static void map_display_load_textures(unsigned char* state)
         DAT_00ac98a8[1] = 0x188;
         DAT_00ac98a8[2] = 0x80;
         DAT_00ac98a8[3] = 0x70;
-        LoadTexturePage(g_TimImageBuffer__bitmap, 0x15, 0x1f, 0xe, 4, 0, 0x88, 0);
+        LoadTexturePage(mapBuf, 0x15, 0x1f, 0xe, 4, 0, 0x88, 0);
 
         strcpy(DAT_008e1cb0, GAME_DATA_ROOT);
         strcat(DAT_008e1cb0, g_MapBlueFileName);
-        LoadFile(DAT_008e1cb0, g_TimImageBuffer__bitmap, 0x20);
-        LoadTexturePage(g_TimImageBuffer__bitmap, 0x15, 0x1f, 0xf, 4, 0, 0x88, 0);
+        LoadFile(DAT_008e1cb0, mapBuf, 0x20);
+        LoadTexturePage(mapBuf, 0x15, 0x1f, 0xf, 4, 0, 0x88, 0);
     }
 
     // Start the area highlight for the map variants that show it

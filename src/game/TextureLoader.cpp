@@ -239,9 +239,22 @@ void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffse
 {
     int slotOffset = slotIndex * 0x37C;
 
-    int textureCount = *(int*)((BYTE*)&g_VideoDriverArray_814 + slotOffset);
-    if (textureCount != 0) {
+    // Same legacy-descriptor bounds problem as LoadTexturePage, and this one
+    // indexes ALL the tables by slotOffset (slot * 0x37C = 892 bytes per slot),
+    // so it leaves the 1024-byte tables after slot 1: the boot font load
+    // (slotIndex 2 -> offset 1784) already wrote past three of them.
+    const bool descOk   = (size_t)slotOffset + 0x24 <= sizeof(g_VideoDriverArray_838);
+    const bool tableOk  = (size_t)slotOffset + sizeof(DWORD) <= sizeof(g_TexturePageTable_DAT);
+    const bool cnt814Ok = (size_t)slotOffset + sizeof(int) <= sizeof(g_VideoDriverArray_814);
+    const bool cnt810Ok = (size_t)slotOffset + sizeof(int) <= sizeof(g_VideoDriverArray_810);
+
+    int textureCount = cnt814Ok
+                         ? *(int*)((BYTE*)&g_VideoDriverArray_814 + slotOffset)
+                         : 0;
+    if (textureCount != 0 && tableOk) {
         DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + slotOffset);
+        size_t room = (sizeof(g_TexturePageTable_DAT) - (size_t)slotOffset) / sizeof(DWORD);
+        if ((size_t)textureCount > room) textureCount = (int)room;
         for (int i = 0; i < textureCount; i++) {
             if (pageTable[i] != 0) { destroy_texture_page(pageTable[i]); pageTable[i] = 0; }
         }
@@ -259,27 +272,33 @@ void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffse
     short baseX = (textureBankID >= 0x10) ? 0x400 : 0;
     short baseY = (textureBankID >= 0x10) ? 0x100 : 0;
 
-    WORD* texDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + slotOffset);
-    texDesc[0] = textureBankID * 0x40 - baseX;
-    texDesc[1] = baseY;
-    *(short*)(texDesc + 2) = (short)psxTex.m_WidthPixels;
-    *(short*)(texDesc + 3) = (short)psxTex.m_Height;
-    texDesc[4] = 0;
-    texDesc[5] = pageOffset + 0x1E0;
-    texDesc[6] = 0;
-    texDesc[7] = 1;
-    texDesc[8] = textureBankID;
+    if (descOk) {
+        WORD* texDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + slotOffset);
+        texDesc[0] = textureBankID * 0x40 - baseX;
+        texDesc[1] = baseY;
+        *(short*)(texDesc + 2) = (short)psxTex.m_WidthPixels;
+        *(short*)(texDesc + 3) = (short)psxTex.m_Height;
+        texDesc[4] = 0;
+        texDesc[5] = pageOffset + 0x1E0;
+        texDesc[6] = 0;
+        texDesc[7] = 1;
+        texDesc[8] = textureBankID;
 
-    if (psxTex.m_BitDepth == 4)
-        texDesc[2] = (short)(((int)texDesc[2] + ((int)texDesc[2] >> 31 & 3)) >> 2);
-    else if (psxTex.m_BitDepth == 8)
-        texDesc[2] = texDesc[2] / 2;
+        if (psxTex.m_BitDepth == 4)
+            texDesc[2] = (short)(((int)texDesc[2] + ((int)texDesc[2] >> 31 & 3)) >> 2);
+        else if (psxTex.m_BitDepth == 8)
+            texDesc[2] = texDesc[2] / 2;
+    }
 
-    DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + slotOffset);
-    pageTable[0] = create_texture_page(&psxTex, 2);
+    if (tableOk) {
+        DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + slotOffset);
+        pageTable[0] = create_texture_page(&psxTex, 2);
+    } else {
+        create_texture_page(&psxTex, 2);
+    }
 
-    *(DWORD*)((BYTE*)&g_VideoDriverArray_810 + slotOffset) = 1;
-    *(DWORD*)((BYTE*)&g_VideoDriverArray_814 + slotOffset) = 1;
+    if (cnt810Ok) *(DWORD*)((BYTE*)&g_VideoDriverArray_810 + slotOffset) = 1;
+    if (cnt814Ok) *(DWORD*)((BYTE*)&g_VideoDriverArray_814 + slotOffset) = 1;
 
     // --- Create D3D11 font texture for text rendering ---
     if (textureBankID == 0x1E && psxTex.m_pPixelData != NULL) {
@@ -390,8 +409,36 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
     int slotOffset = slotIndex * 0x37C;
     int texCheckOffset = slotIndex * 0xDF;
 
-    int textureCount = *(int*)((BYTE*)&g_VideoDriverArray_814 + texCheckOffset);
-    if (textureCount != 0) {
+    // ---- Legacy Marni page descriptors (vestigial in this port) ----------
+    // These tables are BYTE-indexed by the shifted slot (slot * 0xDF and
+    // slot * 0x37C). The original's span ~393KB (0x008ed4d0..0x008f7890); the
+    // port's stand-ins are 0.5-8KB, so from slot 4 upward EVERY access lands
+    // outside its own array. The DX11 render path takes page state exclusively
+    // from the g_TexturePage* arrays at the end of this function, so reads that
+    // fall out of range can safely yield 0 - but the WRITES were corrupting
+    // whatever the linker placed after these arrays. Only the _838 write was
+    // guarded; the table and _4d0 writes were not.
+    //
+    // Opening the map tab is slot 0xC -> shifted 27 -> texCheckOffset 6021 into
+    // a 1024-byte table and slotOffset 24084 into a 4096-byte one. That wiped
+    // the page metadata behind the character portrait (slot 9) and the blue
+    // inventory background (slot 10) - both drew black, because display_texture
+    // bails when a page's width/height are unknown - and left the equipped
+    // weapon box sampling a stale page as diagonal stripes.
+    //
+    // g_TexturePageTable_DAT is doubly dangerous: SpriteRenderer indexes it by
+    // ELEMENT (0-255) while this function indexes it by BYTE offset, so an
+    // out-of-range write here also lands in live entries. See the
+    // byte-offset-indexed-globals trap.
+    const bool descOk   = (size_t)slotOffset + 0x24 <= sizeof(g_VideoDriverArray_838);
+    const bool tableOk  = (size_t)texCheckOffset + 8 * sizeof(DWORD) <= sizeof(g_TexturePageTable_DAT);
+    const bool cnt814Ok = (size_t)texCheckOffset + sizeof(int) <= sizeof(g_VideoDriverArray_814);
+    const bool cnt810Ok = (size_t)texCheckOffset + sizeof(int) <= sizeof(g_VideoDriverArray_810);
+
+    int textureCount = cnt814Ok
+                         ? *(int*)((BYTE*)&g_VideoDriverArray_814 + texCheckOffset)
+                         : 0;
+    if (textureCount != 0 && tableOk) {
         DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
         for (int i = 0; i < textureCount; i++) {
             if (pageTable[i] != 0) { destroy_texture_page(pageTable[i]); pageTable[i] = 0; }
@@ -408,14 +455,10 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
     int storeResult = psxTex.Store((int*)imageBuffer, 1);
     if (storeResult == 0) return;
 
-    // The port's g_VideoDriverArray_838 is a small fragment of the original's
-    // ~393KB descriptor table (0x008ed838..0x008f7890), so slot offsets beyond
-    // the array land in unrelated .bss globals. The map screen's slots 0x1C-0x1F
-    // hit the SCD event table area and corrupt it (menu textures broke, palette
-    // changed). The render path reads page state from the g_TexturePage* arrays
-    // below, never from this descriptor, so skipping the out-of-range write is
-    // safe and the low slots (0-6, used by LoadImage/TitleScreen) keep it.
-    if ((unsigned int)slotOffset + 0x24 <= (unsigned int)sizeof(g_VideoDriverArray_838)) {
+    // Same rule as above: only write the descriptor when the slot's offset is
+    // actually inside the port's fragment. The low slots (0-3, used by
+    // LoadImage/TitleScreen) keep the original behaviour.
+    if (descOk) {
         WORD* texDesc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + slotOffset);
         texDesc[0] = posX;
         texDesc[1] = posY;
@@ -435,11 +478,18 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
     }
 
     int pageIndex = 0;
-    int pageCount = *(int*)((BYTE*)&g_VideoDriverArray_810 + texCheckOffset);
-    if (pageCount > 0) {
+    // An out-of-range read here used to hand the loop a garbage page count, so
+    // it wrote thousands of DWORDs past both arrays.
+    int pageCount = cnt810Ok
+                      ? *(int*)((BYTE*)&g_VideoDriverArray_810 + texCheckOffset)
+                      : 0;
+    if (pageCount > 0 && tableOk) {
         BYTE* pageData = (BYTE*)&g_VideoDriverArray_4d0 + slotOffset;
         DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
         for (int i = 0; i < pageCount; i++) {
+            if ((size_t)slotOffset + (size_t)i * 0x68 + 0x54 > sizeof(g_VideoDriverArray_4d0)) {
+                break;
+            }
             if ((flags & 1) == 0) {
                 *(DWORD*)(pageData + 0x50) = 1;
                 int mode = ((flags & 2) == 0) ? 2 : 0x12;
@@ -453,7 +503,7 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
         pageIndex = pageCount;
     }
 
-    if (pageIndex < 8) {
+    if (pageIndex < 8 && tableOk) {
         DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset + pageIndex * sizeof(DWORD));
         for (int i = 8 - pageIndex; i > 0; i--) { *pageTable = 0; pageTable++; }
     }
