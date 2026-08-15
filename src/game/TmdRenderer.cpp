@@ -354,14 +354,22 @@ void FlushTmdObjects(void)
             DWORD tex = (*(DWORD*)(e->slot + e->objIndex * 0x4C + 0x48) != 0)
                         ? *(DWORD*)(e->objData + 0x58) : 0;
             // Render flags at +0x80: bit 2 = unlit, take the vertex colour as
-            // it stands (see the layout note at the top of this file). The same
-            // bit marks semi-transparent models (CreateTmdObjectInternal ORs it
-            // when any TMD polygon has the 0x02000000 transparency bit); those
-            // carry their blend alpha in the record at +0x68, which the original
-            // draw also treats as the unlit path. Opaque objects keep alpha 1.
+            // it stands (see the layout note at the top of this file).
             bool unlit = (*(DWORD*)(e->objData + 0x80) & 2) != 0;
+
+            // Blend alpha at +0x68, INDEPENDENT of the unlit flag.
+            // CMarniDirect3DTMD::Create zeroes the field (puVar4[3] = 0 at
+            // 0x00415650), so an object nobody marked semi-transparent reads 0
+            // here and stays opaque. Two writers set it:
+            //   CreateTmdObjectInternal (0x00483910) - room/entity TMDs; it
+            //     happens to set the unlit bit as well, which is what made
+            //     gating on that bit look right, and
+            //   the item viewer (0x0048467f) - it stamps DAT_004d2c10 into
+            //     +0x68/+0x78 of every record and sets NO flag at all.
+            // Gating on the unlit bit therefore dropped the examine screen's
+            // 50% pass entirely: the glass bottles rendered solid.
             float triAlpha = 1.0f;
-            if (unlit) {
+            {
                 float a = *(float*)(e->objData + 0x68);
                 if (a > 0.0f && a <= 1.0f) triAlpha = a;
             }

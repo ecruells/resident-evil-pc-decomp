@@ -3,6 +3,7 @@
 // Addresses correspond to the original binary layout.
 
 #include "../Globals.h"
+#include "../system/AssetPath.h"
 #include "PrintText.h"
 
 // ============================================================================
@@ -647,8 +648,12 @@ extern const unsigned char g_ItemModelExtIVM[8] = ".ivm";
 // menu code builds the path from GAME_DATA_ROOT + "item_m2/" instead)
 extern const unsigned char g_ItemModelDir[24] = "./usa/item_m2/";
 
-// g_ItemMixPixPath (0x004B10D4) ".\usa\data\item_mix.pix"
-extern const unsigned char g_ItemMixPixPath[32] = ".\\usa\\data\\item_mix.pix";
+// g_ItemMixPixPath (0x004B10D4) ".\usa\data\item_mix.pix" - the sprite sheet
+// menu_item_combine_refresh reloads a combined slot's icon from. Rooted at
+// GAME_DATA_ROOT like every other asset path in this port (see
+// system/AssetPath.h); the literal retail root only resolves in a release
+// build, so LoadFile silently failed on it and no combine ever got a new icon.
+extern const unsigned char g_ItemMixPixPath[32] = GAME_DATA_ROOT "data\\item_mix.pix";
 
 // g_ItemHealTable (0x004BD927, 96 bytes) - indexed by itemId (DAT_004bd927 + itemId)
 // Low nibble: heal amount (1=1/3, 2=2/3, 3=full). High nibble: status cure

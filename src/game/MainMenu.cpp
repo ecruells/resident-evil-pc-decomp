@@ -1413,7 +1413,16 @@ static int menu_item_check_combine(void)
             if (pRec[3] != 0) {
                 g_CombineEffectFunctions[pRec[3] & 7](bVar3, bVar4);
             }
-            menu_item_combine_refresh(bVar3, bVar4, pRec[1], pRec[2]);
+            // 0x00401ac2-0x00401ad2: the last two arguments are the slots' OLD
+            // item ids (bVar1/bVar2, read at the top of this function), NOT the
+            // new ones just written. menu_item_combine_refresh reloads a slot's
+            // sprite only when its CURRENT id differs from the id passed in, so
+            // passing pRec[1]/pRec[2] compared the new id against itself: always
+            // equal, never a reload. Mixing chemicals left the old bottle sprite
+            // on the slot that had become an EMPTY BOTTLE.
+            // (menu_item_apply_combine, the confirmed-move path, already passed
+            // the old ids - which is why only the direct mix looked stale.)
+            menu_item_combine_refresh(bVar3, bVar4, bVar1, bVar2);
             rearrange_item_slots();
             return 4;
         }
@@ -5238,7 +5247,7 @@ static void FUN_004841f0(void);
 extern void ResolveAnimPointers(unsigned char* data);
 extern void InitScaMatrix(int parentPtr, ScaMatrixData* matrix);
 extern unsigned int CheckTmdTransparency(int tmdData);
-extern void FUN_004631c0(void);
+// room_event_take_item (0x004631c0) is declared in Globals.h
 extern void LoadPSXImage(PSXTexture* tex, void* buf, int mode);
 
 // Item 3D model viewer (0x0044e1b0) and item model loader (0x004841f0)
@@ -5249,11 +5258,18 @@ static int  g_itemModelSrc;            // DAT_00aafcdc - .ivm file buffer (TIM p
 static int  g_itemModelTmdBase;        // DAT_00aafcd8 - TMD header inside the .ivm
 static int  g_itemModelBlendFlag;      // DAT_004d2c10 - 0x3f000000 when the model has transparency
 static int  g_itemModelTmdCount;       // DAT_004d2c14 - processed object count
-static int  g_itemModelTexCreated;     // DAT_008fc3f8 - item texture page flag
-static int  g_itemSharedTmdCount;      // DAT_008f8c48 - shared transparent TMD slot count
-static int  g_itemSharedTmdReady;      // DAT_008f8c50 - shared textures created flag
 static int  g_itemRenderSlot;          // DAT_008f8d80 - render slot index (0-2)
-static int  g_itemSharedDisplayFlag;   // DAT_009220b8 - shared model drawn flag
+// DAT_008fc3f8 / DAT_008f8c48 / DAT_008f8c50 / DAT_009220b8 are NOT standalone
+// globals: each is a field of the object it sits at the end of.
+//   0x008fc3f8 = itemPage        + 0x348  (Direct3DTIM_Create's "created" flag)
+//   0x008f8c48 = g_itemStpPage   + 0x340  (PSXTexture::m_NumCLUTs)
+//   0x008f8c50 = g_itemStpPage   + 0x348  ("created" flag)
+//   0x009220b8 = shared TMD slot + 0x1590 (CMarniDirect3DTMD::m_initialized)
+// Declaring them as separate ints left every one of them permanently 0, which
+// is what deleted the examine screen's semi-transparency pass (see
+// FUN_004841f0 / FUN_004844c0 below).
+#define ITEM_PAGE_CREATED(page)   (*(DWORD*)((BYTE*)(page) + 0x348))
+#define ITEM_PAGE_NUMCLUTS(page)  (*(DWORD*)((BYTE*)(page) + 0x340))
 // The original stores EACH TMD object of a multi-object item into its own
 // CMarniDirect3DTMD slot at 0x008f8d88 + objIndex*0x1594, and the viewer draws
 // the slot matching the render slot. That address is a region of its own, well
@@ -5268,12 +5284,21 @@ static BYTE* g_itemTmdSlots[TMD_ITEM_SLOT_COUNT] = {
     &g_itemTmdSlotBuffer[1 * TMD_SLOT_STRIDE],  // item object 1
     &g_itemTmdSlotBuffer[2 * TMD_SLOT_STRIDE],  // item object 2
 };
-// DAT_008f8908 - shared transparent slot. Another region of its own in the
-// original; CMarniDirect3DTMD::Transform is called on it (see the examine
-// render), so TmdQueueObject has to be able to resolve pointers into it or the
-// object is silently dropped from the frame's queue.
+// DAT_00920b28 - the shared TMD slot the semi-transparency pass draws from.
+// A region of its own in the original; CMarniDirect3DTMD::Transform is called
+// on it (see the examine render), so TmdQueueObject has to be able to resolve
+// pointers into it or the object is silently dropped from the frame's queue.
 alignas(16) unsigned char g_itemSharedTmdSlot[TMD_SLOT_STRIDE];
-static DWORD g_itemSharedTmdHandles[16]; // DAT_008f8c54 - shared texture handles
+
+// DAT_008f8908 - the STP ("semi-transparent") variant of the item texture page.
+// A second PSXTexture holding its own copy of the same TIM, with every texel
+// whose CLUT colour carries the PS1 STP bit (0x8000) knocked out to palette
+// index 0 (= fully transparent). The examine screen draws the model twice at
+// the same OT depth: once from the item page at 50% alpha, once from this page
+// opaque, so the glass texels end up half-transparent and everything else keeps
+// its full brightness. Sized like a texture-page record: PSXTexture (0x348) +
+// the created flag (0x348) + eight handles (0x34C..0x36C).
+alignas(16) static unsigned char g_itemStpPage[0x36C];
 
 // Viewer animation state
 static short DAT_00ae9f4b;             // 0x00ae9f4b - item model object count
@@ -5841,7 +5866,11 @@ viewer_state3:
                     uVar7 = 5;
                 }
             } else {
-                FUN_004631c0();
+                // 0x0044e5b7 - menu mode 4 is the script-driven award
+                // (SCD `got_item`): the viewer itself hands over the item,
+                // there is no message post-action to do it. Global message
+                // 0xc1 ("You got the X.") carries no trailing action bytes.
+                room_event_take_item();
                 break;
             }
         } else {
@@ -6012,17 +6041,31 @@ static void FUN_004844c0(void)
 
     int depth = slot + 10;
     if (slot >= 3) slot = 0;
-    int tr = ((CMarniDirect3DTMD*)g_itemTmdSlots[slot])->Transform(g_pMarniDirect3D, (void*)(size_t)depth, transformMatrix, 0);
-    if (tr == 0) {
-        OutputDebugStringA("[ITEM] Transform skipped (slot not initialized)\n");
-    } else {
-        char dbg[160];
-        sprintf_s(dbg, sizeof(dbg), "[ITEM] transform ok tz=%f\n", transformMatrix[14]);
-        OutputDebugStringA(dbg);
-    }
+    ((CMarniDirect3DTMD*)g_itemTmdSlots[slot])->Transform(g_pMarniDirect3D, (void*)(size_t)depth, transformMatrix, 0);
 
-    if ((slot == 0) && (g_itemSharedDisplayFlag == 1)) {
-        ((CMarniDirect3DTMD*)g_itemSharedTmdSlot)->Transform(g_pMarniDirect3D, (void*)(size_t)10, transformMatrix, 0);
+    // 0x00484670: the semi-transparency pass, and the only place the item
+    // viewer's blend alpha is ever applied. The gate is the SHARED slot's
+    // m_initialized (DAT_009220b8 = 0x00920b28 + 0x1590), raised by its Create
+    // in FUN_004841f0 and cleared there for every non-transparent item.
+    CMarniDirect3DTMD* shared = (CMarniDirect3DTMD*)g_itemSharedTmdSlot;
+    if ((slot == 0) && (shared->m_initialized == 1)) {
+        // 0x0048467f: stamp DAT_004d2c10 into +0x68 and +0x78 of all 32 object
+        // records of item slot 0 - both m_objectData (0x4D0) and its copy
+        // (0xD10), 0x84 apart, whichever side Transform queued. This runs AFTER
+        // the Transform above on purpose: the draw queue holds POINTERS to the
+        // records (see TmdQueueObject), so the alpha still lands on this
+        // frame's opaque pass and turns it into the 50% pass.
+        BYTE* rec = g_itemTmdSlots[0] + 0x4D0 + 0x68;
+        for (int i = 0; i < 32; i++) {
+            *(DWORD*)(rec)        = (DWORD)g_itemModelBlendFlag;
+            *(DWORD*)(rec + 0x10) = (DWORD)g_itemModelBlendFlag;
+            rec += 0x84;
+        }
+        // Second pass at the SAME depth, from the STP page (opaque texels
+        // only). Coplanar with the first: DrawTriangles3D depth-tests
+        // LESS_EQUAL, so both survive, and where the two agree the texel
+        // colour is identical - so the pass order does not matter.
+        shared->Transform(g_pMarniDirect3D, (void*)(size_t)10, transformMatrix, 0);
     }
 }
 
@@ -6064,6 +6107,69 @@ static void FUN_0044ea50(void)
 }
 
 
+// (0x004842c0) - Knock the semi-transparent texels out of the STP item page
+// The original locks each of the page's CLUT sub-surfaces (vtable[4]/[5]),
+// walks all 256 palette entries and, for every colour with the PS1 STP bit
+// (0x8000) set, rewrites every pixel using that index to 0 - palette index 0
+// being the PS1's fully transparent colour, and the index this port's
+// VTable_CreateTextureHandle also maps to alpha 0.
+//
+// The result is a copy of the item texture holding ONLY the opaque texels.
+// Drawn over a 50% pass of the full texture (see FUN_004844c0), it restores
+// the per-texel semi-transparency the PS1 GPU did in hardware: glass stays at
+// half alpha, labels and caps come back to full brightness.
+//
+// The original compares every pixel against every STP colour (256 * w * h);
+// a 256-entry lookup gives the identical result in one pass.
+static void ItemStpPage_KnockOutStpTexels(void)
+{
+    PSXTexture* tex = (PSXTexture*)g_itemStpPage;
+
+    BYTE* pixels = (BYTE*)tex->m_pPixelData;
+    WORD* clut   = (WORD*)tex->m_pCLUTData;
+    if (pixels == NULL || clut == NULL) return;
+    if (tex->m_BitDepth != 4 && tex->m_BitDepth != 8) return;   // no CLUT, nothing to key
+
+    const int entries = 1 << tex->m_BitDepth;          // 16 (4bpp) or 256 (8bpp)
+    const int w       = (int)tex->m_WidthPixels;
+    const int h       = (int)tex->m_Height;
+    const int pitch   = (int)tex->m_RowStride;
+    if (w <= 0 || h <= 0 || pitch <= 0) return;
+
+    // Union of every CLUT's STP mask: the sub-surfaces share one pixel buffer,
+    // so the original's per-CLUT passes accumulate exactly like this.
+    bool stp[256] = { false };
+    DWORD clutCount = tex->m_NumCLUTs ? tex->m_NumCLUTs : 1;
+    if (clutCount > 8) clutCount = 8;
+    for (DWORD n = 0; n < clutCount; n++) {
+        const WORD* pal = clut + n * entries;
+        for (int i = 0; i < entries; i++) {
+            if (pal[i] & 0x8000) stp[i] = true;
+        }
+    }
+
+    int knocked = 0;
+    for (int y = 0; y < h; y++) {
+        BYTE* row = pixels + y * pitch;
+        if (tex->m_BitDepth == 8) {
+            for (int x = 0; x < w; x++) {
+                if (stp[row[x]]) { row[x] = 0; knocked++; }
+            }
+        } else {
+            for (int x = 0; x < w; x += 2) {
+                BYTE two = row[x >> 1];
+                BYTE lo = (BYTE)(two & 0x0F), hi = (BYTE)(two >> 4);
+                if (stp[lo]) { lo = 0; knocked++; }
+                if (stp[hi]) { hi = 0; knocked++; }
+                row[x >> 1] = (BYTE)((hi << 4) | lo);
+            }
+        }
+    }
+
+    dbg_printf("[ITEM] STP page: %dbpp %dx%d, %d texels knocked out\n",
+               (int)tex->m_BitDepth, w, h, knocked);
+}
+
 // (0x004841f0) - Item model async processor
 // Parses the .ivm file loaded by menu_load_item_model: creates the item
 // texture page (bank 0x15) and the Direct3DTMD slot(s) from the TMD header.
@@ -6075,33 +6181,38 @@ static void FUN_004841f0(void)
     if (local_10 < 1 || local_10 >= 3) return;
 
     ResolveAnimPointers((unsigned char*)(g_itemModelTmdBase + 4));
-    VideoDriver_ClearState348(g_pMarniDirect3D, g_pMarniDirect3D);
-    VideoDriver_ClearState348(g_pMarniDirect3D, g_pMarniDirect3D);
 
     BYTE* itemPage = &g_psxTextureArray[0x15 * 0x1b60];
 
-    if (g_itemModelTexCreated == 0) {
+    // 0x0048422c / 0x00484244: release the previous item's D3D textures on BOTH
+    // pages. ECX is the page in the original, not the video driver - passing
+    // g_pMarniDirect3D here released nothing and leaked a texture slot per
+    // examine, and left the "created" flags reading as another object's fields.
+    VideoDriver_ClearState348(itemPage, g_pMarniDirect3D);
+    VideoDriver_ClearState348(g_itemStpPage, g_pMarniDirect3D);
+
+    if (ITEM_PAGE_CREATED(itemPage) == 0) {
         LoadPSXImage((PSXTexture*)itemPage, (void*)g_itemModelSrc, 1);
         Direct3DTIM_Create(itemPage, g_pMarniDirect3D);
     }
 
+    // 0x0048427d: cleared FIRST, so an opaque item viewed after a glass one
+    // stamps 0 (= opaque) instead of inheriting the 50%.
+    g_itemModelBlendFlag = 0;
+
     if (CheckTmdTransparency(g_itemModelTmdBase + 0xc) != 0) {
-        g_itemModelBlendFlag = 0x3f000000;
-        if (g_itemSharedTmdReady != 1) {
-            LoadPSXImage((PSXTexture*)itemPage, (void*)g_itemModelSrc, 1);
-            // Shared transparent TMD slots (DAT_008f8c48, set up by the map
-            // screen): reload their texture handles. The count is 0 until the
-            // map screen is ported, so this loop is inert.
-            for (int i = 0; i < g_itemSharedTmdCount; i++) {
-                ((CMarniDirect3DTMD*)g_itemSharedTmdSlot)->CleanupObjects(g_pMarniDirect3D);
-            }
-            void** vtable = *(void***)g_pMarniDirect3D;
-            typedef DWORD (*CreateTexFn)(void*, void*, int, int);
-            CreateTexFn createTex = (CreateTexFn)vtable[6];
-            for (int i = 0; i < g_itemSharedTmdCount; i++) {
-                g_itemSharedTmdHandles[i] = createTex(g_pMarniDirect3D, g_itemSharedTmdSlot, 0x21, 0);
-            }
-            g_itemSharedTmdReady = 1;
+        g_itemModelBlendFlag = 0x3f000000;   // 0.5f
+        if (ITEM_PAGE_CREATED(g_itemStpPage) != 1) {
+            // Own copy of the same TIM (copyData = 1 allocates its own pixel
+            // and CLUT buffers, so knocking texels out below cannot touch the
+            // item page).
+            LoadPSXImage((PSXTexture*)g_itemStpPage, (void*)g_itemModelSrc, 1);
+            ItemStpPage_KnockOutStpTexels();
+            // 0x0048433c-0x0048435f: the original creates the per-CLUT handles
+            // by hand and then sets 0x008f8c50 (= page + 0x348). That is what
+            // Direct3DTIM_Create does, and it leaves the flag clear when a
+            // handle fails - which is the safer half of the difference.
+            Direct3DTIM_Create(g_itemStpPage, g_pMarniDirect3D);
         }
     }
 
@@ -6119,11 +6230,16 @@ static void FUN_004841f0(void)
     }
     g_itemModelTmdCount = local_10;
 
-    // NOTE: no CleanupObjects here - it would reset the slot's m_initialized
-    // flag and stop the viewer's Transform from queuing the model.
-    if (g_itemSharedTmdReady == 1) {
+    // 0x004843cf: the shared slot is torn down for EVERY item and only rebuilt
+    // when this one is transparent. CleanupObjects clears m_initialized, which
+    // is the exact gate FUN_004844c0 reads - without it, examining an opaque
+    // item after a glass one would leave the previous model's geometry queued
+    // for a second pass. (This is the shared slot, not the item slots above;
+    // those are cleaned inside the loop and re-Created right after.)
+    ((CMarniDirect3DTMD*)g_itemSharedTmdSlot)->CleanupObjects(g_pMarniDirect3D);
+    if (ITEM_PAGE_CREATED(g_itemStpPage) == 1) {
         PSXObject_Store((CMarniDirect3DTMD*)g_itemSharedTmdSlot, (int*)g_itemModelTmdBase, 0, 0xffffffff, 0x100);
-        ((CMarniDirect3DTMD*)g_itemSharedTmdSlot)->Create(g_pMarniDirect3D, itemPage, (void*)1);
+        ((CMarniDirect3DTMD*)g_itemSharedTmdSlot)->Create(g_pMarniDirect3D, g_itemStpPage, (void*)1);
     }
 }
 

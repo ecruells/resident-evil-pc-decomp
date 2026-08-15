@@ -1145,11 +1145,9 @@ static void handle_message_post_action(void)
 
     switch (*g_MessageCurrentPtr) {
     case 0: // Room event / flag action
-        if (*(char*)(*(int*)((char*)g_room_event_index + 8) + 8) == 'M') {
-            Flg_on((int)g_PlayerFlags, 0x7f);
-            return;
-        }
-        room_event_item_pickup();
+        // The original has room_event_take_item (0x004631c0) inlined here;
+        // same body, one copy.
+        room_event_take_item();
         return;
 
     case 1: // Use selected item

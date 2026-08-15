@@ -108,8 +108,6 @@ void FUN_00470a40(void) { }
 // (0x00470a20) - Empty function (menu init placeholder)
 void empty_00470a20(void) { }
 
-// (0x004631c0) - Use the desk item (stub pending)
-void FUN_004631c0(void) { }
 
 // (0x00482c50) - Status screen texture setup
 void FUN_00482c50(void) { }

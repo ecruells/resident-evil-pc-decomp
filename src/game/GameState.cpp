@@ -2543,6 +2543,33 @@ void room_event_item_pickup(void)
 }
 
 // ============================================================================
+// room_event_take_item (0x004631c0, was FUN_004631c0)
+// Awards the armed room event's item. Either the RADIO (id 0x4D = 'M'), which
+// is not an inventory item at all and only raises the player flag that unlocks
+// the menu's RADIO tab, or an ordinary item through room_event_item_pickup.
+//
+// This is the ONLY thing that hands the player an item from a script-driven
+// award: the item viewer calls it directly when it closes in menu mode 4
+// (item_viewer_update 0x0044e5b7), the mode SCD opcode 0x2D `got_item` selects.
+// Mode 3 - the walk-up-and-take pickup - goes the other way round, through
+// global message 0xc0's trailing [skip][action 10][case 0] bytes and
+// handle_message_post_action, which is why plain pickups kept working while
+// every scripted award silently did nothing: this function was an empty
+// placeholder in EngineStubs.cpp. The chemical containers in room 4090 consume
+// the EMPTY BOTTLE via SCD `item_remove` and award the filled one via
+// `got_item`, so the bottle vanished and nothing came back.
+// ============================================================================
+void room_event_take_item(void)
+{
+    unsigned char* record = *(unsigned char**)((char*)g_room_event_index + 8);
+    if ((char)record[8] == 'M') {          // 0x4D = ITEM_COMM_RADIO
+        Flg_on((int)g_PlayerFlags, 0x7f);
+        return;
+    }
+    room_event_item_pickup();
+}
+
+// ============================================================================
 // check_event_item_usage (0x0041c490)
 // Per-frame: after a door or desk consumed a key item (g_eventItemUsedFlag
 // raised by door_try_enter / use_room_action_item), once the prompt message

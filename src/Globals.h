@@ -1476,6 +1476,7 @@ int  check_climb_object(void);                       // 0x00474930 - action-key 
 int  ChkPlReachEntity(int obj);                      // 0x00474a20
 void door_transition_update(void);                   // 0x00495d70
 void room_event_item_pickup(void);                   // 0x00451700
+void room_event_take_item(void);                     // 0x004631c0 (was FUN_004631c0)
 void use_room_action_item(void);                     // 0x004631f0
 void DrawFadeSpr(void);                               // 0x00456d30
 // 0x00474090 - room 3D-object collision + the walk-into-it push driver.
