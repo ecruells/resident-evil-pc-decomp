@@ -683,10 +683,11 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
     short sy = texture->screenY + g_ScreenOffsetY;
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
 
-    unsigned int flags; BuildSpriteRenderFlags(texture->flags, &flags);
-    int variant = GetTextureVariant(texture->flags);
-    cmd->unk1c = (float)(variant ? (flags | 8) : flags);
+    const int variant = GetTextureVariant(texture->flags);
+    cmd->spriteFlags = SpriteBuildFlags(texture->flags);
+    cmd->alpha = 1.0f;
 
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
@@ -807,10 +808,11 @@ int AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageC
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
 
-    unsigned int flags; BuildSpriteRenderFlags(texture->flags, &flags);
-    int variant = GetTextureVariant(texture->flags);
-    cmd->unk1c = (float)(variant ? (flags | 8) : flags);
+    const int variant = GetTextureVariant(texture->flags);
+    cmd->spriteFlags = SpriteBuildFlags(texture->flags);
+    cmd->alpha = 1.0f;
 
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;

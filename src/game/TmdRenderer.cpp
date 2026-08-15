@@ -279,10 +279,32 @@ static void TmdComputeLight(const TmdLightState* ls, const float* n, const float
 // The queue entry's `depth` (the original OT depth) is not used for ordering:
 // triangles from all objects go into one pool and are sorted individually by
 // view-space Z, which is what the original's depth buffer did within an object.
+//
+// The scene sprites - the room background masks and the entities' ground
+// shadows - are merged into that same far-to-near walk. The original put them
+// and the entity primitives in one ordering table, and their keys are directly
+// comparable with a triangle's view-space Z, because this port stores every
+// scene primitive at depthSort = OT index * 16 while an entity enters the table
+// at t[2] >> 4 (FUN_00483250 passes depthShift 4). Drawing the whole TMD pass
+// first and the sprites afterwards - which is what this did - put every mask in
+// front of the player unconditionally, whichever side of the wall she was
+// standing on, and every shadow in front of every mask.
+//
+// Scene sprites do not write depth, so the interleave is a pure painter's
+// order: every triangle behind one is already down before it paints over them,
+// and every triangle in front of it is submitted after. Triangle-vs-triangle
+// ordering still comes from the depth buffer, untouched.
 // ============================================================================
+#define TMD_MAX_SCENE_DEPTHS  320   // 255 room sprites (count is a byte) + shadows
+
 void FlushTmdObjects(void)
 {
     int queued = g_tmdQueueCount;
+
+    unsigned int maskDepths[TMD_MAX_SCENE_DEPTHS];
+    const int    maskCount  = SpriteQueue_CollectSceneDepths(maskDepths, TMD_MAX_SCENE_DEPTHS);
+    int          maskIdx    = 0;
+    unsigned int maskCursor = 0xFFFFFFFFu;
 
     if (queued > 0 && g_tmdLight != NULL && Marni_DX() != NULL) {
         float scaleX, scaleY;
@@ -487,6 +509,21 @@ void FlushTmdObjects(void)
 
         for (int k = 0; k < collected; k++) {
             const TmdTri* t3 = &g_tmdTris[g_tmdTriOrder[k]];
+
+            // Every scene sprite farther than this triangle has to be on
+            // screen before it. The batch in flight is behind them too, so it
+            // goes down first.
+            while (maskIdx < maskCount && (float)maskDepths[maskIdx] > t3->depth) {
+                if (triCount > 0) {
+                    Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
+                                                MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
+                    triCount = 0;
+                }
+                FlushSpriteCommandsRange(maskDepths[maskIdx], maskCursor, SPRITE_CLASS_SCENE);
+                maskCursor = maskDepths[maskIdx];
+                maskIdx++;
+            }
+
             if ((triCount > 0 && t3->tex != triTex) || triCount >= TMD_MAX_TRIS_FLUSH) {
                 Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
                                             MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
@@ -500,6 +537,13 @@ void FlushTmdObjects(void)
             Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
                                         MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
         }
+    }
+
+    // The scene sprites nearer than the last triangle - and, when no entity was
+    // queued at all, every one of them. Nothing else draws SPRITE_CLASS_SCENE,
+    // so this drain is what guarantees they are not silently dropped.
+    if (maskIdx < maskCount) {
+        FlushSpriteCommandsRange(0, maskCursor, SPRITE_CLASS_SCENE);
     }
 
     g_tmdQueueCount = 0;

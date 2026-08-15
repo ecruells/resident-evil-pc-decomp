@@ -35,17 +35,19 @@ static const int g_VariantData[5] = { 0, 1, 2, 4, 8 };
 // ============================================================================
 void BuildSpriteRenderFlags(unsigned int textureFlags, unsigned int* outFlags) {
     unsigned int flags = 0;
-    if (textureFlags & 0x400000) flags |= 0x20;
-    if (textureFlags & 0x800000) flags |= 0x10;
+    if (textureFlags & TEXDESC_MIRROR_V) flags |= SPRITE_FLAG_MIRROR_V;
+    if (textureFlags & TEXDESC_MIRROR_U) flags |= SPRITE_FLAG_MIRROR_U;
     *outFlags = flags;
 }
 
 // ============================================================================
 // GetTextureVariant (0x0046d940)
+// Returns 0 when the descriptor carries no variant, else the 2-bit variant
+// field biased by 1 so that "variant 0" is distinguishable from "none".
 // ============================================================================
 int GetTextureVariant(unsigned int textureFlags) {
-    if (textureFlags & 0x40000000) {
-        return ((textureFlags & 0x30000000) >> 28) + 1;
+    if (textureFlags & TEXDESC_VARIANT_ENABLE) {
+        return (int)((textureFlags & TEXDESC_VARIANT_MASK) >> 28) + 1;
     }
     return 0;
 }
@@ -67,8 +69,15 @@ void SpriteQueue_Reset(void) {
 // FlushSpriteCommands, so the range split preserves the global order:
 // the death screen's base died.tim image (depthSort 0x10194) is flushed
 // before the 3D TMD pass and the wavy strip (660) after it.
+//
+// classMask selects which sprite classes take part. The 2D passes ask for
+// SPRITE_CLASS_NORMAL only: room masks carry a view-space Z in depthSort and
+// are drawn by FlushTmdObjects, interleaved with the entity triangles, so
+// letting them out here as well would draw them twice - and on top of the
+// player, which is the bug this split exists to fix.
 // ============================================================================
-void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
+void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
+                              unsigned int classMask)
 {
     if (g_SpriteQueueCount == 0) {
         return;
@@ -99,6 +108,7 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
     for (int i = 0; i < g_SpriteQueueCount; i++) {
         TextureDraw* cmd = &g_SpriteCommandBuffer[i];
         if (cmd->depthSort < minDepth || cmd->depthSort >= maxDepth) continue;
+        if ((cmd->sortClass & classMask) == 0) continue;
 
         // Line primitives (type 11): used by the menu EKG health bar.
         // The original FUN_00470c60 built a line primitive and inserted it
@@ -116,7 +126,7 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
             if (cr > 255) cr = 255; if (cr < 0) cr = 0;
             if (cg > 255) cg = 255; if (cg < 0) cg = 0;
             if (cb > 255) cb = 255; if (cb < 0) cb = 0;
-            float alpha = cmd->unk1c;
+            float alpha = cmd->alpha;
             if (alpha < 0.0f) alpha = 0.0f;
             if (alpha > 1.0f) alpha = 1.0f;
             int ca = (int)(alpha * 255.0f);
@@ -162,10 +172,9 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
             if (cr > 255) cr = 255; if (cr < 0) cr = 0;
             if (cg > 255) cg = 255; if (cg < 0) cg = 0;
             if (cb > 255) cb = 255; if (cb < 0) cb = 0;
-            float alpha = 1.0f;
-            if (cmd->unk1c > 0.0f && cmd->unk1c < 1.0f) {
-                alpha = cmd->unk1c;
-            }
+            float alpha = cmd->alpha;
+            if (alpha < 0.0f) alpha = 0.0f;
+            if (alpha > 1.0f) alpha = 1.0f;
             int ca = (int)(alpha * 255.0f);
             if (ca > 255) ca = 255; if (ca < 0) ca = 0;
 
@@ -225,11 +234,9 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
         if (cg > 255) cg = 255; if (cg < 0) cg = 0;
         if (cb > 255) cb = 255; if (cb < 0) cb = 0;
 
-        // unk1c carries alpha when in (0,1) range, or render flags otherwise
-        float alpha = 1.0f;
-        if (cmd->unk1c > 0.0f && cmd->unk1c < 1.0f) {
-            alpha = cmd->unk1c;
-        }
+        float alpha = cmd->alpha;
+        if (alpha < 0.0f) alpha = 0.0f;
+        if (alpha > 1.0f) alpha = 1.0f;
         int ca = (int)(alpha * 255.0f);
         if (ca > 255) ca = 255; if (ca < 0) ca = 0;
         DWORD color = (ca << 24) | (cr << 16) | (cg << 8) | cb;
@@ -277,12 +284,34 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
         float v1 = (float)(cmd->v1 + 1) / pageH;
 
         // Emulate PS1 texture flip (0x10=X, 0x20=Y)
-        unsigned int renderFlags = (unsigned int)cmd->unk1c;
-        if (renderFlags & 0x10) { float t = u0; u0 = u1; u1 = t; }
-        if (renderFlags & 0x20) { float t = v0; v0 = v1; v1 = t; }
+        if (cmd->spriteFlags & SPRITE_FLAG_MIRROR_U) { float t = u0; u0 = u1; u1 = t; }
+        if (cmd->spriteFlags & SPRITE_FLAG_MIRROR_V) { float t = v0; v0 = v1; v1 = t; }
 
         MarniDrawSprite(x, y, w, h, u0, v0, u1, v1, color, srv);
     }
+}
+
+// ============================================================================
+// SpriteQueue_CollectSceneDepths
+// The distinct depthSort values of the queued scene primitives, far to near.
+// Masks commonly share a depth (one overlay group is split into several tiles)
+// and a clipped shadow is submitted as two commands at one depth, so collapsing
+// duplicates keeps the number of interleave points - and therefore the number
+// of range flushes FlushTmdObjects has to issue - small.
+// ============================================================================
+int SpriteQueue_CollectSceneDepths(unsigned int* out, int maxOut)
+{
+    if (out == NULL || maxOut <= 0) return 0;
+
+    int n = 0;
+    for (int i = 0; i < g_SpriteQueueCount && n < maxOut; i++) {
+        if ((g_SpriteCommandBuffer[i].sortClass & SPRITE_CLASS_SCENE) == 0) continue;
+        out[n++] = g_SpriteCommandBuffer[i].depthSort;
+    }
+    if (n == 0) return 0;
+
+    std::sort(out, out + n, [](unsigned int a, unsigned int b) { return a > b; });
+    return (int)(std::unique(out, out + n) - out);
 }
 
 // ============================================================================
@@ -294,7 +323,7 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth)
 // ============================================================================
 void FlushSpriteCommands(void) {
 
-    FlushSpriteCommandsRange(0, 0xFFFFFFFFu);
+    FlushSpriteCommandsRange(0, 0xFFFFFFFFu, SPRITE_CLASS_ALL);
     g_SpriteQueueCount = 0;
 }
 int draw_texture(TextureDesc* texture, unsigned short depth) {
@@ -366,11 +395,11 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
 
-    unsigned int flags;
-    BuildSpriteRenderFlags(texture->flags, &flags);
-    int variant = GetTextureVariant(texture->flags);
-    cmd->unk1c = (float)((variant != 0) ? (flags | 8) : flags);
+    const int variant = GetTextureVariant(texture->flags);
+    cmd->spriteFlags = SpriteBuildFlags(texture->flags);
+    cmd->alpha = 1.0f;
 
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
@@ -414,12 +443,14 @@ int SubmitLine(short x0, short y0, short x1, short y1, unsigned short depth,
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 11;
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
     cmd->x0 = x0;
     cmd->y0 = y0;
     cmd->x1 = x1;
     cmd->y1 = y1;
     cmd->depthSort = (unsigned int)depth * 16 + 500;
-    cmd->unk1c = alpha;
+    cmd->spriteFlags = 0;
+    cmd->alpha = alpha;
     cmd->r = r;
     cmd->g = g;
     cmd->b = b;
@@ -442,11 +473,13 @@ int AddSprite(TextureDesc* texture, short depth, int tpage, int fade) {
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
+    // DrawRoomSpr is AddSprite's only caller (the original has exactly four
+    // call sites, all inside it), so every command built here is a room mask
+    // and its depthSort is a scene Z rather than a 2D layer.
+    cmd->sortClass = SPRITE_CLASS_ROOMMASK;
 
-    unsigned int flags;
-    BuildSpriteRenderFlags(texture->flags, &flags);
-    int variant = GetTextureVariant(texture->flags);
-    cmd->unk1c = (float)((variant != 0) ? (flags | 8) : flags);
+    cmd->spriteFlags = SpriteBuildFlags(texture->flags);
+    cmd->alpha = 1.0f;
 
     cmd->r = 1.0f;
     cmd->g = 1.0f;
@@ -515,11 +548,10 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
 
-    unsigned int flags;
-    BuildSpriteRenderFlags(texture->flags, &flags);
-    int variant = GetTextureVariant(texture->flags);
-    cmd->unk1c = (float)((variant != 0) ? (flags | 8) : flags);
+    cmd->spriteFlags = SpriteBuildFlags(texture->flags);
+    cmd->alpha = 1.0f;
 
     // cmd->r/g/b are a 0..1 MULTIPLIER - FlushSpriteCommands does
     // `(int)(cmd->r * 255.0f)` and clamps. draw_texture sets the convention:
@@ -594,7 +626,17 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
 // special case and multiplies the texture to black, the blood pool's
 // (0x50, 0xFF, 0xFF) comes out (0.31, 0.004, 0.004) dark red.
 // ============================================================================
-int AddFadePoly(unsigned short alpha, int tpage, unsigned char* rgb,
+// Per-frame record of the fade polys already inserted, mirroring the original's
+// g_OTFadeTbl (0x008ed430) plus the translation Z it reads back out of each OT
+// record. Both are only ever read at indices below g_OTIndex, which
+// SpriteQueue_Reset zeroes each frame, so they need no clearing of their own.
+// The bound is the original's OT capacity (0x20 entries per render buffer);
+// DrawFadeSpr can queue at most FADE_SPR_MAX = 32 shadows anyway.
+#define FADE_OT_MAX  32
+static int            g_FadeOtZ[FADE_OT_MAX];
+static unsigned short g_FadeOtKey[FADE_OT_MAX];
+
+int AddFadePoly(unsigned short alpha, int transZ, int tpage, unsigned char* rgb,
                 const int* px, const int* py, const int* wz,
                 const int* cu, const int* cv, int count) {
     // A clipped convex quad has 3..5 corners; a TextureDraw carries 4, so the
@@ -602,6 +644,48 @@ int AddFadePoly(unsigned short alpha, int tpage, unsigned char* rgb,
     // the triangle (0,3,4). Fewer than 4 corners repeat the last one.
     int cmds = (count > 4) ? 2 : 1;
     if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - cmds) return 0;
+
+    // 0x00470100: the ordering-table key is (alpha >> 2) - g_OTIndex, floored at
+    // 0 and capped at 0xfff. g_OTIndex counts the fade polys already submitted
+    // this frame, so each successive shadow lands one step nearer than the last
+    // and two of them never collide on one slot.
+    //
+    // The port stored the raw `alpha` here, which is four times the OT scale and
+    // carries none of that. Scaled properly it becomes OT * 16 like every other
+    // scene primitive - i.e. view-space Z - so the shadow sorts against the room
+    // masks and the entity triangles instead of floating on top of them.
+    //
+    unsigned int otKey = (unsigned int)alpha >> 2;
+    otKey = (otKey > (unsigned int)g_OTIndex) ? (otKey - (unsigned int)g_OTIndex) : 0u;
+    if (otKey > 0xfff) otKey = 0xfff;
+
+    // 0x004702a5-0x004702fd: walk the fade polys already inserted this frame and
+    // push this one one slot behind any that is NEARER in view space. Two
+    // shadows whose keys land on the same slot - which the >> 2 makes easy, as
+    // it quantises 16 view units into one step - would otherwise be ordered by
+    // submission, so the far one could paint over the near one wherever they
+    // overlap. The bump is sequential and order-dependent exactly as written:
+    // each hit raises the running key, so a later comparison sees the raised
+    // value. The original compares the OT records' translation Z with a strict
+    // FCOMP/C0 test, i.e. `prev < this`.
+    for (int j = 0; j < g_OTIndex && j < FADE_OT_MAX; j++) {
+        if (g_FadeOtZ[j] < transZ && otKey <= (unsigned int)g_FadeOtKey[j]) {
+            otKey = (unsigned int)g_FadeOtKey[j] + 1u;
+            if (otKey > 0xfff) otKey = 0xfff;
+        }
+    }
+    if (otKey > 0xfff) otKey = 0xfff;
+
+    const unsigned int shadowDepth = otKey * 16u;
+
+    // 0x0047032d/0x00470337: publish this poly's key, then advance. One
+    // increment per CALL, not per command - a clipped pentagon becomes two
+    // TextureDraws here but was still a single primitive in the original.
+    if (g_OTIndex >= 0 && g_OTIndex < FADE_OT_MAX) {
+        g_FadeOtZ[g_OTIndex]   = transZ;
+        g_FadeOtKey[g_OTIndex] = (unsigned short)otKey;
+    }
+    g_OTIndex++;
 
     // `alpha` is the ORDERING-TABLE key only - it never reaches the blend.
     // The original inserts the primitive with (alpha >> 2) - g_OTIndex as its
@@ -634,6 +718,7 @@ int AddFadePoly(unsigned short alpha, int tpage, unsigned char* rgb,
 
         TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
         cmd->type = 12;
+        cmd->sortClass = SPRITE_CLASS_SHADOW;
         cmd->renderFlags = 0;
         cmd->x0 = (short)px[k0];
         cmd->y0 = (short)py[k0];
@@ -659,8 +744,9 @@ int AddFadePoly(unsigned short alpha, int tpage, unsigned char* rgb,
         cmd->wz1 = (short)w1;
         cmd->wz2 = (short)w2;
         cmd->wz3 = (short)w3;
-        cmd->depthSort = (unsigned int)alpha;
-        cmd->unk1c = a;
+        cmd->depthSort = shadowDepth;
+        cmd->spriteFlags = 0;
+        cmd->alpha = a;
         cmd->r = r;
         cmd->g = g;
         cmd->b = b;
@@ -681,10 +767,12 @@ int DrawPrim_SpriteLarge(int* params, unsigned short alpha, int tpage,
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
     cmd->r = (float)params[0] * g_ColorScaleFactor;
     cmd->g = (float)params[1] * g_ColorScaleFactor;
     cmd->b = (float)params[2] * g_ColorScaleFactor;
-    cmd->unk1c = 1.0f;
+    cmd->spriteFlags = 0;
+    cmd->alpha = 1.0f;
     cmd->texturePage = 0;
     cmd->x0 = 0;
     cmd->y0 = 0;

@@ -5,6 +5,7 @@
 #include "SpriteRenderer.h"
 #include <cstdio>
 #include "../system/AssetPath.h"
+#include "../DebugPrint.h"
 
 extern void SetSpriteBufferFlag(void);
 
@@ -325,6 +326,321 @@ int Room_ApplySpriteFlags(void) // 0x00432220
 }
 
 // ============================================================================
+// Room mask ordering tables (0x004c3be8 / 0x004c3c88 / 0x004c4188)
+//
+// DrawRoomSpr does NOT sort the overlays by their raw posData. It first looks
+// up a per-(room, camera) record that biases both the sprite's brightness and
+// its ordering-table key, and a per-room bitmask that selects which of the two
+// entry walks to use. All three tables are contiguous in the original's .data:
+//
+//   0x004c3be8  unsigned char[160]     bit per camera: 1 = walk entries forward
+//   0x004c3c88  unsigned char[160][8]  record index for (room, camera)
+//   0x004c4188  { int, int, int }[32]  { depthBias, fadeBias, mode }
+//
+// The room index is roomId + stage*0x20 with stages 5-9 folded onto 0-4
+// (0x00475ba4-0x00475bb1).
+//
+// The port had none of this: every overlay went out with depth = posData >> 2
+// and sort key = posData, i.e. record 0 for every room. That is right for the
+// ~130 (room, camera) pairs whose record IS 0, and wrong for the 29 that are
+// not - which is why only *some* masks sorted incorrectly against the player.
+// ============================================================================
+struct RoomSprDepthRecord {
+    int depthBias;   // 0x004c4188 + i*0xc: subtracted from the brightness key
+    int fadeBias;    // 0x004c418c + i*0xc: subtracted from the OT sort key
+    int mode;        // 0x004c4190 + i*0xc: non-zero pins the brightness key
+};
+
+// 0x004c3be8
+static const unsigned char kRoomSprPathFlags[160] = {
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xff, 0x00, 0x00, 0x00, 0x00, 0x00,
+    0xff, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+};
+
+// 0x004c3c88 - indexed [roomIdx * 8 + cameraId]
+static const unsigned char kRoomSprRecordIndex[160 * 8] = {
+    0, 0, 0, 0, 0, 7, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 31, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 15, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 5, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 11, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    19, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 6, 0, 0, 0, 0, 0,
+    0, 0, 20, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 14, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 31, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 21, 10, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 27, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 26, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 18, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 9, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    22, 0, 0, 0, 0, 0, 0, 0, 23, 24, 25, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 12, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 13, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+};
+
+// 0x004c4188 - { depthBias, fadeBias, mode }
+static const RoomSprDepthRecord kRoomSprDepthRecords[32] = {
+    {      0,      0,      0 },  // 0  - the default for every unlisted camera
+    {   -250,      0,      0 },  // 1
+    {     30,     -5,      0 },  // 2
+    {      0,    -40,      0 },  // 3
+    {    -30,      0,      0 },  // 4
+    {    -70,      0,      0 },  // 5
+    {     60,    -40,      0 },  // 6
+    {   -100,    -20,      0 },  // 7
+    {    100,    -10,      0 },  // 8
+    {      0,    -10,      0 },  // 9
+    {      0,     19,      0 },  // 10
+    {      5,      0,      0 },  // 11
+    {      1,      8,      0 },  // 12
+    {   -100,      0,      0 },  // 13
+    {    -50,      0,      0 },  // 14
+    {      0,     -2,      0 },  // 15
+    {      0,      1,      0 },  // 16
+    {      0,     -4,      0 },  // 17
+    {      0,    -20,      0 },  // 18
+    {      0,     -5,      0 },  // 19
+    {   1000,      0,      0 },  // 20
+    {      0,      0,      1 },  // 21 - the only record that pins the key
+    {     90,      0,      0 },  // 22
+    {    -30,    -65,      0 },  // 23
+    {    -70,    -30,      0 },  // 24
+    {      0,      0,      0 },  // 25
+    {     10,      0,      0 },  // 26
+    {    -10,      0,      0 },  // 27
+    {   -100,      0,      0 },  // 28
+    {     84,      0,      0 },  // 29
+    {      0,    100,      0 },  // 30
+    {      0,    -11,      0 },  // 31
+};
+
+// 0x004760ec: the brightness key is posData >> 2, clamped once posData leaves
+// the 12-bit ordering-table range. The compare is on posData & 0xfffc, not on
+// posData, so the bottom two bits never push it over the clamp.
+static inline unsigned short RoomSprBrightnessKey(unsigned short posData)
+{
+    return ((posData & 0xfffc) < 0x1000) ? (unsigned short)(posData >> 2)
+                                         : (unsigned short)0x3ff;
+}
+
+// A positive fadeBias on an overlay sitting almost on the camera can drive the
+// sort key negative. The original fed that straight into the ordering table,
+// which masked the index; this port stores depthSort as an unsigned int, where
+// the same value wraps to ~4e9 and drops the overlay behind the entire scene.
+// Clamp instead - a key of 0 is the nearest slot, which is what a bias meant to
+// pull the overlay forward was asking for.
+static inline int RoomSprClampSortKey(int fade)
+{
+    return (fade < 0) ? 0 : fade;
+}
+
+// ==========================================================================
+// DrawRoomSpr (0x00475b80)
+// Submit active room-overlay sprites to the 2D sprite queue. The room4080
+// numeric panel is made from nine of these entries: the passcode state machine
+// only changes their active flags, while this per-frame pass renders them.
+//
+// AddSprite's arguments are not named the way they read: arg 2 ("depth") only
+// picks the sprite's brightness and, when zero, a fixed 550 sort slot; arg 4
+// ("fade") is the real ordering-table key - AddSprite stores fade << 4 as
+// depthSort. Because entities enter the ordering table at t[2] >> 4 (the
+// depthShift FUN_00483250 passes), fade << 4 is view-space Z in the same units
+// as the TMD pass, which is what lets the two interleave. See FlushTmdObjects.
+// ==========================================================================
+void DrawRoomSpr(void)
+{
+    // 0x00475b83: skip room sprites while the corresponding render-state bit is
+    // active or before the room has populated its camera sprite table.
+    if ((g_main_state_flags2 & 0x02000000) != 0 ||
+        g_RdtPointer == NULL || g_RdtPointer->sprites_count == 0) {
+        return;
+    }
+
+    // 0x00475ba4-0x00475bbe: stages 5-9 reuse the stage 0-4 table rows.
+    unsigned int stage = (unsigned int)g_stageId;
+    if (stage > 4) stage -= 5;
+    const unsigned int roomIdx = (unsigned int)g_roomId + stage * 0x20;
+    const unsigned int cam     = (unsigned int)g_roomCameraId;
+
+    // 0x00475bdb-0x00475c07: the two bias globals the original adds to the
+    // record (0x004c3bc0 / 0x004c3bc4) have no writer anywhere in the binary
+    // and are both zero, so the record supplies the biases outright.
+    //
+    // The original indexes both tables blind. A room past the end would read
+    // whatever follows them in .data; fall back to record 0 and the backward
+    // walk instead, which is the entry every unlisted camera uses anyway.
+    const RoomSprDepthRecord* rec = &kRoomSprDepthRecords[0];
+    unsigned char pathFlags = 0;
+    if (roomIdx < 160 && cam < 8) {
+        rec = &kRoomSprDepthRecords[kRoomSprRecordIndex[roomIdx * 8 + cam]];
+        pathFlags = kRoomSprPathFlags[roomIdx];
+    }
+    const short depthBias = (short)rec->depthBias;
+    const int   fadeBias  = rec->fadeBias;
+    const int   mode      = rec->mode;
+
+    // 0x00475c0d: the stage 2 / room 0x0B / camera 5 shot hides two overlays.
+    if (g_stageId == 2 && g_roomId == 0x0b && cam == 5) {
+        g_RoomSprEntries[25].active = 0;
+        g_RoomSprEntries[26].active = 0;
+    }
+
+    const int count = (int)g_RdtPointer->sprites_count;
+
+    // 0x00475c3a: the per-room bitmask picks the walk direction. Only 8 rooms
+    // walk forward; everything else walks the entries backwards so that
+    // same-depth overlays keep the original painter order.
+    if ((pathFlags & (1u << (cam & 7))) != 0) {
+        // 0x00475c42: the stage 2 / room 0x02 / camera 0 shot pushes overlay 18
+        // 200 units farther back than its posData asks for.
+        const bool pushEntry18 = (g_stageId == 2 && g_roomId == 2 && cam == 0);
+
+        for (int i = 0; i < count; i++) {
+            RoomSprEntry* entry = &g_RoomSprEntries[i];
+            if (entry->active == 0) continue;
+
+            const unsigned short posData = entry->posData;
+            short depth;
+            int   fade;
+
+            if (pushEntry18 && i == 18) {
+                depth = (short)(RoomSprBrightnessKey(posData) - depthBias);
+                fade  = (int)posData - fadeBias + 200;
+            }
+            else if (mode == 0) {
+                depth = (short)(RoomSprBrightnessKey(posData) - depthBias);
+                fade  = (int)posData - fadeBias;
+            }
+            else {
+                // 0x00475cc3: the key is pinned to the record's depthBias, so
+                // every overlay in this camera shares one brightness.
+                depth = depthBias;
+                fade  = (int)posData - fadeBias;
+            }
+
+            AddSprite(&entry->texDesc, depth, 0, RoomSprClampSortKey(fade));
+        }
+        return;
+    }
+
+    // 0x00475da2: the backward walk, with two rooms carrying hand-tuned
+    // per-overlay offsets that the shared record cannot express.
+    const bool isRoom3_0e = (g_stageId == 3 && g_roomId == 0x0e);
+    const bool isRoom3_0f = (g_stageId == 3 && g_roomId == 0x0f);
+
+    for (int i = count - 1; i >= 0; i--) {
+        RoomSprEntry* entry = &g_RoomSprEntries[i];
+        if (entry->active == 0) continue;
+
+        const unsigned short posData = entry->posData;
+        const short key = (short)RoomSprBrightnessKey(posData);
+        short depth;
+        int   fade;
+
+        if (isRoom3_0e) {
+            // 0x00475dde-0x00475fa0
+            if      (cam == 1 && i == 11) { depth = (short)(key - depthBias); fade = 0x4b0; }
+            else if (cam == 1 && i ==  9) { depth = (short)(key - 0x5a); fade = (int)posData - fadeBias; }
+            else if (cam == 3 && i ==  9) { depth = (short)(key - 0x3d); fade = (int)posData - fadeBias; }
+            else if (cam == 3 && i ==  7) { depth = (short)(key - 0x4b); fade = (int)posData - fadeBias; }
+            else if (cam == 3 && i == 31) { depth = (short)(key - 0x3c); fade = (int)posData - fadeBias; }
+            else if (cam == 3 && i == 32) { depth = (short)(key - 0x3c); fade = (int)posData - fadeBias; }
+            else if (cam == 3 && i == 33) continue;   // 0x00475f89: never drawn
+            else if (cam == 2 && i == 28) continue;   // 0x00475f9a: never drawn
+            else { depth = (short)(key - depthBias); fade = (int)posData - fadeBias; }
+        }
+        else if (isRoom3_0f && i >= 34 && i <= 52) {
+            // 0x0047602c: this run of overlays is pulled 0x352 brighter and its
+            // sort key is offset by a constant instead of the camera's bias.
+            depth = (short)((short)(key - depthBias) - 0x352);
+            fade  = (int)posData + (i == 49 ? 0x23 : 0x46);
+        }
+        else if (isRoom3_0f && cam == 0 && i == 54) {
+            // 0x004760b4
+            depth = (short)((short)(key - depthBias) - 0x12c);
+            fade  = (int)posData - fadeBias;
+        }
+        else {
+            // 0x004760e4: the common case.
+            depth = (short)(key - depthBias);
+            fade  = (int)posData - fadeBias;
+        }
+
+        AddSprite(&entry->texDesc, depth, 0, RoomSprClampSortKey(fade));
+    }
+}
+
 // RoomSpr_SetActive (0x00476170) - Enable room sprite by ID
 // Iterates through the room sprite table and sets active=1 for all entries
 // whose id matches the given parameter. Called by SCD command 0x25.
@@ -392,6 +708,9 @@ void load_room_masks(int param_1) // 0x00475a90
             pakData = &g_bgMaskDataBuffer[g_bgMaskOffsets[param_1]];
         }
         unpack_pakfile_(pakData, g_TimImageBuffer__bitmap);
+        // The original passes texture-set parameter 0 here. Its legacy page
+        // handle is stored in texture set 4 internally, while this port keeps
+        // the D3D SRV produced from that image at direct slot 0.
         TexturePage_SetupFull(g_TimImageBuffer__bitmap, g_TextureBankID, g_TextureDepthByte, 0);
     } else {
         TexturePage_DeleteSet(4);

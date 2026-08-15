@@ -522,11 +522,16 @@ void DrawFadeSpr(void)
         unsigned short forceAlpha =
             (unsigned short)(prm->sortBias + 100 + g_FadeSprAlphaBias);
 
-        // Three branches in the original collapse to two distinct outcomes: the
-        // clamped projected depth, or forceAlpha + 1 when the record's flag is
-        // set and g_main_state_flags2 bit 3 is clear.
+        // 0x00456f6d-0x00456f7d: the record's flag and g_main_state_flags2 bit 3
+        // select between three call sites, two of which have identical bodies -
+        // so there are only two distinct outcomes, the clamped projected depth
+        // or forceAlpha + 1.
+        //
+        // The selector is an XOR of the two, not an AND: flag == 0 with bit 3
+        // SET takes the forceAlpha path too (0x00456fc7 jne). Bit 3 is clear
+        // throughout normal play, which is why reading it as an AND behaved.
         unsigned short alpha;
-        if (prm->flag != 0 && (g_main_state_flags2 & 8) == 0) {
+        if ((prm->flag != 0) != ((g_main_state_flags2 & 8) != 0)) {
             alpha = (unsigned short)(forceAlpha + 1);
         } else {
             if (depth > 0xFEF) {
@@ -549,7 +554,11 @@ void DrawFadeSpr(void)
         // slot 0x2F by LoadShadowMaskTexture, so pass that slot here or the
         // sprite looks up a NULL SRV and is skipped (no shadows / no blood
         // puddle on the corpse).
-        AddFadePoly(alpha, 0x2F, rgb, px, py, vz, vu, vv, n);
+        // composed.t[2] is the quad origin's view-space Z - the value the
+        // original stores in the OT record's translation row (0x004701b4, from
+        // the composed matrix) and that AddFadePoly's de-collision pass reads
+        // back when ordering this shadow against the ones already queued.
+        AddFadePoly(alpha, (int)composed.t[2], 0x2F, rgb, px, py, vz, vu, vv, n);
     }
 
     g_FadeSprCount = 0;

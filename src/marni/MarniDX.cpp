@@ -1227,9 +1227,14 @@ void MarniDX::DrawTrianglesPersp(const float* verts, int triCount, MarniHandle t
     float bf[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     p->context->OMSetBlendState(bs, bf, 0xFFFFFFFFu);
 
-    // No depth: the shadow draws over the room like a sprite (the depth
-    // state is left however the caller had it - depthDisabled at this point
-    // in the frame).
+    // No depth: the shadow draws over the room like a sprite. This used to
+    // inherit whatever the caller had set, which held only while the whole 2D
+    // pass ran after the 3D one. FlushTmdObjects now interleaves scene sprites
+    // between DrawTriangles3D batches, so state it outright rather than depend
+    // on that call having restored it.
+    if (p->depthDisabled)
+        p->context->OMSetDepthStencilState(p->depthDisabled, 0);
+
     p->context->Draw((UINT)(triCount * 3), 0);
 }
 

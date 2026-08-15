@@ -135,7 +135,9 @@ static void CharSelectDrawShadowRect(short posX, short posY, short scaleFix12)
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
-    cmd->unk1c = 100.0f / 255.0f;  // alpha = ~0.392
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
+    cmd->spriteFlags = 0;
+    cmd->alpha = 100.0f / 255.0f;  // ~0.392
     cmd->r = 0.0f;
     cmd->g = 0.0f;
     cmd->b = 0.0f;
@@ -188,7 +190,9 @@ static void CharSelectRenderSprite(unsigned char texU, unsigned char texV,
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
-    cmd->unk1c = 0.0f;
+    cmd->sortClass = SPRITE_CLASS_NORMAL;
+    cmd->spriteFlags = 0;
+    cmd->alpha = 1.0f;
     cmd->r = 1.0f;
     cmd->g = 1.0f;
     cmd->b = 1.0f;
