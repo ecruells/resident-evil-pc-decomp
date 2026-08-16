@@ -4,6 +4,7 @@
 #include "../marni/Marni3DObject.h"
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
+#include "../DebugPrint.h"
 #include <cstdio>
 
 // ============================================================================
@@ -685,10 +686,26 @@ void ComplexTmdObjectSetup(int* param_1)
             normalOut[2] = (short)((int)vertexPositions[0][2] + (int)vertexPositions[1][2] + (int)vertexPositions[2][2]) / 3;
 
             // Call SetList for both primitives [vtable[5]]
-            typedef int (__stdcall *SetListFn)(void*, int, void*);
+            //
+            // The indices are CONSTANTS, not the TMD data. The original builds
+            // them once in a stack blob before the loop -
+            //   ebp-0x60: 0x00010000, then 2  -> {0, 1, 2}
+            //   ebp-0x58: 0, 2, 1              -> {0, 2, 1}
+            // - i.e. the same 3 vertices wound both ways, which is what
+            // "CreateWork(3 vertices, 2 primitives, type 3)" describes: one
+            // double-sided triangle.
+            //
+            // Passing `objTable` here instead handed SetList the primitive
+            // header (0x34000609) as vertex indices. SetList bounds-checks them
+            // against m_vertexCount and calls Release() when they fail, so every
+            // element freed its own buffers and zeroed its counts the instant
+            // after it was built - the whole pool ended up empty and Plant 42's
+            // tendrils drew nothing.
+            static const WORD kTriIndices[2][3] = { { 0, 1, 2 }, { 0, 2, 1 } };
+            typedef int (__stdcall *SetListFn)(void*, int, const void*);
             SetListFn setList = (SetListFn)funcPtrs[5];
-            setList(ptrArray, 0, objTable);
-            setList(ptrArray, 1, objTable);
+            setList(ptrArray, 0, kTriIndices[0]);
+            setList(ptrArray, 1, kTriIndices[1]);
 
             // Call Unlock [vtable[7]] (this = the entry)
             ((ReleaseFn)funcPtrs[7])(ptrArray);
@@ -743,6 +760,7 @@ void ComplexTmdObjectSetup(int* param_1)
 
     g_objectListCleanupCount = outCount;
     param_1[4] = 1;
+
 }
 
 // ============================================================================

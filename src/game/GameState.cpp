@@ -1604,7 +1604,7 @@ static void TmdObjectSetLightScale(void* modelObj, int value)
 //     luminance path, 0x3f for the tint path). That asymmetry is the
 //     original's; it is not a transcription slip.
 // ============================================================================
-void scd_model_tint_apply(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6)
+void scd_model_tint_apply(short p1, short p2, short p3, unsigned short p4, unsigned short p5, unsigned char p6)
 {
     unsigned char* e = g_textureQueueData;
     unsigned char slot = 0;
@@ -2246,9 +2246,99 @@ static void room_trans_report(const char* what)
     if (what != last) { last = what; dbg_printf("[roomtrans] missing %s\n", what); }
 }
 static void object_delete_00442170(int a) { (void)a; room_trans_report("0x00442170 object_delete"); }
-static void BuildEnemySnap(void)          { room_trans_report("0x0048f150 BuildEnemySnap"); }
 static void FUN_0041d070(void)            { room_trans_report("0x0041d070"); }
 static void FUN_00442180(void)            { room_trans_report("0x00442180"); }
+
+// ============================================================================
+// BuildEnemySnap (0x0048f1a0) - tear the outgoing room's enemy list down and
+// snapshot what should survive into g_savedEnemyStates.
+//
+// This was a report-only stub, and the missing half of it is the destructive
+// one: the ORIGINAL clears status_flags on every entity slot and drains
+// g_enemy_count to zero before the destination room loads. Without that, the
+// outgoing room's enemies stay flagged active, and update_entities keeps
+// dispatching them in the NEW room against data the load has already
+// overwritten. Plant 42 makes that fatal rather than merely wrong: its state-0
+// handler ALLOCATES (two entity clones plus their animation objects) out of
+// g_loadDataDestPointer, so a stale Plant 42 re-initialising after the load
+// writes straight through the freshly loaded room - observed leaving room 40C0
+// as a missing player model, cameras cycling, and entities reporting positions
+// outside every room zone.
+//
+// FUN_0048f330 (the restore side, called from cmd_em_set) was already ported,
+// so until now it scanned a table nothing ever filled.
+//
+// `valid` is a TTL, not a boolean: set to 5 here, aged by one on each room
+// change, and treated as "occupied" by the restore while non-zero.
+//
+// Two bounds are the port's, not the original's. The original's free-slot scan
+// walks off the end of the 16-entry table when more than 16 enemies need
+// saving, and its clear loop runs one entity past g_EnemiesList[29] into the
+// 0x40 gap that precedes the table in the original's .bss. Neither is safe to
+// reproduce here (see the .bss adjacency note in the docs), so both are clamped.
+// ============================================================================
+static void BuildEnemySnap(void)
+{
+    const unsigned char* record = (const unsigned char*)g_pendingDoorRecord;
+
+    // Age every snapshot when the destination is a different room than the one
+    // we last came from. g_AttractMode_RoomCameraId still holds the previous
+    // room here; the caller overwrites it right after this returns.
+    if (record != nullptr && (char)record[0x0D] != (char)g_AttractMode_RoomCameraId) {
+        for (int i = 0; i < 16; i++) {
+            if (g_savedEnemyStates[i].valid != 0) {
+                g_savedEnemyStates[i].valid--;
+            }
+        }
+    }
+
+    ENTITY = g_EnemiesList;
+    g_pSavedEnemyState = g_savedEnemyStates;
+
+    while (g_enemy_count != 0) {
+        // Advance to the first free slot. Bounded, unlike the original.
+        int slotIdx = (int)(g_pSavedEnemyState - g_savedEnemyStates);
+        while (slotIdx < 16 && g_savedEnemyStates[slotIdx].valid != 0) {
+            slotIdx++;
+        }
+        if (slotIdx >= 16) break;
+        g_pSavedEnemyState = &g_savedEnemyStates[slotIdx];
+        SavedEnemyState* slot = g_pSavedEnemyState;
+
+        bool store;
+        if (ENTITY->health < 0) {
+            slot->statusFlags = 0;
+            // A death with a room event attached is permanent: the event flag
+            // is what keeps it dead, so no snapshot is written.
+            store = ((char)ENTITY->death_event_id == -1);
+        } else {
+            slot->statusFlags = (unsigned char)(ENTITY->status_flags & 0x0F);
+            store = true;
+        }
+
+        // Bit 7 of +0x161 marks an entity cmd_em_set spawned unconditionally;
+        // those are never snapshotted.
+        if (store && (char)ENTITY->pad_160[1] >= 0) {
+            slot->behaviorFlags = ENTITY->behavior_flags;
+            slot->roomId        = g_roomId;
+            slot->enemyType     = ENTITY->pad_160[1];
+            *(unsigned int*)&slot->pad_04[0] = (unsigned int)ENTITY->state;
+            slot->posX  = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+            slot->posY  = (short)ENTITY->scaMatrixData.localMatrix.t[1];
+            slot->posZ  = (short)ENTITY->scaMatrixData.localMatrix.t[2];
+            slot->angle = (unsigned short)ENTITY->angle;
+            slot->valid = 5;
+        }
+
+        ENTITY++;
+        g_enemy_count--;
+    }
+
+    g_enemy_count = 0;
+    for (int i = 0; i < 30; i++) {
+        g_EnemiesList[i].status_flags = 0;
+    }
+}
 
 void room_transition_load(void)
 {

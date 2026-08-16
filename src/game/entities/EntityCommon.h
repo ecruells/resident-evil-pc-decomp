@@ -41,7 +41,7 @@ enum EnemyType {
     ENEMY_5                = 5,   // 0x0042e520
     ENEMY_HUNTER           = 6,   // hunter_update
     ENEMY_BEE              = 7,   // 0x0048daf0 - bee
-    ENEMY_WEB_SPINNER      = 8,   // 0x00464d10 - web spinner (big spider)
+    ENEMY_PLANT42          = 8,   // 0x00464d10 - Plant 42 boss
     ENEMY_9                = 9,   // 0x00438a70
     ENEMY_ADDER            = 10,  // adder_update - snake
     ENEMY_NEPTUNE          = 11,  // neptune_update - shark
@@ -69,6 +69,7 @@ extern void* enemies_update_functions_tbl[48];
 // ---- Per-type update functions referenced by the dispatch table ----
 void zombie_update(void);          // 0x004338c0 - Zombie.cpp
 void character_npc_update(void);   // 0x0046acf0 - CharacterNpc.cpp
+void plant42_update(void);         // 0x00464d10 - Plant42.cpp
 
 // ============================================================================
 // Angle / line-of-sight helpers

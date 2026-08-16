@@ -129,7 +129,3 @@ void FUN_0048a210(void* joint) { }
 // (0x00497de0) - Keyboard scancode read (async)
 unsigned char FUN_00497de0(void) { return 0; }
 
-// (0x00486df0) - Sprite rendering mode (used when spriteData[4]==1)
-void FUN_00486df0(void* spriteData) { }
-
-

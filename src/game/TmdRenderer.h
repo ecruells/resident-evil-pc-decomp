@@ -82,6 +82,15 @@ extern unsigned char g_itemSharedTmdSlot[TMD_SLOT_STRIDE];                      
 // flush time, never snapshotted here.
 void  TmdQueueObject(void* objData, int depth);
 
+// Queue one entry from the complex-object pool that ComplexTmdObjectSetup
+// builds (geometry in g_objectListPtrArray at stride 0x38, render state in
+// g_complexTmdObjectData at stride 0x84). Called only from FUN_00486df0.
+void  TmdQueueComplexObject(void* objData, void* elem, int depth);
+
+// (0x00486df0) - draw the complex-object pool. FUN_00483080 dispatches here for
+// any animation object ComplexTmdObjectSetup has processed (spriteData[4] == 1).
+void  FUN_00486df0(void* spriteData);
+
 // Draw every queued TMD object, then clear the queue. Called once per frame
 // from FrameRateGovernor after the background sprites and before the 2D sprite
 // command flush. Triangles from all objects are pooled, depth-sorted far to

@@ -243,10 +243,317 @@ void player_anim_crawling(void) {
         g_playerEntity.action_state = 0;
     }
 }
-void player_anim_set_attacked_flag(void) {    // 0x00469400 - dispatch via DAT_004c2ac8[action_behavior]
-    extern void* DAT_004c2ac8[];
-    void (*func)(void) = (void(*)(void))DAT_004c2ac8[g_playerEntity.action_behavior];
-    if (func) func();
+// ============================================================================
+// player_anim_set_attacked_flag (0x00469400) and its three branches.
+//
+// 0x00469400 is nothing but `JMP [action_behavior*4 + 0x004c2ac8]` - the
+// compiler's jump table for a three-case switch, NOT a data table of installable
+// handlers. The port modelled it as the latter and left `DAT_004c2ac8` an
+// all-NULL array, so this whole state machine did nothing.
+//
+// That machine is how a grabbed player RECOVERS. Plant 42 drops the player with
+// animationId 6 / animFrameId 8 / action_behavior 2, which routes here (state 6
+// -> player_dispatch_anim_fn(8 + 0x13) -> entry 27), and behaviour 2 runs the
+// knockdown, then hands off to behaviour 0, whose state 4 and 0x0B are the only
+// places `isBeingAttackedFlag` is cleared and `animationId` returns to 1. With
+// the table empty the player stayed frozen mid-pose with input suppressed -
+// a softlock after Plant 42 released Chris in room 40C0.
+//
+// Note these use the player's DAMAGE animation pointers at +0x16C/+0x170
+// (emdScratchPtr1/2), not the ordinary animHeader/animBase at +0x90/+0x94, and
+// the animation INDEX Joint_move reads for the player is `attackAnim` (+0xBD).
+// ============================================================================
+
+// 0x004c2a0c - Plant 42's capture matrix t[0], doubling as the shared knock-back
+// facing (see Plant42.cpp).
+extern MATRIX g_plant42CaptureMatrix;
+
+static void player_anim_effects_at_joints(int a, int b, int c, int d,
+                                          unsigned char type, unsigned char variant,
+                                          int xBias)
+{
+    JointStruct* j = g_playerEntity.jointsStructs;
+    VECTOR* dead = (VECTOR*)((uintptr_t)g_deadMoveValue + 0x14);
+    g_playerPosScratch = *dead;
+    g_playerPosScratch.x += xBias;
+    Effect_CreateBillboard(type, variant, 0, &j[a].world, &g_playerPosScratch, 0);
+    Effect_CreateBillboard(type, variant, 0, &j[b].world, &g_playerPosScratch, 0);
+    if (c >= 0) Effect_CreateBillboard(type, variant, 0, &j[c].world, &g_playerPosScratch, 0);
+    if (d >= 0) Effect_CreateBillboard(type, variant, 0, &j[d].world, &g_playerPosScratch, 0);
+}
+
+// 0x00469410 - action_behavior 0: the fall / slide / get-up chain. Its states 4
+// and 0x0B are what give the player back to the controller.
+static void player_anim_knockdown_recover(void)
+{
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.action_state = 1;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 6;
+        g_playerEntity.unk_8c = 4;
+        g_playerEntity.move_speed_current = 1000;
+        Play3DSnd(3, 2, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+        // fall through
+    case 1: {
+        g_playerEntity.move_speed_current =
+            (unsigned short)(g_playerEntity.move_speed_current +
+                             (unsigned short)g_playerEntity.animation_frame_id * (unsigned short)-0xf);
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400));
+        Add_speedXZ(0x800);
+        // The collision test is probe-only here: the position is restored
+        // afterwards and only the hit/miss result is kept.
+        unsigned int savedM0 = *(unsigned int*)&g_playerEntity.scaMatrixData.worldMatrix.m[0][0];
+        int t0 = g_playerEntity.scaMatrixData.localMatrix.t[0];
+        int t1 = g_playerEntity.scaMatrixData.localMatrix.t[1];
+        int t2 = g_playerEntity.scaMatrixData.localMatrix.t[2];
+        unsigned char hit = check_room_collision(
+            (VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t,
+            *(short*)(g_playerEntity.Sca_info + 10));
+        g_playerDisplacement = (int)hit;
+        g_playerEntity.scaMatrixData.localMatrix.t[0] = t0;
+        g_playerEntity.scaMatrixData.localMatrix.t[1] = t1;
+        g_playerEntity.scaMatrixData.localMatrix.t[2] = t2;
+        *(unsigned int*)&g_playerEntity.scaMatrixData.worldMatrix.m[0][0] = savedM0;
+        if (g_playerDisplacement != 0) {
+            g_playerEntity.action_state = 5;
+            return;
+        }
+        break;
+    }
+    case 2:
+        g_playerEntity.action_state = 3;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 7;
+        Play3DSnd(2, 0x1d, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+        // fall through
+    case 3:
+        if ((g_playerEntity.animation_frame_id & 1) == 0 &&
+            g_playerEntity.animation_frame_id < 10) {
+            player_anim_effects_at_joints(5, 8, -1, -1, 9, 0x16, 0);
+        }
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400));
+        Add_speedXZ(0x800);
+        g_playerEntity.move_speed_current = (unsigned short)(g_playerEntity.move_speed_current - 0xf);
+        if ((short)g_playerEntity.move_speed_current < 0) {
+            g_playerEntity.move_speed_current = 0;
+            return;
+        }
+        break;
+    case 4:
+        g_playerEntity.animationId = 1;
+        g_playerEntity.animFrameId = 0;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+        g_playerEntity.isBeingAttackedFlag = 0;
+        return;
+    case 5:
+        g_playerEntity.action_state = 6;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 4;
+        g_playerEntity.unk_8c = 3;
+        Play3DSnd(2, 0x1a, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+        Play3DSnd(3, 2, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+        player_anim_effects_at_joints(5, 8, -1, -1, 9, 0x16, -400);
+        player_anim_effects_at_joints(0, 3, 6, -1, 9, 0x11, -400);
+        // fall through
+    case 6:
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400));
+        return;
+    case 7:
+        g_playerEntity.action_state = 8;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 5;
+        g_playerEntity.unk_8c = 3;
+        // fall through
+    case 8:
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400));
+        return;
+    case 9:
+        g_playerEntity.action_state = 10;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 4;
+        g_playerEntity.unk_8c = 3;
+        // fall through
+    case 10:
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(1, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400));
+        break;
+    case 0x0B:
+        g_playerEntity.animationId = 1;
+        g_playerEntity.animFrameId = 0;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+        g_playerEntity.isBeingAttackedFlag = 0;
+        g_playerEntity.flags &= 0xfd;
+        return;
+    default:
+        break;
+    }
+}
+
+// 0x00469840 - action_behavior 1: held/grabbed, driven entirely by the grabber.
+static void player_anim_grabbed(void)
+{
+    JointStruct* joints = g_playerEntity.jointsStructs;
+
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.action_state = 1;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 0;
+        // fall through
+    case 1:
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400));
+        return;
+    case 2:
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 1;
+        g_playerEntity.action_state = 3;
+        g_playerEntity.unk_8c = 3;
+        // fall through
+    case 3:
+        Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
+        return;
+    case 4:
+        g_playerEntity.action_state = 5;
+        g_playerEntity.attackAnim = 2;
+        g_playerEntity.unk_8c = 3;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        // fall through
+    case 5:
+        Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
+        return;
+    case 6: {
+        JointStruct* head = joints + 2;
+        head->flags |= 0x0c;
+        g_playerEntity.action_state = 7;
+        g_playerPosScratch = *(VECTOR*)((uintptr_t)g_deadMoveValue + 0x14);
+        Effect_CreateBillboard(0, 3, 0, &joints[2].world, &g_playerPosScratch, 0);
+        Effect_CreateBillboard(0, 0, 0, NULL, joints[0].world.t, 0);
+        JointApplyColorTint(head, 0x30, 0x80820, (void*)0x00606060);
+        JointApplyColorTint(head, 0x30, 0x80820, (void*)0x00606060);
+        return;
+    }
+    default:
+        return;
+    }
+}
+
+// 0x004699d0 - action_behavior 2: thrown/dropped. Hands over to behaviour 0.
+static void player_anim_thrown(void)
+{
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.action_state = 1;
+        g_playerEntity.attackAnim = 3;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        if (g_playerEntity.health < 0) {
+            Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+        }
+        // fall through
+    case 1:
+        if (g_playerEntity.animation_frame_id == 1) {
+            player_anim_effects_at_joints(4, 7, 0, 2, 9, 0x11, 0);
+        }
+        if (g_playerEntity.animation_frame_id == 0x0c) {
+            g_playerEntity.action_state = 2;
+            g_playerEntity.attackDirection = 0x5a;
+            if (g_playerEntity.health < 0) {
+                g_playerEntity.action_state = 8;
+            }
+        }
+        Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
+        break;
+    case 2: {
+        short pressed = GetPlayerInputMasked();
+        // Mashing a button shortens the time on the floor: 4 per frame instead of 1.
+        g_playerEntity.attackDirection = (unsigned short)(g_playerEntity.attackDirection -
+            ((unsigned short)(pressed != 0) * 3 + 1));
+        if ((short)g_playerEntity.attackDirection < 0) {
+            g_playerEntity.action_state = 3;
+            return;
+        }
+        break;
+    }
+    case 3:
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400));
+        return;
+    case 4:
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 7;
+        return;
+    case 5:
+        g_playerEntity.action_state = 6;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 3;
+        g_playerEntity.unk_8c = 7;
+        g_playerEntity.attackDirection = 0;
+        g_playerEntity.move_speed_current = 500;
+        Play3DSnd(3, 1, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+        Play3DSnd(2, 0x19, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+        // fall through
+    case 6:
+        if (g_playerEntity.animation_frame_id == 5 || g_playerEntity.animation_frame_id == 7) {
+            player_anim_effects_at_joints(5, 8, 0, 2, 9, 0x11, 0);
+        }
+        g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state +
+            (char)Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x200));
+        if (g_playerEntity.animation_frame_id < 0x0f) {
+            // Slide along the knock-back facing the attacker stashed at
+            // 0x004c2a0c, then restore the real facing.
+            g_playerDisplacement = (int)g_playerEntity.directionAngle;
+            g_playerEntity.directionAngle = (short)g_plant42CaptureMatrix.t[0];
+            Add_speedXZ(0);
+            short step = (short)g_playerEntity.attackDirection;
+            g_playerEntity.attackDirection = (unsigned short)(g_playerEntity.attackDirection + 1);
+            g_playerEntity.directionAngle = (short)g_playerDisplacement;
+            g_playerEntity.move_speed_current =
+                (unsigned short)(g_playerEntity.move_speed_current + step * -5);
+            return;
+        }
+        break;
+    case 7:
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 7;
+        return;
+    default:
+        break;
+    }
+}
+
+// 0x00469400 - `JMP [action_behavior*4 + 0x004c2ac8]`. Three entries; the
+// original applies no bound, this one reports instead of jumping into the pulse
+// table that follows.
+void player_anim_set_attacked_flag(void) {
+    switch (g_playerEntity.action_behavior) {
+    case 0: player_anim_knockdown_recover(); break;   // 0x00469410
+    case 1: player_anim_grabbed();           break;   // 0x00469840
+    case 2: player_anim_thrown();            break;   // 0x004699d0
+    default: {
+        static int lastReported = -1;
+        if ((int)g_playerEntity.action_behavior != lastReported) {
+            lastReported = (int)g_playerEntity.action_behavior;
+            dbg_printf("[player] action_behavior=%u past the 3-entry 0x004c2ac8 jumptable\n",
+                       (unsigned int)g_playerEntity.action_behavior);
+        }
+        break;
+    }
+    }
 }
 // 0x00468e10 — Limb physics with bouncing (7 states)
 void player_anim_dispatch_4ba360(void) {
@@ -1420,7 +1727,86 @@ static void player_state_report_missing(const char* addr)
     }
 }
 
-static void player_state_02(void)         { player_state_report_missing("0x00495250"); }
+// ----------------------------------------------------------------------------
+// Player state 2 (0x00495250 -> 0x004955f0) — the generic hit reaction.
+//
+// Was a report-only stub, which froze the player outright: every one of the five
+// action_behavior cases below is a self-terminating animation, and their common
+// tail is the ONLY thing that returns animationId to 1 and clears
+// isBeingAttackedFlag. Plant 42's acid spit drops the player straight in here
+// (it writes animationId=2 / animFrameId=0 / action_behavior=0x64 as one DWORD),
+// so being hit while aiming locked the game up.
+//
+// 0x64/0x65 animate from the ordinary animHeader/animBase; 0x66/0x67/0x68 use the
+// damage pointers at +0x16C/+0x170 and pick their animation from
+// isBeingAttackedFlag - 1. As everywhere on the player, the animation index
+// Joint_move reads is attackAnim (+0xBD).
+// ----------------------------------------------------------------------------
+static void player_hit_react_common(bool damageAnimSet, unsigned char sndId, short startSpeed)
+{
+    if (g_playerEntity.action_state == 0) {
+        if (damageAnimSet) {
+            g_playerEntity.attackAnim = (unsigned char)(g_playerEntity.isBeingAttackedFlag - 1);
+        } else {
+            g_playerEntity.attackAnim = 1;
+        }
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.move_speed_current = (unsigned short)startSpeed;
+        g_playerEntity.action_state = 1;
+        g_playerEntity.unk_8c = 3;
+        Play3DSnd(3, sndId, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t[0]);
+    } else if (g_playerEntity.action_state != 1) {
+        return;
+    }
+
+    unsigned int header = damageAnimSet ? g_playerEntity.emdScratchPtr1 : g_playerEntity.animHeader;
+    unsigned int base   = damageAnimSet ? g_playerEntity.emdScratchPtr2 : g_playerEntity.animBase;
+    if (Joint_move(0, header, base, 0x400) != 0) {
+        g_playerEntity.animationId = 1;
+        g_playerEntity.animFrameId = 0;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+        g_playerEntity.isBeingAttackedFlag = 0;
+    }
+}
+
+static void player_state_02(void)         // 0x00495250
+{
+    if (g_playerEntity.animFrameId != 0) return;
+
+    // 0x004955f0
+    if (g_playerEntity.action_state == 0) {
+        if (((unsigned char)g_main_state_flags & 0x40) != 0 ||
+            (g_playerEntity.healthStatusFlags & 0x80) != 0) {
+            g_message_flags = (unsigned short)((g_message_flags & 0xff00) |
+                                               (((unsigned char)g_message_flags) | 0x40));
+        }
+        g_playerEntity.healthStatusFlags &= 0x7f;
+    }
+
+    switch (g_playerEntity.action_behavior) {
+    case 0x64:                                   // 0x00457090
+    case 0x65:
+        player_hit_react_common(false, 0, 0);
+        return;
+    case 0x66:                                   // 0x00457110
+        player_hit_react_common(true, 0, 0xfa);
+        if (3 < g_playerEntity.animation_frame_id) g_playerEntity.move_speed_current = 0x1e;
+        break;
+    case 0x67:                                   // 0x00457110 + Add_speedXZ(0)
+        player_hit_react_common(true, 0, 0xfa);
+        if (3 < g_playerEntity.animation_frame_id) g_playerEntity.move_speed_current = 0x1e;
+        Add_speedXZ(0);
+        return;
+    case 0x68:                                   // 0x004571a0
+        player_hit_react_common(true, 3, 0);
+        return;
+    default:
+        return;
+    }
+    Add_speedXZ(0x800);
+}
 static void player_state_null(void)       { player_state_report_missing("NULL in original"); }
 
 // ============================================================================

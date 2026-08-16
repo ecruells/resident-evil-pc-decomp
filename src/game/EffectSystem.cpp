@@ -2502,6 +2502,32 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     g_TextureDesc.unk10 = (*(unsigned short*)(eff->clutInfo + 4) & 0x3f) << 4;
     g_TextureDesc.texU = uv[0];
     g_TextureDesc.texV = uv[1];
+    // depthGroup packs two things: the low 3 bits select the animation (see
+    // Effect_CreateBillboard), and depthGroup >> 3 selects the PALETTE. That is
+    // how one blood sprite renders red for a zombie, yellow for a spray, and
+    // white for Plant 42's sap.
+    //
+    // KNOWN GAP (2026-08-15): this value is written and never read back, so the
+    // palette half of that mechanism does nothing. Plant 42 bleeds red.
+    //
+    // What is already CONFIRMED correct, so do not go looking there again:
+    // the tint index and the colour records resolve exactly right - Plant 42's
+    // effects (depthGroup 0x18/0x1B/0x1C) come out as tint 3, colorIdx 4,
+    // count 4 -> rgb FFFFFF, while the type-9 spray at tint 2 correctly picks
+    // FFCC66. The `color` triple below reaches SubmitEffectSprite as an RGB
+    // MULTIPLIER, and white multiplied by a red texture is still red, so the
+    // red is in the sprite's own CLUT.
+    //
+    // The missing half is the blit: the original turns this 0-3 index into a
+    // CLUT coordinate, but nothing in the port's effect path consumes
+    // printClutTint. The other readers (MainMenu, TextureLoader, Rendering) use
+    // the field as a real CLUT id in the 0x1E0 encoding
+    // (`printClutTint - g_TexturePageClutBase[slot]` -> CLUT X), which is a
+    // different scale entirely from what is stored here.
+    //
+    // To fix: decompile the original effect blit around 0x0047c6d8 and follow
+    // how it applies this to the CLUT selection; `unk10` above is where the
+    // effect path currently gets its CLUT from, unconditionally.
     g_TextureDesc.printClutTint = (short)(eff->depthGroup >> 3);
 
     // ---- scale: camera light * sprite light factor * width / distance ----

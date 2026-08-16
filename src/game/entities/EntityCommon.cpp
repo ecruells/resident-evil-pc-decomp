@@ -17,6 +17,9 @@
 #include "../../Globals.h"
 #include <cstring>
 
+// Plant 42 boss update (0x00464d10).
+extern void plant42_update(void);
+
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
 // Also written by RoomCollision.cpp, PlayerAnimations.cpp and WeaponDamage.cpp,
@@ -46,23 +49,23 @@ void*        _ENTITY_SAVE = NULL;
 void* enemies_update_functions_tbl[48] = {
     (void*)zombie_update,  // [0]  zombie (white coat)
     (void*)zombie_update,  // [1]  zombie (naked)
-    NULL,                  // [2]  enemy type 2  (0x00497fb0)
-    NULL,                  // [3]  enemy type 3  (0x00478310)
-    NULL,                  // [4]  enemy type 4  (0x0044f300)
-    NULL,                  // [5]  enemy type 5  (0x0042e520)
-    NULL,                  // [6]  enemy type 6  (0x004161f0)
-    NULL,                  // [7]  enemy type 7  (0x0048daf0)
-    NULL,                  // [8]  enemy type 8  (0x00464d10)
-    NULL,                  // [9]  enemy type 9  (0x00438a70)
-    NULL,                  // [10] enemy type 10 (0x004727f0)
-    NULL,                  // [11] enemy type 11 (0x0043d8d0)
-    NULL,                  // [12] enemy type 12 (0x00421990)
-    NULL,                  // [13] enemy type 13 (0x004051e0)
-    NULL,                  // [14] enemy type 14 (0x0047e1c0)
-    NULL,                  // [15] enemy type 15 (0x0045abb0)
-    NULL,                  // [16] enemy type 16 (0x00421990)
+    NULL,                  // [2]  cerberus  (0x00497fb0)
+    NULL,                  // [3]  web spinner  (0x00478310)
+    NULL,                  // [4]  black tiger (Giant spider boss)  (0x0044f300)
+    NULL,                  // [5]  crow  (0x0042e520)
+    NULL,                  // [6]  hunter (0x004161f0)
+    NULL,                  // [7]  wasp  (0x0048daf0)
+    (void*)plant42_update, // [8]  plant 42  (0x00464d10)
+    NULL,                  // [9]  chimera  (0x00438a70)
+    NULL,                  // [10] adder (regular size snakes) (0x004727f0)
+    NULL,                  // [11] neptune (0x0043d8d0)
+    NULL,                  // [12] tyrant 1 (0x00421990)
+    NULL,                  // [13] yawn 1 (Giant snake) (0x004051e0)
+    NULL,                  // [14] plant 42 roots (0x0047e1c0)
+    NULL,                  // [15] monster plant (0x0045abb0)
+    NULL,                  // [16] tyrant 2 (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3
-    NULL,                  // [18] enemy type 18 (0x004051e0)
+    NULL,                  // [18] yawn 2 (0x004051e0)
     NULL,                  // [19] enemy type 19 (0x00443640)
     NULL,                  // [20] enemy type 20 (0x00427330)
     NULL,                  // [21] enemy type 21 (0x0040b760)
@@ -1447,4 +1450,3 @@ void update_entities(void)
 
     } while (em_counter < (int)(unsigned int)g_enemy_count);
 }
-

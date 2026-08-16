@@ -37,7 +37,6 @@
 
 // Forward declarations for dependencies defined elsewhere
 extern unsigned int AsyncCreateTmdObject(unsigned int param1, unsigned int param2, unsigned int param3);
-extern void FUN_00486df0(void* spriteData);                 // sprite render mode (EngineStubs.cpp)
 extern void FUN_004896c0(void* joint, short p1, short p2, int p3); // 0x004896c0 (EngineStubs.cpp)
 extern void FUN_0048a210(void* joint);                      // 0x0048a210 (EngineStubs.cpp)
 extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData); // 0x00462d90 (Room.cpp)
@@ -80,9 +79,14 @@ static inline float TmdDepthNdc(float vz)
 }
 
 struct TmdDrawEntry {
-    BYTE* slot;        // owning CMarniDirect3DTMD slot in g_tmdObjectBuffer
+    BYTE* slot;        // owning CMarniDirect3DTMD slot in g_tmdObjectBuffer,
+                       // NULL for the complex-object pool (see FUN_00486df0)
     BYTE* objData;     // the queued 0x84-byte object entry (matrix at +0x08)
-    int   objIndex;    // embedded CMarniViewport2 index
+    BYTE* elem;        // geometry element (CMarniViewport2 / CDirect3DObject).
+                       // Held explicitly because the complex-object pool keeps
+                       // its elements in a SEPARATE 0x38-stride array rather
+                       // than embedded in the owning slot at stride 0x4C.
+    int   objIndex;    // embedded CMarniViewport2 index (slot-owned entries)
     int   depth;       // original OT depth (gte t[2] >> shift); kept for
                        // reference - ordering is per-triangle, see FlushTmdObjects
 };
@@ -107,8 +111,11 @@ struct TmdLightState {
     DWORD ambient;     // g_d3dAmbientColor
 };
 
-// Pinned so the light-latch fix cannot silently grow the .bss footprint again.
-static_assert(sizeof(TmdDrawEntry) == 16, "TmdDrawEntry must stay 16 bytes");
+// Pinned so a change here cannot silently grow the .bss footprint unnoticed.
+// 20 rather than 16 since the geometry element is now carried explicitly: the
+// complex-object pool (FUN_00486df0) keeps its elements outside any TMD slot,
+// so `slot + objIndex * 0x4C` can no longer stand in for it.
+static_assert(sizeof(TmdDrawEntry) == 20, "TmdDrawEntry must stay 20 bytes");
 
 static TmdDrawEntry  g_tmdQueue[TMD_MAX_QUEUE];
 static int           g_tmdQueueCount = 0;
@@ -206,10 +213,44 @@ void TmdQueueObject(void* objData, int depth)
     TmdDrawEntry* e = &g_tmdQueue[idx];
     e->slot     = slotBase;
     e->objData  = p;
+    e->elem     = slotBase + objIndex * 0x4C;
     e->objIndex = objIndex;
     e->depth    = depth;
 
     // Latch the light state for this object (see the note on TmdLightState).
+    TmdLightState* ls = &g_tmdLight[idx];
+    const float* lights = (const float*)g_d3dLightData;
+    for (int i = 0; i < 3; i++) {
+        const float* L = lights + i * 12;
+        ls->dir[i][0] = L[3]; ls->dir[i][1] = L[4]; ls->dir[i][2] = L[5];
+        ls->col[i][0] = L[6]; ls->col[i][1] = L[7]; ls->col[i][2] = L[8];
+    }
+    ls->ambient = g_d3dAmbientColor;
+}
+
+// ============================================================================
+// Queue one entry from the complex-object pool (FUN_00486df0). Same contract as
+// TmdQueueObject, except the geometry element is passed in: those elements live
+// in g_objectListPtrArray at stride 0x38, not embedded in a TMD slot at 0x4C,
+// so there is no slot to resolve the pointer against.
+// ============================================================================
+void TmdQueueComplexObject(void* objData, void* elem, int depth)
+{
+    if (objData == NULL || elem == NULL || g_tmdQueueCount >= TMD_MAX_QUEUE) return;
+
+    if (g_tmdLight == NULL) {
+        g_tmdLight = (TmdLightState*)calloc(TMD_MAX_QUEUE, sizeof(TmdLightState));
+        if (g_tmdLight == NULL) return;
+    }
+
+    int idx = g_tmdQueueCount++;
+    TmdDrawEntry* e = &g_tmdQueue[idx];
+    e->slot     = NULL;
+    e->objData  = (BYTE*)objData;
+    e->elem     = (BYTE*)elem;
+    e->objIndex = 0;
+    e->depth    = depth;
+
     TmdLightState* ls = &g_tmdLight[idx];
     const float* lights = (const float*)g_d3dLightData;
     for (int i = 0; i < 3; i++) {
@@ -328,15 +369,14 @@ void FlushTmdObjects(void)
             // so a null slot means this record was never filled - i.e. the
             // count outran the writes. Dereferencing it read address 4 and
             // faulted; skip it and say so instead.
-            if (e->slot == NULL) {
+            if (e->elem == NULL) {
                 dbg_printf("FlushTmdObjects: unfilled queue entry %d of %d "
                            "(objData=%p objIndex=%d)\n",
                            i, queued, (void*)e->objData, e->objIndex);
                 continue;
             }
 
-            CMarniViewport2* elem =
-                (CMarniViewport2*)(e->slot + e->objIndex * 0x4C);
+            CMarniViewport2* elem = (CMarniViewport2*)e->elem;
 
             const float* vbuf = (const float*)elem->m_pVertexBuffer;
             const WORD*  ibuf = (const WORD*)elem->m_pIndexBuffer;
@@ -351,7 +391,11 @@ void FlushTmdObjects(void)
             // Read the transform and texture handle now (see TmdQueueObject):
             // both are written to the object entry after it was queued.
             const float* M = (const float*)(e->objData + 0x08);
-            DWORD tex = (*(DWORD*)(e->slot + e->objIndex * 0x4C + 0x48) != 0)
+            // A NULL slot marks a complex-pool entry. Those are only ever built
+            // from textured triangle primitives (ComplexTmdObjectSetup filters
+            // on flags == 0x34000609) and their 0x38-byte element has no +0x48
+            // flag to read, so the texture is unconditional there.
+            DWORD tex = (e->slot == NULL || *(DWORD*)(e->elem + 0x48) != 0)
                         ? *(DWORD*)(e->objData + 0x58) : 0;
             // Render flags at +0x80: bit 2 = unlit, take the vertex colour as
             // it stands (see the layout note at the top of this file).
@@ -766,6 +810,100 @@ static void FUN_00486190(float* modelMatrix)
     FUN_0048cc50(from, to, viewMatrix);
     FUN_0048c730(modelMatrix, viewMatrix, modelMatrix);
     FUN_0048c820(modelMatrix + 12, viewMatrix);
+}
+
+// ============================================================================
+// FUN_00486df0 (0x00486df0) - draw the "complex" object pool.
+//
+// ComplexTmdObjectSetup (0x00486990) explodes one TMD into up to 256 standalone
+// textured-triangle objects: geometry into the 0x38-stride element array at
+// g_objectListPtrArray, per-object render state into the 0x84-stride array at
+// g_complexTmdObjectData. FUN_00483080 routes any animation object it has
+// processed (spriteData[4] == 1) here instead of through the normal
+// AsyncCreateTmdObject path.
+//
+// This was an empty stub in EngineStubs.cpp, so everything built through that
+// path drew nothing at all - visibly, Plant 42's curtain of hanging tendrils in
+// room 40C0 (the plant's 3D limbs come through the ordinary path and did show).
+//
+// Unlike FUN_00483080 the original does NOT fold the FUN_00486190 view rotation
+// into these matrices; the raw GTE rotation/translation is written straight into
+// each object entry. That is deliberate and is preserved here.
+// ============================================================================
+void FUN_00486df0(void* spriteData)
+{
+    if (g_objectListCleanupFlag != 1) return;
+    if (spriteData == NULL || ((int*)spriteData)[4] != 1) return;
+
+    // Base ordering-table depth: GTE t[2] / 4, clamped to 3000.
+    int t2 = g_gteRotTransMatrix.t[2];
+    int baseDepth = (t2 + (t2 >> 31 & 3)) >> 2;
+    if (baseDepth >= 3000) baseDepth = 3000;
+
+    const int count = g_objectListCleanupCount;
+    if (count <= 0) return;
+
+    // Depth-key every object from the face centroid ComplexTmdObjectSetup
+    // stashed for it (0x008fb8b0, one SVECTOR each).
+    const int maxFaces = (int)(sizeof(g_faceNormalBuffer) / 8);
+    const int keyed = (count < maxFaces) ? count : maxFaces;
+    for (int i = 0; i < keyed; i++) {
+        SVECTOR out;
+        ApplyMatrixSV(&g_gteRotTransMatrix, (SVECTOR*)(g_faceNormalBuffer + i * 8), &out);
+        g_complexTmdObjectIds[i]   = i;
+        g_complexTmdObjectArray[i] = (int)out.z;
+    }
+    for (int i = keyed; i < count; i++) {
+        g_complexTmdObjectIds[i]   = i;
+        g_complexTmdObjectArray[i] = 0;
+    }
+
+    // Selection sort, near to far (the original's nested loop, verbatim).
+    for (int i = 0; i < count - 1; i++) {
+        for (int j = i; j < count; j++) {
+            if (g_complexTmdObjectArray[j] < g_complexTmdObjectArray[i]) {
+                int d = g_complexTmdObjectArray[i];
+                g_complexTmdObjectArray[i] = g_complexTmdObjectArray[j];
+                g_complexTmdObjectArray[j] = d;
+                int id = g_complexTmdObjectIds[i];
+                g_complexTmdObjectIds[i] = g_complexTmdObjectIds[j];
+                g_complexTmdObjectIds[j] = id;
+            }
+        }
+    }
+
+    const float scale = 0.00024414063f;  // 1/4096
+    for (int i = 0; i < count; i++) {
+        int id = g_complexTmdObjectIds[i];
+        if (id < 0 || id >= 256) continue;
+
+        BYTE*  entry = g_complexTmdObjectData + id * 0x84;
+        float* M     = (float*)(entry + 0x08);
+
+        M[0]  = (float)g_gteRotTransMatrix.m[0][0] * scale;
+        M[4]  = (float)g_gteRotTransMatrix.m[0][1] * scale;
+        M[8]  = (float)g_gteRotTransMatrix.m[0][2] * scale;
+        M[1]  = (float)g_gteRotTransMatrix.m[1][0] * scale;
+        M[5]  = (float)g_gteRotTransMatrix.m[1][1] * scale;
+        M[9]  = (float)g_gteRotTransMatrix.m[1][2] * scale;
+        M[2]  = (float)g_gteRotTransMatrix.m[2][0] * scale;
+        M[6]  = (float)g_gteRotTransMatrix.m[2][1] * scale;
+        M[10] = (float)g_gteRotTransMatrix.m[2][2] * scale;
+        M[12] = (float)g_gteRotTransMatrix.t[0];
+        M[13] = (float)g_gteRotTransMatrix.t[1];
+        // Each object is nudged one unit further back than the previous one so
+        // the sorted order survives into the ordering table.
+        M[14] = (float)i + (float)g_gteRotTransMatrix.t[2];
+        M[3]  = 0.0f;
+        M[7]  = 0.0f;
+        M[11] = 0.0f;
+        M[15] = 1.0f;
+
+        // +0x54 is the object's D3D handle; zero means it was never created.
+        if (*(DWORD*)(entry + 0x54) == 0) continue;
+
+        TmdQueueComplexObject(entry, &g_objectListPtrArray[id * 0x0E], baseDepth + i);
+    }
 }
 
 // (0x00482fa0) - Copy light data to TMD render object and insert into ordering table
