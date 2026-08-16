@@ -70,6 +70,7 @@ extern void* enemies_update_functions_tbl[48];
 void zombie_update(void);          // 0x004338c0 - Zombie.cpp
 void character_npc_update(void);   // 0x0046acf0 - CharacterNpc.cpp
 void plant42_update(void);         // 0x00464d10 - Plant42.cpp
+void yawn_update(void);            // 0x004051e0 - Yawn.cpp (ids 13 and 18)
 
 // ============================================================================
 // Angle / line-of-sight helpers
@@ -81,9 +82,13 @@ extern unsigned char check_line_of_sight(VECTOR* targetPos);                // 0
 extern unsigned int entity_check_angular_los(short fovHalfAngle, VECTOR* targetPos); // 0x00489c60
 extern unsigned char checkAngularViewAndDistance(short fovHalfAngle, short maxDistance, VECTOR* targetPos); // 0x00489cf0
 
-// Sets status_flags bit 0x20 / 0x80 when the player is inside `range`
-extern void entity_check_visual_range(unsigned int range);  // 0x0043bfa0
-extern void entity_check_alert_range(unsigned int range);   // 0x0043bfe0
+// Sets status_flags bit 0x20 / 0x80 when the player is inside `range`.
+// Both RETURN the distance they computed - SquareRoot0's result is still in EAX
+// at the RET, and yawn_state_check (0x004056b7) reads it back with
+// `CMP EAX, 0xfa0` to decide whether to clear the "aligned" bit. Declaring
+// entity_check_alert_range void made that comparison unwritable.
+extern unsigned int entity_check_visual_range(unsigned int range);  // 0x0043bfa0
+extern unsigned int entity_check_alert_range(unsigned int range);   // 0x0043bfe0
 
 // ============================================================================
 // Movement / pathfinding state machines

@@ -341,10 +341,26 @@ int GteTpageBuild(unsigned short param_1, unsigned short param_2, int param_3, i
 // GteFixedMul12 (helper)
 // 4.12 fixed-point multiply: (a * b) >> 12 with rounding toward zero
 // ============================================================================
+// The intermediate is 64-bit, and that is load-bearing. The original does this
+// multiply in FLOATING POINT - ApplyMatrixLV (0x00409bc0) is three __ftol()
+// calls over x87 expressions - so the product is formed at full width and only
+// the result is converted to long. A 32-bit `a * b` silently wraps once the
+// product passes 2^31.
+//
+// Nothing hit that until Yawn. Its skeleton animator (0x00408e00) builds the
+// body chain in <<9 fixed point, so it hands ApplyMatrixLV offsets 512x larger
+// than any other caller: a -1099 joint offset becomes -562688, and against the
+// identity's 4096 that is -2,304,770,048 - just past INT_MIN. It wrapped to
+// +1,990,197,248, and >>12 then >>9 turned a -1099 step per body segment into
+// +949, so the snake built itself backwards and the animator's anchor step
+// converted the disagreement into ~20000 units of entity motion per frame.
+//
+// For every product that already fit in 32 bits this is bit-identical to the
+// old code, so no existing caller changes behaviour.
 static inline int GteFixedMul12(int a, int b)
 {
-    int val = a * b;
-    return (val + (val >> 31 & 0xFFF)) >> 12;
+    long long val = (long long)a * (long long)b;
+    return (int)((val + (val >> 63 & 0xFFF)) >> 12);
 }
 
 // ============================================================================

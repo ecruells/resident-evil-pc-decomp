@@ -19,6 +19,8 @@
 
 // Plant 42 boss update (0x00464d10).
 extern void plant42_update(void);
+// Yawn (giant snake) boss update (0x004051e0) - Yawn.cpp.
+extern void yawn_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -60,12 +62,12 @@ void* enemies_update_functions_tbl[48] = {
     NULL,                  // [10] adder (regular size snakes) (0x004727f0)
     NULL,                  // [11] neptune (0x0043d8d0)
     NULL,                  // [12] tyrant 1 (0x00421990)
-    NULL,                  // [13] yawn 1 (Giant snake) (0x004051e0)
+    (void*)yawn_update,    // [13] yawn 1 (Giant snake) (0x004051e0)
     NULL,                  // [14] plant 42 roots (0x0047e1c0)
     NULL,                  // [15] monster plant (0x0045abb0)
     NULL,                  // [16] tyrant 2 (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3
-    NULL,                  // [18] yawn 2 (0x004051e0)
+    (void*)yawn_update,    // [18] yawn 2 (0x004051e0)
     NULL,                  // [19] enemy type 19 (0x00443640)
     NULL,                  // [20] enemy type 20 (0x00427330)
     NULL,                  // [21] enemy type 21 (0x0040b760)
@@ -264,7 +266,7 @@ unsigned char checkAngularViewAndDistance(short fovHalfAngle, short maxDistance,
 // Computes Euclidean distance from entity to player via SquareRoot0.
 // If distance < range, sets status_flags bit 5 (0x20) - "player in visual range".
 // ============================================================================
-void entity_check_visual_range(unsigned int range)
+unsigned int entity_check_visual_range(unsigned int range)
 {
     int dx = (int)g_playerEntity.scaMatrixData.localMatrix.t[0]
            - (int)ENTITY->scaMatrixData.localMatrix.t[0];
@@ -275,6 +277,7 @@ void entity_check_visual_range(unsigned int range)
     if (distance < range) {
         ENTITY->status_flags |= ENTITY_STATUS_PLAYER_ABOVE;
     }
+    return distance;   // still in EAX at the original's RET; Yawn reads it back
 }
 
 // ============================================================================
@@ -282,7 +285,7 @@ void entity_check_visual_range(unsigned int range)
 // Computes Euclidean distance from entity to player via SquareRoot0.
 // If distance < range, sets status_flags bit 7 (0x80) - "player in alert range".
 // ============================================================================
-void entity_check_alert_range(unsigned int range)
+unsigned int entity_check_alert_range(unsigned int range)
 {
     int dx = (int)g_playerEntity.scaMatrixData.localMatrix.t[0]
            - (int)ENTITY->scaMatrixData.localMatrix.t[0];
@@ -293,6 +296,7 @@ void entity_check_alert_range(unsigned int range)
     if (distance < range) {
         ENTITY->status_flags |= ENTITY_STATUS_PLAYER_BELOW;
     }
+    return distance;   // still in EAX at the original's RET; Yawn reads it back
 }
 
 // ============================================================================

@@ -139,6 +139,7 @@
     <ClCompile Include="src\game\entities\EntityCommon.cpp" />
     <ClCompile Include="src\game\entities\CharacterNpc.cpp" />
     <ClCompile Include="src\game\entities\Plant42.cpp" />
+    <ClCompile Include="src\game\entities\Yawn.cpp" />
     <ClCompile Include="src\game\entities\Zombie.cpp" />
     <ClCompile Include="src\game\WeaponDamage.cpp" />
     <ClCompile Include="src\game\Rendering.cpp" />
