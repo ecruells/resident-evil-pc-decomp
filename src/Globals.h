@@ -166,6 +166,7 @@ extern short         g_TexturePageDepth[256];     // tpage code (for page-depth 
 extern short         g_TexturePageClutBase[256];  // base printClutTint (= pageOffset + 0x1E0)
 extern int           g_texturePageMode;
 extern int           g_texturePageHandle;
+extern void*         g_texturePageSrcDesc;   // port-only: last create_texture_page source, for diagnostics
 
 // Marni video driver arrays
 extern DWORD         g_VideoDriverArray_D0[64];
@@ -786,11 +787,12 @@ extern const unsigned char g_ItemModelFileNameMINI[8]; // 0x004bd5a8
 extern const unsigned char* g_ItemCombinePtrs[35];     // 0x004bd768
 extern const unsigned char g_ItemCombineData[440];     // 0x004bd5b0
 extern const unsigned char g_ItemMaxQty[448];          // 0x004bd81c
-extern const unsigned char g_ItemImageTypeTable[32];   // 0x004bd7f8
+extern const unsigned char g_ItemImageTypeTable[35];   // 0x004bd7f8
 extern const unsigned char g_ItemModelExtIVM[8];       // 0x004c29a0 ".ivm"
 extern const unsigned char g_ItemModelDir[24];         // 0x004c29a8 "./usa/item_m2/"
 extern const unsigned char g_ItemMixPixPath[32];       // 0x004b10d4
-extern const unsigned char g_ItemHealTable[96];        // 0x004bd927 (indexed by itemId)
+extern const unsigned char g_MedalPixPath[32];         // 0x004bf330
+extern const unsigned char g_ItemHealTable[0x61];      // 0x004bd927 (indexed by itemId; +0x51 = examine messages)
 extern const unsigned char g_ItemExamineCombos[48];    // 0x004bd988
 extern const unsigned char g_ItemExamineTypes[48];     // 0x004bd9b8
 

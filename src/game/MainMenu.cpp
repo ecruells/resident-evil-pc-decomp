@@ -5707,16 +5707,44 @@ static void FUN_0044e8c0(void)
     }
 }
 
-// (0x0044e920) - Viewer action 3: reload the item image after examining
+// (0x0044e920) - Viewer action 3: the doom book -> medal transformation.
+//
+// FUN_0044e8c0 hands control here (DAT_00ae9f4a = 3, DAT_00aea084 = 0x40) once
+// the examine spin has opened one of the two doom books. The first 0x40 frames
+// are the viewer's normal fade-out - the same zoom/yaw/roll steps and light
+// ramp as state 5 of FUN_0044e1b0 - and the last frame does the swap:
+//   0x3F (doom book 2) -> 0x24 (wolf medal), 0x40 (doom book 1) -> 0x25 (eagle)
+// The new slot sprite comes from data/medal.pix, two 1200-byte 20x30 images
+// with the book id minus 0x3F picking the row, blitted into the cursor slot's
+// own sheet row (g_ItemSlotIndices). menu_load_item_model then reloads the
+// model and DAT_00ae9f49 = 0 restarts the viewer on the medal.
+//
+// This was previously a fabricated stub that reloaded the CURRENT item's image
+// into sheet row 0 and dropped back to display mode: the book never became a
+// medal and slot 0's sprite got overwritten with whatever the model buffer held.
 static void FUN_0044e920(void)
 {
-    if ((g_menu_choice_id & 0x80) == 0) {
-        unsigned char imageType = g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4];
-        if (imageType != 0) {
-            LoadItemImage((int)imageType - 1, 0, (int)g_TimImageBuffer__bitmap);
-        }
-        DAT_00ae9f4a = 0;
+    DAT_00aea04c = DAT_00aea04c - 0x322;
+    DAT_00ae9f66 = DAT_00ae9f66 - 0xc0;
+    DAT_00ae9f68 = DAT_00ae9f68 - 0x80;
+    DAT_00aea084 = DAT_00aea084 - 1;
+    g_spriteAnimB = DAT_00aea084 >> 1;
+    // 0x0044e953: the light colour ramp is a BYTE (DAT_00aea084 << 2) - 1
+    viewer_setup_lights((DAT_00aea084 << 2) - 1);
+    if (DAT_00aea084 != 0) {
+        return;
     }
+
+    // 0x0044e9c0 - the cursor slot, read before DAT_00ae9f1b is rewritten
+    unsigned char slot = (unsigned char)((unsigned char)(DAT_00ae9f23 >> 1) - 4);
+    DAT_00ae9f1b = DAT_00ae9f1b - 0x3f;     // 0 = wolf, 1 = eagle
+    LoadFile((char*)g_MedalPixPath, g_TimImageBuffer__bitmap, 0x20);
+    LoadItemImage((int)DAT_00ae9f1b, (int)g_ItemSlotIndices[slot], (int)g_TimImageBuffer__bitmap);
+    DAT_00ae9f1b = DAT_00ae9f1b + 0x24;     // ITEM_WOLF_MEDAL / ITEM_EAGLE_MEDAL
+    ITEM_SLOTS[(unsigned int)slot * 2] = DAT_00ae9f1b;
+    ITEM_SLOTS[(unsigned int)slot * 2 + 1] = 1;
+    menu_load_item_model();
+    DAT_00ae9f49 = 0;
 }
 
 // Viewer action dispatch table (PTR_FUN_004bf310)

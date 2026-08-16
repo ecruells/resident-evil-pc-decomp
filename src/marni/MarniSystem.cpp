@@ -331,6 +331,35 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
         }
     }
 
+    // The palette pointer needs the same treatment as the pixel base, and never
+    // had it. m_pPalette is whatever PSXTexture::Store parsed out of the TIM /
+    // whatever CopyFrom carried into g_MarniBitsWorkBuffer; the loops below
+    // index it by a full pixel byte (0-255 at 8bpp, 0-15 at 4bpp) with no
+    // check, so one mis-parsed descriptor faults on `clut[idx]` deep inside the
+    // async task instead of failing the page. Verify the whole CLUT is readable
+    // and drop to the untextured path if it is not.
+    if (clut != NULL && (bpp == 4 || bpp == 8)) {
+        SIZE_T need = (bpp == 4) ? 16 * sizeof(WORD) : 256 * sizeof(WORD);
+        MEMORY_BASIC_INFORMATION mbi;
+        SIZE_T avail = 0;
+        if (VirtualQuery(clut, &mbi, sizeof(mbi)) == sizeof(mbi) &&
+            mbi.State == MEM_COMMIT &&
+            (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0) {
+            avail = (SIZE_T)((const BYTE*)mbi.BaseAddress + mbi.RegionSize -
+                             (const BYTE*)clut);
+        }
+        if (avail < need) {
+            char dbg[224];
+            sprintf_s(dbg, sizeof(dbg),
+                      "[TEXPAGE] BAD CLUT: w=%d h=%d bpp=%d pitch=%d base=%p "
+                      "clut=%p need=%Iu avail=%Iu src=%p\n",
+                      w, h, bpp, pitch, (const void*)base, (const void*)clut,
+                      need, avail, g_texturePageSrcDesc);
+            OutputDebugStringA(dbg);
+            return 0;
+        }
+    }
+
     // Output is uploaded as DXGI_FORMAT_R8G8B8A8_UNORM, so each DWORD must be
     // 0xAABBGGRR - red in the lowest byte. PS1 15-bit source colour is
     // MBBBBBGGGGGRRRRR, i.e. red in bits 0-4. Packing 0xAARRGGBB here (the

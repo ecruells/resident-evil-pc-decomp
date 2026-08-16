@@ -600,6 +600,7 @@ int           g_DisplayImageHeight = 0;   // 0x004c3368
 int           g_titleTextureSlotId = 0;   // 0x004c331c
 int           g_texturePageMode = 0;      // DAT_008ec9c0
 int           g_texturePageHandle = 0;    // global handle
+void*         g_texturePageSrcDesc = NULL; // port-only diagnostic (see create_texture_page)
 int           g_AsyncResult = 0;          // async operation result
 int           g_ExecuteBufferHandle = 0;  // DAT_008e1d58
 int           g_SpriteQueueCount = 0;     // sprite queue count

@@ -225,6 +225,11 @@ int create_texture_page(void* psxTexData, int flags)
     // no-op that leaves the existing page untouched.
     if (psxTexData == NULL) return 0;
 
+    // Diagnostic only: VTable_CreateTextureHandle runs on the scheduler task, so
+    // its "[TEXPAGE] BAD CLUT" report has no way back to the call site. Stash
+    // the source descriptor so the log names the page that went wrong.
+    g_texturePageSrcDesc = psxTexData;
+
     CMarniBits_CopyFrom(&g_MarniBitsWorkBuffer, psxTexData);
     g_texturePageMode = flags;
     ExecAsync((void*)AsyncCreateTexturePage);
