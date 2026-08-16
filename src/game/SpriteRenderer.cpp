@@ -528,12 +528,48 @@ int AddSprite(TextureDesc* texture, short depth, int tpage, int fade) {
 }
 
 // ============================================================================
-// SubmitEffectSprite (0x0046d950)
+// SubmitEffectSprite (0x0046d9b0)
+//
+// The 2D billboard effects - water, steam, fire, muzzle flashes, blood. These
+// are SCENE primitives, not overlays: the original hands them to the ordering
+// table through the same MarniDirect3D vtable+0x28 insert that AddSprite and
+// AddSprite_Ex use, so an effect interleaves with the entity geometry by depth.
+//
+// The port had them as SPRITE_CLASS_NORMAL, which meant they were flushed in
+// the 2D pass that runs entirely AFTER FlushTmdObjects - so every effect
+// painted over every model no matter where it was in the room. They are now
+// SPRITE_CLASS_EFFECT and take part in FlushTmdObjects' far-to-near walk,
+// exactly like room masks and ground shadows.
+//
+// depthSort keeps the original's `depth * 0x40 - scaleY` unchanged, and the
+// 0x40 is NOT a mistake even though every other producer scales its key by 16.
+// Work the units through:
+//
+//   ProjectEffectSprite (0x0040aa50)  returns  viewZ >> 2   <- the easy one to
+//   eff->projDepth                    =        viewZ / 4       miss
+//   effect_submit_sprite's depthArg   =        viewZ / 64   (a further >> 4)
+//   depth * 0x40                      =        viewZ        <- view-space Z
+//
+// So this lands in exactly the same units as a TMD triangle's view Z and as a
+// room mask's `fade << 4`, which is what makes the interleave in FlushTmdObjects
+// meaningful. `scaleY` is g_EffectLightRecords[rec][1], 0 in all seven records.
+//
+// The ordering-table key the original passes to the vtable+0x28 insert is a
+// different, coarser quantity - clamp(depth - scaleX, 0, 0xfff) then minus
+// brightness and g_DepthFadeBias (0x004c3350: .rdata, one xref, 0). It is one
+// OT bucket per 64 view units here versus one per 16 for masks. The port sorts
+// on the field, not the bucket, so it is deliberately not reproduced; rewriting
+// depthSort as otKey*16 makes every effect sort four times too near and puts
+// them back on top of everything, which is the bug this comment exists to stop
+// someone re-introducing.
 // ============================================================================
 int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
                        unsigned char r, unsigned char g, unsigned char b,
                        int scaleX, int scaleY, int blendMode, short brightness) {
     if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return 0;
+
+    // Both only feed the OT bucket, which the port does not use.
+    (void)scaleX; (void)brightness;
 
     bool useSubpixel = !(texture->scaleX == 0x1000 && texture->scaleY == 0x1000);
 
@@ -548,7 +584,7 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
-    cmd->sortClass = SPRITE_CLASS_NORMAL;
+    cmd->sortClass = SPRITE_CLASS_EFFECT;
 
     cmd->spriteFlags = SpriteBuildFlags(texture->flags);
     cmd->alpha = 1.0f;
@@ -593,6 +629,9 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
         cmd->y1 = (texture->height - texture->pivotY) + sy - 1;
     }
 
+    // 0x0046dcdd, verbatim. This IS view-space Z - see the unit chain in the
+    // header comment. Do not "normalise" the 0x40 to the 16 the other producers
+    // use; the factor of four is what cancels ProjectEffectSprite's `>> 2`.
     cmd->depthSort = ((unsigned int)(depth & 0xFFFF)) * 0x40 - scaleY;
 
     cmd->u0 = (unsigned short)texture->texU;

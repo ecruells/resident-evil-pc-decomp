@@ -1394,10 +1394,32 @@ void Snd_em(unsigned char em_snd_id) // 0x0047fca0
 // Loads per-room enemy sound banks. Iterates through g_emSndBanks, destroys
 // existing banks, and loads WAV files from ./usa/sound/<name>.wav using the
 // g_RoomSoundNameTable lookup table (indexed by stageId * 29 + roomId).
+//
+// The lookup is bounds-checked because the table used to be short. It was mined
+// as 145 rows (5 stages), but the real one at 0x004cfae0 is 203 - the pointers
+// run contiguously with a 0xC0 stride to 0x004cfa20 and the first NULL is at
+// index 203 = 7 stages x 29. Stage 5 room 26 (room61A0) is index 171, so it read
+// a garbage row pointer, then a garbage char* out of it, and the sprintf below
+// copied whatever that pointed at into a 260-byte stack buffer until it hit a
+// NUL - smashing the frame, which is why the fault landed on `*piVar7 = bank`
+// with piVar7 = 0xB9E381AF rather than anywhere near the actual bug. The table
+// is complete now; the guard and the snprintf are here so a future short table
+// reports itself instead of corrupting the stack.
 // ============================================================================
 void Room_LoadEnemySoundBanks(void) {
     int iVar6 = 0;
     int* piVar7 = g_emSndBanks;
+
+    const unsigned int roomIdx = (unsigned int)g_stageId * 29 + (unsigned int)g_roomId;
+    const int roomIdxValid =
+        roomIdx < sizeof(g_RoomSoundNameTable) / sizeof(g_RoomSoundNameTable[0]);
+    if (!roomIdxValid) {
+        dbg_printf("[emsnd] stage %u room %u -> index %u is past the %u-row sound"
+                   " name table; loading no entity SFX for this room\n",
+                   (unsigned int)g_stageId, (unsigned int)g_roomId, roomIdx,
+                   (unsigned int)(sizeof(g_RoomSoundNameTable)
+                                  / sizeof(g_RoomSoundNameTable[0])));
+    }
 
     do {
         // Destroy existing bank if loaded
@@ -1409,13 +1431,14 @@ void Room_LoadEnemySoundBanks(void) {
         *((unsigned char*)(piVar7 + 1) + 1) = 0;
 
         // Look up per-room sound name table
-        const char** soundTable = g_RoomSoundNameTable[g_stageId * 29 + g_roomId];
+        const char** soundTable = roomIdxValid ? g_RoomSoundNameTable[roomIdx] : NULL;
 
         if (soundTable != NULL) {
             const char* filename = soundTable[iVar6 / 4];
             if (filename != NULL) {
                 char path[260];
-                sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", filename);
+                _snprintf(path, sizeof(path), GAME_DATA_ROOT "sound\\%s.wav", filename);
+                path[sizeof(path) - 1] = '\0';
                 findAndOpenFile(path);
 
                 int bank = loadSndBankFromWav(path);

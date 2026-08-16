@@ -913,7 +913,7 @@ unsigned int  room_check_sight_blocked(VECTOR* delta, unsigned char cell); // 0x
 
 // Per-room enemy sound name table (indexed by stageId * 29 + roomId)
 // Each entry points to an array of 4 sound name strings (or NULL)
-extern const char**  g_RoomSoundNameTable[145];
+extern const char**  g_RoomSoundNameTable[203];
 extern void*         g_SoundManager;
 extern class DirectSound* g_pDirectSound;
 extern DWORD         g_CachedWaveOutVolume;

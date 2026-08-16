@@ -2238,16 +2238,26 @@ extern const unsigned char g_ScdAnimRemap[32] = {
 // ============================================================================
 extern unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
 
-// Not yet transcribed. Reporting rather than silent so a missing one is visible in
-// the log instead of just producing a subtly wrong room.
-static void room_trans_report(const char* what)
-{
-    static const char* last = nullptr;
-    if (what != last) { last = what; dbg_printf("[roomtrans] missing %s\n", what); }
-}
-static void object_delete_00442170(int a) { (void)a; room_trans_report("0x00442170 object_delete"); }
-static void FUN_0041d070(void)            { room_trans_report("0x0041d070"); }
-static void FUN_00442180(void)            { room_trans_report("0x00442180"); }
+// The three calls this function makes that used to be report-only stubs, all
+// three now resolved against the retail exe:
+//
+//   0x00442170  object_delete_00442170  - a single RET. Called 13 more times
+//                                         through room_set with an increasing
+//                                         category number: a stripped debug or
+//                                         profiling checkpoint. Lives in
+//                                         ObjectManager.cpp.
+//   0x00442180  FUN_00442180            - also a single RET. Same thing, at the
+//                                         tail of the transition.
+//   0x0041d070  SndCompactAsync         - real: ExecAsync(0x0041d050), the
+//                                         DirectSound heap compaction. Inert in
+//                                         this port (XAudio2 backend); see the
+//                                         comment on SndCompactCallback.
+extern void object_delete_00442170(int category);   // ObjectManager.cpp
+extern void SndCompactAsync(void);                  // MarniSound.cpp
+
+// 0x00442180 - empty in the original. Kept as a named call so the shape of
+// room_transition_load still matches the disassembly.
+static void FUN_00442180(void) { }
 
 // ============================================================================
 // BuildEnemySnap (0x0048f1a0) - tear the outgoing room's enemy list down and
@@ -2482,7 +2492,7 @@ void room_transition_load(void)
     if ((flags & 0x40) == 0) {
         play_sfx(0, 1, 0);
     }
-    FUN_0041d070();
+    SndCompactAsync();
     FUN_00442180();
 
     g_AttractModeIdleTimer = 0;

@@ -1620,7 +1620,15 @@ dining-room door.
    room's switch table contains x=30900, so `check_camera_switch` correctly declines.
 4. **Nothing in the original moves the player after placement.** The two remaining
    stubs at the tail of `room_transition_load` are `FUN_00442180` (**empty in the
-   original**) and `FUN_0041d070` (`ExecAsync(&LAB_0041d050)`, the event-VM task).
+   original** - a single `RET`, like `0x00442170`) and `FUN_0041d070`. Both are
+   now resolved and implemented, 2026-08-16. `FUN_0041d070` is **not** the
+   event-VM task, as this note originally claimed: it is
+   `ExecAsync(&LAB_0041d050)`, and `LAB_0041d050` checks the sound manager's
+   initialised flag at `g_SoundManager+0x10` and calls
+   `DirectSound::compact` (`0x0041e680`) - `SetCooperativeLevel(EXCLUSIVE)`,
+   `IDirectSound::Compact()`, `SetCooperativeLevel(PRIORITY)`. It is the
+   per-room-load sound heap defragmenter and is inert in this port, whose audio
+   backend is XAudio2. Ported as `SndCompactAsync` in `MarniSound.cpp`.
 
 **The design, read from both sides of the same doorway.** The dining room's own door
 back to the hall is `ROOM1050.RDT` `doorNum=1`, `dest=6`, zone x 31600..33600, entry

@@ -5,6 +5,7 @@
 #include "../system/AssetPath.h"
 #include <cstdio>
 #include <cstring>
+#include <cmath>
 #include <xaudio2.h>        // NOLINT: XAudio2 (DirectSound replacement)
 #include <memory>            // NOLINT: std::unique_ptr for XAudio2 cleanup
 
@@ -130,6 +131,39 @@ const char** g_SoundBanksTable[SFX_SUBTABLE_SIZE] = {
 
 // Internal sentinel to identify stubbed DS buffers (no real COM buffer created)
 #define DS_STUB_BUF ((int*)0x00000001)
+
+// ============================================================================
+// DirectSound volume -> XAudio2 amplitude
+//
+// Every volume in this game is an IDirectSoundBuffer::SetVolume argument:
+// attenuation in HUNDREDTHS OF A DECIBEL (millibels), 0 = full scale,
+// DSBVOLUME_MIN = -10000 = silence. IXAudio2Voice::SetVolume takes a LINEAR
+// amplitude multiplier instead, so the conversion is
+//
+//     amplitude = 10 ^ (millibels / 2000)      (mB -> dB -> amplitude)
+//
+// This used to be `1.0f - (-vol / 10000.0f)`, i.e. linear IN THE MILLIBEL
+// NUMBER, which is a completely different curve and squashes the whole useful
+// range into the top of the scale. The values the game actually uses land
+// between roughly -800 and -2300 mB, and the old map turned that entire span
+// into 0.92..0.77 amplitude - about half a decibel from end to end, when the
+// original spans some 15 dB.
+//
+// Everything that varies volume was affected: 3D distance attenuation
+// (CalcPanVolume), the SCD per-camera BGM levels (opcode 0x2F) and the volume
+// ramps (opcode 0x43) all became near-inaudible nudges. The visible symptom
+// that turned this up was the stage 2 waterfall: rooms 2 and 4 share BGM group
+// 0x24, so channel 1 (Se_42) survives the transition and each room's per-frame
+// script re-levels it per camera - courtyard about -1070 mB, next room about
+// -1376..-1646 mB. Under the old curve that was 0.89 vs 0.84 and the waterfall
+// sounded exactly as loud from the next room.
+// ============================================================================
+static float DsVolumeToAmplitude(int millibels)
+{
+    if (millibels <= -10000) return 0.0f;
+    if (millibels >= 0)      return 1.0f;
+    return powf(10.0f, (float)millibels / 2000.0f);
+}
 
 // ------------------------------------------------------------------------
 // DirectSound constructor (0x0041f3b0)
@@ -404,10 +438,7 @@ void DirectSound::PlaySound(int bank, unsigned int slot)
         }
 
         // Apply current volume
-        int vol = BANK_VOL(bank);
-        float xa2vol = (vol <= -10000) ? 0.0f : 1.0f - ((float)(-vol) / 10000.0f);
-        if (xa2vol > 1.0f) xa2vol = 1.0f;
-        voice->SetVolume(xa2vol);
+        voice->SetVolume(DsVolumeToAmplitude(BANK_VOL(bank)));
 
         BANK_STATUS(bank) = 1;
         return;
@@ -452,16 +483,9 @@ void DirectSound::SetVol(int bank, int vol)
     if (buf == NULL) return;
 
     if (buf == DS_STUB_BUF) {
-        float xa2vol;
-        if (vol <= -10000) {
-            xa2vol = 0.0f;
-        } else {
-            xa2vol = 1.0f - ((float)(-vol) / 10000.0f);
-            if (xa2vol > 1.0f) xa2vol = 1.0f;
-        }
         IXAudio2SourceVoice* voice = g_BankVoices[bank];
         if (voice != NULL) {
-            voice->SetVolume(xa2vol);
+            voice->SetVolume(DsVolumeToAmplitude(vol));
         }
         BANK_VOL(bank) = vol;
         return;
@@ -919,6 +943,39 @@ void CleanupSoundManagerResources(void)
 
 void PauseGameSoundsCallback(void) { PauseSounds(); }
 void ResumeGameSoundsCallback(void) { ResumePausedSounds(); }
+
+// ============================================================================
+// SndCompactCallback (0x0041d050) / SndCompactAsync (0x0041d070)
+//
+// room_transition_load calls SndCompactAsync once per room load, right after the
+// BGM change and the door SFX. It is the DirectSound heap defragmenter: the
+// callback checks the manager's initialised flag at +0x10 and, if the device is
+// up, runs DirectSound::compact - SetCooperativeLevel(EXCLUSIVE),
+// IDirectSound::Compact(), SetCooperativeLevel(PRIORITY). Retail needed it
+// because a room's worth of freed hardware sound buffers left the on-card
+// mixer heap fragmented.
+//
+// In this port it is inert by construction, and deliberately so. The audio
+// backend is XAudio2 (see InitializeSoundSystem), and the DirectSound object
+// never gets a real device pointer - the constructor memsets the whole block,
+// so DirectSound::compact's `dev == NULL` guard returns immediately. XAudio2
+// owns its own voice memory and has nothing corresponding to compact.
+//
+// Wired up rather than stubbed so the call site reads like the original and the
+// day someone puts a real device behind this class, it just works.
+// ============================================================================
+void SndCompactCallback(void)
+{
+    // 0x0041d050 - the +0x10 initialised flag, not the vtable slot.
+    if (g_pDirectSound != NULL && *(int*)((BYTE*)g_pDirectSound + 0x10) != 0) {
+        g_pDirectSound->compact();
+    }
+}
+
+void SndCompactAsync(void)
+{
+    ExecAsync((void*)SndCompactCallback);
+}
 
 int findAndOpenFile(char* path)
 {

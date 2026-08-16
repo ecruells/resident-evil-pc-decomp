@@ -67,6 +67,8 @@ void PlayCurSnd(void);
 void getCurSndBankVol(void);
 void PauseGameSoundsCallback(void);
 void ResumeGameSoundsCallback(void);
+void SndCompactCallback(void);   // 0x0041d050
+void SndCompactAsync(void);      // 0x0041d070 - per-room-load sound heap compaction
 
 // File path resolution
 int  findAndOpenFile(char* path);

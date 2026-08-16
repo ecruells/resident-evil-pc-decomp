@@ -336,7 +336,10 @@ static void TmdComputeLight(const TmdLightState* ls, const float* n, const float
 // and every triangle in front of it is submitted after. Triangle-vs-triangle
 // ordering still comes from the depth buffer, untouched.
 // ============================================================================
-#define TMD_MAX_SCENE_DEPTHS  320   // 255 room sprites (count is a byte) + shadows
+// 255 room sprites (the count is a byte) + shadows + the 2D billboard effects.
+// Above MAX_SPRITE_COMMANDS (300) on purpose: the whole queue is the ceiling on
+// how many scene depths can exist, so this bound can never actually be reached.
+#define TMD_MAX_SCENE_DEPTHS  320
 
 void FlushTmdObjects(void)
 {

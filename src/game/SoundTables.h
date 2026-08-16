@@ -17,4 +17,4 @@ extern const unsigned char g_BgmRoomData[7][32][4]; // 0x004d0c30
 // Per-room enemy sound name table (indexed by stageId * 29 + roomId)
 // Each entry points to an array of const char* sound name strings (or NULL)
 // Up to 48 entries per room, accessed as soundTable[iVar6 / 4] where iVar6 = 0..96
-extern const char** g_RoomSoundNameTable[145]; // 0x004cfae0
+extern const char** g_RoomSoundNameTable[203]; // 0x004cfae0 - 7 stages x 29 rooms

@@ -247,6 +247,14 @@ void setSomeColor(int r, int g, int b)
 
 // ============================================================================
 // object_delete_00442170 (0x00442170)
-// No-op placeholder. Called from room_set with category=1 but does nothing.
+//
+// A single RET in the retail exe - verified at the byte level, not just an
+// empty Ghidra decompilation. room_set calls it thirteen times with a category
+// number that only ever counts up (1..0xd, one after each stage of the load),
+// and room_transition_load calls it once more with 0. That is the signature of
+// a debug or profiling checkpoint whose body was compiled out of the release
+// build, not of an object deleter: nothing reads the argument.
+//
+// The name is Ghidra's guess and is kept only so the call sites stay greppable.
 // ============================================================================
-void object_delete_00442170(int category) { }
+void object_delete_00442170(int category) { (void)category; }

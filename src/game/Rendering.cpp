@@ -379,8 +379,9 @@ void FrameRateGovernor(void)
             // 0xFFA*16+500 = 0x10194) that must draw BEHIND both the pending
             // overlays and the 3D TMD pass - the original sorted everything in
             // a single OT, where 0x10194 was the farthest primitive.
-            // Effect sprites sort at depthSort = projected_z (up to 0xFFC0,
-            // culled at 0x3FFF), so 0x10000 keeps them in the on-top half.
+            // Effect sprites no longer pass through here at all - they are
+            // SPRITE_CLASS_EFFECT and FlushTmdObjects interleaves them with the
+            // entity triangles, so this range only ever sees NORMAL commands.
             FlushSpriteCommandsRange(0x10000, 0xFFFFFFFFu);
 
             // Render high-depth pending sprites (background, room lighting).
@@ -439,9 +440,10 @@ void FrameRateGovernor(void)
             // 500 is the floor because a command sprite's depthSort is
             // depth*16 + 500: nothing from display_texture/draw_texture can
             // land below it, so overlays under 500 (every screen fade, at
-            // 450-499) keep drawing after ALL of them exactly as before. Only
-            // effect sprites, which sort by projected Z, can go lower - those
-            // are deliberately left under the fades.
+            // 450-499) keep drawing after ALL of them exactly as before.
+            // Effect sprites used to be the one class that could sort lower;
+            // they are SPRITE_CLASS_EFFECT now and drew during the TMD pass, so
+            // this range sees nothing below 500 at all.
             unsigned int spriteCursor = 0x10000;
             for (int i = 0; i < g_pendingSpriteCount; i++) {
                 if (!g_pendingSprites[i].valid) continue;

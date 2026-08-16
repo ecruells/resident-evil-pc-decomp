@@ -72,7 +72,9 @@ static_assert(sizeof(TextureDraw) == 0x54, "TextureDraw size mismatch");
 #define SPRITE_CLASS_NORMAL    0x1u
 #define SPRITE_CLASS_ROOMMASK  0x2u   // DrawRoomSpr overlays, key = posData
 #define SPRITE_CLASS_SHADOW    0x4u   // ground shadow / blood pool (AddFadePoly)
-#define SPRITE_CLASS_SCENE     (SPRITE_CLASS_ROOMMASK | SPRITE_CLASS_SHADOW)
+#define SPRITE_CLASS_EFFECT    0x8u   // 2D billboard effects (SubmitEffectSprite)
+#define SPRITE_CLASS_SCENE     (SPRITE_CLASS_ROOMMASK | SPRITE_CLASS_SHADOW \
+                                | SPRITE_CLASS_EFFECT)
 #define SPRITE_CLASS_ALL       (SPRITE_CLASS_NORMAL | SPRITE_CLASS_SCENE)
 
 // ---------------------------------------------------------------------------

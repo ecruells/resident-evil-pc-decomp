@@ -95,10 +95,16 @@ static const CharScaInfo g_charScaInfo[11] = {
 };
 
 // ============================================================================
-// Held-weapon TMD path table (0x004c1a30) - 4 blocks of 7, 18-byte entries.
+// Held-weapon TMD path table (0x004c1a30) - 5 blocks of 7, 18-byte entries.
 // Indexed by (characterBlock * 7 + behavior_flags) * 0x12.
+//
+// FIVE blocks, not four: the clamp below is `if (block > 4) block = 2`, so
+// block 4 is a legal index and it is the one Wesker (id 36) uses. Declaring
+// only 4 blocks made char_init_wesker read 0x7e bytes past the array into the
+// next .rdata literal, hand LoadFile the garbage path ".\assets\USA\emented %s
+// (id=%u ...)", and then walk the un-loaded buffer inside ProcessTmdTextures.
 // ============================================================================
-static const char g_charWeaponTmdTable[4][7][18] = {
+static const char g_charWeaponTmdTable[5][7][18] = {
     {   // block 0 - Chris
         "players/ws202.tmd", "players/ws202.tmd", "players/ws202.tmd",
         "players/ws202.tmd", "players/ws202.tmd", "players/ws202.tmd",
@@ -118,6 +124,11 @@ static const char g_charWeaponTmdTable[4][7][18] = {
         "players/ws232.tmd", "players/ws232.tmd", "players/ws232.tmd",
         "players/ws232.tmd", "players/ws232.tmd", "players/ws232.tmd",
         "players/ws236.tmd",
+    },
+    {   // block 4 - Wesker (0x004c1c1c)
+        "players/ws242.tmd", "players/ws242.tmd", "players/ws242.tmd",
+        "players/ws242.tmd", "players/ws242.tmd", "players/ws242.tmd",
+        "players/ws242.tmd",
     }
 };
 
@@ -129,8 +140,9 @@ static const char g_charWeaponTmdTable[4][7][18] = {
 //
 // The block index is clamped twice in the original:
 //     block = id - 0x20;  if (block > 4) block = 2;  if (block > 0xb) block = 3;
-// The second test can never fire - block is at most 4 by then - so the ws232
-// block is dead code. Kept as-is.
+// The second test can never fire - block is at most 4 by then. Kept as-is.
+// Blocks 0-4 are all reachable: ids 32-36 are Chris/Jill/?/Rebecca/Wesker, and
+// every id above 36 folds onto block 2.
 // ============================================================================
 static void LoadCharacterWeaponTmd(void)
 {

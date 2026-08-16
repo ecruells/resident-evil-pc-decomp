@@ -43,7 +43,7 @@ extern unsigned char check_weapon_line_of_sight(VECTOR* targetPos); // WeaponDam
 extern unsigned char Effect_CreateBillboard(unsigned char type, unsigned char depthGroup,
                                             short yaw, void* spriteInfo, void* pos,
                                             char lightFactor);       // PlayerAnimations.cpp
-extern const unsigned char g_RoomEffectSpriteTable[5 * 32 * 4]; // RoomStubs.cpp 0x004c48b8
+extern const unsigned char g_RoomEffectSpriteTable[7 * 32 * 4]; // RoomStubs.cpp 0x004c48b8
 extern unsigned int g_entity_bkp;          // EntityCommon.cpp 0x00be0df4
 extern int  ProjectEffectSprite(SVECTOR* world, int* outxy);   // GteMatrix.cpp 0x0040aa50
 extern int  is_entity_in_switch_zone(VECTOR* position, void* zoneData); // Room.cpp 0x00462d90
@@ -2502,32 +2502,34 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     g_TextureDesc.unk10 = (*(unsigned short*)(eff->clutInfo + 4) & 0x3f) << 4;
     g_TextureDesc.texU = uv[0];
     g_TextureDesc.texV = uv[1];
-    // depthGroup packs two things: the low 3 bits select the animation (see
-    // Effect_CreateBillboard), and depthGroup >> 3 selects the PALETTE. That is
-    // how one blood sprite renders red for a zombie, yellow for a spray, and
-    // white for Plant 42's sap.
+    // depthGroup packs two things: the low 3 bits select the animation, and
+    // depthGroup >> 3 lands here as the tint index.
     //
-    // KNOWN GAP (2026-08-15): this value is written and never read back, so the
-    // palette half of that mechanism does nothing. Plant 42 bleeds red.
+    // AUDITED 2026-08-16 - this path is complete, and an earlier note claiming a
+    // "missing CLUT half" was wrong. The audit, so nobody repeats it:
     //
-    // What is already CONFIRMED correct, so do not go looking there again:
-    // the tint index and the colour records resolve exactly right - Plant 42's
-    // effects (depthGroup 0x18/0x1B/0x1C) come out as tint 3, colorIdx 4,
-    // count 4 -> rgb FFFFFF, while the type-9 spray at tint 2 correctly picks
-    // FFCC66. The `color` triple below reaches SubmitEffectSprite as an RGB
-    // MULTIPLIER, and white multiplied by a red texture is still red, so the
-    // red is in the sprite's own CLUT.
+    //   * g_TextureDesc.printClutTint is 0x00be1172. It has exactly TWO readers
+    //     in the whole exe - 0x0047c8cf (this function) and 0x0047cd6b (the
+    //     menu redraw) - and both use it only as the index into
+    //     g_EffectColorRecords[colorIdx], which is what the port does below.
+    //   * Effect_CreateBillboard (0x0047be30) stores depthGroup verbatim and
+    //     otherwise touches only `depthGroup & 7`, the animation index. nClutInfo
+    //     comes from g_effectSpriteInfo[type], per sprite TYPE, never per tint.
+    //   * SubmitEffectSprite takes texture page variant 0 unconditionally
+    //     (`g_TexturePageTable[textureId * 223]`). AddSprite_Ex is the one that
+    //     resolves printClutTint into a CLUT variant, and effects do not go
+    //     through it. That asymmetry in the ORIGINAL is what the old note
+    //     mistook for something the port had dropped.
     //
-    // The missing half is the blit: the original turns this 0-3 index into a
-    // CLUT coordinate, but nothing in the port's effect path consumes
-    // printClutTint. The other readers (MainMenu, TextureLoader, Rendering) use
-    // the field as a real CLUT id in the 0x1E0 encoding
-    // (`printClutTint - g_TexturePageClutBase[slot]` -> CLUT X), which is a
-    // different scale entirely from what is stored here.
+    // So depthGroup >> 3 has exactly one effect anywhere: picking the RGB triple
+    // that multiplies the sprite. There is no second palette mechanism.
     //
-    // To fix: decompile the original effect blit around 0x0047c6d8 and follow
-    // how it applies this to the CLUT selection; `unk10` above is where the
-    // effect path currently gets its CLUT from, unconditionally.
+    // The old note also reasoned that Plant 42's tint resolving to FFFFFF meant
+    // the sap "should be white". FFFFFF is the identity multiplier - it means no
+    // modulation, i.e. render the sprite in its own colours. It says nothing
+    // about what colour those are. If the sap ever does look wrong, the place to
+    // look is the sprite art itself (which CLUT blit_effect_tim_at pulls out of
+    // the RDT/esp TIM), not this index.
     g_TextureDesc.printClutTint = (short)(eff->depthGroup >> 3);
 
     // ---- scale: camera light * sprite light factor * width / distance ----
@@ -2612,10 +2614,14 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     int brightness = g_EffectLightRecords[lightRec][2];
 
     // ---- stage-4 room-0x13 camera-5 special case (in-game path only): the
-    // bird's-eye view renders the effect unlit and at a fixed depth ----
+    // bird's-eye view renders the effect unscaled and at a fixed depth ----
+    //
+    // The colour is NOT reset here. 0x0047c99e is `LEA ECX,[EDI+EDI*2]` then
+    // `ADD ECX,[EBP+0x4c528c]` - tint*3 added to the record table, exactly like
+    // the general path. This branch only zeroes the two scale addends and pins
+    // the depth to 0x3c; brightness and blendMode carry through untouched.
     unsigned int depthArg;
     if (stage4Special && (g_stageId == 4) && (g_roomId == 0x13) && (g_roomCameraId == 5)) {
-        color = g_EffectColorRecords[colorIdx].table;
         scaleXadd = 0;
         scaleYadd = 0;
         depthArg = 0x3c;
