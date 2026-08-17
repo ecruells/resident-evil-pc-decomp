@@ -60,7 +60,10 @@ extern void FUN_00483580(int* joint, MATRIX* out);          // 0x00483580 item_v
 // SetRotAndTransMatrix negates the GTE Y translation while screen Y grows
 // downwards.
 // ============================================================================
-#define TMD_NEAR_Z          (1.0f)    // cull verts with vz <= this (behind/near)
+// TMD_NEAR_Z is only the depth-buffer range's lower edge and a floor under the
+// real near plane; the near CLIP itself is 2 * g_sceneRenderParam, computed per
+// frame in FlushTmdObjects because the fov changes with the camera.
+#define TMD_NEAR_Z          (1.0f)
 #define TMD_FAR_Z      (131072.0f)    // depth-buffer range; every scene z fits
 #define TMD_MAX_QUEUE       2048
 #define TMD_MAX_TRIS_FLUSH  1024      // MarniDX::DrawTriangles3D per-call cap
@@ -357,6 +360,29 @@ void FlushTmdObjects(void)
         float cy = (float)g_SubpixelOffsetY * scaleY;
         float f  = (float)g_sceneRenderParam * scaleX;
 
+        // Near plane. The original marks a vertex clipped when its view-space Z
+        // is under TWICE the projection distance (0x00447023-0x0044703c):
+        //     MOV EAX, [EBP + 0x44]   ; the projection distance (g_primParam,
+        //                             ; which FUN_0040a8f0 loads from
+        //                             ; g_sceneRenderParam - the RDT camera fov)
+        //     ADD EAX, EAX            ; 2 * f
+        //     CMP EAX, EBX            ; EBX = (int)vz
+        //     JLE  -> [vtx+0x18] = 0  ; keep
+        //             [vtx+0x18] = 1  ; clip
+        // and drops a primitive whose vertices' clip flags do not sum to zero
+        // (the `... + ... + ... == 0` test guarding every AddPrim in
+        // FUN_00446e40). This port used 1.0, i.e. "behind the eye" only, so
+        // anything that came within a few hundred units of the camera still
+        // projected - blown up until it filled the frame. That is the boulder
+        // pinning itself against the wall the room-30F0 camera looks out of,
+        // and the crank-driven bridge wall as it swings through the eye point.
+        //
+        // vz is in world units, so this must use the UNSCALED parameter: f
+        // above carries the render-resolution scale purely to turn view space
+        // into pixels.
+        float nearZ = 2.0f * (float)g_sceneRenderParam;
+        if (nearZ < TMD_NEAR_Z) nearZ = TMD_NEAR_Z;   // fov never read / zero
+
         // Triangles are collected across every queued object and submitted only
         // after a per-triangle depth sort. The original inserts each TMD object
         // into the ordering table at a single depth and lets the D3D depth
@@ -446,7 +472,7 @@ void FlushTmdObjects(void)
                 float vz = M[2] * x + M[6] * y + M[10] * z + M[14];
 
                 vzArr[v] = vz;
-                if (vz <= TMD_NEAR_Z) {
+                if (vz < nearZ) {
                     clipped[v] = 1;
                     sx[v] = sy[v] = 0.0f;
                 }
@@ -497,29 +523,49 @@ void FlushTmdObjects(void)
                 idx[0] = ip[0]; idx[1] = ip[1]; idx[2] = ip[2];
                 if (vertsInPrim == 4) idx[3] = ip[3];
 
+                bool oob = false;
+                for (int v = 0; v < vertsInPrim; v++)
+                    if (idx[v] >= vtxCount) { oob = true; break; }
+                if (oob) continue;
+
+                // Both the near-clip and the backface test are decided ONCE per
+                // primitive and gate all of its triangles, exactly as the
+                // original does - a quad never loses only one of its halves.
+                //
+                // Near clip: the original's guard is
+                // `clip[a] + clip[b] + clip[c] (+ clip[d]) == 0`, i.e. one
+                // clipped vertex drops the whole packet.
+                int clipSum = 0;
+                for (int v = 0; v < vertsInPrim; v++) clipSum += clipped[idx[v]];
+                if (clipSum != 0) continue;
+
+                // Backface cull. The original tests
+                //     0 < (ya - yb) * (xc - xb) + (yc - yb) * (xb - xa)
+                // over the packet's FIRST THREE screen vertices (the condition
+                // in front of every AddPrim in FUN_00446e40), which expands
+                // term for term to the signed area below - so there is no
+                // winding convention left to choose. This port previously drew
+                // both sides and leaned on the depth buffer; that is what let
+                // an object the camera sits inside paint its far shell over the
+                // whole frame, since every surviving triangle there is a back
+                // face. The index buffer feeding this is byte-identical to the
+                // original's (PSXObject_Store writes quads as base+0,+1,+3,+2),
+                // so the vertex order the test sees is the original's too.
+                float x0 = sx[idx[0]], y0 = sy[idx[0]];
+                float x1 = sx[idx[1]], y1 = sy[idx[1]];
+                float x2 = sx[idx[2]], y2 = sy[idx[2]];
+                if ((x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0) <= 0.0f)
+                    continue;
+
                 // Triangulate: (0,1,2) + (0,2,3) for quads
                 for (int t = 0; t < vertsInPrim - 2; t++) {
                     WORD i0 = idx[0];
                     WORD i1 = idx[t + 1];
                     WORD i2 = idx[t + 2];
-                    if (i0 >= vtxCount || i1 >= vtxCount || i2 >= vtxCount)
-                        continue;
-                    if (clipped[i0] || clipped[i1] || clipped[i2])
-                        continue;
 
-                    float x0 = sx[i0], y0 = sy[i0];
-                    float x1 = sx[i1], y1 = sy[i1];
-                    float x2 = sx[i2], y2 = sy[i2];
-
-                    // No backface culling: the PS1 GPU draws both sides and the
-                    // original PC path leaned on the D3D depth buffer to decide
-                    // which survives. The per-triangle depth sort below stands in
-                    // for that buffer, so the nearer face always wins and there
-                    // is no winding convention to get wrong here. Degenerate
-                    // (zero-area) triangles are still dropped.
-                    float area2 = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0);
-                    if (area2 == 0.0f)
-                        continue;
+                    x0 = sx[i0]; y0 = sy[i0];
+                    x1 = sx[i1]; y1 = sy[i1];
+                    x2 = sx[i2]; y2 = sy[i2];
 
                     if (collected >= TMD_MAX_TRIS_COLLECT) continue;
 
@@ -1175,7 +1221,22 @@ static void RoomObjectRender(unsigned char* obj)
         skip = true;
     } else if ((stageMod == 2) && (g_roomId == 0x0f) && (g_roomCameraId == 3) &&
                (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0) &&
-               (*(int*)(obj + 0x34) <= 0x7274)) {
+               (*(int*)(obj + 0x34) > 0x7274)) {
+        // 0x004747ab: CMP dword ptr [EDI], 0x7274 / JG <return>, with EDI at
+        // record + 0x34 - the model's world X. The sense is "skip once X passes
+        // the threshold", and this port had it inverted, so the object was
+        // hidden exactly when it should have drawn and drawn exactly when it
+        // should have been hidden.
+        //
+        // This is the boulder in room 30F0 (g_stageId is 0-based, so the stage-3
+        // file name is id 2). Camera 3 sits at x = 32940 looking back down the
+        // corridor; 0x7275 = 29301, so the original drops the model as soon as
+        // the boulder rolls within ~3600 units of the eye - which is the whole
+        // point of the rule, and why it filled the screen here instead.
+        //
+        // The type is compared against DAT_004c3694 in the original, but that
+        // global has exactly one xref (this read) and holds 0, so it is a
+        // build-time constant and the literal below is faithful.
         skip = true;
     }
     if (skip) return;
