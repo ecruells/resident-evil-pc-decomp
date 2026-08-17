@@ -3,6 +3,10 @@
 // Adapted from Ghidra decompilation
 #include "Globals.h"
 
+// 0x00470750 - declared in SpriteRenderer.h; the signature must match that
+// definition exactly (see the stub-overload note on display_room_camera_bg).
+extern void Display_SetParams(int param1, int param2);
+
 // Sprite animation/screen tint state (original addresses 0x00be41d0-0x00be41d4)
 // These are global in the original binary; game_start resets g_spriteAnimIntensity
 // to prevent stale white-flash overlays from the character-select fade transition.
@@ -163,6 +167,30 @@ int main_loop(void)
     }
     if (g_SndRampFramesLeft != 0) {
         UpdateSoundDecay();
+    }
+
+    // 0x004297e5-0x004297f6: msf2 bit 1 is the screen-shake enable (SCD bank 5,
+    // byte offset 4, bit 0x02 - set by the boulder tunnel's event scripts), and
+    // the gate is `CMP byte ptr [0x00be41c1], BL` - byte 1 of msf only, i.e. no
+    // menu/message/got-item state. Testing `g_main_state_flags >> 8` instead of
+    // `(g_main_state_flags >> 8) & 0xFF` folded in bits 16-31, which always hold
+    // the "game loop active"/"game initialized" bits during play, so the shake
+    // never ran once.
+    const bool shakeActive = ((g_main_state_flags2 & 0x02) != 0) &&
+                             (((g_main_state_flags >> 8) & 0xFF) == 0);
+
+    // The offsets have to be rolled BEFORE TaskScheduler_Update, not at the end
+    // of the frame where the original rolls them (0x004297f6). The original
+    // transforms everything it draws into the ordering table during the task
+    // pass, so one roll per frame feeds the whole next frame uniformly. This
+    // port only bakes the offset in at queue time for the 2D sprites and the
+    // room masks (AddSprite/draw_texture add g_ScreenOffsetX); the 3D pass and
+    // the background quad read g_SubpixelOffsetX/g_displayImageOriginX live at
+    // render time. Rolling at the end therefore cut the frame in half - the
+    // masks were drawn with the previous roll while the entities and the
+    // background used the new one, which is the mask/background desync.
+    if (shakeActive) {
+        ApplyScreenShake();
     }
 
     if ((g_main_state_flags & 0x20000000) != 0) {
@@ -372,14 +400,34 @@ _fade_done:
     } else if ((g_main_state_flags & 0x80000000) != 0) {
         if ((g_main_state_flags2 & 0x04) == 0) {
             ResetScreenAndRebuildSprites(g_spriteAnimActive == 0 ? 0xF0 : 0);
+
+            if (shakeActive) {
+                // ResetScreenAndRebuildSprites just re-centred the screen offset
+                // and put the display image back at (0,0), both of which the
+                // render-time readers below would otherwise pick up. Re-apply
+                // this frame's roll - the same values the masks queued during
+                // TaskScheduler_Update already baked in - so the whole frame
+                // agrees. No re-roll here: that happened before the task pass.
+                SetScreenOffset(g_ScreenShakeOffsetX + 160, g_ScreenShakeOffsetY + 120);
+
+                // The room background is the display image, not a sprite, so
+                // SetScreenOffset does not touch it - only its own origin does.
+                // The original moves that origin in ApplyShakeAndRebuildSprites
+                // (0x0045ab72), but that whole branch sits behind msf2 bit 2,
+                // the "background inset to 316x236 so the shake has 2px of
+                // margin" mode, and nothing in the retail exe ever sets msf2
+                // bit 2 - so its background never moved. No inset is needed
+                // here: OT_InsertPrimitive shifts the sampled window instead of
+                // the full-screen quad, so nothing can be uncovered.
+                Display_SetParams(g_ScreenShakeOffsetX, g_ScreenShakeOffsetY);
+            }
         } else {
             ApplyShakeAndRebuildSprites();
         }
     }
 
-    if (((g_main_state_flags2 & 0x02) != 0) && ((g_main_state_flags >> 8) == 0)) {
-        ApplyScreenShake();
-    }
+    // (0x004297f6's ApplyScreenShake call lives at the top of the frame here -
+    // see the note next to it.)
 
     if (g_ScreenAccessCheck != 0) {
         SetScreenReady(1);

@@ -789,13 +789,29 @@ static void apply_vol_delta(int* bankPtr, int delta)
     set_volume(*bankPtr, vol);
 }
 
+// Record counts for UpdateSoundFade's four bank sweeps, read off the original's
+// loop bounds at 0x004802f5-0x00480423 (base -> exclusive end, stride 8):
+//   g_SfxBanks          0x00ac9b80 -> 0x00ac9c00   16 records (32 ints)
+//   g_RoomSfxBanks      0x00ac9910 -> 0x00ac9920    2 records ( 4 ints)
+//   g_CharacterSfxBanks 0x00ac9950 -> 0x00ac9998    9 records (18 ints)
+//   g_emSndBanks        0x00ac99f0 -> 0x00ac9b70   48 records (96 ints)
+// The 9 is deliberate: load_character_sfx fills 16 records, and the original
+// only ever fades the first 9 (see the note on its loop bound in SoundSystem.cpp).
 void UpdateSoundFade(int steps)
 {
     if (g_BgmSoundBank != 0) apply_vol_delta(&g_BgmSoundBank, steps);
     for (int* p = g_SfxBanks; p < g_SfxBanks + 32; p += 2) apply_vol_delta(p, steps);
-    for (int* p = g_RoomSfxBanks; p < &g_SndRampDirection; p += 2) apply_vol_delta(p, steps);
-    for (int* p = g_CharacterSfxBanks; p < g_CharacterSfxBanks + 48; p += 2) apply_vol_delta(p, steps);
-    for (int* p = g_emSndBanks; p < g_emSndBanks + 48; p += 2) apply_vol_delta(p, steps);
+    // Was `p < &g_SndRampDirection`. In the original that address happens to be
+    // the end of this array; in our .bss it is five globals later, so the sweep
+    // ran off g_RoomSfxBanks through g_CharacterSfxBanks, g_emSndBanks and the
+    // scalars behind them, feeding whatever it found to DirectSound::GetVol as a
+    // bank index - GetVol's BANK_BASE is `this + bank * 0xA2C`, so a stray -1
+    // (g_SfxVolume / g_EnemySndVolume both idle at -1) is an instant access
+    // violation. See docs/MEMORY_LAYOUT.md: never bound a loop with the address
+    // of a neighbouring global.
+    for (int* p = g_RoomSfxBanks; p < g_RoomSfxBanks + 4; p += 2) apply_vol_delta(p, steps);
+    for (int* p = g_CharacterSfxBanks; p < g_CharacterSfxBanks + 18; p += 2) apply_vol_delta(p, steps);
+    for (int* p = g_emSndBanks; p < g_emSndBanks + 96; p += 2) apply_vol_delta(p, steps);
     // Original bound is 0x00ac99e8, i.e. 3 records - not 24 (the old `+ 48` on an
     // int* over-ran the array by 21 entries).
     for (int i = 0; i < 3; i++) {

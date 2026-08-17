@@ -3,6 +3,7 @@
 #include "../marni/PSXTexture.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/MarniBits.h"
+#include "../DebugPrint.h"
 #include <stdio.h>
 
 #undef LoadImage  // Win32 WinUser.h macro conflicts with Marni LoadImage
@@ -1066,10 +1067,47 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
     static const int bppTable[] = { 1, 2, 4 };
     int bpp = (format >= 0 && format < 3) ? bppTable[format] : 2;
 
+    // --- legacy Marni descriptor bounds --------------------------------------
+    // Same problem LoadTexturePage/ProcessTextureImage were already guarded for,
+    // and this function had it worse. The original's per-slot descriptor arrays
+    // give every slot 0xDF DWORDs (0x37C bytes) and span ~393KB of Marni memory
+    // (see display_texture's note); the port's stand-ins hold roughly ONE slot's
+    // worth. LoadImage then biases every slot by 0xF, so the smallest possible
+    // destCheck is 0xF*0xDF = 3345 and the smallest destOff is 0xF*0x37C =
+    // 13332 - i.e. every single call indexed tens of KB past the end of
+    // DWORD[256]/DWORD[1024] arrays. The destroy loop below is the dangerous
+    // one: both the "is the slot live" flag and the page COUNT came from
+    // whatever .bss happened to sit at that offset (for the item box that lands
+    // in g_bgPakLoadBuffer, i.e. raw file bytes), and it then zeroed that many
+    // DWORDs starting tens of KB into .bss. The item box drives the largest
+    // offsets in the game - itembox_draw_slot_icon passes dstSlot 0xF..0x16, so
+    // destSlot 30..37 and destOff up to 33004 - which is how live globals near
+    // g_ItemSlotsPointer got zeroed and menu_draw_inventory faulted reading
+    // ITEM_SLOTS[equipped*2-2] at a NULL base.
+    //
+    // The D3D11 VRAM-page path below is what actually puts these images on
+    // screen (it keys off destSlot, which is range-checked separately), so
+    // skipping the legacy descriptor work costs nothing today. The checks are
+    // written against the real array sizes rather than hardcoded so the code
+    // starts working again if the stand-ins are ever sized properly.
+    const int  srcCheck    = (srcSlot + 0xF) * 0xDF;
+    const bool destCntOk   = (size_t)(destCheck + 1) * sizeof(DWORD) <= sizeof(g_VideoDriverArray_814) &&
+                             (size_t)(destCheck + 1) * sizeof(DWORD) <= sizeof(g_VideoDriverArray_810);
+    const bool srcCntOk    = srcCheck >= 0 &&
+                             (size_t)(srcCheck + 1) * sizeof(DWORD) <= sizeof(g_VideoDriverArray_814);
+    const bool destTableOk = (size_t)(destCheck + 1) * sizeof(DWORD) <= sizeof(g_TexturePageTable_DAT);
+    const bool srcBitsOk   = srcOff  >= 0 && (size_t)srcOff  + sizeof(CMarniBits) <= sizeof(g_VideoDriverArray_4d0);
+    const bool destBitsOk  = destOff >= 0 && (size_t)destOff + sizeof(CMarniBits) <= sizeof(g_VideoDriverArray_4d0);
+    const bool destDescOk  = (size_t)destOff + 0x24 <= sizeof(g_VideoDriverArray_838);
+    const bool srcDescOk   = (size_t)(srcSlot + 0xF) * 0x37C + 0x24 <= sizeof(g_VideoDriverArray_838);
+
     // Destroy existing texture pages at destination slot
-    if (g_VideoDriverArray_814[destCheck] != 0) {
-        for (DWORD i = 0; i < g_VideoDriverArray_810[destCheck]; i++) {
-            DWORD* handles = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + destCheck * sizeof(DWORD));
+    if (destCntOk && destTableOk && g_VideoDriverArray_814[destCheck] != 0) {
+        DWORD pageCount = g_VideoDriverArray_810[destCheck];
+        DWORD room = (DWORD)(sizeof(g_TexturePageTable_DAT) / sizeof(DWORD)) - (DWORD)destCheck;
+        if (pageCount > room) pageCount = room;
+        DWORD* handles = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + destCheck * sizeof(DWORD));
+        for (DWORD i = 0; i < pageCount; i++) {
             if (handles[i] != 0) {
                 destroy_texture_page(handles[i]);
                 handles[i] = 0;
@@ -1198,6 +1236,31 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
                 g_TexturePageOriginY[slot] = 0;
             }
         }
+    }
+
+    // Everything from here on works through the legacy per-slot descriptors, so
+    // it only runs when every one of them is actually in range. Note this is not
+    // merely a bad-pointer read: srcBits->Lock() hands back m_pPixelData read out
+    // of an unrelated global, and the copy loop below then writes width*height
+    // 16-bit pixels through it.
+    if (!srcBitsOk || !destBitsOk || !destDescOk || !srcDescOk ||
+        !destCntOk || !srcCntOk || !destTableOk) {
+#ifdef _DEBUG
+        // One line per distinct slot pair, not per call - this fires every frame
+        // the item box is open otherwise.
+        static int s_reported[64];
+        static int s_reportCount = 0;
+        int key = (dstSlot << 8) | (srcSlot & 0xFF);
+        bool seen = false;
+        for (int i = 0; i < s_reportCount; i++) if (s_reported[i] == key) { seen = true; break; }
+        if (!seen && s_reportCount < 64) {
+            s_reported[s_reportCount++] = key;
+            dbg_printf("[TEX] LoadImage: legacy descriptors out of range, skipped "
+                       "(srcSlot=%d dstSlot=%d destCheck=%d destOff=%d srcOff=%d)\n",
+                       srcSlot, dstSlot, destCheck, destOff, srcOff);
+        }
+#endif
+        return;
     }
 
     // Lock source CMarniBits to get its pixel data buffer

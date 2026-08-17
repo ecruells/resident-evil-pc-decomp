@@ -354,9 +354,7 @@ void FrameRateGovernor(void)
         // Dropped frame: discard everything queued for it, the 3D queue
         // included, otherwise objects pile up until the next presented frame.
         g_LastFrameTime_ms = 0;
-        g_pendingSpriteCount = 0;
-        SpriteQueue_Reset();
-        TmdQueue_Reset();
+        ResetSpriteQueue();
     } else {
         if (g_ScreenAccessReady && g_RenderAccessReady) {
             MarniClear();
@@ -485,9 +483,18 @@ void FrameRateGovernor(void)
                 MarniPresent();
             }
             g_numFramesPresented++;
-
-            ResetSpriteQueue();
         }
+
+        // Outside the ready check on purpose. Everything queued above belongs
+        // to THIS frame, presented or not - StMask(0,N) holds
+        // g_ScreenAccessReady low for 2-3 frames after every cut_set, and
+        // leaving the queues alone on those frames meant the commands built
+        // while the screen was masked survived into the next presented frame.
+        // That is why the previous camera's room masks kept drawing over the
+        // new background after a camera change, and why several frames' worth
+        // of masks - each baked with a different screen-shake offset - could
+        // end up on screen at once during the shake.
+        ResetSpriteQueue();
 
         g_frameTimeAccumulator -= g_frameTargetTime;
         if (g_frameTimeAccumulator < 0) g_frameTimeAccumulator = 0;
@@ -550,6 +557,18 @@ void OT_InsertPrimitive(void* prim, unsigned int depth)
     DWORD lw = (pD3D && pD3D->m_logicalWidth  >= 320) ? pD3D->m_logicalWidth  : 320;
     DWORD lh = (pD3D && pD3D->m_logicalHeight >= 240) ? pD3D->m_logicalHeight : 240;
 
+    // Display-image origin (0x004c335c/0x004c3360, set by Display_SetParams).
+    // The original moves the background with the screen shake by moving this
+    // origin - FUN_00470a90 rebuilt the background sprites around it every
+    // frame, and that rebuild is a no-op here because the background is one
+    // full-screen quad instead. Shifting the quad would uncover a gap at the
+    // trailing edge, so shift the sampled window by the same amount instead:
+    // the sampler is CLAMP (MarniDX.cpp), so the edge row/column smears by a
+    // pixel rather than showing through. Origin +1 moves the image right, i.e.
+    // samples one pixel further left.
+    float du = -(float)g_displayImageOriginX / (float)lw;
+    float dv = -(float)g_displayImageOriginY / (float)lh;
+
     for (int i = g_pendingSpriteCount; i > 0; i--) {
         g_pendingSprites[i] = g_pendingSprites[i - 1];
     }
@@ -557,10 +576,10 @@ void OT_InsertPrimitive(void* prim, unsigned int depth)
     g_pendingSprites[0].y = 0;
     g_pendingSprites[0].w = (float)lw * scaleX;
     g_pendingSprites[0].h = (float)lh * scaleY;
-    g_pendingSprites[0].u0 = 0;
-    g_pendingSprites[0].v0 = 0;
-    g_pendingSprites[0].u1 = 1;
-    g_pendingSprites[0].v1 = 1;
+    g_pendingSprites[0].u0 = du;
+    g_pendingSprites[0].v0 = dv;
+    g_pendingSprites[0].u1 = 1.0f + du;
+    g_pendingSprites[0].v1 = 1.0f + dv;
     g_pendingSprites[0].color = 0xFFFFFFFF;
     g_pendingSprites[0].tex = g_displayImageSRV;
     g_pendingSprites[0].valid = TRUE;
@@ -974,8 +993,9 @@ void ApplyScreenShake(void)
     // Apply shake to screen offset and subpixel offset.
     // In the original: SetScreenOffset(shakeX + 0xa0, shakeY + 0x78) set both
     // g_ScreenOffsetX/Y and g_SubpixelOffsetX/Y to the full centering+shake value.
-    g_ScreenOffsetX = g_ScreenShakeOffsetX;
-    g_ScreenOffsetY = g_ScreenShakeOffsetY;
+    // (0x0045ab34-0x0045ab4c is only the SetScreenOffset call - the two stores of
+    // the bare shake offset that used to sit here were dead, SetScreenOffset
+    // overwrites both with the centred value anyway.)
     SetScreenOffset(g_ScreenShakeOffsetX + 160, g_ScreenShakeOffsetY + 120);
 }
 

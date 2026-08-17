@@ -36,17 +36,10 @@ void*        _ENTITY_SAVE = NULL;
 // enemies_update_functions_tbl @ 0x004d3c90
 // Per-entity-type update function dispatch table, indexed by entity->id.
 //
-// **48 entries**, not 32. Ids 0-21 are the monsters; ids 22-47 all point at
+// **48 entries**. Ids 0-21 are the monsters; ids 22-47 all point at
 // 0x0046acf0, the shared human-character driver (character_npc_update in
-// CharacterNpc.cpp). Verified by reading 0x004d3c90: the 0x0046acf0 run ends at
-// 0x004d3d50, which is 48 dwords in, and the next dword is 0.
+// CharacterNpc.cpp). 
 //
-// Declaring only 32 was not a harmless under-count. cmd_em_set gives cutscene
-// actors ids from 32 up (Chris 32, Jill 33, Barry 34, Rebecca 35, Wesker 36), so
-// update_entities indexed one to sixteen entries past the end - straight into
-// zombie_states_table, which used to follow in the same translation unit. Jill
-// read zombie_state_check and ran zombie logic; nothing ever ran her character
-// init, so her skeleton was never posed and she never appeared.
 // ============================================================================
 void* enemies_update_functions_tbl[48] = {
     (void*)zombie_update,  // [0]  zombie (white coat)
@@ -68,7 +61,7 @@ void* enemies_update_functions_tbl[48] = {
     NULL,                  // [16] tyrant 2 (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3
     (void*)yawn_update,    // [18] yawn 2 (0x004051e0)
-    NULL,                  // [19] enemy type 19 (0x00443640)
+    NULL,                  // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)
     NULL,                  // [20] enemy type 20 (0x00427330)
     NULL,                  // [21] enemy type 21 (0x0040b760)
     (void*)character_npc_update,  // [22]
