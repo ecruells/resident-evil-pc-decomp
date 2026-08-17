@@ -27,8 +27,10 @@ int g_renderPrimCount        = 0;   // 0x004c2d10
 
 // Page width factors indexed by flags bits 22-23 (0x004c2d78)
 static const int g_PageWidthFactor[4] = { 1, 2, 4, 8 };
-// Variant data (0x004c2d64)
-static const int g_VariantData[5] = { 0, 1, 2, 4, 8 };
+// g_dwTexVariantBlend (0x004c2d64) used to be mirrored here as
+// `{ 0, 1, 2, 4, 8 }`, which is not what is in the exe - the real bytes are
+// { 0, 0x80, 0x80, 0, 0x80 }. It now lives in SpriteVariantAlpha()
+// (SpriteRenderer.h) together with the 1/256 scale the producers apply to it.
 
 // ============================================================================
 // BuildSpriteRenderFlags (0x0046d960)
@@ -151,14 +153,10 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
                 if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
                 if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
             }
-            if (srv == MARNI_NULL_HANDLE) {
-                texSlot = cmd->texturePage;
-                if (texSlot >= 0 && texSlot < 256) {
-                    srv = g_TexturePageSRV[texSlot];
-                    if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
-                    if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
-                }
-            }
+            // No second chance at the page: the field that used to be read here
+            // as a fallback slot is the semi-transparency level, not a slot
+            // index (see TextureDraw::variantAlpha), so this only ever resolved
+            // slot 0 - never a real page.
             if (srv == MARNI_NULL_HANDLE) {
                 continue;
             }
@@ -255,14 +253,7 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
             if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
             if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
         }
-        if (srv == MARNI_NULL_HANDLE) {
-            texSlot = cmd->texturePage;
-            if (texSlot >= 0 && texSlot < 256) {
-                srv = g_TexturePageSRV[texSlot];
-                if (g_TexturePageWidth[texSlot] > 0)  pageW = (float)g_TexturePageWidth[texSlot];
-                if (g_TexturePageHeight[texSlot] > 0) pageH = (float)g_TexturePageHeight[texSlot];
-            }
-        }
+        // See the note in the type-12 branch: +0x2c is not a page slot.
         if (srv == MARNI_NULL_HANDLE) {
             continue;
         }
@@ -397,19 +388,14 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
     cmd->type = 10;
     cmd->sortClass = SPRITE_CLASS_NORMAL;
 
-    const int variant = GetTextureVariant(texture->flags);
     cmd->spriteFlags = SpriteBuildFlags(texture->flags);
-    cmd->alpha = 1.0f;
 
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
     cmd->b = (float)texture->colorMulB * g_ColorScaleFactor;
 
-    if (variant == 0) {
-        cmd->texturePage = 0;
-    } else {
-        cmd->texturePage = (int)((float)g_VariantData[variant] * 0.003921569f);
-    }
+    cmd->variantAlpha = SpriteVariantAlpha(texture->flags);
+    cmd->alpha        = SpriteDrawAlpha(cmd->variantAlpha);
 
     short sx = texture->screenX + g_ScreenOffsetX;
     short sy = texture->screenY + g_ScreenOffsetY;
@@ -454,7 +440,7 @@ int SubmitLine(short x0, short y0, short x1, short y1, unsigned short depth,
     cmd->r = r;
     cmd->g = g;
     cmd->b = b;
-    cmd->texturePage = 0;
+    cmd->variantAlpha = 0.0f;
     cmd->extraFlags = 0;
     cmd->u0 = 0;
     cmd->v0 = 0;
@@ -484,7 +470,9 @@ int AddSprite(TextureDesc* texture, short depth, int tpage, int fade) {
     cmd->r = 1.0f;
     cmd->g = 1.0f;
     cmd->b = 1.0f;
-    cmd->texturePage = 0;
+    // Room masks are always opaque - AddSprite (0x0046ddc0) writes a literal 0
+    // to +0x2c and never consults the descriptor's variant.
+    cmd->variantAlpha = 0.0f;
 
     short sx = texture->screenX + g_ScreenOffsetX;
     short sy = texture->screenY + g_ScreenOffsetY;
@@ -587,7 +575,6 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
     cmd->sortClass = SPRITE_CLASS_EFFECT;
 
     cmd->spriteFlags = SpriteBuildFlags(texture->flags);
-    cmd->alpha = 1.0f;
 
     // cmd->r/g/b are a 0..1 MULTIPLIER - FlushSpriteCommands does
     // `(int)(cmd->r * 255.0f)` and clamps. draw_texture sets the convention:
@@ -603,12 +590,13 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
     cmd->g = (float)g * (float)texture->colorMulG * tintNorm;
     cmd->b = (float)b * (float)texture->colorMulB * tintNorm;
 
-    // NOTE: blendMode is effectively dropped - FlushSpriteCommands has no
-    // blend-mode plumbing (MarniDrawSprite takes only colour + SRV), and this
-    // field is read solely as a fallback texture slot when extraFlags' SRV is
-    // missing. Kept as-is; wiring the PS1 semi-transparency modes through is a
-    // separate job from the tint.
-    cmd->texturePage = (int)((float)blendMode * g_ColorScaleFactor);
+    // blendMode is this producer's semi-transparency level: 0x0046dbae is
+    // `fild [esp+0x40]` * the 1/256 at 0x004af29c, stored as a FLOAT into the
+    // +0x2c field (see TextureDraw::variantAlpha). It is NOT scaled by
+    // g_ColorScaleFactor (1/128) - that constant belongs to r/g/b, and using it
+    // here turned the usual 0x80 into a 1.0 instead of a 0.5.
+    cmd->variantAlpha = (float)blendMode * 0.00390625f;
+    cmd->alpha        = SpriteDrawAlpha(cmd->variantAlpha);
     cmd->extraFlags = textureId;
 
     if (useSubpixel) {
@@ -789,7 +777,7 @@ int AddFadePoly(unsigned short alpha, int transZ, int tpage, unsigned char* rgb,
         cmd->r = r;
         cmd->g = g;
         cmd->b = b;
-        cmd->texturePage = 0;
+        cmd->variantAlpha = 0.0f;   // shadow alpha travels in cmd->alpha
         cmd->extraFlags = (unsigned int)tpage;
 
         g_SpriteQueueCount++;
@@ -812,7 +800,7 @@ int DrawPrim_SpriteLarge(int* params, unsigned short alpha, int tpage,
     cmd->b = (float)params[2] * g_ColorScaleFactor;
     cmd->spriteFlags = 0;
     cmd->alpha = 1.0f;
-    cmd->texturePage = 0;
+    cmd->variantAlpha = 0.0f;
     cmd->x0 = 0;
     cmd->y0 = 0;
     cmd->x1 = 320;

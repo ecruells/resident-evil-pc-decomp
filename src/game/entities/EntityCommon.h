@@ -74,6 +74,7 @@ void character_npc_update(void);   // 0x0046acf0 - CharacterNpc.cpp
 void plant42_update(void);         // 0x00464d10 - Plant42.cpp
 void yawn_update(void);            // 0x004051e0 - Yawn.cpp (ids 13 and 18)
 void spiderweb_update(void);       // 0x00443640 - SpiderWeb.cpp (id 19)
+void computer_arm_update(void);    // 0x00427330 / 0x0040b760 - ComputerArms.cpp (ids 20, 21)
 
 // ============================================================================
 // Angle / line-of-sight helpers

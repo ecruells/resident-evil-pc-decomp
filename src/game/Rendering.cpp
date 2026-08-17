@@ -611,7 +611,8 @@ void ResetSpriteQueue(void)
 // scaled by the BPP factor because PS1 texU/texV are in VRAM-pixel
 // coordinates and the SRV is expanded to full RGBA texels.
 // ============================================================================
-int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount)
+int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount,
+                    unsigned int sortClass)
 {
     // 0x0046e8d0: queue overflow
     if ((MAX_SPRITE_COMMANDS - 1) < g_SpriteQueueCount) return 0;
@@ -704,22 +705,18 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
     short sy = texture->screenY + g_ScreenOffsetY;
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
-    cmd->sortClass = SPRITE_CLASS_NORMAL;
+    cmd->sortClass = sortClass;
 
-    const int variant = GetTextureVariant(texture->flags);
     cmd->spriteFlags = SpriteBuildFlags(texture->flags);
-    cmd->alpha = 1.0f;
 
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
     cmd->b = (float)texture->colorMulB * g_ColorScaleFactor;
 
-    if (variant == 0) {
-        cmd->texturePage = 0;
-    } else {
-        static const int s_VariantBlend[5] = { 0, 0x80, 0x80, 0, 0x80 };
-        cmd->texturePage = (int)((float)s_VariantBlend[variant] * 0.00390625f);
-    }
+    // 0x0046e70e: an x87 FLOAT store of g_dwTexVariantBlend[variant]/256 into
+    // +0x2c - the per-primitive semi-transparency level, not a page index.
+    cmd->variantAlpha = SpriteVariantAlpha(texture->flags);
+    cmd->alpha        = SpriteDrawAlpha(cmd->variantAlpha);
 
     cmd->x0  = sx - texture->pivotX;
     cmd->y0  = sy - texture->pivotY;
@@ -754,7 +751,13 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
 //   - otherwise the quad is scaled about pivotX/pivotY with fix16.12 math
 //     and placed relative to g_SubpixelOffsetX/Y (PS1 subpixel space).
 // ============================================================================
-int AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageCount)
+// SubmitEffectSprite_Ex (0x0046edb0) shares this whole body: same page search,
+// same CLUT check, same UV maths. It differs only in that it never scales
+// about the pivot and that its ordering key is a separate argument instead of
+// the fade value. Both are expressed through the two extra parameters here.
+static int AddSpriteEx_Core(TextureDesc* texture, unsigned short depth, int slot,
+                            int pageCount, int depthKey, bool allowScale,
+                            unsigned int sortClass)
 {
     if ((MAX_SPRITE_COMMANDS - 1) < g_SpriteQueueCount) return 0;
 
@@ -823,28 +826,23 @@ int AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageC
 
     // 0x0046f2dd: unscaled sprites use the screen offset; scaled sprites
     // (map zoom) use the subpixel offset.
-    bool scaled = (texture->scaleX != 0x1000) || (texture->scaleY != 0x1000);
+    bool scaled = allowScale && ((texture->scaleX != 0x1000) || (texture->scaleY != 0x1000));
     short sx = (short)(texture->screenX + (scaled ? (short)g_SubpixelOffsetX : (short)g_ScreenOffsetX));
     short sy = (short)(texture->screenY + (scaled ? (short)g_SubpixelOffsetY : (short)g_ScreenOffsetY));
 
     TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount];
     cmd->type = 10;
-    cmd->sortClass = SPRITE_CLASS_NORMAL;
+    cmd->sortClass = sortClass;
 
-    const int variant = GetTextureVariant(texture->flags);
     cmd->spriteFlags = SpriteBuildFlags(texture->flags);
-    cmd->alpha = 1.0f;
 
     cmd->r = (float)texture->colorMulR * g_ColorScaleFactor;
     cmd->g = (float)texture->colorMulG * g_ColorScaleFactor;
     cmd->b = (float)texture->colorMulB * g_ColorScaleFactor;
 
-    if (variant == 0) {
-        cmd->texturePage = 0;
-    } else {
-        static const int s_VariantBlend[5] = { 0, 0x80, 0x80, 0, 0x80 };
-        cmd->texturePage = (int)((float)s_VariantBlend[variant] * 0.00390625f);
-    }
+    // 0x0046f0c5 / 0x0046f61b: see TextureDraw::variantAlpha.
+    cmd->variantAlpha = SpriteVariantAlpha(texture->flags);
+    cmd->alpha        = SpriteDrawAlpha(cmd->variantAlpha);
 
     // 0x0046f36a: fix16.12 scale about the pivot point, rounding like the
     // original ((x + ((x >> 0x1f) & 0xfff)) >> 0xc).
@@ -863,7 +861,7 @@ int AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageC
         cmd->x1 = (texture->width  - texture->pivotX) + sx - 1;
         cmd->y1 = (texture->height - texture->pivotY) + sy - 1;
     }
-    cmd->depthSort = (unsigned int)depth * 0x10 + 500;
+    cmd->depthSort = (unsigned int)depthKey * 0x10 + 500;
 
     cmd->u0 = (unsigned short)(su0 >= 0 ? su0 : 0);
     cmd->v0 = (unsigned short)(sv0 >= 0 ? sv0 : 0);
@@ -881,6 +879,36 @@ int AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageC
 
     if ((g_RenderDisableFlags & 0x21) == 0) g_SpriteQueueCount++;
     return 1;
+}
+
+int AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageCount)
+{
+    return AddSpriteEx_Core(texture, depth, slot, pageCount, (int)depth, true,
+                            SPRITE_CLASS_NORMAL);
+}
+
+// ============================================================================
+// SubmitEffectSprite_Ex (0x0046edb0)
+// The paged-sprite submit the lab computer terminal draws its whole UI
+// through. Unscaled, and the sort key is explicit so a caller can lay several
+// sprites of the same fade value into a deliberate front-to-back order.
+//
+// These are SPRITE_CLASS_SCENE, not NORMAL. The explicit sort key IS an
+// ordering-table index - CMarniDirect3D::SetTexture (0x00448300) files a type-10
+// primitive at `depthSort >> 4` in the one OT that also holds the entity
+// triangles (an entity enters it at t[2] >> 4), so the terminal's overlays
+// genuinely interleave with the player's forearm models by depth. Classing them
+// NORMAL put every one of them in the flat 2D pass that runs AFTER
+// FlushTmdObjects, so the keyboard and the typed text painted over the hands
+// instead of the hands reaching in front of them. The window frames and the
+// monitor pictures sit at depthSort 4596-26100 and stay behind the arms either
+// way; it is the keyboard/text/caret group at 660-740 that has to lose.
+// ============================================================================
+int SubmitEffectSprite_Ex(TextureDesc* texture, unsigned short fade, int slot,
+                          int pageCount, int depthKey)
+{
+    return AddSpriteEx_Core(texture, fade, slot, pageCount, depthKey, false,
+                            SPRITE_CLASS_EFFECT);
 }
 
 // ============================================================================

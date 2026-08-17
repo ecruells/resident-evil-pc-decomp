@@ -29,7 +29,22 @@ struct TextureDraw {
     float r;                    // 0x20
     float g;                    // 0x24
     float b;                    // 0x28
-    int texturePage;            // 0x2c
+    // 0x2c is the PER-PRIMITIVE SEMI-TRANSPARENCY LEVEL, and it is a FLOAT.
+    //
+    // Ghidra renders the store as `(int)((float)g_dwTexVariantBlend[v] *
+    // 0.00390625)` at every producer, which reads as an int field holding 0 -
+    // and that is a fake cast: 0x0046f0c5 is `fstp float ptr [eax*4+0x8e500c]`,
+    // an x87 FLOAT store, with the value built by `fild` + `fmul [0x004af29c]`
+    // (= 1/256). The field was mis-ported as `int texturePage`, so 0x80/256 =
+    // 0.5 truncated to 0 and EVERY sprite lost its translucency.
+    //
+    // The consumer is the sprite draw at 0x0042c090, which reads it twice:
+    //   - `(prim[0x2c] & 0x7fffffff) == 0` picks between forcing the vertex
+    //     alpha byte to 0xff and packing this value into it;
+    //   - the same test (OR'd with the page's own alpha flag at +0x2e) is what
+    //     sets D3DRENDERSTATE_ALPHABLENDENABLE at 0x0042c2xx.
+    // So 0.0 here means OPAQUE, not invisible.
+    float variantAlpha;         // 0x2c
     unsigned int extraFlags;    // 0x30
     // Type 12 (4-corner quad) only: corners 2 and 3 plus their UVs.
     // UVs are 0..4096 fixed point (0..1 of the texture page).
@@ -98,11 +113,10 @@ static_assert(sizeof(TextureDraw) == 0x54, "TextureDraw size mismatch");
 #define SPRITE_FLAG_MIRROR_V   0x20u  // <- TEXDESC_MIRROR_V
 
 // SPRITE_FLAG_VARIANT is set by every producer that builds flags from a
-// descriptor, and no draw path reads it. In the original it reached the Marni
-// texture-page layer, which selected a blend/CLUT variant from it; this port
-// resolves the texture per command through the page slot instead, so the bit
-// is carried for fidelity and never acted on. Do not "clean it up": it is the
-// only surviving record that the descriptor asked for a variant.
+// descriptor, and no draw path reads it - the translucency it implies is
+// carried numerically in TextureDraw::variantAlpha instead (see the note on
+// that field). It is kept because it is the only surviving record that the
+// descriptor asked for a variant at all.
 
 struct OTEntry {
     int   type;
@@ -137,6 +151,25 @@ static inline unsigned int SpriteBuildFlags(unsigned int textureFlags) {
     BuildSpriteRenderFlags(textureFlags, &flags);
     if (GetTextureVariant(textureFlags) != 0) flags |= SPRITE_FLAG_VARIANT;
     return flags;
+}
+
+// The value the original writes to TextureDraw+0x2c: g_dwTexVariantBlend
+// (0x004c2d64) indexed by the variant, scaled by the 1/256 at 0x004af29c.
+// Returns 0.0f for "no variant", which the draw path reads as OPAQUE.
+static inline float SpriteVariantAlpha(unsigned int textureFlags) {
+    const int v = GetTextureVariant(textureFlags);
+    if (v <= 0 || v > 4) return 0.0f;
+    static const int blend[5] = { 0, 0x80, 0x80, 0, 0x80 };
+    return (float)blend[v] * 0.00390625f;
+}
+
+// TextureDraw+0x2c -> the vertex alpha the sprite draw actually rasterises
+// with. 0x0042c090 forces the alpha byte to 0xff and leaves
+// D3DRENDERSTATE_ALPHABLENDENABLE off when the field is +-0.0, so a zero there
+// is fully opaque - never invisible. Variant 3 ("fade to black") also lands on
+// 0 and is therefore opaque here; its darkening comes from r/g/b, not alpha.
+static inline float SpriteDrawAlpha(float variantAlpha) {
+    return (variantAlpha == 0.0f) ? 1.0f : variantAlpha;
 }
 void SpriteQueue_Reset(void);
 void FlushSpriteCommands(void);

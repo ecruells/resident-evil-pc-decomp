@@ -56,7 +56,10 @@ void LoadEffectTextureSheet(int slot, void* timData)
             WORD clr = clut[c];
             DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
             DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
-            DWORD a = (c == 0) ? 0x00 : ((clr & 0x8000) ? 0x80 : 0xFF);
+            // STP (bit 15) is NOT a per-texel alpha - the PC build has no such
+            // thing, only a black colour key. Translucency is per primitive; see
+            // the long note in the CLUT loop of LoadTexturePage.
+            DWORD a = (c == 0) ? 0x00 : 0xFF;
             DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
             clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
         }
@@ -530,34 +533,43 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
             // used to read red from bits 10-14 and blue from bits 0-4, which
             // swapped the two channels for every CLUT-based model texture -
             // reddish surfaces came out blue. Every other conversion in the
-            // tree already uses this layout. PS1 CLUT index 0 is the
-            // transparent colour key, so alpha=0 for index 0 (matches
-            // RebuildTextureSRV). Bit 15 (STP) marks semi-transparent
-            // colours: the map screen's textures (Map_blue grid, floor maps)
-            // carry it on their fills, and rendering those opaque made the
-            // grid solid instead of the PS1's 50% transparency.
-            // PS1 transparency is keyed on the COLOUR VALUE (0x0000, and
-            // 0x8000 = STP-black), not on the index. Nearly every RE1 page
-            // does put that key at index 0, and on those pages the remaining
-            // STP bits are genuine semi-transparency flags (Map_blue's grid
-            // fill: indices 1-3 all carry STP), so they keep the rule above
-            // unchanged.
+            // tree already uses this layout.
             //
-            // A page whose index 0 is a REAL colour is not using index 0 as a
-            // key at all - the filem_*.pix document pages are exactly that:
-            // [0] = 0xffff (the bright text), [1..6] = the grey antialias
-            // ramp (all STP-set), [7] = 0x0000 (the page background). Keying
-            // on the index punched holes through the brightest text pixels and
-            // the STP rule washed the rest out to 50%, which is the "the file
-            // page renders with transparency" bug.
+            // ALPHA IS A PURE COLOUR KEY ON BLACK. Bit 15 (STP) must NOT become
+            // a per-pixel alpha here. The PC build has no per-texel
+            // semi-transparency at all: CMarniDirect3D::CreateTextureHandle
+            // (0x0044c900) only ever tests `(colour & 0xffffff) == 0` when it
+            // builds a page's transparency - it never looks at bit 15 - and
+            // CMarniBits::BltFast's colorkey flag keys on the same test. PS1
+            // semi-transparency arrives PER PRIMITIVE instead, as the variant
+            // level the producers write to TextureDraw+0x2c (see
+            // TextureDraw::variantAlpha in SpriteRenderer.h).
+            //
+            // Baking STP in as alpha 0x80 applied it unconditionally, whatever
+            // blend the primitive asked for. umb00.tim / umb01.tim - the lab
+            // terminal's UI sheets - carry STP on 255 of their 256 CLUT
+            // entries, so the whole terminal (login window, keyboard, typed
+            // text) rendered at 50% even though cl_draw_windows and cl_draw_text
+            // draw a settled window with the variant bits OFF, i.e. opaque.
+            // The map screen keeps its 50% grid because g_MapZoomDesc[1]/[2]
+            // really do set 0x40000000; it never needed the per-texel rule.
+            //
+            // Which texel is the key is unchanged from before, and is still
+            // decided per page: nearly every RE1 page puts the key at index 0,
+            // but a page whose index 0 is a REAL colour is not using the index
+            // as a key at all - the filem_*.pix document pages are exactly that
+            // ([0] = 0xffff, the bright text; [7] = 0x0000, the background), and
+            // keying on the index punched holes through the brightest text.
+            // Both 0x0000 and 0x8000 count as black: the top bit is masked out
+            // of the comparison, so STP-black is cut out too.
             bool indexZeroIsKey = (clut[0] == 0x0000 || clut[0] == 0x8000);
             for (int c = 0; c < numClutEntries; c++) {
                 WORD clr = clut[c];
                 DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
                 DWORD a = indexZeroIsKey
-                            ? ((c == 0) ? 0x00 : ((clr & 0x8000) ? 0x80 : 0xFF))
-                            : ((clr == 0x0000 || clr == 0x8000) ? 0x00 : 0xFF);
+                            ? ((c == 0) ? 0x00 : 0xFF)
+                            : (((clr & 0x7FFF) == 0) ? 0x00 : 0xFF);
                 DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
                 // R8G8B8A8_UNORM wants R in the lowest byte
                 clutRGBA[c] = (a << 24) | (b << 16) | (g << 8) | r;
@@ -644,8 +656,12 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                 // ignored, so both 0x0000 and 0x8000 are cut out. Mirror that
                 // exactly:
                 //   0x0000 / 0x8000  -> fully transparent (cut-out)
-                //   STP set + colour -> semi-transparent (PS1 half blend)
                 //   otherwise        -> opaque
+                //
+                // STP set on a NON-BLACK texel is not a per-texel alpha here:
+                // the PC build's page upload never tests bit 15 (0x0044c900),
+                // and semi-transparency is a per-primitive level instead - see
+                // the note in the CLUT loop above.
                 //
                 // In the 16bpp pages that reach here the cut-outs are stored as
                 // 0x8000 (STP set, colour black): Select_b.tim's round card
@@ -661,10 +677,7 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                 // Do NOT copy this rule into display_image: a background is
                 // blitted without the colorkey flag and its black is real
                 // artwork. See the note there.
-                DWORD a;
-                if ((px & 0x7FFF) == 0)  a = 0x00;
-                else if (px & 0x8000)    a = 0x80;
-                else                     a = 0xFF;
+                DWORD a = ((px & 0x7FFF) == 0) ? 0x00 : 0xFF;
                 DWORD r = ((px >> 0)  & 0x1F) * 255 / 31;
                 DWORD g = ((px >> 5)  & 0x1F) * 255 / 31;
                 DWORD b = ((px >> 10) & 0x1F) * 255 / 31;

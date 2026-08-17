@@ -734,6 +734,19 @@ extern unsigned char  g_passcodePanelSprites[9];        // 0x007d9128
 extern unsigned short g_passcodePanelTimer;             // 0x00d227a0 (overlaid)
 extern unsigned short g_passcodePanelPatternIndex;      // 0x00d227a2 (overlaid)
 
+// The lab computer terminal (ComputerLab.cpp) is the third tenant of the same
+// block. It needs the four slots the slide/passcode views never named:
+//   +0x03 a fourth sub-state byte. check_and_display_interactive_screen clears
+//         bytes 0..3 on entry, so this MUST be cleared alongside the other
+//         three or the terminal resumes mid-sequence on a second visit.
+//   +0x0c the player's saved Y (the model is parked below the floor while the
+//         first-person terminal is up).
+//   +0x10/+0x12 the two shorts every terminal step uses as timers.
+extern unsigned char  g_labSlidesSubState2;             // 0x00d22793
+extern int            g_labSlidesSavedPlayerY;          // 0x00d2279c
+extern short          g_labSlidesTimerA;                // 0x00d227a0 (overlaid)
+extern short          g_labSlidesTimerB;                // 0x00d227a2 (overlaid)
+
 // Character switch backup globals (used by room_set when switching between Jill/Chris and Rebecca)
 extern short          HEALTH_BKP;                      // 0x008f87b0 - backup of player health
 extern unsigned short HEALTH_STATUS_BKP;               // 0x008f87b4 - backup of health status flags
@@ -1407,8 +1420,16 @@ void clear_textures(void);
 #undef LoadImage  // Win32 macro conflicts with Marni LoadImage
 void LoadImage(int srcData, int srcSlot, int dstSlot, short format, short x, short y, short width, short height, int mode);
 void LoadItemImage(int item_id, int image_index, int img_buffer);
-int  display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount);
+// sortClass is port-only and defaults to 1 == SPRITE_CLASS_NORMAL (the literal
+// avoids pulling game/SpriteRenderer.h into this header). Pass
+// SPRITE_CLASS_EFFECT for a sprite that has to interleave with the 3D pass by
+// depth rather than draw flat on top of it - see the lab terminal's LEDs.
+int  display_texture(TextureDesc* texture, unsigned short depth, int slot, int pageCount,
+                     unsigned int sortClass = 1u);
 int  AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int pageCount); // 0x0046f280
+int  SubmitEffectSprite_Ex(TextureDesc* texture, unsigned short fade, int slot,
+                           int pageCount, int depthKey);                               // 0x0046edb0
+void display_computer_lab(void);                       // 0x00412390 - ComputerLab.cpp
 int  AddTintSprite(TextureDesc* texture, unsigned short brightness);
 
 // --- Misc game helpers ---

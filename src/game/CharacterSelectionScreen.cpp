@@ -141,7 +141,7 @@ static void CharSelectDrawShadowRect(short posX, short posY, short scaleFix12)
     cmd->r = 0.0f;
     cmd->g = 0.0f;
     cmd->b = 0.0f;
-    cmd->texturePage = 0;
+    cmd->variantAlpha = 0.0f;   // translucency is set explicitly in cmd->alpha
 
     cmd->x0 = (short)sx;
     cmd->y0 = (short)sy;
@@ -196,7 +196,7 @@ static void CharSelectRenderSprite(unsigned char texU, unsigned char texV,
     cmd->r = 1.0f;
     cmd->g = 1.0f;
     cmd->b = 1.0f;
-    cmd->texturePage = 0;
+    cmd->variantAlpha = 0.0f;
 
     cmd->x0 = sx - scaledPX;
     cmd->y0 = sy - scaledPY;

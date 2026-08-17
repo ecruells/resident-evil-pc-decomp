@@ -134,11 +134,13 @@
     <ClCompile Include="src\game\RoomEvents.cpp" />
     <ClCompile Include="src\game\CmdFunctions.cpp" />
     <ClCompile Include="src\game\EngineStubs.cpp" />
+    <ClCompile Include="src\game\ComputerLab.cpp" />
     <ClCompile Include="src\game\InteractiveScreen.cpp" />
     <ClCompile Include="src\game\DeathScreen.cpp" />
     <ClCompile Include="src\game\entities\EntityCommon.cpp" />
     <ClCompile Include="src\game\entities\CharacterNpc.cpp" />
     <ClCompile Include="src\game\entities\Plant42.cpp" />
+    <ClCompile Include="src\game\entities\ComputerArms.cpp" />
     <ClCompile Include="src\game\entities\SpiderWeb.cpp" />
     <ClCompile Include="src\game\entities\Yawn.cpp" />
     <ClCompile Include="src\game\entities\Zombie.cpp" />

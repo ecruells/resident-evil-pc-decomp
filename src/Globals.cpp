@@ -1187,6 +1187,12 @@ unsigned char  g_passcodePanelSprites[9] = {};       // 0x007d9128
 unsigned short g_passcodePanelTimer = 0;              // 0x00d227a0 (overlaid)
 unsigned short g_passcodePanelPatternIndex = 0;       // 0x00d227a2 (overlaid)
 
+// Lab computer terminal slots in the same block - see Globals.h.
+unsigned char  g_labSlidesSubState2 = 0;              // 0x00d22793
+int            g_labSlidesSavedPlayerY = 0;           // 0x00d2279c
+short          g_labSlidesTimerA = 0;                 // 0x00d227a0 (overlaid)
+short          g_labSlidesTimerB = 0;                 // 0x00d227a2 (overlaid)
+
 // 0x00d226a4 - Room event index (SCD event pointer for current room entity)
 void*         g_room_event_index = NULL;
 

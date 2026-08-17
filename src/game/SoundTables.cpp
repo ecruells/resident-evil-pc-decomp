@@ -230,11 +230,13 @@ static const char g_VoiceNameData_Stage4[][9] = {
     "VB00_11", "V016_06",
     "V11A_00", "V11A_01", "V11A_02", "V11A_03", "V11A_04", "V11A_05",
     "VA00_03", "VA00_04", "VA00_05",
+    // 35 entries, not 29: the run goes all the way to V115_22. It was cut at
+    // V115_1c (a suspiciously round 29), and v115_1d..v115_22.wav all exist.
     "V115_00", "V115_01", "V115_02", "V115_03", "V115_04", "V115_05", "V115_06",
     "V115_07", "V115_08", "V115_09", "V115_0a", "V115_0b", "V115_0c", "V115_0d",
     "V115_0e", "V115_0f", "V115_10", "V115_11", "V115_12", "V115_13", "V115_14",
     "V115_15", "V115_16", "V115_17", "V115_18", "V115_19", "V115_1a", "V115_1b",
-    "V115_1c",
+    "V115_1c", "V115_1d", "V115_1e", "V115_1f", "V115_20", "V115_21", "V115_22",
     "VA03_00", "VA03_01", "VA03_02", "VA03_03", "VA03_04", "VA03_05", "VA03_06",
     "VA03_07", "VA03_08", "VA03_09", "VA03_0a", "VA03_0b", "VA03_0c", "VA03_0d",
     "VA03_0e",
@@ -247,8 +249,23 @@ static const char g_VoiceNameData_Stage4[][9] = {
     "V116_00", "V116_01", "V116_02", "V116_03", "V116_04", "V116_05",
     "V116_10",
     "VB00_10", "VB00_11",
+    // TWO EMPTY RECORDS. 0x004b2d4d and 0x004b2d56 are eighteen zero bytes, not
+    // padding - they are ids 181 and 182 and they hold the run's indices apart.
+    // Dropping them slid everything after down by two, and combined with the
+    // truncated V115 run it put the whole tail eight entries out of place, so
+    // the lab terminal's boot jingle (id 0xb7 = 183 = VB00_20) indexed PAST the
+    // end of the array and read whatever followed in .rdata - which is where the
+    // "[voice] could not open file: .\assets\USA\voice\e02.wav" came from.
+    "",        "",
     "VB00_20", "VB00_21", "VB00_22", "VB00_40"
 };
+
+// 187 records (0..186) in the original, ending at 0x004b2d7a + 9 with five bytes
+// of padding before the pointer table at 0x004b2d88. Locked down because the
+// highest id any caller uses (0xb7) is only three short of the end: a truncation
+// here does not fail loudly, it silently reads adjacent .rdata as a filename.
+static_assert(sizeof(g_VoiceNameData_Stage4) / 9 == 187,
+              "stage 4 voice name table must hold 187 records");
 
 // 0x004b2d88 - Per-stage voice name data pointers (indexed by g_stageId)
 const char* g_StageVoiceNamesTable[8] = {

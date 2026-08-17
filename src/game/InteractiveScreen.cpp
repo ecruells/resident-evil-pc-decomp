@@ -337,16 +337,22 @@ void check_and_display_interactive_screen(void)
     if (interactive != 0) {
         if (g_labSlidesState == 0) {
             // The original clears the first four bytes of the shared state
-            // block when an interactive screen is entered.
+            // block when an interactive screen is entered. All four: the
+            // fourth is the computer terminal's innermost sub-state, and
+            // leaving it stale resumes the terminal mid-sequence.
             g_labSlidesFuncIndex = 0;
             g_labSlidesAnimState = 0;
             g_passcodePanelAnimationState = 0;
+            g_labSlidesSubState2 = 0;
         }
 
-        // SysFlags bit 0x1d selects the numeric panel. The computer-lab and
-        // slide branches remain separate subsystems and are not touched here.
+        // 0x0042a05e: the SysFlags bit picks which screen. 0x1d is the numeric
+        // panel (room 4080), 0x1e the lab computer terminal (room 5060), 0x1f
+        // the slide projector - still a separate unported subsystem.
         if (Flg_ck((int)g_SysFlags, 0x1d) != 0) {
             display_passcode_panel();
+        } else if (Flg_ck((int)g_SysFlags, 0x1e) != 0) {
+            display_computer_lab();
         }
     }
     // 0x0042a0ad: the flag is re-read AFTER the dispatch, not reused from the
