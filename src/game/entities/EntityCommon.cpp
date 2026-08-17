@@ -21,6 +21,8 @@
 extern void plant42_update(void);
 // Yawn (giant snake) boss update (0x004051e0) - Yawn.cpp.
 extern void yawn_update(void);
+// Spider web (room 30C0 door blocker) update (0x00443640) - SpiderWeb.cpp.
+extern void spiderweb_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -61,7 +63,7 @@ void* enemies_update_functions_tbl[48] = {
     NULL,                  // [16] tyrant 2 (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3
     (void*)yawn_update,    // [18] yawn 2 (0x004051e0)
-    NULL,                  // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)
+    (void*)spiderweb_update, // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)
     NULL,                  // [20] enemy type 20 (0x00427330)
     NULL,                  // [21] enemy type 21 (0x0040b760)
     (void*)character_npc_update,  // [22]

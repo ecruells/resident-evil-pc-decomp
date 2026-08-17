@@ -52,7 +52,9 @@ enum EnemyType {
     ENEMY_TYRANT_2         = 16,  // tyrant_update (variant)
     ENEMY_17               = 17,  // zombie_update (variant)
     ENEMY_YAWN_2           = 18,  // yawn_update (variant)
-    ENEMY_CHIMERA          = 19,  // 0x00443640 - chimera
+    // Not an enemy: the web that blocks the door in room 30C0. Only the knife
+    // and the fire/explosive weapons can burn it away - see SpiderWeb.cpp.
+    ENEMY_SPIDER_WEB       = 19,  // 0x00443640 - spider web
     ENEMY_20               = 20,  // 0x00427330
     ENEMY_BLACK_TIGER      = 21,  // 0x0040b760 - black tiger (giant spider)
     ENEMY_GENERIC          = 22,  // 0x0046acf0 - shared human character driver
@@ -71,6 +73,7 @@ void zombie_update(void);          // 0x004338c0 - Zombie.cpp
 void character_npc_update(void);   // 0x0046acf0 - CharacterNpc.cpp
 void plant42_update(void);         // 0x00464d10 - Plant42.cpp
 void yawn_update(void);            // 0x004051e0 - Yawn.cpp (ids 13 and 18)
+void spiderweb_update(void);       // 0x00443640 - SpiderWeb.cpp (id 19)
 
 // ============================================================================
 // Angle / line-of-sight helpers
