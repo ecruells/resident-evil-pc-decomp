@@ -5240,7 +5240,8 @@ static void FUN_0044e660(void);
 static void FUN_0044e820(void);
 static void FUN_0044e8c0(void);
 static void FUN_0044e920(void);
-static void FUN_004846d0(int slot);
+// Non-static: the ending epilogue (EndingScreen.cpp) reuses the item viewer.
+void FUN_004846d0(int slot);
 static void FUN_004844c0(void);
 extern void FUN_00483580(int* joint, MATRIX* out);   // shared with room_camera_and_lighting_update
 static void FUN_004841f0(void);
@@ -6029,7 +6030,7 @@ void FUN_00483580(int* joint, MATRIX* out)
 }
 
 // (0x004846d0) - Queue the item model draw for the given render slot
-static void FUN_004846d0(int slot)
+void FUN_004846d0(int slot)
 {
     g_itemRenderSlot = slot;
     ExecAsync((void*)FUN_004844c0);

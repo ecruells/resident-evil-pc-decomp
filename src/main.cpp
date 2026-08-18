@@ -486,11 +486,20 @@ BOOL CreateGameWindow(int nCmdShow)
     
     // Window style based on fullscreen, not adapter ID
     // Original used adapter ID 5/7 for windowed; we use g_bFullScreen directly
+    //
+    // 0x00441bd1/0x00441bda pick between two immediates:
+    //   windowed   0x00441c15: 0x00CA0000 = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+    //   fullscreen 0x00441bdc: 0x82000000 = WS_POPUP | WS_CLIPCHILDREN
+    // The windowed style deliberately omits WS_THICKFRAME (0x00040000) and
+    // WS_MAXIMIZEBOX (0x00010000): the game renders at one fixed back-buffer
+    // size, so the border must not be draggable and the maximise button must
+    // show up greyed out. WS_OVERLAPPEDWINDOW carries both of those bits, which
+    // is what made this port resizable.
     if (g_bFullScreen) {
-        dwStyle = WS_POPUP;
+        dwStyle = WS_POPUP | WS_CLIPCHILDREN;
         dwExStyle = WS_EX_TOPMOST;
     } else {
-        dwStyle = WS_OVERLAPPEDWINDOW | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+        dwStyle = WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
         dwExStyle = WS_EX_APPWINDOW;
     }
     
@@ -636,8 +645,20 @@ int RunMessageLoop(void)
         // 0x00441e50: Frame timing and game loop execution
         // 0x00441e9d/0x00441eb1: the original reads DAT_004bcb2c (window focused)
         // here, not the SideWinder pause flag.
-        if (!g_bQuitFlag && g_bWindowActive) {
-            if ((g_hWnd != NULL && g_bWindowActive) || g_bWindowFocused) {
+        //
+        // The original gate, instruction for instruction:
+        //   0x00441e91 CMP g_bQuitFlag,      0 / JNZ loop_top
+        //   0x00441e9d CMP g_bWindowFocused, 0 / JZ  loop_top   <- focus-loss pause
+        //   0x00441ea9 CMP g_hWnd,           0 / JZ  0x00441eb9
+        //   0x00441eb1 CMP g_bWindowFocused, 0 / JNZ run
+        //   0x00441eb9 CMP g_bWindowActive,  0 / JZ  0x00441f88 (g_bWindowActive = 0)
+        // Focus is already known non-zero at 0x00441eb1, so the second read always
+        // takes the JNZ and g_bWindowActive only matters when g_hWnd is NULL.
+        // Losing focus therefore stops main_loop() being called at all - that is
+        // the pause. The port previously ORed the two flags together with an
+        // always-TRUE g_bWindowActive, so it never paused.
+        if (!g_bQuitFlag && g_bWindowFocused) {
+            if (g_hWnd != NULL || g_bWindowActive) {
                 DWORD currentTime = timeGetTime();
                 
                 // 0x00441e70: Frame rate counter every second
@@ -686,8 +707,11 @@ int RunMessageLoop(void)
                     return (int)msg.wParam;
                 }
             }
-            // (original 0x00441f88 clears DAT_004bcb30 here; g_isPaused is consumed
-            // by main_loop itself, so nothing to clear in this pump)
+            else {
+                // 0x00441f88: mov [g_bWindowActive], ebx (ebx == 0), then jmp
+                // back to the top of the pump.
+                g_bWindowActive = FALSE;
+            }
         }
     }
     

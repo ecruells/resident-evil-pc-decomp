@@ -530,11 +530,18 @@ BOOL g_bMCIVideoEvent = FALSE;
 
 // --- Misc flags ---
 
-BOOL g_bWindowActive = TRUE;    // DAT_004bcb30 (start active so game loop runs)
+// DAT_004bcb30. In the original this lives in .bss and has exactly two xrefs:
+// one read at 0x00441eb9 and one `mov [0x4bcb30], ebx` (ebx == 0) at 0x00441f88.
+// Nothing ever stores a non-zero value, so it is always FALSE - it only gates
+// the g_hWnd == NULL arm of the game-loop test. Initialising it TRUE (as the
+// port used to) inverts the whole gate and defeats the focus-loss pause.
+BOOL g_bWindowActive = FALSE;
 // 0x004bcb2c - window focused flag, written by WM_ACTIVATE, read by the message
 // pump in main(). NOT the same variable as g_isPaused (0x004d46ac), which is the
 // SideWinder pause-button event flag consumed by main_loop (injects START+bit8).
-BOOL g_bWindowFocused = TRUE;
+// Starts FALSE like the original's .bss; ShowWindow() sends WM_ACTIVATE
+// synchronously before the pump starts, so it is already TRUE by then.
+BOOL g_bWindowFocused = FALSE;
 BOOL g_bQuitFlag = FALSE;       // DAT_004bcb40
 BOOL g_bUseFrameSkip = FALSE; // DAT_004bcb48
 BOOL g_bFrameSkipDetected = TRUE;  // DAT_004d46dc (allow frame timing check)
