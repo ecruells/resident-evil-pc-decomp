@@ -113,7 +113,10 @@
       <div class="field"><label>Health</label><input id="f_health" type="number" min="0" max="65535"></div>
       <div class="field"><label>Health status flags (hex)</label><input id="f_healthFlags" type="text"></div>
       <div class="field"><label>Game timer (frames @30fps)</label><input id="f_timer" type="number" min="0" max="4294967295"></div>
-      <div class="field"><label>Game timer (HH:MM:SS)</label><input id="f_timerStr" disabled></div>
+      <div class="field"><label>Game clear time (editable)</label>
+        <input id="f_timerStr" placeholder="1:23:45">
+        <div class="hint" id="timerHint"></div>
+      </div>
       <div class="field"><label>Saves counter</label><input id="f_saves" type="number" min="0" max="99"></div>
       <div class="field"><label>Countdown timer</label><input id="f_countdown" type="number" min="0" max="65535"></div>
       <div class="field"><label>Selected item</label><select id="f_selectedItem"></select></div>
@@ -346,6 +349,7 @@ function loadFields() {
   const t = u32(0x224);
   $("f_timer").value = t;
   $("f_timerStr").value = timerToString(t);
+  updateTimerHint(t);
   $("f_saves").value = active.bytes[0x228];
   $("f_countdown").value = u16(0x21C);
   fillItemSelect($("f_selectedItem"), active.bytes[0x206]);
@@ -370,6 +374,48 @@ function loadFields() {
   renderHex();
   $("status").textContent = "loaded " + active.name;
   $("status").className = "ok";
+}
+
+// The game clock reads this field at 30 ticks/second: 0x1e per second,
+// 0x708 per minute, 0x1a5e0 per hour (ending_result_draw, 0x00410f40).
+const TICKS_PER_SEC = 30;
+
+// Accepts "H:MM:SS", "MM:SS", "SS", or "1h 23m 45s". Returns frames.
+function stringToTimer(str) {
+  const s = String(str).trim().toLowerCase();
+  if (s === "") throw new Error("time: empty");
+
+  let h = 0, m = 0, sec = 0;
+  const hms = s.match(/^(?:(\d+)\s*h)?\s*(?:(\d+)\s*m)?\s*(?:(\d+)\s*s)?$/);
+  if (hms && (hms[1] || hms[2] || hms[3])) {
+    h = +(hms[1] || 0); m = +(hms[2] || 0); sec = +(hms[3] || 0);
+  } else {
+    const parts = s.split(":");
+    if (parts.length > 3 || parts.some((p) => !/^\d+$/.test(p.trim()))) {
+      throw new Error("time: use HH:MM:SS");
+    }
+    const n = parts.map((p) => parseInt(p, 10));
+    if (n.length === 3)      { h = n[0]; m = n[1]; sec = n[2]; }
+    else if (n.length === 2) { m = n[0]; sec = n[1]; }
+    else                     { sec = n[0]; }
+  }
+  // Minutes/seconds may carry (90 in the seconds slot means 1:30), but the
+  // total still has to fit the DWORD the save block holds.
+  const total = (h * 3600 + m * 60 + sec) * TICKS_PER_SEC;
+  if (!isFinite(total) || total < 0 || total > 0xFFFFFFFF) throw new Error("time: out of range");
+  return total >>> 0;
+}
+
+// The ending grants the infinite weapon below 0x69780 ticks (ending_state,
+// 0x00410c7a) - flag the threshold so an edit does not silently cross it.
+const INFINITE_WEAPON_CUTOFF = 0x69780;
+
+function updateTimerHint(frames) {
+  const el = $("timerHint");
+  if (!el) return;
+  const under = frames < INFINITE_WEAPON_CUTOFF;
+  el.textContent = frames + " ticks @30/s \u00b7 " +
+    (under ? "under" : "over") + " the 04:00:00 infinite-weapon cutoff";
 }
 
 function timerToString(frames) {
@@ -436,10 +482,25 @@ $("f_healthFlags").addEventListener("change", () => {
   catch (e) { $("status").textContent = e.message; $("status").className = "err"; }
 });
 $("f_timer").addEventListener("change", () => {
-  const t = num("f_timer");
+  const t = num("f_timer") >>> 0;
   setU32(0x224, t);
   $("f_timerStr").value = timerToString(t);
+  updateTimerHint(t);
   markDirty();
+});
+$("f_timerStr").addEventListener("change", () => {
+  try {
+    const t = stringToTimer($("f_timerStr").value);
+    setU32(0x224, t);
+    $("f_timer").value = t;
+    $("f_timerStr").value = timerToString(t);   // normalise 90s -> 00:01:30
+    updateTimerHint(t);
+    markDirty();
+  } catch (e) {
+    $("status").textContent = e.message;
+    $("status").className = "err";
+    $("f_timerStr").value = timerToString(u32(0x224));
+  }
 });
 $("f_saves").addEventListener("change", () => { setByte(0x228, num("f_saves")); markDirty(); });
 $("f_countdown").addEventListener("change", () => { setU16(0x21C, num("f_countdown") & 0xFFFF); markDirty(); });

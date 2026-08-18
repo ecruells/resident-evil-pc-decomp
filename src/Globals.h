@@ -92,7 +92,6 @@ extern signed char   g_ScreenShakeOffsetY;             // 0x00bca0d9
 extern DWORD         g_dwSystemTimer1;                 // 0x007e0df4
 extern DWORD         g_dwGameTimer1;                   // 0x007e0df8
 extern DWORD         g_GameInitTime;                   // 0x004d46c4
-extern DWORD         g_gameTimerSnapshot;              // 0x00be9844
 extern DWORD         Game_timer;                       // 0x00d22730
 extern DWORD         DAT_004d46d4;                     // 0x004d46d4
 extern DWORD         g_LastFrameTime_ms;               // 0x004d45fc
@@ -131,8 +130,11 @@ extern BYTE          g_joystickBindingData[128];
 extern BOOL          g_isSideWinderConnected;          // 0x004d1f50
 extern BYTE          g_InstallFlagData;
 extern int           g_InstallFlagDataLoaded;
-extern DWORD         g_dwPlayCount;                    // 0x004d6430
-extern DWORD         g_dwClearCount;                   // 0x004d6434
+// The registry pair. LoadInstallationConfiguration reads "Play Number" into
+// 0x004d63f4 (0x0040b159) and "Clear Number" into 0x004d6430 (0x0040b19f);
+// ending_state increments the latter.
+extern DWORD         g_dwPlayCount;                    // 0x004d63f4
+extern DWORD         g_dwClearCount;                   // 0x004d6430
 
 // Drive types
 extern UINT          g_DriveTypes[MAX_DRIVES];

@@ -1221,30 +1221,8 @@ void InitializeGame(void)
     printf("end of game init\n");
 }
 
-// ============================================================================
-// ending_state (0x00410820) — STUB
-// Ending sequence: plays ending FMVs, credits, result screen.
-// Sets up next-cycle save data and chains to title_state.
-// ============================================================================
-void ending_state(void)
-{
-    // 0x00410820
-    OutputDebugStringA("[GAME] ending_state — stub\n");
-
-    g_main_state_flags |= 0x80000;
-    Task_sleep(1);
-
-    sounds_reset();
-    LoadSoundBank(0xe, g_DataBuffer);
-
-    // Stub: brief delay then return to title
-    for (int i = 0; i < 90; i++) {
-        Task_sleep(1);
-    }
-
-    g_dwClearCount++;
-    Task_chain((void*)title_state);
-}
+// ending_state (0x00410820) lives in EndingScreen.cpp.
+extern void ending_state(void);
 
 // ============================================================================
 // game_start (0x00480710)
@@ -1264,8 +1242,6 @@ void game_start(void)
     g_message_flags = g_message_flags & 0xfdff;
 
     InitializeGame();
-
-    // Task_chain((void*)texture_viewer_state);
 
     end_game_status = game_loop();
 
@@ -2196,8 +2172,6 @@ void FUN_0040c560(int param)
     DAT_004d6444 = (unsigned char)param & 1;
 }
 
-// Global stubs
-unsigned long g_gameTimerSnapshot = 0;            // 0x00be9844
 // ============================================================================
 // g_ScdAnimRemap (0x004bec80)
 // Animation remap table for SCD event state-1 opcode 0x89 (set animation frame).

@@ -102,7 +102,11 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define g_PlayerHealthCopy        (g_BioCard.playerHealthCopy)                  // SHORT 0x00be983E
 #define g_PlayerDpadHeld          (g_BioCard.playerDpadHeld)                    // SHORT 0x00be9840
 #define g_PlayerDpadPressed       (g_BioCard.playerDpadPressed)                 // SHORT 0x00be9842
-#define g_gameTimerSnapshot_bio   (g_BioCard.gameTimerSnapshot)                 // DWORD 0x00be9844
+// The live play timer. main_loop mirrors Game_timer into it every frame
+// (0x004298a5) and title_state restores Game_timer from it after a load
+// (0x00430686), so it has to be the BioCard field the save block writes -
+// a separate global here would drop the saved play time on every load.
+#define g_gameTimerSnapshot       (g_BioCard.gameTimerSnapshot)                 // DWORD 0x00be9844
 #define g_SavesCounter            (g_BioCard.savesCounter)                      // BYTE 0x00be9848
 #define g_EquippedItemId          (g_BioCard.equippedItemId)                    // BYTE 0x00be9849
 #define g_RoomItemBackup          (g_BioCard.roomItemBackup)                    // BYTE 0x00be984A
