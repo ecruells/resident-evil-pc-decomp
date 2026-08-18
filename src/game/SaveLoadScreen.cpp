@@ -403,20 +403,26 @@ void rearrange_item_slots(void)
 //   mode          — 0 = save mode, 1 = load mode. Controls the exit behavior
 //                   (0 returns in-game, anything else chains to title_state)
 //                   and the slot-selection state (state = mode + 3).
-//   flags         — unused by the screen itself; passed through to the
-//                   slot-select play_sfx bank (always a non-bank value, so
-//                   that call is silent in the original).
-//   useInkRibbon  — non-zero to consume ink ribbon when saving; also the
-//                   play_sfx bank for the cursor-move sounds.
-//   exitMode      — play_sfx bank for the confirm/cancel/animation sounds
-//                   (2 from the typewriter, 1 from the title screen).
+//   flags         — unused by the screen itself (the original never reads it).
+//   useInkRibbon  — non-zero to consume ink ribbon when saving. Read only by
+//                   state 6; it is NOT a play_sfx bank.
+//   sfxBank       — play_sfx bank for every sound the screen makes: cursor
+//                   move, confirm, cancel and the save reveal ticks. Every
+//                   one of the six calls loads the bank byte from THIS
+//                   argument (arg4 at [ESP+0x17f4], e.g. 0x004934af,
+//                   0x0049353a, 0x00493b76). 2 from the typewriter -> the
+//                   room's g_emSndBanks records 29/30/31 (cancel/type01/
+//                   type02, see g_RoomSndData); 1 from the title/ending
+//                   screens -> g_SfxBanks 29/30/31, which play_sfx folds to
+//                   13/14/15 of the loaded bank (g_st12/g_st14 hold
+//                   cancel/type01/type02 there).
 //   cutsceneReset — controls cut_set/StMask on exit (0 = do reset).
 //
 // Called from:
 //   title_state:        LoadSaveGameState(1, 0x80180000, 0, 1, 0)  — Load Game
 //   check_typewriter:   LoadSaveGameState(0, flags, ribbon+1, 2, 0) — Save Game
 // ============================================================================
-void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int cutsceneReset)
+void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int cutsceneReset)
 {
     // Save slot info table (9 entries: 8 file slots + 1 exit option)
     SaveSlotInfo save_slots[SAVE_SLOT_COUNT + 1];
@@ -495,7 +501,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 input_delay = 6;
                 if (--selected_slot < 0) selected_slot = 8;
                 state = STATE_INPUT_DELAY;
-                play_sfx(useInkRibbon, 30);
+                play_sfx(sfxBank, 30);
             }
 
             // Down pressed (use g_RawPadHeld for continuous held detection)
@@ -505,7 +511,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 input_delay = 6;
                 if (++selected_slot > 8) selected_slot = 0;
                 state = STATE_INPUT_DELAY;
-                play_sfx(useInkRibbon, 30);
+                play_sfx(sfxBank, 30);
             }
 
             // SideWinder pad check
@@ -518,7 +524,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
             if (((g_PlayerDpadPressed & 0x4000) != 0) || (sidewinderBtn != 0)) {
                 if (selected_slot == SAVE_SLOT_COUNT) {
                     // Exit option selected
-                    play_sfx(exitMode, 29);
+                    play_sfx(sfxBank, 29);
                     if (mode == 0) {
                         // In-game: return to gameplay
                         if (!cutsceneReset) {
@@ -535,7 +541,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
                 } else {
                     // Non-exit slot selected → go to mode-specific state
                     // (original: state = mode + 3 → 3 = save, 4 = load)
-                    play_sfx(exitMode, 31);
+                    play_sfx(sfxBank, 31);
                     state = (MenuState)(mode + 3);
                 }
             }
@@ -543,7 +549,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
             // (cancel/back)
             if ((g_PlayerDpadPressed & 0x8000) != 0) {
 
-                play_sfx(exitMode, 29);
+                play_sfx(sfxBank, 29);
 
                 if (mode == 0) {
                     // In-game: return to gameplay
@@ -828,7 +834,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int 
             // "Typewriter" tick — plays for every revealed non-space char
             // (the char two back from the copy end; spaces are 0x00).
             if (animBuf[copyLen - 2] != 0) {
-                play_sfx(exitMode, 31);
+                play_sfx(sfxBank, 31);
             }
             break;
         }

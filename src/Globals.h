@@ -1588,7 +1588,7 @@ void empty_00497c10(int value);
 void update_title_options(void);
 
 // --- Save / load ---
-void LoadSaveGameState(int mode, int flags, int useInkRibbon, int exitMode, int cutsceneReset);
+void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int cutsceneReset);
 int  FileWrite(const char* name, void* buf, int len);
 int  ReadSaveFile(const char* path, void* buffer);
 void EnsureDirectoryExists(const char* path);
