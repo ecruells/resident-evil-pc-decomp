@@ -2476,12 +2476,12 @@ static void effect_submit_diag(int stage, Effect* eff, int sheetSlot,
     unsigned char t = eff->effectType;
     if (stage == lastStage[t] && sheetSlot == lastSlotT[t]) return;
     lastStage[t] = stage; lastSlotT[t] = sheetSlot;
-    dbg_printf("[effect] submit stage=%d type=%u slot=%d srvNull=%u"
-               " scr=(%d,%d) depth=%d scale=%d u=%u v=%u w=%u h=%u\n",
-               stage, (unsigned int)eff->effectType, sheetSlot, (unsigned int)srvNull,
-               (int)screenX, (int)screenY, depth, scale,
-               (unsigned int)g_TextureDesc.texU, (unsigned int)g_TextureDesc.texV,
-               (unsigned int)g_TextureDesc.width, (unsigned int)g_TextureDesc.height);
+    // dbg_printf("[effect] submit stage=%d type=%u slot=%d srvNull=%u"
+    //            " scr=(%d,%d) depth=%d scale=%d u=%u v=%u w=%u h=%u\n",
+    //            stage, (unsigned int)eff->effectType, sheetSlot, (unsigned int)srvNull,
+    //            (int)screenX, (int)screenY, depth, scale,
+    //            (unsigned int)g_TextureDesc.texU, (unsigned int)g_TextureDesc.texV,
+    //            (unsigned int)g_TextureDesc.width, (unsigned int)g_TextureDesc.height);
 }
 
 static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
@@ -2884,10 +2884,10 @@ void update_2d_effects(void)
         }
         if (active != lastActive) {
             lastActive = active;
-            dbg_printf("[effect] update_2d_effects: %d/%d slots active"
-                       " (free=%u flags=%u)\n",
-                       active, MAX_EFFECTS,
-                       (unsigned int)g_freeEffectSlots, (unsigned int)g_message_flags);
+            // dbg_printf("[effect] update_2d_effects: %d/%d slots active"
+            //            " (free=%u flags=%u)\n",
+            //            active, MAX_EFFECTS,
+            //            (unsigned int)g_freeEffectSlots, (unsigned int)g_message_flags);
         }
     }
 

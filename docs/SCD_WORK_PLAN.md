@@ -161,10 +161,10 @@ is how a cutscene animates anyone: event opcodes `0x83`/`0x84`/`0x85` write stat
 8 plus a behaviour straight into the entity. With state 8 missing the actor froze
 in the pose the script had just set.
 
-Player behaviours **0, 1, 5, 7, 8, 9** are transcribed (`PlayerAnimations.cpp`);
-2, 3, 4 and 6 (`0x0044d380`, `0x0044d5e0`, `0x0044d930`, `0x0044dc50`) log their
-address. Behaviour 1 is the remapped-animation player and 5 walks to the scripted
-destination in `unk_c6`/`unk_c8`.
+All ten player behaviours are transcribed (`PlayerAnimations.cpp`). Behaviour 1
+is the remapped-animation player, 5 walks to the scripted destination in
+`unk_c6`/`unk_c8`, and 4 walks to it **backwards** (see the 2026-08-18 entry at
+the end of this file).
 
 New file `src/game/entities/CharacterNpc.cpp` holds the NPC side: the update
 driver, state 0 init, state 1 idle, state 8, all ten per-character init handlers,
@@ -2254,3 +2254,108 @@ hardcoded start zone 0, which is why the divergence went unnoticed.
 
 **Not run in-game.** Build-verified only (full tree, zero errors). Ghidra updated with all
 four names and saved.
+
+## Room 1151 ceiling trap: player SCD behaviour 4 (2026-08-18)
+
+Jill never stepped back before Barry kicks the door in, and the cutscene stalled
+there forever. The whole chain:
+
+* `ROOM1151.RDT` event script 0, `+0x16C`: `83 04 24 13 F4 1A 04` -
+  `s1_pose_full` puts the **player** into state 8 with `action_behavior = 4`,
+  target `unk_c6/unk_c8 = (0x1324, 0x1AF4)`, `scd_anim_param = 4`, and (from the
+  `0x83` handler) `scd_timer/unk_de = 0x28`.
+* `+0x17B`: `FD call_cmd` spins on the SCD command parked at `+0x176`,
+  `04 04 04` = `bit_test` **bank 4 bit 4**. Bank 4 is `g_SysFlags` (0x00be41c8),
+  which is exactly what the behaviour's `Flg_on(g_SysFlags, scd_anim_param)`
+  raises on arrival. That spin is the `[scd] slot 1 PARKED op=0xFD` in the log.
+* Player behaviour 4 (`0x0044d930`) was a one-line stub that only logged its
+  address, so the player never moved, the flag never went up, and the `FD` loop
+  never terminated.
+
+`0x0044d930` is now transcribed. It is the player twin of
+`npc_walk_backward_step`: flip the facing by `0x800`, run
+`entity_rotate_toward_target`, flip back, `Add_speedXZ(0x800)` - the turn aligns
+the player's **back** with the target and the motion carries them toward it.
+Arrival is 100 units.
+
+Three things worth recording:
+
+* It animates from **`animHeader`/`animBase`** (`+0x90`/`+0x94`, pushed from
+  `0x00be6374`/`0x00be6378` at `0x0044da19`), **not** from
+  `jointMoveData0`/`jointMoveData1` (`+0x15C`/`+0x160`, `0x00be6440`/`0x00be6444`,
+  which is what behaviours 2 and 3 push at `0x0044d537`). Same-shaped call, two
+  different global pairs - check the operand address, not the shape.
+* The `move_speed_current` frame window at `0x0044d997`-`0x0044d9ae` is **dead
+  code as emitted**: `JNC` at `0x0044d9a8` jumps to the `0x40` store, and the
+  `JA` at `0x0044d9ac` is only reachable with `AL < 5` so it never fires. Both
+  arms land on `0x40`; the `0x3c` written first never survives a frame. Kept
+  verbatim rather than "fixed".
+* The `+0x800` is masked with `& 0xfff`, the `-0x800` afterwards is not. That
+  asymmetry is the original's and can leave the angle outside `0..0xFFF`.
+
+The function did not exist in the Ghidra database (the address sat inside no
+function); it was created there as `player_scd_behavior_04` before decompiling.
+
+**User-tested 2026-08-18: fixed.** Jill backs up and the door kick proceeds.
+
+## tools/rdt_event_editor.html - editing a room's event scripts (2026-08-18)
+
+A self-contained page (no CDN, no build) that loads a `ROOM????.RDT`, disassembles
+the SCD **event** scripts at header `0x68`, lets them be edited, and writes the RDT
+back out. Open it straight from disk. It is the interactive sibling of
+`tools/evt_disasm.py`; the per-frame room SCD at `0x64` is still
+`tools/mine_room_scd.py`'s job.
+
+**What it shows.** One row per opcode with its offset, the VM state it decodes in,
+raw bytes, mnemonic and a decoded note. Named field editors for every opcode that
+has operands - `s1_pose_full` gets behaviour / target X / target Z / completion
+flag, `bit_test` gets bank / bit / byte-offset / condition, and so on - plus a raw
+hex box on every row as the escape hatch. Insert, duplicate, reorder and delete
+with a state-aware opcode palette; undo/redo; a text export in `evt_disasm.py`'s
+format.
+
+**How it stays lossless.** A script is decoded into items that *tile* its byte
+range with no gaps, so re-serialising is exact. The variable-width opcodes
+(`0x06`, `0x07`, and `0xFC`) own their entire span **including the payload the VM
+only runs later off the call stack**, and their width byte is recomputed from the
+payload length on every edit, so a payload change can never desync the jump.
+Verified: all 237 shipped RDTs that have an event table parse, decode and rebuild
+**byte-identical**; the other 111 either have a zero-length table (83 rooms with no
+cutscenes) or are under 0x94 bytes.
+
+**How it saves.** The event region is bounded by the next landmark above the table
+(any other section pointer, any camera mask pointer, or EOF). If the rebuilt region
+still fits there it is written in place and the file size does not change. If it
+does not - and it often will not, e.g. ROOM1151 has **zero** slack - the whole
+region is appended at EOF and header `0x68` is repointed. That is safe precisely
+because `LoadRoomRdt` rebases `0x48..0x93` by adding the buffer base and the event
+table's own entries are relative to the table, so nothing else in the file moves.
+A budget meter shows which path a save will take.
+
+**A script boundary is not an execution boundary.** Table entries are entry points,
+not extents: a script that does not end in `0xFF` simply walks on into the next
+one's bytes with its VM state intact. The editor ends each listing at the next
+entry point and says so in a banner, with a selector to re-read a script as a
+state-1 or state-2 fall-through. `evt_disasm.py` over-reads by 0x200 instead, which
+is why its "script 0" listing for ROOM1151 shows opcodes that belong to script 1.
+
+### Two decoding bugs found while building it, both fixed
+
+**`mine_room_scd.py` reported the wrong flag bank for nearly every test.**
+`cmd_bit_test` (0x00460570) and `cmd_bit_op` (0x00460650) read through
+`g_ScdOpcodes`, which points at the **opcode**, so `scd_read_u16(0) >> 8` is the
+byte immediately after it. Per byte the operands are `[bank][offset+bit][cond]`.
+The script was taking the pair one byte later. Measured over every shipped RDT:
+787 flag commands, of which the old reading put **677 (86%)** outside the valid
+bank range 0-9; the corrected reading puts **none** outside it, and all ten banks
+are populated (SysFlags is much the commonest at 359). The unused `bit_desc()`
+helper encoded the same mistake a third way and was deleted.
+
+**`evt_disasm.py` mislabelled `s1_pose_anim`'s completion flag.** For opcode `0x84`,
+`scd_anim_param` is the **low** byte of the word at +2 (`(char)uVar5` at
+0x0041dd2c), not the byte at +3. The byte at +3 is not a second parameter at all:
+the whole word feeds `scd_entity_flags` as `(word >> 6) & 0x3FC` - bit 1 runs the
+state-8 handler twice, bit 2 refreshes the weapon joint, bit 3 picks the hand. The
+shipped data makes this obvious once you look: every `0x84` in ROOM1151 carries a
+constant `0x3F` at +2 and a varying `0x00`/`0x03` at +3, and `0x03` there is exactly
+`entity_flags = 0x0C`, i.e. refresh the weapon joint in hand 1.

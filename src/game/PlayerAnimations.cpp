@@ -5219,8 +5219,9 @@ static void player_ctrl_frame4(void)
 // 8 unimplemented the player froze in whatever pose the script had just set and
 // the event VM waited on an animation that never advanced.
 //
-// Handlers 0, 1, 5, 7, 8 and 9 are transcribed. 2, 3, 4 and 6 are not yet, and
-// log their address rather than sitting NULL.
+// All ten handlers are transcribed. Behaviour 4 was the last one left logging
+// its address, and its absence stalled the room 1151 ceiling-trap cutscene: the
+// script parks waiting on the flag the backward walk raises on arrival.
 // ============================================================================
 
 extern void Flg_on(int baseAddr, unsigned int bitIndex);                          // 0x00473ef0
@@ -5719,7 +5720,80 @@ static void player_scd_behavior_03(void)
         return;
     }
 }
-static void player_scd_behavior_04(void) { player_scd_report("0x0044d930"); }
+// 0x0044d930 - behaviour 4: walk BACKWARDS to the scripted target. The player
+// twin of npc_walk_backward_step: the facing is flipped 180 degrees, the normal
+// "rotate toward target" step runs against the flipped heading, then the flip is
+// undone - so the turn aligns the player's BACK with the target while
+// Add_speedXZ(0x800) drives motion along that same flipped heading. This is the
+// "step back" beat of a cutscene (Jill backing away before Barry kicks the door
+// in room 1151).
+//
+// Only states 0 and 1 exist; anything else returns immediately. Unlike
+// behaviours 2/3 this one animates from animHeader/animBase (+0x90/+0x94), NOT
+// from jointMoveData0/1 (+0x15C/+0x160) - the two pairs are pushed from
+// different globals at 0x0044da19 and 0x0044d537 respectively.
+//
+// Arrival is 100 units. Flg_on fires on every frame inside that radius, and the
+// return to state 1 (one 32-bit store at +0x84) happens only when
+// healthStatusFlags bit 7 is clear.
+static void player_scd_behavior_04(void)
+{
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_bf             = 0;
+        g_playerEntity.unk_8c             = 3;
+        g_playerEntity.action_state       = 1;
+        g_playerEntity.attackAnim         = 3;
+    }
+    else if (g_playerEntity.action_state != 1) {
+        return;
+    }
+
+    // PlayEntitySnd takes ONE parameter; the call site pushes a dead second
+    // dword. Unlike behaviour 2 the two frame tests share a single call here.
+    if (g_playerEntity.animation_frame_id == 8 ||
+        g_playerEntity.animation_frame_id == 0x16) {
+        PlayEntitySnd(0);
+    }
+
+    // 0x0044d997-0x0044d9ae, transcribed as emitted. Both arms of the compare
+    // fall into the 0x40 store - the `JNC` at 0x0044d9a8 targets it, and the
+    // `JA` at 0x0044d9ac is only reachable with AL < 5 so it is never taken.
+    // The 0x3c written first is therefore dead in every frame; it is kept so
+    // the store order matches the original.
+    g_playerEntity.move_speed_current = 0x3c;
+    if (g_playerEntity.animation_frame_id >= 5 ||
+        g_playerEntity.animation_frame_id <= 7) {
+        g_playerEntity.move_speed_current = 0x40;
+    }
+
+    g_playerPosScratch.x = (int)g_playerEntity.unk_c6;
+    g_playerPosScratch.z = (int)g_playerEntity.unk_c8;
+    g_playerPosScratch.y = 0;
+
+    // The +0x800 is masked into the 0..0xFFF angle space, the -0x800 is not.
+    // That asymmetry is the original's (0x0044d9e7 / 0x0044da0e).
+    *(unsigned short*)&g_playerEntity.directionAngle =
+        (unsigned short)((*(unsigned short*)&g_playerEntity.directionAngle + 0x800) & 0xfff);
+    entity_rotate_toward_target(&g_playerPosScratch, g_playerEntity.unk_de);
+    g_playerEntity.directionAngle = (short)(g_playerEntity.directionAngle - 0x800);
+
+    Joint_move(player_joint_mirror(), g_playerEntity.animHeader,
+               g_playerEntity.animBase, 0x400);
+    Add_speedXZ(0x800);
+
+    int dz = g_playerEntity.scaMatrixData.localMatrix.t[2] - (int)g_playerEntity.unk_c8;
+    int dx = g_playerEntity.scaMatrixData.localMatrix.t[0] - (int)g_playerEntity.unk_c6;
+    if (SquareRoot0(dz * dz + dx * dx) < 100) {
+        Flg_on((int)g_SysFlags, g_playerEntity.scd_anim_param);
+        if ((g_playerEntity.healthStatusFlags & 0x80) == 0) {
+            g_playerEntity.animationId     = 1;
+            g_playerEntity.animFrameId     = 0;
+            g_playerEntity.action_behavior = 0;
+            g_playerEntity.action_state    = 0;
+        }
+    }
+}
 // 0x0044dc50 - behaviour 6: turn in place toward the scripted target. Rotates at
 // a fixed 0x38 per frame and finishes when turn_toward_target reports the
 // remaining angle closed at the script's own step (unk_de), then hands the player
