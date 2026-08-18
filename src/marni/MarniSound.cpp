@@ -423,6 +423,9 @@ void DirectSound::PlaySound(int bank, unsigned int slot)
         xa2buf.PlayLength = 0;
         xa2buf.LoopBegin = 0;
         xa2buf.LoopLength = 0;
+        // LoopBegin/LoopLength stay 0: DSBPLAY_LOOPING, which this replaces,
+        // always repeats the WHOLE buffer, and the PC build has no loop-region
+        // mechanism anywhere. See the note in SoundSystem.cpp's bgm_load_and_start.
         xa2buf.LoopCount = (slot != 0) ? XAUDIO2_LOOP_INFINITE : 0;
 
         HRESULT hr = voice->SubmitSourceBuffer(&xa2buf, NULL);

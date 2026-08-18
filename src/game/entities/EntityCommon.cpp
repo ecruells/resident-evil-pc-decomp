@@ -23,6 +23,8 @@ extern void plant42_update(void);
 extern void yawn_update(void);
 // Spider web (room 30C0 door blocker) update (0x00443640) - SpiderWeb.cpp.
 extern void spiderweb_update(void);
+// Tyrant boss update (0x00421990) - Tyrant.cpp. Ids 12 and 16 share it.
+extern void tyrant_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -56,11 +58,11 @@ void* enemies_update_functions_tbl[48] = {
     NULL,                  // [9]  chimera  (0x00438a70)
     NULL,                  // [10] adder (regular size snakes) (0x004727f0)
     NULL,                  // [11] neptune (0x0043d8d0)
-    NULL,                  // [12] tyrant 1 (0x00421990)
+    (void*)tyrant_update,  // [12] tyrant 1 - em100C, the lab slab (0x00421990)
     (void*)yawn_update,    // [13] yawn 1 (Giant snake) (0x004051e0)
     NULL,                  // [14] plant 42 roots (0x0047e1c0)
     NULL,                  // [15] monster plant (0x0045abb0)
-    NULL,                  // [16] tyrant 2 (0x00421990)
+    (void*)tyrant_update,  // [16] tyrant 2 - em1010, the rooftop (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3
     (void*)yawn_update,    // [18] yawn 2 (0x004051e0)
     (void*)spiderweb_update, // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)

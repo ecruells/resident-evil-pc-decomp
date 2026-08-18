@@ -910,7 +910,19 @@ void player_anim_death_billboard(void) {
     }
 }
 void player_anim_limb_physics(void) {         // 0x00424fb0 - dispatch via DAT_004ba360[action_behavior]
-    extern void* DAT_004ba360[];
+    // The Tyrant player-hit reactions; the table is defined in Tyrant.cpp next
+    // to the rest of the Tyrant's 0x004ba2xx-0x004ba3xx data block. Four slots,
+    // the last NULL - the original indexes it unbounded, so bound it here.
+    extern void* DAT_004ba360[4];
+    if (g_playerEntity.action_behavior >= 4) {
+        static int lastReported = -1;
+        if ((int)g_playerEntity.action_behavior != lastReported) {
+            lastReported = (int)g_playerEntity.action_behavior;
+            dbg_printf("[player] DAT_004ba360[%u] out of range (Tyrant hit reaction)\n",
+                       (unsigned int)g_playerEntity.action_behavior);
+        }
+        return;
+    }
     void (*func)(void) = (void(*)(void))DAT_004ba360[g_playerEntity.action_behavior];
     if (func) func();
 }

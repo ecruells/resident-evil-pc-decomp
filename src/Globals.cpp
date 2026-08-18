@@ -664,7 +664,11 @@ void* g_playerAnimFunctions[52] = {};     // 0x00bebbd8
 // Player animation jump tables (populated from binary data)
 // TODO: Extract actual table contents from binary
 void* DAT_004c2ac8[32] = {};   // jump table for player_anim_set_attacked_flag dispatch (action_behavior)
-void* DAT_004ba360[32] = {};   // jump table for player_anim_limb_physics dispatch (action_behavior)
+// DAT_004ba360 - player_anim_limb_physics dispatch (action_behavior). Three real
+// entries, and they are all Tyrant player-hit reactions living inside the Tyrant's
+// own data block (0x004ba240..0x004ba377), so the table is DEFINED IN Tyrant.cpp
+// alongside them. It was an all-NULL placeholder here, which softlocked Chris
+// mid-pose the first time the Tyrant connected.
 void* DAT_004b1a90[32] = {};   // jump table for player_anim_death_alt dispatch (action_behavior)
 void* DAT_004c10b0[32] = {};   // jump table for player_anim_dispatch_4b1a90 dispatch (action_state)
 

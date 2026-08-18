@@ -142,6 +142,7 @@
     <ClCompile Include="src\game\entities\Plant42.cpp" />
     <ClCompile Include="src\game\entities\ComputerArms.cpp" />
     <ClCompile Include="src\game\entities\SpiderWeb.cpp" />
+    <ClCompile Include="src\game\entities\Tyrant.cpp" />
     <ClCompile Include="src\game\entities\Yawn.cpp" />
     <ClCompile Include="src\game\entities\Zombie.cpp" />
     <ClCompile Include="src\game\WeaponDamage.cpp" />

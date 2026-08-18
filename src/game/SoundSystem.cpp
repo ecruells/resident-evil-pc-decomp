@@ -708,6 +708,28 @@ static unsigned char bgm_group_for(unsigned char roomId, unsigned char bgmState)
 // g_SoundSystemFlags bit 3 (0x0047f42d-0x0047f470): it builds a second path from
 // g_SoundAltPathPrefix, discards it, and falls into the normal path regardless.
 // ============================================================================
+// ============================================================================
+// BGM LOOPING - whole buffer, by design. Do not "fix" this.
+//
+// A looping BGM channel repeats its ENTIRE wav from sample 0; there is no
+// loop-region mechanism anywhere in the PC build. Confirmed end to end:
+//   * the wav loader (0x00463110) is the stock mmio WaveLoadFile and reads only
+//     `fmt ` and `data`; no BGM wav carries a `smpl` chunk,
+//   * g_BgmLoopTable holds a 1-bit flag, not an offset, and the exe has no
+//     loop-offset table (the string "Bgm_24" appears exactly once, in the name
+//     pool at 0x004d0428),
+//   * playback is DirectSound Play(0, 0, DSBPLAY_LOOPING), which can only repeat
+//     the whole buffer.
+//
+// This is audible on Bgm_24, the Tyrant battle: the wav is 43.8 s of which the
+// first 33.5 s is a build-up, so the build-up comes back round every cycle. That
+// is correct for the PC release - the PS1 version loops only the 10.3 s battle
+// section, and the assets still ship the two halves separately (bgm_24a.wav
+// 739454 samples + bgm_24b.wav 227316 samples = bgm_24.wav 966470 samples, the
+// only such pair among the 61 BGM files). The PC build simply plays the joined
+// file and loops all of it. User-confirmed 2026-08-17.
+// ============================================================================
+
 static void bgm_load_and_start(unsigned char bgmState)
 {
     int slotCount = 3;
