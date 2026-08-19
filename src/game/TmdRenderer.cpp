@@ -515,6 +515,27 @@ void FlushTmdObjects(void)
                 }
             }
 
+            // F7 (debug builds): one line per queued TMD object with the
+            // screen box its unclipped vertices cover.
+            if (g_debugDumpDrawFlag) {
+                float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
+                int vis = 0;
+                for (int v = 0; v < vtxCount; v++) {
+                    if (clipped[v]) continue;
+                    vis++;
+                    if (sx[v] < bx0) bx0 = sx[v];
+                    if (sy[v] < by0) by0 = sy[v];
+                    if (sx[v] > bx1) bx1 = sx[v];
+                    if (sy[v] > by1) by1 = sy[v];
+                }
+                dbg_printf("[dump]  tmd#%3d obj=%p slot=%p prims=%d verts=%d/%d"
+                           " tex=%u alpha=%.3f unlit=%d depth=%d"
+                           " box=(%.0f,%.0f)-(%.0f,%.0f)\n",
+                           i, (void*)e->objData, (void*)e->slot, listCount,
+                           vis, vtxCount, (unsigned int)tex, triAlpha,
+                           unlit ? 1 : 0, e->depth, bx0, by0, bx1, by1);
+            }
+
             // Emit triangles
             for (int pIdx = 0; pIdx < listCount; pIdx++) {
                 WORD idx[4];

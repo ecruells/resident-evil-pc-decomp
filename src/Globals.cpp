@@ -1930,5 +1930,6 @@ int            DAT_004d228c = 0;
 int            g_debugOpenSaveScreenFlag = 0;
 int            g_debugOpenItemboxFlag = 0;
 int            g_debugTextureViewerFlag = 0;
+int            g_debugDumpDrawFlag = 0;
 int            g_debugTextureViewerOpen = 0;
 #endif

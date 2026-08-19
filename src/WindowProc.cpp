@@ -181,6 +181,10 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             else if (wParam == VK_F6) {
                 g_debugTextureViewerFlag = 1;
             }
+            // F7: dump every draw command submitted for one frame.
+            else if (wParam == VK_F7) {
+                g_debugDumpDrawFlag = 1;
+            }
 #endif
             break;
         

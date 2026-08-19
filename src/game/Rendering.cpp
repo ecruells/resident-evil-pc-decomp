@@ -209,37 +209,58 @@ void draw_rect(RectDrawDesc* rect, int blend, int flags)
     unsigned char g = (unsigned char)(rect->g & 0xFF);
     unsigned char b = (unsigned char)(rect->b & 0xFF);
 
+    // 0x0047039b-0x004703fa: the primitive's colour is a PER-CHANNEL ON/OFF
+    // MASK, not the rect's literal colour. Each component is stored as 1.0f
+    // when its byte is non-zero and 0x3b449ba6 (~0.003, i.e. black) when it is
+    // zero, and `brightness` - the level that becomes the blend weight - is the
+    // LAST non-zero component. A tint is therefore always drawn fully
+    // saturated, with only its alpha varying.
+    unsigned char brightness = 0;
+    unsigned char mr = 0, mg = 0, mb = 0;
+    if (r != 0) { mr = 0xFF; brightness = r; }
+    if (g != 0) { mg = 0xFF; brightness = g; }
+    if (b != 0) { mb = 0xFF; brightness = b; }
+
     int variant = GetTextureVariant(rect->textureId);
+
+    // 0x004703fd: an all-zero colour draws nothing - unless the descriptor
+    // carries no variant at all, since variant 0 is the opaque fill and may
+    // legitimately be black.
+    if (brightness == 0 && variant != 0) return;
+
+    // The original stores (0x100 - brightness) / 256 into the primitive's +0x2c,
+    // which the sprite draw uses as the DESTINATION weight; `brightness` is
+    // therefore the source alpha, which is what this pending-sprite path wants.
     unsigned char a;
 
     switch (variant) {
+    case 1:
     case 2:
-        // fade_type_id=1: White flash — white overlay, alpha = brightness
-        a = r; if (g > a) a = g; if (b > a) a = b;
-        r = 255; g = 255; b = 255;
+        // 0x00470526 and 0x00470553 are BYTE-IDENTICAL blocks (only the jmp
+        // displacement differs): both set the variant flag and keep the mask
+        // colour built above. Case 2 used to force r=g=b=255 here. That is
+        // invisible for a greyscale fade - every component is already equal -
+        // but it destroys a COLOURED tint. Room 2050's poison gas arms
+        // `1C 01 C8 00 06 00`: g_SpecialRoomLightR = 1 -> variant 2, flags 6 =
+        // R|G, i.e. a YELLOW veil, and it rendered white.
+        r = mr; g = mg; b = mb;
+        a = brightness;
         break;
     case 3:
-        // fade_type_id=2: Fade to black — black overlay, alpha = brightness
-        a = r; if (g > a) a = g; if (b > a) a = b;
+        // 0x00470580: forces the colour to black, keeps the level.
         r = 0; g = 0; b = 0;
-        break;
-    case 1:
-        // Special room lighting — tinted overlay, alpha = max component
-        a = r; if (g > a) a = g; if (b > a) a = b;
+        a = brightness;
         break;
     case 4:
-        // Special room lighting with the R byte's bits 0-1 set (R=3, e.g. the
-        // stage-4 room-0x11 emergency light): textureId 0x70000000. The
-        // original's draw_rect case 4 (0x004705c8) is the same tinted overlay
-        // at HALF opacity - texturePage = (0x100 - (bVar4 >> 1)) / 256 vs
-        // case 1's (0x100 - bVar4) / 256. Dropping this case made the
-        // emergency-light flash fall into the opaque default: a solid red
-        // rect over the room instead of the red tint.
-        a = r; if (g > a) a = g; if (b > a) a = b;
-        a = a >> 1;
+        // 0x004705c8: the same tinted overlay at HALF the level - `shr bl,1`
+        // before the (0x100 - bl) / 256 store. This is the stage-4 room-0x11
+        // emergency light (g_SpecialRoomLightR = 3 -> textureId 0x70000000).
+        r = mr; g = mg; b = mb;
+        a = (unsigned char)(brightness >> 1);
         break;
     default:
-        // Variant 0 or unknown: fully opaque (g_window_rect, etc.)
+        // 0x00470472: variant 0 is the opaque fill (g_window_rect etc.) and is
+        // the one case that keeps the rect's literal colour.
         a = 255;
         break;
     }
@@ -359,6 +380,24 @@ void FrameRateGovernor(void)
             MarniClear();
 
             FUN_0040a8f0(NULL);
+
+            // F7 (debug builds): dump one frame of every draw class.
+            if (g_debugDumpDrawFlag) {
+                dbg_printf("[dump] ===== frame stage=%d room=%d cam=%d"
+                           " pending=%d sprites=%d =====\n",
+                           (int)g_stageId, (int)g_roomId, (int)g_roomCameraId,
+                           g_pendingSpriteCount, g_SpriteQueueCount);
+                for (int i = 0; i < g_pendingSpriteCount; i++) {
+                    PendingSprite* ps = &g_pendingSprites[i];
+                    dbg_printf("[dump]  pend#%3d valid=%d depth=%u tex=%u"
+                               " xywh=(%.0f,%.0f,%.0f,%.0f) uv=(%.3f,%.3f)-(%.3f,%.3f)"
+                               " color=%08X\n",
+                               i, ps->valid, ps->depth, (unsigned int)ps->tex,
+                               (float)ps->x, (float)ps->y, (float)ps->w, (float)ps->h,
+                               (float)ps->u0, (float)ps->v0, (float)ps->u1, (float)ps->v1,
+                               (unsigned int)ps->color);
+                }
+            }
 
             // Sort pending sprites by depth (descending: high depth first = behind, low depth last = on top)
             for (int i = 0; i < g_pendingSpriteCount - 1; i++) {
@@ -494,6 +533,7 @@ void FrameRateGovernor(void)
         // of masks - each baked with a different screen-shake offset - could
         // end up on screen at once during the shake.
         ResetSpriteQueue();
+        g_debugDumpDrawFlag = 0;   // F7 dump covers exactly one frame
 
         g_frameTimeAccumulator -= g_frameTargetTime;
         if (g_frameTimeAccumulator < 0) g_frameTimeAccumulator = 0;

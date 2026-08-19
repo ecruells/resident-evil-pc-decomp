@@ -411,6 +411,7 @@ extern int           DAT_004d228c;                     // 0x004d228c - menu proc
 extern int           g_debugOpenSaveScreenFlag;
 extern int           g_debugOpenItemboxFlag;
 extern int           g_debugTextureViewerFlag;   // F6: request the overlay (edge)
+extern int           g_debugDumpDrawFlag;        // F7: dump one frame of draw commands
 extern int           g_debugTextureViewerOpen;   // 1 while the overlay is active
 int texture_viewer_overlay(void);                 // GameState.cpp - per-frame overlay; 0 when closed
 #endif
