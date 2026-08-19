@@ -8,9 +8,9 @@
 // slot's behavior function (g_effectBehaviorTable[animId], and a second one by
 // updateId), integrates velocity/rotation through the animation header, steps
 // the sprite frame, projects the world position, and submits the sprite via
-// SubmitEffectSprite (SpriteRenderer.cpp). When a menu is open
+// SubmitEffectSprite (SpriteRenderer.cpp). In a mirror room
 // (g_main_state_flags & 1) each effect is additionally redrawn through
-// FUN_0047ca30 in the menu's mirrored camera.
+// effect_draw_mirror_reflection in the reflected camera.
 //
 // Each effect's animation data is a chain of 24-byte header blocks. The header
 // bytes (animId, updateId, type, lightFactor + 16 more) select the behavior
@@ -776,22 +776,37 @@ static int effect_projectile_hit_check(int range, short x, short z)
 }
 
 // ============================================================================
-// FUN_0048bd00 - lighting visibility probe.
-// The camera light slab at `light` (RDT lights + cameraId*0x2c) against the
-// world position `param_3`. `param_2` selects which axis: 0 tests z (offset
-// +8), 1 tests y (offset +4). When the position and the near plane lie on
-// opposite sides of the camera, the position is behind the camera and 0 is
-// returned; otherwise an interpolated depth is left in g_entity_bkp (read by
-// the menu lighting path) and 1 returned when it is inside the far plane.
+// mirror_point_visible - the mirror visibility probe.
 //
-// Also called from update_entities and update_player_anim (the room lighting
-// probe) - the shared function replaces the old EntityCommon stub, whose
-// constant 0 silently skipped every effect the menu path asked about.
+// `light` is the RDT camera record for the current camera, aimed at its posX
+// (RDT + 0x9c + cameraId*0x2c), and `param_3` a world position. `param_2` is
+// g_main_state_flags bit 1, the mirror's plane axis: 0 = the plane is Z = k,
+// 1 = the plane is X = k, with k = g_mirrorPlaneCoord.
+//
+// First the camera and the position must lie on the SAME side of the plane -
+// you cannot see the reflection of something behind the mirror - which is the
+// sign test on the XOR. Then it intersects the camera-to-position segment with
+// the plane and leaves that crossing coordinate in g_entity_bkp, returning 1
+// only when it falls inside g_mirrorExtentMin .. g_mirrorExtentMax, the mirror's extent
+// along the other axis. In short: is this point visible in the mirror?
+//
+// Called from effect_draw_mirror_reflection (effects),
+// entity_build_mirror_joints (per entity joint) and the two mirror-pass call
+// sites in update_entities / update_player_anim.
 // ============================================================================
-unsigned char FUN_0048bd00(void* light, unsigned char param_2, int param_3)
+unsigned char mirror_point_visible(void* light, unsigned char param_2, int param_3)
 {
-    unsigned int uVar4 = (unsigned int)param_2 * 4;
-    unsigned int uVar5 = (unsigned int)DAT_00d2276c;
+    // *8, NOT *4. The original doubles the flag before scaling it:
+    //   0048bd06  ADD AL,AL          ; AL = param_2 * 2
+    //   0048bd16  LEA EBX,[ECX*0x4]  ; EBX = param_2 * 8
+    // Ghidra folded the two into a single *4 and the port inherited it. With
+    // *4 the axis-X case reads the position's Y for BOTH the plane coordinate
+    // (pp - off + 8) and the cross coordinate (pp + off), which is degenerate;
+    // with *8 it reads x for the plane and z for the extent, as it must. The
+    // axis-Z case has offset 0 either way, which is why rooms 1120/1130
+    // (plane Z) always worked and 1110/40B0/6110 (plane X) never did.
+    unsigned int uVar4 = (unsigned int)param_2 * 8;
+    unsigned int uVar5 = (unsigned int)g_mirrorPlaneCoord;
     char* lp = (char*)light;
     char* pp = (char*)param_3;
 
@@ -805,8 +820,8 @@ unsigned char FUN_0048bd00(void* light, unsigned char param_2, int param_3)
     int quotient = product / (int)(iVar3 - (int)(uVar5 * 2) + iVar1);
 
     g_entity_bkp = (unsigned int)(*(int*)(lp + uVar4) + quotient);
-    return (unsigned char)(g_entity_bkp - (unsigned int)DAT_00d211c4
-                           < (unsigned int)DAT_00d21350 - (unsigned int)DAT_00d211c4);
+    return (unsigned char)(g_entity_bkp - (unsigned int)g_mirrorExtentMin
+                           < (unsigned int)g_mirrorExtentMax - (unsigned int)g_mirrorExtentMin);
 }
 
 // ============================================================================
@@ -2442,7 +2457,7 @@ static const unsigned char g_EffectBlendStart[32] = {
 
 // ============================================================================
 // effect_submit_sprite - the shared render tail of EffectActor_UpdateAndRender
-// (0x0047c2f0) and FUN_0047ca30: fill g_TextureDesc from the slot's sprite
+// (0x0047c2f0) and effect_draw_mirror_reflection: fill g_TextureDesc from the slot's sprite
 // pointers, compute the size from the camera light and distance, walk the
 // blend/colour tables, and submit through SubmitEffectSprite.
 //
@@ -2804,17 +2819,17 @@ void EffectActor_UpdateAndRender(void)
 }
 
 // ============================================================================
-// FUN_0047ca30 - the menu-path redraw of one effect.
+// effect_draw_mirror_reflection - the mirror-pass redraw of one effect.
 //
-// update_2d_effects calls this after EffectActor_UpdateAndRender when a menu
-// is open (g_main_state_flags & 1): the camera has been mirrored for the
-// menu's flipped view, so the effect is re-projected through the mirrored
-// matrix. Transform-type effects project their stored position; the screenY
-// offset moves by a full frame height when g_spriteAnimActive == 0 (the menu
-// renders into the other half of the 480-line buffer). The light probe
-// (effect_light_check) additionally culls effects behind the camera.
+// update_2d_effects calls this after EffectActor_UpdateAndRender when the room
+// script has turned the mirror on (g_main_state_flags & 1): the camera has been
+// reflected about the mirror plane, so the effect is re-projected through the
+// reflected matrix and submitted a second time. Transform-type effects project
+// their stored position; the screenY offset moves by a full frame height when
+// g_spriteAnimActive == 0 (the pass renders into the other half of the 480-line
+// buffer). mirror_point_visible then culls anything not actually visible in the mirror.
 // ============================================================================
-static void FUN_0047ca30(void)
+static void effect_draw_mirror_reflection(void)
 {
     Effect* eff = &g_effectPool[g_activeEffectIndex];
     // packed screen coordinates, see EffectActor_UpdateAndRender
@@ -2841,7 +2856,7 @@ static void FUN_0047ca30(void)
     if ((eff->animHeader[11] & 0x80) != 0) return;
 
     int* camera = (int*)((char*)g_RdtPointer + 0x9c + (int)g_roomCameraId * 0x2c);
-    if (FUN_0048bd00((void*)camera, (unsigned char)((g_main_state_flags >> 1) & 1),
+    if (mirror_point_visible((void*)camera, (unsigned char)((g_main_state_flags >> 1) & 1),
                      (int)&local_10) == 0) return;
 
     if (is_entity_in_switch_zone(&local_10, g_CurrentRdtDataTypePtr) == 0) return;
@@ -2857,11 +2872,12 @@ static void FUN_0047ca30(void)
 // ============================================================================
 // update_2d_effects (0x0047c0c0)
 // Walks the 64-slot pool from the top and updates/renders every active slot.
-// With a menu open (g_main_state_flags & 1), each effect is redrawn into the
-// menu's mirrored camera: the camera matrix is read out of the RDT, mirrored
-// (FlipSprite), installed (MatrixToCamera), the mirrored view composed into
-// g_RoomCameraData (Matrix_MulMatrix), the effect redrawn (FUN_0047ca30), and
-// the camera restored.
+// In a mirror room (g_main_state_flags & 1, set only by SCD opcode 0x0F), each
+// effect is redrawn into the reflected camera: the camera record is read out of
+// the RDT, reflected about the mirror plane (FlipSprite), installed
+// (MatrixToCamera), the handedness flip composed into g_RoomCameraData
+// (Matrix_MulMatrix), the effect redrawn (effect_draw_mirror_reflection), and the camera
+// restored. This is the effect-side twin of entity_draw_mirror_reflection in EntityCommon.cpp.
 //
 // The 0x004c59bc flag is a static 1 in the shipped exe (never written - the
 // only xref is this read), so the reverse iteration branch (63..0) is the one
@@ -2905,14 +2921,14 @@ void update_2d_effects(void)
                                          + (int)g_roomCameraId * 0x2c);
                     FlipSprite(camera, &tempMatrix,
                                (unsigned char)((g_main_state_flags >> 1) & 1),
-                               DAT_00d2276c);
+                               g_mirrorPlaneCoord);
                     MatrixToCamera(&tempMatrix);
 
                     g_matrixScratch = g_identityMatrixData;
                     g_matrixScratch.m[0][0] = -g_matrixScratch.m[0][0];
                     Matrix_MulMatrix(&g_matrixScratch, &g_RoomCameraData);
 
-                    FUN_0047ca30();
+                    effect_draw_mirror_reflection();
 
                     MatrixToCamera((MATRIX*)camera);
                 }
@@ -2935,14 +2951,14 @@ void update_2d_effects(void)
                                      + (int)g_roomCameraId * 0x2c);
                 FlipSprite(camera, &tempMatrix,
                            (unsigned char)((g_main_state_flags >> 1) & 1),
-                           DAT_00d2276c);
+                           g_mirrorPlaneCoord);
                 MatrixToCamera(&tempMatrix);
 
                 g_matrixScratch = g_identityMatrixData;
                 g_matrixScratch.m[0][0] = -g_matrixScratch.m[0][0];
                 Matrix_MulMatrix(&g_matrixScratch, &g_RoomCameraData);
 
-                FUN_0047ca30();
+                effect_draw_mirror_reflection();
 
                 MatrixToCamera((MATRIX*)camera);
             }
@@ -2953,11 +2969,13 @@ void update_2d_effects(void)
 
 // ============================================================================
 // FlipSprite (0x0048bca0)
-// Copies the camera matrix (8 dwords) from `src` into `dst`, then mirrors one
-// axis: with `mirror` set, the X column (dwords 0 and 3) is folded around
-// width*2 - the menu's flipped view; otherwise the Y column (dwords 2 and 5)
-// is folded. The mirror reads the ORIGINAL source dwords - the copy does not
-// advance the pointer used by the fold.
+// Copies the camera record (8 dwords: posX, posY, posZ, toX, toY, toZ, roll,
+// lightIndex) from `src` into `dst`, then reflects it about the mirror plane.
+// `mirror` is the plane axis: set folds the X pair (dwords 0 and 3, the eye and
+// the look-at target) around width*2, i.e. the plane X = width; clear folds the
+// Z pair (dwords 2 and 5), the plane Z = width. `width` is g_mirrorPlaneCoord. The
+// fold reads the ORIGINAL source dwords - the copy does not advance the pointer
+// used by the fold.
 // ============================================================================
 void FlipSprite(int* src, MATRIX* dst, unsigned char mirror, unsigned int width)
 {
@@ -2978,7 +2996,8 @@ void FlipSprite(int* src, MATRIX* dst, unsigned char mirror, unsigned int width)
 
 // ============================================================================
 // Matrix_MulMatrix (0x0040a210)
-// m1 = m0 * m1 (in-place compose). Only used by the menu mirror dance above.
+// m1 = m0 * m1 (in-place compose). Only used by the mirror pass - here and in
+// entity_draw_mirror_reflection.
 // ============================================================================
 void Matrix_MulMatrix(MATRIX* m0, MATRIX* m1)
 {

@@ -1854,10 +1854,10 @@ unsigned char* g_RoomScdOpcodes = NULL;                  // 0x00d213b8
 // SCD flag bank 9
 unsigned int   DAT_00d213a0[2] = {};                    // 0x00d213a0
 
-// Player entity fields used by SCD command functions
-unsigned short DAT_00d211c4 = 0;                        // 0x00d211c4
-unsigned short DAT_00d21350 = 0;                        // 0x00d21350
-unsigned short DAT_00d2276c = 0;                        // 0x00d2276c
+// Mirror (planar reflection) parameters - set by SCD opcode 0x0F
+unsigned short g_mirrorExtentMin = 0;                   // 0x00d211c4
+unsigned short g_mirrorExtentMax = 0;                   // 0x00d21350
+unsigned short g_mirrorPlaneCoord = 0;                  // 0x00d2276c
 unsigned int   DAT_00d22770 = 0;                        // 0x00d22770
 
 // Sound system BGM state

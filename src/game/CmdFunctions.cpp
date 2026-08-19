@@ -388,9 +388,9 @@ int cmd_entities_0x0f(void)
 {
     Entity* entityBkp = ENTITY;
     g_main_state_flags = (g_main_state_flags & ~3u) | g_ScdOpcodes[1];
-    *(unsigned short*)&DAT_00d211c4 = *(unsigned short*)(g_ScdOpcodes + 2);
-    *(unsigned short*)&DAT_00d21350 = *(unsigned short*)(g_ScdOpcodes + 4);
-    *(unsigned short*)&DAT_00d2276c = *(unsigned short*)(g_ScdOpcodes + 6);
+    *(unsigned short*)&g_mirrorExtentMin = *(unsigned short*)(g_ScdOpcodes + 2);
+    *(unsigned short*)&g_mirrorExtentMax = *(unsigned short*)(g_ScdOpcodes + 4);
+    *(unsigned short*)&g_mirrorPlaneCoord = *(unsigned short*)(g_ScdOpcodes + 6);
     ENTITY = (Entity*)&g_playerEntity;
     SetupEntityJointAnimation();
     FUN_0048bfe0();

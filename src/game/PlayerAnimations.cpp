@@ -1559,8 +1559,8 @@ extern void SetEntityScaHitData(Entity* ent);                                   
 extern unsigned int HandleEnemyPlayerCollisions(void);                            // 0x00489e10
 extern unsigned char check_room_collision(VECTOR* pos, short radius);             // 0x0047d310
 extern void FUN_004565f0(SVECTOR* a, SVECTOR* b, int c, int d);                   // 0x004565f0
-extern unsigned char FUN_0048bd00(void* light, unsigned char param2, int param3); // 0x0048bd00
-extern void FUN_0048bda0(void);                                                   // 0x0048bda0
+extern unsigned char mirror_point_visible(void* light, unsigned char param2, int param3); // 0x0048bd00
+extern void entity_draw_mirror_reflection(void);                                  // 0x0048bda0
 extern void ClearAnimTiming(void);                                                // 0x00429d30
 extern void MovePlayerXZ(int angle, SVECTOR* offset, SVECTOR* out);
 extern int is_entity_in_switch_zone(VECTOR* pos, void* zoneData);                 // 0x00462d90
@@ -5954,14 +5954,16 @@ void update_player_anim(void)
                                     (int)g_playerEntity.directionAngle);
     }
 
-    // 0x00494e73: recompute lighting when the joint-animation flag is set
+    // 0x00494e73: the mirror pass - see entity_draw_mirror_reflection in EntityCommon.cpp. Only
+    // a room script (SCD opcode 0x0F) raises bit 0, so this is inert everywhere
+    // except the rooms that actually have a mirror.
     if ((g_main_state_flags & 1) != 0) {
-        unsigned char lit = FUN_0048bd00(
+        unsigned char lit = mirror_point_visible(
             (void*)((int)g_RdtPointer[1].lights + (unsigned int)g_roomCameraId * 0x2c - 4),
             (unsigned char)((g_main_state_flags >> 1) & 1),
             (int)g_playerEntity.scaMatrixData.localMatrix.t);
         if (lit != 0) {
-            FUN_0048bda0();
+            entity_draw_mirror_reflection();
         }
     }
 

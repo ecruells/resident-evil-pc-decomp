@@ -164,8 +164,10 @@ extern void FUN_0040a380(VECTOR* v0, VECTOR* v1);
 extern unsigned int is_facing_toward_entity(void* player);
 extern char reduce_attack_time_by_btn_press(void);
 extern void set_next_entity_data_buffer(int count);                           // 0x00457070
-extern unsigned char FUN_0048bd00(void* light, unsigned char param2, int param3); // 0x0048bd00 - lighting check (EffectSystem.cpp)
-extern void FUN_0048bda0(void);                                               // 0x0048bda0 - lighting response
-extern void FUN_0048c0d0(void);                                               // 0x0048c0d0 - pre-flip setup
+// The mirror pass. mirror_point_visible lives in EffectSystem.cpp; the other
+// two are defined in EntityCommon.cpp.
+extern unsigned char mirror_point_visible(void* light, unsigned char param2, int param3); // 0x0048bd00
+extern void entity_draw_mirror_reflection(void);                              // 0x0048bda0
+extern void entity_build_mirror_joints(void);                                 // 0x0048c0d0
 extern void FlipSprite(int* src, MATRIX* dst, unsigned char mirror, unsigned int width); // 0x0048bca0 - EffectSystem.cpp
 extern void Matrix_MulMatrix(MATRIX* a, MATRIX* b);                           // 0x0040a210 - EffectSystem.cpp

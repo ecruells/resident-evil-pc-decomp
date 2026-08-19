@@ -636,10 +636,14 @@ extern const unsigned char g_ScdAnimRemap[32];          // 0x004bec80
 // SCD flag bank 9 (misc flags)
 extern unsigned int  DAT_00d213a0[2];                  // 0x00d213a0
 
-// Player entity fields used by cmd functions
-extern unsigned short DAT_00d211c4;                    // 0x00d211c4
-extern unsigned short DAT_00d21350;                    // 0x00d21350
-extern unsigned short DAT_00d2276c;                    // 0x00d2276c
+// Mirror (planar reflection) parameters, all written only by SCD opcode 0x0F
+// (cmd_entities_0x0f). The plane axis is g_main_state_flags bit 1; bit 0 arms
+// the whole subsystem. See entity_draw_mirror_reflection in EntityCommon.cpp.
+// (Ghidra names these g_wMirrorExtentMin / g_wMirrorExtentMax / g_wMirrorPlaneCoord,
+// its global naming policy demands a Hungarian prefix this codebase does not use.)
+extern unsigned short g_mirrorExtentMin;               // 0x00d211c4 - near edge, cross axis
+extern unsigned short g_mirrorExtentMax;               // 0x00d21350 - far edge, cross axis
+extern unsigned short g_mirrorPlaneCoord;              // 0x00d2276c - the mirror plane itself
 extern unsigned int   DAT_00d22770;                    // 0x00d22770
 
 // Screen effect parameter storage

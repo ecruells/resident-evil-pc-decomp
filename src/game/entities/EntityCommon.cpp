@@ -1380,11 +1380,176 @@ void set_next_entity_data_buffer(int count)
     g_loadDataDestPointer = (char*)g_loadDataDestPointer + (unsigned int)count * 0x78;
 }
 
-// FUN_0048bda0 @ 0x0048bda0 - lighting response stub
-void FUN_0048bda0(void) { }
+// ============================================================================
+// The mirror (planar reflection) pass - entity_build_mirror_joints and
+// entity_draw_mirror_reflection.
+//
+// A room configures the mirror through SCD opcode 0x0F (cmd_entities_0x0f,
+// CmdFunctions.cpp), which writes four values:
+//
+//   g_main_state_flags bits 0-1 - bit 0 = mirror active, bit 1 = plane axis
+//                                 (0 = the plane is Z = k, 1 = the plane is X = k)
+//   g_mirrorPlaneCoord               - k, the mirror plane coordinate
+//   g_mirrorExtentMin / g_mirrorExtentMax - the mirror's extent along the OTHER axis
+//
+// ROOM1120 (plane Z) issues `0f 01 04 10 10 27 44 16` - bit 0 and bit 1 in one
+// go: on, plane Z = 5700, span X = 4100..10000.
+//
+// The plane-X rooms need TWO commands, because the axis bit alone leaves bit 0
+// clear. ROOM1110 issues:
+//
+//   0f 02 a0 0f 9c 18 d4 30    ; axis X, plane X = 12500, span Z = 4000..6300
+//   05 05 1f 00                ; bit_op bank 5, OR, mask 0x80000000 >> 31 = bit 0
+//
+// That second command is easy to misread. cmd_bit_op counts its bit index from
+// the MSB (`mask = 0x80000000U >> bitIndex`), so index 31 is bit 0 - the enable.
+// It also has no immediate operand, so searching the exe for `OR [flags], 1`
+// finds nothing and the enable looks absent. Ten rooms use the mirror:
+//
+//   plane Z, flags 0x01 in one command  - 1120/1121, 1130/1131, 6120/6121, 6130/6131
+//   plane X, flags 0x02 + a bit_op      - 1110/1111, 40B0/40B1, 6110/6111
+//
+// Once bit 0 is up, update_entities and update_player_anim call
+// entity_draw_mirror_reflection after the normal draw. It reflects the room
+// camera about the plane, flips the handedness, and submits the entity a SECOND
+// time - that second submission is the reflection. mirror_point_visible decides
+// per joint whether the segment from the camera to that joint actually crosses
+// the mirror rectangle.
+//
+// Nothing here is menu-related, despite what the older comments on the
+// effect-side twin (effect_draw_mirror_reflection, EffectSystem.cpp) claimed:
+// bits 0-1 of g_main_state_flags have exactly one writer, and it is the room
+// script.
+//
+// The enable gate is bit 0 only: update_entities loads EBX = 1 at 0x0048f10c
+// and does TEST [0x00be41c0],EBX at 0x0048f132; update_player_anim and both
+// update_2d_effects sites use an immediate TEST byte ptr [0x00be41c0],0x1.
+// Nothing anywhere tests bit 1 - it is read only as the axis argument, inside
+// the bit-0-gated blocks.
+// ============================================================================
 
-// FUN_0048c0d0 @ 0x0048c0d0 - pre-flip setup stub
-void FUN_0048c0d0(void) { }
+// ============================================================================
+// entity_build_mirror_joints (0x0048c0d0) - build the reflected copy of the joint array.
+//
+// Walks the joints from the last one down to joint 0 (jointCount iterations,
+// stride 0x7C) and copies two things out of the live array at +0x98 into the
+// mirror array at +0xAC: the flag byte (+0x00) and the composite world matrix
+// (+0x44, 8 dwords). Everything else in the mirror array was already filled in
+// by SetupEntityJointAnimation, so only the per-frame transform needs refreshing.
+//
+// A joint whose flags carry 0x40 is then probed: mirror_point_visible against the
+// joint's world translation (+0x58, which is world.t and therefore inside the
+// block just copied) sets or clears bit 0 of the COPY's flag byte. Bit 0 is
+// what calc_entity_lighting's `(jointFlags & 1)` gate tests, so bit 0 means
+// "draw this joint in the reflection". It is forced clear again when the source
+// joint is not being drawn at all, so a hidden joint can never show up in the
+// mirror.
+//
+// The copy exists because calc_entity_lighting WRITES into the joints it draws
+// (the `jointFlags & 4` branch patches m[0][2], m[1][0], m[1][1]); running the
+// reflection pass over the live array would corrupt the next real frame.
+// ============================================================================
+void entity_build_mirror_joints(void)
+{
+    unsigned char count = ENTITY->jointCount;
+
+    // Guards, not in the original: its DEC/JNZ on a byte counter would run 256
+    // times for a zero count, and the mirror array is only allocated once the
+    // entity's joints have been set up.
+    if (count == 0 || ENTITY->jointsStructs == NULL || ENTITY->weaponJointsPtr == 0) {
+        return;
+    }
+
+    unsigned char* src = (unsigned char*)ENTITY->jointsStructs
+                         + (unsigned int)count * 0x7c - 0x7c;
+    unsigned char* dst = (unsigned char*)ENTITY->weaponJointsPtr
+                         + (unsigned int)count * 0x7c - 0x7c;
+
+    do {
+        JointStruct* s = (JointStruct*)src;
+        JointStruct* d = (JointStruct*)dst;
+
+        // 0x0048c10d-0x0048c11d: flag byte, then the 8-dword world matrix.
+        d->flags = s->flags;
+        d->world = s->world;
+
+        // 0x0048c11f: only joints marked 0x40 are mirror-tested.
+        if ((d->flags & 0x40) != 0) {
+            unsigned char visible = mirror_point_visible(
+                (void*)((char*)g_RdtPointer + 0x9c
+                        + (unsigned int)g_roomCameraId * 0x2c),
+                (unsigned char)((g_main_state_flags >> 1) & 1),
+                (int)d->world.t);
+
+            if (visible != 0) {
+                d->flags |= 0x01;
+            } else {
+                d->flags &= 0xfe;
+            }
+
+            // 0x0048c169: and never mirror a joint the live pass is hiding.
+            if ((s->flags & 0x01) == 0) {
+                d->flags &= 0xfe;
+            }
+        }
+
+        src -= 0x7c;
+        dst -= 0x7c;
+        count--;
+    } while (count != 0);
+}
+
+// ============================================================================
+// entity_draw_mirror_reflection (0x0048bda0) - draw the entity's reflection.
+//
+// Called from update_entities (0x0048f177) and update_player_anim (0x00494ea5),
+// both already gated on g_main_state_flags bit 0 - those two sites are the
+// function's only callers.
+//
+//   1. entity_build_mirror_joints refreshes the mirror joint array and its visibility bits.
+//   2. ENTITY->jointsStructs (+0x98) is pointed at that array, the real pointer
+//      parked in g_tempVar.
+//   3. FlipSprite reflects the RDT camera record - the pointer is aimed at the
+//      camera's posX, so its dwords are posX/posY/posZ/toX/toY/toZ/roll/light -
+//      about the mirror plane, folding both the eye and the look-at target.
+//   4. MatrixToCamera installs it; composing an identity with a negated m[0][0]
+//      into g_RoomCameraData flips the handedness the reflection introduced.
+//   5. calc_entity_lighting (0x0048c350) submits the model through that camera.
+//   6. The real camera and joint pointer are restored.
+//
+// ENTITY is re-read from the global at each step, as the original does.
+// ============================================================================
+void entity_draw_mirror_reflection(void)
+{
+    MATRIX mirrorCam;
+
+    entity_build_mirror_joints();
+
+    // 0x0048bdaa-0x0048bdcd: swap in the mirrored joints.
+    g_tempVar = (void*)ENTITY->jointsStructs;
+    ENTITY->jointsStructs = (JointStruct*)ENTITY->weaponJointsPtr;
+
+    int* camera = (int*)((char*)g_RdtPointer + 0x9c
+                         + (unsigned int)g_roomCameraId * 0x2c);
+
+    // 0x0048bdcf-0x0048be1d: reflect the camera and install it.
+    FlipSprite(camera, &mirrorCam,
+               (unsigned char)((g_main_state_flags >> 1) & 1),
+               g_mirrorPlaneCoord);
+    MatrixToCamera(&mirrorCam);
+
+    // 0x0048be25-0x0048be4a: negate X to undo the mirrored handedness.
+    g_matrixScratch = g_identityMatrixData;
+    g_matrixScratch.m[0][0] = -g_matrixScratch.m[0][0];
+    Matrix_MulMatrix(&g_matrixScratch, &g_RoomCameraData);
+
+    // 0x0048be4d: the reflection itself.
+    calc_entity_lighting(ENTITY);
+
+    // 0x0048be5c-0x0048be91: restore the real camera and joint array.
+    MatrixToCamera((MATRIX*)camera);
+    ENTITY->jointsStructs = (JointStruct*)g_tempVar;
+}
 
 // ---------------------------------------------------------------------------
 // Implemented elsewhere, listed here so the split stays legible:
@@ -1400,8 +1565,8 @@ void FUN_0048c0d0(void) { }
 
 // (0x0048f0f0) - Update all enemy entities per-frame
 // Iterates through g_EnemiesList, calls the per-type update function from
-// enemies_update_functions_tbl for each active entity, and performs lighting
-// checks when the entity is in a camera switch zone with joint animation active.
+// enemies_update_functions_tbl for each active entity, and - in a room whose
+// script turned the mirror on - draws each entity's reflection.
 void update_entities(void)
 {
     // 0x0048f0f0-0x0048f102: Set current entity pointer to start of list
@@ -1427,18 +1592,19 @@ void update_entities(void)
                 ((void(*)())updateFunc)();
             }
 
-            // 0x0048f131-0x0048f197: Lighting check when joint animation is active
-            // Original: if ((g_main_state_flags & 1) != 0 && FUN_0048bd00(...) != 0)
-            // then recalculate entity lighting via FUN_0048bda0().
-            // This handles dynamic lighting when the entity's weapon/hand joint
-            // moves in front of a camera light source.
+            // 0x0048f131-0x0048f197: the mirror pass. Bit 0 of g_main_state_flags
+            // is set only by SCD opcode 0x0F, i.e. only by a room with a mirror
+            // in it. The probe asks whether the segment from the camera to this
+            // entity's origin crosses the mirror rectangle; if it does,
+            // entity_draw_mirror_reflection submits the entity again through
+            // the reflected camera.
             if ((g_main_state_flags & 0x00000001) != 0) {
-                unsigned char lightCheck = FUN_0048bd00(
+                unsigned char lightCheck = mirror_point_visible(
                     (void*)((int)g_RdtPointer[1].lights + (unsigned int)g_roomCameraId * 44 - 4),
                     ((unsigned char)(g_main_state_flags >> 1)) & 1,
                     (int)ENTITY->scaMatrixData.localMatrix.t);
                 if (lightCheck != 0) {
-                    FUN_0048bda0();
+                    entity_draw_mirror_reflection();
                 }
             }
 

@@ -42,7 +42,7 @@ CMDS = {
     0x18: ('item_model_set', 25, ""),
     0x19: ('obj19_set', 3, ""),
     0x1a: ('item_search', 1, ""),
-    0x1b: ('em_set', 3, ""),
+    0x1b: ('em_set', 21, "22 bytes total - cmd_em_set adds 0x16"),
     0x1c: ('cmd_0x1c', 5, ""),
     0x1d: ('weapon_set', 1, ""),
     0x1e: ('sfx_set', 3, ""),
@@ -128,18 +128,32 @@ def decode(data, off, length, label):
             #   body[0] = bank, body[1] = offset+bit, body[2] = cond/operation.
             # Reading the pair one byte later (u16(body, 0) >> 8) reported the
             # wrong bank for every flag test in every room.
+            #
+            # The bit index is counted from the MSB: cmd_bit_op builds its mask
+            # as `0x80000000 >> bitIndex` and cmd_bit_test shifts LEFT by it and
+            # tests the sign. So raw index 31 is bit 0, index 0 is bit 31.
+            # Printing the raw index as "bit=31" is how ROOM1110's mirror-enable
+            # (`05 05 1f 00`, which sets bit 0) got read as a write to bit 31.
+            # Report the LSB bit number, with the raw index alongside.
             bank, sel, cond = body[0], body[1], body[2]
+            raw = sel & 0x1F
+            opname = {0: 'set', 1: 'clear', 2: 'toggle'}.get(cond, f'op{cond:#x}')
             detail = (f"bank={bank:#x}({BANKS.get(bank, '?')}) "
-                      f"off={(sel & 0xE0) >> 3} bit={sel & 0x1F} cond={cond:#x}")
+                      f"off={(sel & 0xE0) >> 3} bit={31 - raw}(msbidx {raw}) "
+                      f"mask={0x80000000 >> raw:#010x} "
+                      + (opname if op == 0x05 else f"cond={cond:#x}"))
         elif op == 0x0B:
             detail = f"msg={u16(body, 0) >> 8:#x} pause={u16(body, 2):#x}"
         elif op == 0x0D:
             slot = body[0]
             action = body[9]          # entry[0] = opcode[10] -> body[9]
             flags = body[10]          # entry[1] = opcode[0xb] -> body[10]
-            zx, zz, zw, zh = struct.unpack_from("<HHHH", body, 11)
+            # cmd_item_set (0x00460970) advances 0x12, so the body is 17 bytes
+            # and holds only THREE u16 after the two flag bytes - entry+2/+4/+6
+            # come from opcode +0xc/+0xe/+0x10. Reading a fourth ran off the end.
+            zx, zz, zw = u16(body, 11), u16(body, 13), u16(body, 15)
             detail = (f"slot={slot} action={action:#x} flags={flags:#x} "
-                      f"zone=({zx},{zz},{zw},{zh}) itemrec@{off+3:#x}")
+                      f"zone=({zx},{zz},{zw}) itemrec@{off+3:#x}")
         elif op == 0x0C:
             door = body[0]
             flags = body[0x18]
@@ -148,6 +162,18 @@ def decode(data, off, length, label):
             # 1-byte body: the jump offset is the byte itself (the u16 read
             # below used to overrun on short bodies)
             detail = f"jump+{body[0]:#x}" if body else "jump?"
+        elif op == 0x0F:
+            # cmd_entities_0x0f (0x004610b0) - arms the room mirror.
+            # body[0] -> g_main_state_flags bits 0-1, then three u16 params.
+            # body[0] goes into g_main_state_flags bits 0-1: bit 0 enables the
+            # pass, bit 1 picks the plane axis. A plane-X room writes 0x02 here
+            # and then enables with a separate bit_op (bank 5, msb index 31), so
+            # bit0=0 on this line does NOT mean the mirror is off - check the
+            # following commands.
+            axis = "X" if (body[0] >> 1) & 1 else "Z"
+            detail = (f"MIRROR bit0={body[0] & 1} axis={axis} "
+                      f"extent={u16(body, 1)}..{u16(body, 3)} "
+                      f"plane={axis}={u16(body, 5)}")
         elif op == 0x02:
             detail = f"jump+{body[0]:#x}"
         hx = " ".join(f"{b:02X}" for b in body)
@@ -160,6 +186,8 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("rdt")
     ap.add_argument("--scd2", action="store_true", help="dump scd_opcodes2 (events) instead")
+    ap.add_argument("--init", action="store_true",
+                    help="dump initialization_scd (RDT+0x60, runs once at room load)")
     args = ap.parse_args()
 
     data = open(args.rdt, "rb").read()
@@ -170,20 +198,43 @@ def main():
     cams = data[1]
     print(f"sprites={sprites} cameras={cams} size={len(data):#x}")
 
-    ptr_off = 0x64 if not args.scd2 else 0x68
+    if args.init:
+        ptr_off = 0x60
+    elif args.scd2:
+        ptr_off = 0x68
+    else:
+        ptr_off = 0x64
     rel = u16(data, ptr_off) | (data[ptr_off + 2] << 16) | (data[ptr_off + 3] << 24)
     if rel == 0:
         print("no script pointer")
         return
     print(f"scd ptr offset {ptr_off:#x}: {rel:#x}")
 
+    # A script section ends at the next section, not only at a 0 size word.
+    # Every dword in the RDT header (0x08..0x90) is a section pointer, so the
+    # smallest one greater than `rel` is this section's hard end. Without that
+    # bound the block chain runs off into whatever follows and decodes it as
+    # opcodes: ROOM1130's init walked 0x3a bytes past the start of its own main
+    # script into a dword offset table and reported a bogus desync.
+    limit = len(data)
+    for h in range(0x08, 0x94, 4):
+        q = struct.unpack_from("<I", data, h)[0]
+        if rel < q < limit:
+            limit = q
+    if limit < len(data):
+        print(f"section ends at {limit:#x} (next section pointer)")
+
     # scd section: blocks with 16-bit size prefix, terminated by 0
     off = rel
     block_no = 0
-    while True:
+    while off + 2 <= limit:
         size = u16(data, off)
         if size == 0:
             print(f"=== end of script (0 terminator at {off:#x}) ===")
+            break
+        if off + 2 + size > limit:
+            print(f"=== block {block_no + 1} @ {off:#x} claims {size:#x} bytes, "
+                  f"past the section end - stopping ===")
             break
         block_no += 1
         off = decode(data, off + 2, size, f"block {block_no}")
