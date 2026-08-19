@@ -75,6 +75,7 @@ void plant42_update(void);         // 0x00464d10 - Plant42.cpp
 void yawn_update(void);            // 0x004051e0 - Yawn.cpp (ids 13 and 18)
 void spiderweb_update(void);       // 0x00443640 - SpiderWeb.cpp (id 19)
 void computer_arm_update(void);    // 0x00427330 / 0x0040b760 - ComputerArms.cpp (ids 20, 21)
+void cerberus_update(void);        // 0x00497fb0 - Cerberus.cpp (id 2)
 
 // ============================================================================
 // Angle / line-of-sight helpers
@@ -156,6 +157,17 @@ extern unsigned char FUN_004602b0(unsigned int zoneA, unsigned int zoneB);    //
 // 0x00422c70, hunter 0x00417xxx); the zombie uses its own grab path instead.
 // ============================================================================
 extern unsigned char FUN_0048ae00(MATRIX* jointMtx, VECTOR* pos, short radius, int* playerT);
+
+// ============================================================================
+// entity_ballistic_step (0x004895f0) - defined in EntityCommon.cpp
+// One frame of a projectile arc: `fwdStep` along the entity's own yaw, and a
+// vertical velocity of `vy0 + Entity[0xBC] * gravity` subtracted from
+// localMatrix.t[1], clamped at `groundY`. Entity+0xBC (the port's death_timer)
+// is the airborne frame counter and only advances while the entity is still
+// above the ground. Shared by the cerberus's leaps and the hunter's jumps.
+// ============================================================================
+extern unsigned int entity_ballistic_step(short fwdStep, short vy0,
+                                          short gravity, short groundY);
 
 // ============================================================================
 // Remaining engine dependencies (still stubs pending decompilation)

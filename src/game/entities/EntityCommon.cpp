@@ -25,6 +25,8 @@ extern void yawn_update(void);
 extern void spiderweb_update(void);
 // Tyrant boss update (0x00421990) - Tyrant.cpp. Ids 12 and 16 share it.
 extern void tyrant_update(void);
+// Cerberus (zombie dog) update (0x00497fb0) - Cerberus.cpp.
+extern void cerberus_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -48,7 +50,7 @@ void*        _ENTITY_SAVE = NULL;
 void* enemies_update_functions_tbl[48] = {
     (void*)zombie_update,  // [0]  zombie (white coat)
     (void*)zombie_update,  // [1]  zombie (naked)
-    NULL,                  // [2]  cerberus  (0x00497fb0)
+    (void*)cerberus_update, // [2] cerberus (zombie dog) (0x00497fb0)
     NULL,                  // [3]  web spinner  (0x00478310)
     NULL,                  // [4]  black tiger (Giant spider boss)  (0x0044f300)
     NULL,                  // [5]  crow  (0x0042e520)
@@ -62,7 +64,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)yawn_update,    // [13] yawn 1 (Giant snake) (0x004051e0)
     NULL,                  // [14] plant 42 roots (0x0047e1c0)
     NULL,                  // [15] monster plant (0x0045abb0)
-    (void*)tyrant_update,  // [16] tyrant 2 - em1010, the rooftop (0x00421990)
+    (void*)tyrant_update,  // [16] tyrant 2 - em1010, final battle (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3
     (void*)yawn_update,    // [18] yawn 2 (0x004051e0)
     (void*)spiderweb_update, // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)
@@ -1549,6 +1551,56 @@ void entity_draw_mirror_reflection(void)
     // 0x0048be5c-0x0048be91: restore the real camera and joint array.
     MatrixToCamera((MATRIX*)camera);
     ENTITY->jointsStructs = (JointStruct*)g_tempVar;
+}
+
+// ============================================================================
+// entity_ballistic_step @ 0x004895f0
+// One frame of a projectile arc for whatever entity is airborne: the cerberus's
+// leaps and knockdowns, and the hunter's jump attacks (0x00417ba0, 0x00418220,
+// 0x00418a50, 0x00419540, 0x00417e40).
+//
+// Horizontally it walks `fwdStep` units along the entity's own yaw. Vertically
+// it subtracts `vy0 + airTicks * gravity` from localMatrix.t[1], where airTicks
+// is the byte at Entity+0xBC - the port's `death_timer`, which every ballistic
+// caller reuses as "frames spent in the air". That byte is only incremented
+// while the entity is still ABOVE groundY, so the arc accelerates until it
+// lands and then stops.
+//
+// groundY is a ceiling on t[1] in screen terms (Y grows downward), so the
+// landing test is `t[1] > groundY`. Callers pass 0 for the room floor.
+// ============================================================================
+unsigned int entity_ballistic_step(short fwdStep, short vy0, short gravity, short groundY)
+{
+    SVECTOR v;
+    MATRIX  m;
+
+    // Yaw-only rotation matrix: [0x00489600-0x00489618] zeroes x/z and takes
+    // .y straight from Entity+0x74.
+    v.x = 0;
+    v.y = ENTITY->angle;
+    v.z = 0;
+    RotMatrix(&v, &m);
+
+    v.x = fwdStep;
+    v.y = 0;
+    v.z = 0;
+    ApplyMatrixSV(&m, &v, &v);
+
+    ENTITY->scaMatrixData.localMatrix.t[0] += (int)v.x;
+    ENTITY->scaMatrixData.localMatrix.t[2] += (int)v.z;
+
+    // `MOVZX AX,[EDX+0xbc] / IMUL AX,gravity / ADD AX,vy0` - a 16-bit multiply,
+    // so it wraps at 16 bits exactly as the original does.
+    short vy = (short)((short)(unsigned short)((unsigned short)ENTITY->death_timer * (unsigned short)gravity)
+                       + vy0);
+    ENTITY->scaMatrixData.localMatrix.t[1] -= (int)vy;
+
+    if (ENTITY->scaMatrixData.localMatrix.t[1] > (int)groundY) {
+        ENTITY->scaMatrixData.localMatrix.t[1] = (int)groundY;
+        return (unsigned int)(unsigned short)vy;
+    }
+    ENTITY->death_timer++;
+    return 0;
 }
 
 // ---------------------------------------------------------------------------
