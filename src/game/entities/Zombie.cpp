@@ -3120,7 +3120,18 @@ void zombie_pushback_idle(void)
 // Active stagger backward walk. 4-state FSM: init (animation 14), wait for
 // frame 5, walk backward with body-part physics and SFX, then decelerate
 // with random timer.
+//
+// The turn accumulator at +0x170 is a WORD here, not a byte: the original
+// stores it with `MOV word ptr [ECX + 0x170],AX` (0x0043641c), negates it with
+// a 16-bit `NEG CX` (0x0043643b) and adds it to the angle with
+// `ADD word ptr [ECX + 0x74],AX` (0x00436479). Entities.h has to declare
+// angle_turn_delta as a byte because CharacterNpc genuinely uses that slot as
+// one, so this path reaches it at full width instead - truncating it stored
+// turn_toward_target's -8 as 0xF8 and turned +248 (~22 deg per frame) the wrong
+// way every time the crawl needed to steer counter-clockwise.
 // ============================================================================
+#define ZOMBIE_TURN_DELTA(e) (*(short*)((char*)(e) + 0x170))
+
 void zombie_pushback_stagger(void)
 {
     switch (ENTITY->action_state) {
@@ -3164,23 +3175,23 @@ void zombie_pushback_stagger(void)
             target.z = (int)*(short*)&ENTITY->player_pos_z;
             target.y = 0;
             int turnStep = turn_toward_target(&target, 8);
-            ENTITY->angle_turn_delta = (unsigned char)(unsigned short)turnStep;
+            ZOMBIE_TURN_DELTA(ENTITY) = (short)turnStep;
 
             if ((ENTITY->dir_control_flags & 0x80) != 0) {
-                ENTITY->angle_turn_delta = -ENTITY->angle_turn_delta;
+                ZOMBIE_TURN_DELTA(ENTITY) = -ZOMBIE_TURN_DELTA(ENTITY);
                 ENTITY->action_state = 3;
                 ENTITY->action_ticks_counter = (unsigned short)((g_RandSeed & 0x1F) + 30);
             }
         }
 
-        ENTITY->angle = ENTITY->angle + (short)ENTITY->angle_turn_delta;
+        ENTITY->angle = ENTITY->angle + ZOMBIE_TURN_DELTA(ENTITY);
         Add_speedXZ(0);
         }
         break;
     case 3:
         Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
         zombie_body_part_physics(1);
-        ENTITY->angle = ENTITY->angle + (short)ENTITY->angle_turn_delta;
+        ENTITY->angle = ENTITY->angle + ZOMBIE_TURN_DELTA(ENTITY);
         Add_speedXZ(0);
 
         if (--ENTITY->action_ticks_counter == 0)
