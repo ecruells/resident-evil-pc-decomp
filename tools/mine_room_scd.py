@@ -110,14 +110,6 @@ def u16(data, off):
     return struct.unpack_from("<H", data, off)[0]
 
 
-def bit_desc(u):
-    bank = u >> 8
-    off = (u & 0xE0) >> 3
-    bit = u & 0x1F
-    cond = u >> 8
-    return f"bank{bank}({BANKS.get(bank,'?')})+{off} bit{bit} cond{cond}"
-
-
 def decode(data, off, length, label):
     end = off + length
     print(f"=== {label} @ {off:#x} len={length:#x} ===")
@@ -130,10 +122,15 @@ def decode(data, off, length, label):
         body = data[off + 1:off + 1 + width]
         detail = ""
         if op == 0x04 or op == 0x05:
-            b1 = u16(body, 0)
-            b2 = u16(body, 2)
-            detail = (f"bank={b1 >> 8:#x}({BANKS.get(b1 >> 8, '?')}) "
-                      f"off={(b2 & 0xE0) >> 3} bit={b2 & 0x1F} cond={b2 >> 8:#x}")
+            # cmd_bit_test (0x00460570) / cmd_bit_op (0x00460650) read through
+            # g_ScdOpcodes, which points at the OPCODE - so scd_read_u16(0) >> 8
+            # is the byte immediately AFTER it. Per byte that is
+            #   body[0] = bank, body[1] = offset+bit, body[2] = cond/operation.
+            # Reading the pair one byte later (u16(body, 0) >> 8) reported the
+            # wrong bank for every flag test in every room.
+            bank, sel, cond = body[0], body[1], body[2]
+            detail = (f"bank={bank:#x}({BANKS.get(bank, '?')}) "
+                      f"off={(sel & 0xE0) >> 3} bit={sel & 0x1F} cond={cond:#x}")
         elif op == 0x0B:
             detail = f"msg={u16(body, 0) >> 8:#x} pause={u16(body, 2):#x}"
         elif op == 0x0D:

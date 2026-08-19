@@ -225,7 +225,14 @@ def walk(data, base, start, limit, want_state=0):
             note = f'{kind} idx {data[off + 2]:#x}'
         elif state == 1 and op == 0x84:
             # 0x84 forces action_behavior = 1; the byte at +1 IS the animation id.
-            note = f'behavior=1 anim={data[off + 1]:#x} scd_param={data[off + 3]:#x}'
+            # scd_anim_param is the LOW byte of the word at +2 - `(char)uVar5` at
+            # 0x0041dd2c - and the byte at +3 is NOT a second parameter: the whole
+            # word feeds scd_entity_flags as (word >> 6) & 0x3FC (bit 1 = run the
+            # state-8 handler twice, bit 2 = refresh the weapon joint, bit 3 =
+            # which hand). Labelling +3 as scd_param was wrong.
+            w = u16(data, off + 2)
+            note = (f'behavior=1 anim={data[off + 1]:#x} scd_param={w & 0xFF:#x}'
+                    f' entity_flags={(w >> 6) & 0x3FC:#06x}')
         elif state == 1 and op == 0x85:
             # 0x85 takes the behaviour from +1 and the animation from +2 - the
             # byte at +1 is NOT the animation. This is the pair that selects an
