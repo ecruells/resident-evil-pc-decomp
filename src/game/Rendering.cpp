@@ -312,41 +312,40 @@ void FrameRateGovernor(void)
     g_numFramesRendered++;
 
     DWORD currentTime = timeGetTime();
-    int frameDelta = 0;
 
-    if (g_LastFrameTime_ms != 0) {
-        frameDelta = (int)(currentTime - g_LastFrameTime_ms);
-
-        if (frameDelta < 300) {
-            if (g_bUseFrameSkip) {
-                g_frameTimeIndex += 2;
-                g_frameTimeBuffer[g_frameTimeIndex & 3] = frameDelta;
-                g_frameTimeBuffer[(g_frameTimeIndex - 1) & 3] = frameDelta;
-            } else {
-                g_frameTimeIndex++;
-                g_frameTimeBuffer[g_frameTimeIndex & 3] = frameDelta;
-            }
-
-            if (g_frameTimeIndex > 3) g_frameTimeIndex = 0;
-        }
-    }
-
-    if (g_frameTimeIndex == 0) {
-        int frameTimeSum = 0;
-        for (int i = 0; i < 4; i++) {
-            frameTimeSum += g_frameTimeBuffer[i];
-        }
-
-        if (!g_bUseFrameSkip) {
-            g_frameTargetTime = (int)((frameTimeSum * 100 + (frameTimeSum * 100 >> 31 & 0x3FU)) >> 6);
-        } else {
-            g_frameTargetTime = (frameTimeSum * 100) / 132;
-        }
-
-        if (g_frameTargetTime < 100) g_frameTargetTime = 100;
-        g_bFrameSkipDetected = (g_frameTargetTime > 100);
-        if (g_frameTargetTime > 800) g_frameTargetTime = 800;
-    }
+    // 0x004973e2: RETAIL PATCHES THE FRAME-TIME MEASUREMENT OUT. Do not restore it.
+    //
+    //   004973E2  cmp dword ptr [0x4d45fc], 0    <- flags computed...
+    //   004973E9  mov esi, eax
+    //   004973EB  e9 4d 01 00 00  jmp 0x49753d   <- ...and never read: unconditional
+    //   004973F0  90              nop            <- leftover byte of the 6-byte Jcc
+    //
+    // A Jcc rel32 is six bytes and jmp rel32 is five, and the spare byte is still
+    // sitting there as a nop. Nothing in the whole .text branches into
+    // 0x004973f0-0x0049753c, so the block below - record the delta into the
+    // four-entry ring at 0x00ac4000, sum it, scale it, clamp it - is unreachable in
+    // the shipped game. Its inputs and outputs corroborate that: g_LastFrameTime_ms
+    // (0x004d45fc) and the ring are written but only read from inside the orphan,
+    // and DAT_004d45e8 / DAT_004d45f0 are write-only across the entire image.
+    //
+    // So in the retail build g_frameTargetTime is permanently its initial 100 and
+    // g_bFrameSkipDetected permanently 0. That is the whole point: the accumulator
+    // adds exactly 100 per tick, so every tick presents, and the pump's 33 ms
+    // limiter is armed forever - a dead-steady 30 ticks/s with no measurement
+    // feedback to destabilise it.
+    //
+    // Transcribing the orphan as live code is what produced the room 10F symptom
+    // after the limiter was added: main_loop's own duration jitter pushed a measured
+    // delta from 33 to 34, which is sum 134 -> target 101 - inside the 101..103 band
+    // the 104/132 scaling does not cover (it is guarded by > 103) - which set
+    // g_bFrameSkipDetected, which switched the limiter off for the two frames until
+    // the next recompute. Measured 30.4 ms per tick instead of 33.
+    //
+    // The dead transcription lived here in full; it is not kept, because leaving it
+    // reachable is precisely the bug. The frame-skip machinery it fed
+    // (g_frameTimeBuffer, g_frameTimeIndex, g_LastFrameTime_ms) stays declared, and
+    // the writes the reachable half of this function makes to g_LastFrameTime_ms
+    // below are transcribed as-is - write-only, exactly like the original.
 
     g_frameTimeAccumulator += 100;
 

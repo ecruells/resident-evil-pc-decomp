@@ -100,6 +100,12 @@ DWORD g_dwScreenWidth = 640;
 DWORD g_dwScreenHeight = 480;
 // 0x007d9158
 BOOL g_bFullScreen = FALSE;
+// config.ini [Display] VSync. Off by default: the engine paces itself in
+// software (the 33 ms limiter at 0x00441f25 plus FrameRateGovernor), exactly
+// as the original did blitting to a window without waiting for a vblank.
+// Blocking on a vblank instead makes the display, not the limiter, set the
+// tick rate - see the note on MarniDX::Present.
+BOOL g_bVSync = FALSE;
 // 0x004d642c
 int g_dwBitDepth = 16;
 // 0x004d6430
@@ -543,8 +549,13 @@ BOOL g_bWindowActive = FALSE;
 // synchronously before the pump starts, so it is already TRUE by then.
 BOOL g_bWindowFocused = FALSE;
 BOOL g_bQuitFlag = FALSE;       // DAT_004bcb40
-BOOL g_bUseFrameSkip = FALSE; // DAT_004bcb48
-BOOL g_bFrameSkipDetected = TRUE;  // DAT_004d46dc (allow frame timing check)
+BOOL g_bUseFrameSkip = TRUE;  // DAT_004bcb48 - 1 in the image (SetFrameRateMode
+                              // rewrites it from g_bGameActive every frame anyway)
+BOOL g_bFrameSkipDetected = FALSE; // DAT_004d46dc - 0 in the image. This means
+                              // "the machine cannot hold the target", is set by
+                              // FrameRateGovernor, and it DISABLES the pump's
+                              // 33 ms pacer. Starting it TRUE ran unpaced until
+                              // the governor first computed a target.
 
 // --- Print text buffer ---
 // 0x00be0e20

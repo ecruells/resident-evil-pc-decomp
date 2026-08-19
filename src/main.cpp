@@ -45,6 +45,7 @@ static BOOL LoadIniConfiguration(void)
     g_dwScreenWidth = GetPrivateProfileIntA("Display", "Width", 640, foundPath);
     g_dwScreenHeight = GetPrivateProfileIntA("Display", "Height", 480, foundPath);
     g_dwBitDepth = GetPrivateProfileIntA("Display", "BitDepth", 32, foundPath);
+    g_bVSync = (GetPrivateProfileIntA("Display", "VSync", 0, foundPath) != 0);
 
 #ifdef _DEBUG
     // Debug-only: draw the room's RDT collision boundaries over the background.
@@ -557,10 +558,29 @@ BOOL CreateGameWindow(int nCmdShow)
 // RunMessageLoop - Main message pump with integrated game loop
 // 0x00441d71 - end
 // ============================================================================
+// 0x004d46d8 - frame-limiter enable. Read once, at 0x00441f0e, and written
+// nowhere in the image: the limiter is unconditionally armed.
+static const BOOL kFrameLimiterEnabled = TRUE;
+
+// 0x004bcb54 - gameplay frame interval in ms. Read once, at 0x00441f26, and
+// written nowhere; 0x21 in the image. 33 ms is 30 ticks/s, the rate the play
+// clock (0x1A5E0 == 3600*30) and every scripted frame count assume.
+static const int kFrameIntervalMs = 33;
+
 int RunMessageLoop(void)
 {
     MSG msg = {};
     int exitCode = 0;
+
+    // The 33 ms limiter below compares timeGetTime values, and the original was
+    // written against the ~1 ms timeGetTime of Win9x. On modern Windows the
+    // default multimedia-timer period is 15.625 ms unless some process raises
+    // it, which quantises "wake at last + 33" up to last + 46.9 - a 21 Hz tick.
+    // Both observed runs of the room 10F probe showed this: the first reported
+    // only multiples of 15.625 ms, the second (another process had raised the
+    // resolution) sub-millisecond values. Ask for 1 ms so the limiter behaves
+    // the way its constant assumes. Not in the original - it had no need.
+    timeBeginPeriod(1);
     
     // 0x00441d71: Main loop start
     for (;;) {
@@ -589,6 +609,7 @@ int RunMessageLoop(void)
                 CleanupVideoConfigAndSaveAllSettings();
                 CloseHandle(g_hMutex);
                 CleanupSharedMemory();
+                timeEndPeriod(1);
                 return (int)msg.wParam;
             }
             
@@ -671,29 +692,53 @@ int RunMessageLoop(void)
                     g_dwSystemTimer1 = currentTime;
                 }
                 
-                // 0x00441ec0: Frame timing check (original: frame skip / rate limiting)
-                if (g_bFrameSkipDetected) {
-                    int targetDelta = 0;
+                // 0x00441f0c: frame pacing - this is what pins the game to 30
+                // ticks per second. Instruction for instruction:
+                //
+                //   0x00441f0c  CMP DAT_004d46d8, 0     / JZ  run   <- limiter gate
+                //   0x00441f14  CMP g_bUseFrameSkip, 1  / JNZ 16ms path
+                //   0x00441f1d  CMP g_bFrameSkipDetected, 0 / JNZ run
+                //   0x00441f25  pace to DAT_004bcb54 ms  (gameplay)
+                //   0x00441f4f  pace to 16 ms            (menus, title, FMV)
+                //
+                // Both never-written gates matter. DAT_004d46d8 is read only at
+                // 0x00441f0e and is 1 in the image, so the limiter is always armed;
+                // DAT_004bcb54 is read only at 0x00441f26 and is 0x21 = 33 - the 30
+                // ticks/s the whole game is built on (the play clock divides by 30,
+                // 0x1A5E0 == 3600*30, and every scripted wait is a frame count).
+                //
+                // The port did NO limiting on the gameplay branch, so the tick rate
+                // was whatever the vsync'd Present allowed: measured 627 event-VM
+                // ticks in 18937 ms = 33.1 ticks/s, ~10% fast, and it would reach 60
+                // on a machine that renders every frame inside one vblank. Room 10F's
+                // piano performance is the visible symptom - its 627 frames of
+                // keypresses finished ~2 s before bgm_2b.wav did.
+                //
+                // g_bFrameSkipDetected is the escape hatch, not a second enable:
+                // once the governor decides the machine cannot hold the target it
+                // stops pacing here and drops presented frames instead.
+                if (kFrameLimiterEnabled) {
                     BOOL bSkipFrame = FALSE;
-                    
-                    if (g_bUseFrameSkip) {
-                        // Unlocked framerate: when frame skip is also active, skip limiting
-                        // (original: if DAT_004bcb48==1 && DAT_004d46dc!=0 → goto LAB_00441f75)
-                        // do nothing - proceed to game loop
+
+                    if (g_bUseFrameSkip == 1) {
+                        if (!g_bFrameSkipDetected) {
+                            if ((int)(kFrameIntervalMs + g_dwGameTimer1) > (int)currentTime &&
+                                (int)(g_dwGameTimer1 - 0x10000) < (int)currentTime) {
+                                bSkipFrame = TRUE;
+                            }
+                        }
                     } else {
-                        // Locked framerate: target ~16ms per frame (62.5 FPS)
-                        targetDelta = g_dwGameTimer1 + 16;
-                        if ((int)currentTime < targetDelta && 
+                        if ((int)(g_dwGameTimer1 + 16) > (int)currentTime &&
                             (int)(g_dwGameTimer1 - 0x10000) < (int)currentTime) {
                             bSkipFrame = TRUE;
                         }
                     }
-                    
+
                     if (bSkipFrame) {
                         continue;
                     }
                 }
-                
+
                 // 0x00441f75: Execute game loop
                 g_dwGameTimer1 = currentTime;
                 int loopResult = main_loop();

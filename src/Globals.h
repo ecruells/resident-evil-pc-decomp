@@ -60,7 +60,8 @@ extern DWORD         g_dwSelectedDisplayAdapterID;     // 0x007d9148
 extern DWORD         g_dwSelectedDisplayModeID;        // 0x007d914c
 extern DWORD         g_dwScreenWidth;                  // 0x007d9150
 extern DWORD         g_dwScreenHeight;                 // 0x007d9154
-extern BOOL          g_bFullScreen;                    // 0x007d9158
+extern BOOL          g_bFullScreen;
+extern BOOL          g_bVSync;                         // config.ini [Display] VSync                    // 0x007d9158
 extern int           g_dwBitDepth;                     // 0x004d642c
 extern DWORD         g_GPU_VENDOR_ID;                  // 0x004bcb64
 

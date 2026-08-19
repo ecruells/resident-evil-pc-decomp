@@ -21,6 +21,10 @@
 #include <cstdlib>
 #include "../game/Types.h"
 
+// config.ini [Display] VSync (Globals.cpp). Declared locally rather than
+// pulling all of Globals.h into the Marni layer.
+extern BOOL g_bVSync;
+
 #pragma comment(lib, "d3d11.lib")
 #pragma comment(lib, "dxgi.lib")
 #pragma comment(lib, "d3dcompiler.lib")
@@ -859,7 +863,20 @@ void MarniDX::Present()
 {
     Impl* p = m_pImpl;
     if (!p || !p->swapChain) return;
-    p->swapChain->Present(1, 0);
+
+    // Do NOT wait on a vblank by default. This engine paces itself in software:
+    // the pump limits main_loop to one call per 33 ms (DAT_004bcb54) and
+    // FrameRateGovernor decides which of those frames get presented. A blocking
+    // Present puts the display in charge of both instead, and the two fight:
+    // with SyncInterval 1 on a 60 Hz panel the real frame period becomes 33.33
+    // ms, which the governor measures as 34 often enough to push its target to
+    // 101 - inside the 101..103 notch the 104/132 scaling does not cover - which
+    // sets g_bFrameSkipDetected, which DISABLES the 33 ms limiter, which lets a
+    // burst of frames run at the full 16.7 ms refresh before the average settles
+    // and pacing resumes. Measured: 31.6 ms per tick instead of 33, i.e. ~4%
+    // fast, oscillating. The original blitted to the window without waiting for
+    // a vblank, so its limiter always won.
+    p->swapChain->Present(g_bVSync ? 1 : 0, 0);
     if (p->rtv)
         p->context->OMSetRenderTargets(1, &p->rtv, p->depthStencilView);
 }
