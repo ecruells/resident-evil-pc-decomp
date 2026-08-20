@@ -688,7 +688,11 @@ void* DAT_004c2ac8[32] = {};   // jump table for player_anim_set_attacked_flag d
 // alongside them. It was an all-NULL placeholder here, which softlocked Chris
 // mid-pose the first time the Tyrant connected.
 void* DAT_004b1a90[32] = {};   // jump table for player_anim_death_alt dispatch (action_behavior)
-void* DAT_004c10b0[32] = {};   // jump table for player_anim_dispatch_4b1a90 dispatch (action_state)
+// DAT_004c10b0 - player_anim_dispatch_4b1a90 dispatch (action_state). Three real
+// entries, all of them the monster plant's "held by the vine" player animation
+// living inside the plant's own data block (0x004c0fd8..0x004c10bb), so the table
+// is DEFINED IN MonsterPlant.cpp alongside them. It was an all-NULL placeholder
+// here, which froze a grabbed player with no animation and never released them.
 
 // Texture/room state
 unsigned char g_TextureBankID = 0;       // 0x00bebcc4
@@ -708,7 +712,16 @@ unsigned char g_green_color = 0x34;   // 0x004d2be5 - back color green component
 unsigned char g_blue_color  = 0x00;   // 0x004d2be6 - back color blue component
 DWORD  DAT_004d2bf4 = 0;                // 0x004d2bf4 - TMD processing flag
 DWORD  g_tmdAsyncData = 0;               // 0x008fc424 - TMD async processing data pointer
-DWORD  DAT_004c1a2c = 0;                // 0x004c1a2c
+// 0x004c1a2c - bitmask of entity types that get a g_textureQueueData entry,
+// tested as `DAT_004c1a2c >> (entityType & 0x1F) & 1` in load_enemy_model.
+// Bits 8, 11, 12, 13, 14, 15, 18 = plant42, neptune, tyrant1, yawn1, plant42
+// roots, monster plant, yawn2 - exactly the types scd_model_tint_apply knows
+// how to tint. This was 0, which is a NEVER-WRITTEN BUILD-TIME GATE: with no
+// queue entry registered, scd_model_tint_apply / FUN_00473d10 / FUN_00473d60
+// all fall out of their `find the entry whose id byte matches` scan and return
+// silently, so every model tint in the game - the monster plant's death ramp,
+// SCD opcode 0x34, Plant 42's and Yawn's fades - was a no-op.
+DWORD  DAT_004c1a2c = 0x0004F900;       // 0x004c1a2c
 
 // Weapon animation angle adjustment constants (0x004c2028–0x004c204c)
 int    g_weaponAngle_Special = 0x12;     // 0x004c2028 - special weapon angle

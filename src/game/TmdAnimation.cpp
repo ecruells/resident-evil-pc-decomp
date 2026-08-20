@@ -863,8 +863,15 @@ unsigned char QueueTextureForProcessing(char param1, unsigned char param2)
         return 0xFF;
     }
     unsigned int idx = DAT_00ae9f04;
-    ((unsigned short*)g_textureQueueData)[idx * 5] = param2;
-    ((unsigned short*)g_textureQueueData)[idx * 5 + 1] = param1 - 10;
+    // BYTE stores, not words. The original is `MOV byte ptr [EAX+0xD22740],DL`
+    // and `MOV byte ptr [EAX+0xD22742],DL` (0x00473aec / 0x00473af9). Writing
+    // 16 bits clobbered the two bytes after each: entry[1] is the "armed" flag,
+    // and entry[3] is the RED tint accumulator - `param1 - 10` is negative for
+    // param1 < 10, so its high byte seeded entry[3] to 0xFF (-1) and knocked the
+    // whole death/fade colour ramp one step out.
+    unsigned char* e = g_textureQueueData + idx * 10;
+    e[0] = param2;
+    e[2] = (unsigned char)(param1 - 10);
     DAT_00ae9f04++;
     return (unsigned char)idx;
 }

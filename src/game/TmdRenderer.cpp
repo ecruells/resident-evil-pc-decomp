@@ -430,6 +430,14 @@ void FlushTmdObjects(void)
             // it stands (see the layout note at the top of this file).
             bool unlit = (*(DWORD*)(e->objData + 0x80) & 2) != 0;
 
+            // Per-object colour scale. Marni3DObject's store loop writes 1.0f
+            // to all three at load (Marni3DObject.cpp, `puVar4[0..2]`), and
+            // scd_model_tint_apply -> TmdObjectTintSet (0x00485fa0) overwrites
+            // them with `1.0 + delta` to tint a whole model at runtime.
+            const float objScaleR = *(float*)(e->objData + 0x5C);
+            const float objScaleG = *(float*)(e->objData + 0x60);
+            const float objScaleB = *(float*)(e->objData + 0x64);
+
             // Blend alpha at +0x68, INDEPENDENT of the unlit flag.
             // CMarniDirect3DTMD::Create zeroes the field (puVar4[3] = 0 at
             // 0x00415650), so an object nobody marked semi-transparent reads 0
@@ -512,6 +520,20 @@ void FlushTmdObjects(void)
                     if (n[0] == 0.0f && n[1] == 0.0f && n[2] == 0.0f) n = flatN;
                     TmdComputeLight(&g_tmdLight[i], n, M, &cr[v], &cg[v], &cb[v]);
                     cr[v] *= vtx[6]; cg[v] *= vtx[7]; cb[v] *= vtx[8];
+                    // The original multiplies the lit colour by the object's
+                    // colour scale before the 0..255 clamp: 0x00447169
+                    // (`FLD [EDI+0x5c]` then `FIMUL`), 0x0044719d for +0x60 and
+                    // 0x004471b7 for +0x64. Only TWO of this function's SIX
+                    // reads of +0x5C sit behind the `TEST [EDI+0x80],2` unlit
+                    // gate at 0x00446e99 / 0x00447043 - this one does not.
+                    //
+                    // Without it a LIT model can never be tinted, because the
+                    // only other reader is the unlit branch below. That is why
+                    // the monster plant's poison pulse accumulated a correct
+                    // (2,-3,0) into all 15 joint objects of all six plants and
+                    // nothing changed on screen. Untinted objects hold 1.0f
+                    // here, so this is a no-op for them.
+                    cr[v] *= objScaleR; cg[v] *= objScaleG; cb[v] *= objScaleB;
                 }
             }
 

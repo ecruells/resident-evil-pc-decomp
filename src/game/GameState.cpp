@@ -1647,7 +1647,7 @@ void scd_model_tint_apply(short p1, short p2, short p3, unsigned short p4, unsig
 // what the original actually stores - the declared widths differ from Ghidra's
 // inferred ones but the stored values are identical.
 // ============================================================================
-void FUN_00473d10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6)
+void FUN_00473d10(short p1, short p2, short p3, unsigned short p4, unsigned short p5, char p6)
 {
     unsigned char* e = g_textureQueueData;
     for (unsigned char i = 0; i < 4; i++) {

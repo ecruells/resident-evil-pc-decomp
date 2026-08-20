@@ -29,7 +29,7 @@ extern void FUN_004804a0(short param1, unsigned int param2, short param3, unsign
 extern void FUN_0047cf80(int param1, unsigned int param2, unsigned int param3, unsigned int param4, MATRIX* param5);
 extern void FUN_00473ea0(int param1, void* param2, ScaMatrixData* param3);
 extern void scd_model_tint_apply(short p1, short p2, short p3, unsigned short p4, unsigned short p5, unsigned char p6);
-extern void FUN_00473d10(unsigned char p1, unsigned short p2, unsigned short p3, unsigned char p4, unsigned char p5, char p6);
+extern void FUN_00473d10(short p1, short p2, short p3, unsigned short p4, unsigned short p5, char p6);
 extern void FUN_00473d60(char p1, unsigned char p2, unsigned char p3);
 extern void RoomSpr_SetInactive(char id);  // 0x00476130
 extern void RoomSpr_SetActive(char id);    // 0x00476170

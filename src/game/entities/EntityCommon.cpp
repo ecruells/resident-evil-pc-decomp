@@ -27,6 +27,8 @@ extern void spiderweb_update(void);
 extern void tyrant_update(void);
 // Cerberus (zombie dog) update (0x00497fb0) - Cerberus.cpp.
 extern void cerberus_update(void);
+// Monster plant (em100f) update (0x0045abb0) - MonsterPlant.cpp.
+extern void monster_plant_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -63,7 +65,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)tyrant_update,  // [12] tyrant 1 - em100C, the lab slab (0x00421990)
     (void*)yawn_update,    // [13] yawn 1 (Giant snake) (0x004051e0)
     NULL,                  // [14] plant 42 roots (0x0047e1c0)
-    NULL,                  // [15] monster plant (0x0045abb0)
+    (void*)monster_plant_update, // [15] monster plant (0x0045abb0)
     (void*)tyrant_update,  // [16] tyrant 2 - em1010, final battle (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3
     (void*)yawn_update,    // [18] yawn 2 (0x004051e0)

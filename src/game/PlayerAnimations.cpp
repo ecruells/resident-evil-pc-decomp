@@ -954,8 +954,14 @@ void player_anim_death_alt(void) {            // 0x004088f0 - dispatch via DAT_0
     if (func) func();
 }
 void player_anim_dispatch_4b1a90(void) {      // 0x0045c460 - dispatch via DAT_004c10b0[action_state]
+    // DAT_004c10b0 is defined in MonsterPlant.cpp and has FOUR slots (three
+    // real handlers plus the original's trailing NULL). The original JMPs
+    // through it with an unchecked byte; bound it here so a stray action_state
+    // is a dropped frame rather than a wild jump.
     extern void* DAT_004c10b0[];
-    void (*func)(void) = (void(*)(void))DAT_004c10b0[g_playerEntity.action_state];
+    unsigned int idx = g_playerEntity.action_state;
+    if (idx >= 4) return;
+    void (*func)(void) = (void(*)(void))DAT_004c10b0[idx];
     if (func) func();
 }
 
