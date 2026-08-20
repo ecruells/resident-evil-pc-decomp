@@ -35,6 +35,8 @@ extern void crow_update(void);
 extern void adder_update(void);
 // Wasp (em1007) update (0x0048daf0) - Wasp.cpp.
 extern void wasp_update(void);
+// Neptune (em100b, the shark) update (0x0043d8d0) - Neptune.cpp.
+extern void neptune_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -67,7 +69,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)plant42_update, // [8]  plant 42  (0x00464d10)
     NULL,                  // [9]  chimera  (0x00438a70)
     (void*)adder_update,   // [10] adder (regular size snakes) (0x004727f0)
-    NULL,                  // [11] neptune (0x0043d8d0)
+    (void*)neptune_update, // [11] neptune (shark) (0x0043d8d0)
     (void*)tyrant_update,  // [12] tyrant 1 - em100C, the lab slab (0x00421990)
     (void*)yawn_update,    // [13] yawn 1 (Giant snake) (0x004051e0)
     NULL,                  // [14] plant 42 roots (0x0047e1c0)

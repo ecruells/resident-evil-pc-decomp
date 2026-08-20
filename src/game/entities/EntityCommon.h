@@ -79,6 +79,7 @@ void cerberus_update(void);        // 0x00497fb0 - Cerberus.cpp (id 2)
 void crow_update(void);            // 0x0042e520 - Crow.cpp (id 5)
 void adder_update(void);           // 0x004727f0 - Adder.cpp (id 10)
 void wasp_update(void);            // 0x0048daf0 - Wasp.cpp (id 7)
+void neptune_update(void);         // 0x0043d8d0 - Neptune.cpp (id 11, the shark)
 
 // ============================================================================
 // Angle / line-of-sight helpers
