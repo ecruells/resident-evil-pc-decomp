@@ -141,6 +141,7 @@
     <ClCompile Include="src\game\entities\EntityCommon.cpp" />
     <ClCompile Include="src\game\entities\CharacterNpc.cpp" />
     <ClCompile Include="src\game\entities\Cerberus.cpp" />
+    <ClCompile Include="src\game\entities\Crow.cpp" />
     <ClCompile Include="src\game\entities\MonsterPlant.cpp" />
     <ClCompile Include="src\game\entities\Plant42.cpp" />
     <ClCompile Include="src\game\entities\ComputerArms.cpp" />

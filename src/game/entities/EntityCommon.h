@@ -36,9 +36,9 @@ enum EnemyType {
     ENEMY_ZOMBIE           = 0,   // zombie_update
     ENEMY_ZOMBIE_NAKED     = 1,   // zombie_update (naked variant)
     ENEMY_CERBERUS         = 2,   // 0x00497fb0 - dog
-    ENEMY_CROW             = 3,   // 0x00478310 - crow
+    ENEMY_WEB_SPINNER      = 3,   // 0x00478310 - web spinner (big spider)
     ENEMY_SPIDER           = 4,   // 0x0044f300 - spider
-    ENEMY_5                = 5,   // 0x0042e520
+    ENEMY_CROW             = 5,   // crow_update - Crow.cpp
     ENEMY_HUNTER           = 6,   // hunter_update
     ENEMY_BEE              = 7,   // 0x0048daf0 - bee
     ENEMY_PLANT42          = 8,   // 0x00464d10 - Plant 42 boss
@@ -76,6 +76,7 @@ void yawn_update(void);            // 0x004051e0 - Yawn.cpp (ids 13 and 18)
 void spiderweb_update(void);       // 0x00443640 - SpiderWeb.cpp (id 19)
 void computer_arm_update(void);    // 0x00427330 / 0x0040b760 - ComputerArms.cpp (ids 20, 21)
 void cerberus_update(void);        // 0x00497fb0 - Cerberus.cpp (id 2)
+void crow_update(void);            // 0x0042e520 - Crow.cpp (id 5)
 
 // ============================================================================
 // Angle / line-of-sight helpers
@@ -104,6 +105,12 @@ extern unsigned int entity_update_wander_turn(unsigned int movement_dist,
                                               unsigned char* turn_counter,
                                               unsigned short angle_step,
                                               unsigned char turn_limit);     // 0x00489800
+// 0x00489a50 - obstacle-avoidance steering, defined in EntityCommon.cpp.
+// Only crow_state_run calls it, but it lives in the shared 0x00489xxx helper
+// block. `latch` bit 7 = idle, bits 0-6 = swerve frames left, seeded from
+// g_animFrameIdSave (the caller sets it right before the call).
+extern short entity_swerve_around_obstacle(short angleStep, char blocked,
+                                           short* swerve, unsigned char* latch);
 
 // ============================================================================
 // SCA collision

@@ -29,6 +29,8 @@ extern void tyrant_update(void);
 extern void cerberus_update(void);
 // Monster plant (em100f) update (0x0045abb0) - MonsterPlant.cpp.
 extern void monster_plant_update(void);
+// Crow (em1005) update (0x0042e520) - Crow.cpp.
+extern void crow_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -55,7 +57,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)cerberus_update, // [2] cerberus (zombie dog) (0x00497fb0)
     NULL,                  // [3]  web spinner  (0x00478310)
     NULL,                  // [4]  black tiger (Giant spider boss)  (0x0044f300)
-    NULL,                  // [5]  crow  (0x0042e520)
+    (void*)crow_update,    // [5]  crow  (0x0042e520)
     NULL,                  // [6]  hunter (0x004161f0)
     NULL,                  // [7]  wasp  (0x0048daf0)
     (void*)plant42_update, // [8]  plant 42  (0x00464d10)
@@ -427,6 +429,118 @@ unsigned int entity_update_wander_turn(unsigned int movement_dist, unsigned char
         *entity_angle = *entity_angle + angle_step * 2;
     }
     return 0;
+}
+
+// ============================================================================
+// entity_swerve_around_obstacle @ 0x00489a50
+// Obstacle-avoidance steering. The ONLY caller is crow_state_run (0x0042e84a),
+// but the function sits in the shared 0x00489xxx entity-helper block alongside
+// entity_update_wander_turn, so it lives here rather than in Crow.cpp.
+//
+// Returns the yaw delta to add to Entity->angle this frame.
+//
+//   angleStep  the magnitude of the turn (the crow passes 0x40)
+//   blocked    non-zero while the entity is up against room geometry
+//              (check_room_collision's return value)
+//   swerve     [in/out] the yaw delta being held for the current swerve
+//   latch      [in/out] bit 7 = "not currently swerving", bits 0-6 = frames of
+//              swerve left. The frame count is seeded from g_animFrameIdSave,
+//              which the caller loads immediately before the call (the crow
+//              writes 4 at 0x0042e82c) - it is an argument passed through a
+//              scratch global, not a leftover.
+//
+// Three paths:
+//   A. blocked and not already latched -> pick a swerve direction (toward the
+//      target's X or Z depending on status_flags bit 4), arm the latch, and
+//      return the delta, folded through the quadrant fix-up below.
+//   B. blocked resolved but frames remain -> keep steering the same way and
+//      count the latch down.
+//   C. latch exhausted -> clear the swerve and fall back to a plain
+//      turn-toward-target step (0, +angleStep or -angleStep).
+//
+// The quadrant fix-up in path A (`AND CH,0xc` / `AND DH,0xc` at 0x00489b45)
+// compares bits 10-11 of the current yaw against bits 10-11 of yaw+swerve: when
+// the swerve would cross a quadrant boundary the delta is rewritten so the turn
+// lands ON the boundary instead of overshooting past it.
+// ============================================================================
+short entity_swerve_around_obstacle(short angleStep, char blocked,
+                                    short* swerve, unsigned char* latch)
+{
+    // The original copies g_playerPosScratch into a 16-byte local FIRST, then
+    // reads the target out of the copy - so later writes to the global (there
+    // are none on this path, but the copy is what the code indexes) cannot move
+    // the target mid-call.
+    VECTOR target = g_playerPosScratch;
+
+    // AX survives across the whole function and is reused in path C; Ghidra
+    // surfaces it as `extraout_AX`.
+    short baseAngle = (short)getAngleTowardsTarget(target.x, target.z);
+
+    if (blocked == 0 && (*latch & 0x80) == 0) {
+        *latch |= 0x80;
+    }
+
+    if (blocked != 0 && (*latch & 0x80) == 0) {
+        // ---- path A: newly blocked, choose a direction ----
+        if (*swerve == 0) {
+            // Aim at the target's X with our own Z (or, with status bit 4
+            // clear, our own X with the target's Z) - a 90-degree sidestep.
+            *swerve = (short)getAngleTowardsTarget(
+                target.x, ENTITY->scaMatrixData.localMatrix.t[2]);
+            if ((ENTITY->status_flags & 0x10) == 0) {
+                *swerve = (short)getAngleTowardsTarget(
+                    ENTITY->scaMatrixData.localMatrix.t[0], target.z);
+            }
+            unsigned short d =
+                (unsigned short)((*swerve - ENTITY->angle) + angleStep) & 0xFFF;
+            *swerve = (short)-angleStep;
+            if (d <= 0x800) {
+                *swerve = angleStep;
+            }
+        }
+        *latch = (unsigned char)g_animFrameIdSave;
+
+        short sw = *swerve;
+        unsigned short yaw = (unsigned short)ENTITY->angle;
+        int sum = (int)ENTITY->angle + (int)sw;
+
+        // Quadrant unchanged - use the swerve as-is.
+        if (((yaw >> 8) & 0x0C) == (((unsigned int)sum >> 8) & 0x0C)) {
+            return sw;
+        }
+
+        g_scaled_down_dist = (int)sw - (int)(((unsigned int)sum & 0xFFF) & 0x3FF);
+        if (sw < 0) {
+            g_scaled_down_dist = (int)((unsigned short)yaw & 0xFFF & 0x3FF) + (int)sw;
+        }
+        return (short)g_scaled_down_dist;
+    }
+
+    if ((*latch & 0x7F) != 0) {
+        // ---- path B: hold the swerve, count down ----
+        // The DEC is on the whole byte, so bit 7 rides along with the counter.
+        *latch = (unsigned char)(*latch - 1);
+        unsigned short d =
+            (unsigned short)((*swerve - ENTITY->angle) + angleStep) & 0xFFF;
+        *swerve = (short)-angleStep;
+        if (d <= 0x800) {
+            *swerve = angleStep;
+        }
+        return *swerve;
+    }
+
+    // ---- path C: no swerve pending, plain turn-toward-target ----
+    *swerve = 0;
+    *latch = 0;
+    unsigned short d =
+        (unsigned short)((angleStep - ENTITY->angle) + baseAngle) & 0xFFF;
+    if ((int)angleStep * 2 >= (int)(unsigned int)d) {
+        return 0;
+    }
+    if (d <= 0x800) {
+        return angleStep;
+    }
+    return (short)-angleStep;
 }
 
 // ============================================================================
