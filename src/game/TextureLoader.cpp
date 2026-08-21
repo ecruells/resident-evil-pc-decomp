@@ -797,6 +797,16 @@ void LoadShadowMaskTexture(void* imageBuffer, int slotBase)
     // raw coverage instead (A = 255 - alpha, giving out = dst*alpha/255 = 24%
     // at the core) threw away the page colour entirely and made the shadow
     // about 2.4x too opaque.
+    //
+    // The page's RGB is WHITE on purpose: the kage page is a COVERAGE mask
+    // only, and the primitive tint (AddFadePoly's rgb triple) is the sole
+    // colour carrier - in the original the mode-1 record takes FUN_00446e40's
+    // direct path (record+0x80 bit 1 set), whose vertex diffuse is the tint
+    // scaled by 127 and nothing else. Baking the flattened 48%-grey into the
+    // texels here multiplied it into that tint a second time: the death blood
+    // pool's red (80/256) came out at 4% and read as a washed-out grey patch.
+    // The shadow tint collapses to ~black before this multiply either way, so
+    // shadows are unaffected.
     {
         int w = psxTex.m_WidthPixels;
         int h = psxTex.m_Height;
@@ -810,7 +820,7 @@ void LoadShadowMaskTexture(void* imageBuffer, int slotBase)
                 unsigned int r = (unsigned int)paletteEntries[src[i]] & 0x1F;
                 unsigned int alpha = ((255u - r * 8u) * 2u) & 0xFFu;
                 unsigned int coverage = 255u - alpha;
-                rgba[i] = (((coverage * darken) / 31u) << 24) | 0x00202020u;
+                rgba[i] = (((coverage * darken) / 31u) << 24) | 0x00FFFFFFu;
             }
             if (g_TexturePageSRV[slotIndex] != MARNI_NULL_HANDLE) {
                 Marni_DX()->DestroyTexture(g_TexturePageSRV[slotIndex]);

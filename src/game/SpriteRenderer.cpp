@@ -670,6 +670,14 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
 // collapses to near-black (0x3b83126f == 0.004f): the grey shadow hits the
 // special case and multiplies the texture to black, the blood pool's
 // (0x50, 0xFF, 0xFF) comes out (0.31, 0.004, 0.004) dark red.
+//
+// That tint is the WHOLE colour signal: AddFadePoly stores 6 in the OT
+// record's flag word (+0x80, bit 1 set), which sends FUN_00446e40 down its
+// direct path - vertex diffuse = tint * 127, no light accumulation - and the
+// kage page only supplies coverage through its alpha. So this tint must reach
+// the blend undiluted; LoadShadowMaskTexture bakes the SRV texels white for
+// exactly that reason. Multiplying the old grey texels into it here turned
+// the blood pool into a 4%-red wash that read as grey.
 // ============================================================================
 // Per-frame record of the fade polys already inserted, mirroring the original's
 // g_OTFadeTbl (0x008ed430) plus the translation Z it reads back out of each OT
