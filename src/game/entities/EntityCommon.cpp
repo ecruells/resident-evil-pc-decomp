@@ -37,6 +37,8 @@ extern void adder_update(void);
 extern void wasp_update(void);
 // Neptune (em100b, the shark) update (0x0043d8d0) - Neptune.cpp.
 extern void neptune_update(void);
+// Plant 42 roots (em100e) update (0x0047e1c0) - Plant42Roots.cpp.
+extern void plant42_roots_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -72,7 +74,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)neptune_update, // [11] neptune (shark) (0x0043d8d0)
     (void*)tyrant_update,  // [12] tyrant 1 - em100C, the lab slab (0x00421990)
     (void*)yawn_update,    // [13] yawn 1 (Giant snake) (0x004051e0)
-    NULL,                  // [14] plant 42 roots (0x0047e1c0)
+    (void*)plant42_roots_update, // [14] plant 42 roots (0x0047e1c0)
     (void*)monster_plant_update, // [15] monster plant (0x0045abb0)
     (void*)tyrant_update,  // [16] tyrant 2 - em1010, final battle (0x00421990)
     (void*)zombie_update,  // [17] zombie variant 3

@@ -147,6 +147,7 @@
     <ClCompile Include="src\game\entities\Neptune.cpp" />
     <ClCompile Include="src\game\entities\MonsterPlant.cpp" />
     <ClCompile Include="src\game\entities\Plant42.cpp" />
+    <ClCompile Include="src\game\entities\Plant42Roots.cpp" />
     <ClCompile Include="src\game\entities\ComputerArms.cpp" />
     <ClCompile Include="src\game\entities\SpiderWeb.cpp" />
     <ClCompile Include="src\game\entities\Tyrant.cpp" />
