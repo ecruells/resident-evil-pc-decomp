@@ -42,7 +42,7 @@ enum EnemyType {
     ENEMY_HUNTER           = 6,   // hunter_update
     ENEMY_BEE              = 7,   // 0x0048daf0 - bee
     ENEMY_PLANT42          = 8,   // 0x00464d10 - Plant 42 boss
-    ENEMY_9                = 9,   // 0x00438a70
+    ENEMY_CHIMERA          = 9,   // 0x00438a70 - chimera (Chimera.cpp)
     ENEMY_ADDER            = 10,  // adder_update - snake
     ENEMY_NEPTUNE          = 11,  // neptune_update - shark
     ENEMY_TYRANT           = 12,  // tyrant_update
@@ -82,6 +82,7 @@ void adder_update(void);           // 0x004727f0 - Adder.cpp (id 10)
 void wasp_update(void);            // 0x0048daf0 - Wasp.cpp (id 7)
 void neptune_update(void);         // 0x0043d8d0 - Neptune.cpp (id 11, the shark)
 void hunter_update(void);          // 0x004161f0 - Hunter.cpp (id 6)
+void chimera_update(void);         // 0x00438a70 - Chimera.cpp (id 9)
 void web_spinner_update(void);     // 0x00478310 - WebSpinner.cpp (id 3, the big spider)
 void black_tiger_update(void);     // 0x0044f300 - BlackTiger.cpp (id 4, the giant spider boss)
 

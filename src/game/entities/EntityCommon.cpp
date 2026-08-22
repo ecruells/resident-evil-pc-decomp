@@ -43,6 +43,8 @@ extern void neptune_update(void);
 extern void plant42_roots_update(void);
 // Black Tiger (giant spider boss) update (0x0044f300) - BlackTiger.cpp.
 extern void black_tiger_update(void);
+// Chimera (em1009, the ceiling-hanging ape mutant) update (0x00438a70) - Chimera.cpp.
+extern void chimera_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -73,7 +75,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)hunter_update,  // [6]  hunter (0x004161f0) - Hunter.cpp
     (void*)wasp_update,    // [7]  wasp / bee  (0x0048daf0)
     (void*)plant42_update, // [8]  plant 42  (0x00464d10)
-    NULL,                  // [9]  chimera  (0x00438a70)
+    (void*)chimera_update, // [9]  chimera  (0x00438a70)
     (void*)adder_update,   // [10] adder (regular size snakes) (0x004727f0)
     (void*)neptune_update, // [11] neptune (shark) (0x0043d8d0)
     (void*)tyrant_update,  // [12] tyrant 1 - em100C, the lab slab (0x00421990)
