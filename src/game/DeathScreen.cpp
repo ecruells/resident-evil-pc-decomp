@@ -1,4 +1,4 @@
-// DeathScreen.cpp - Player death sequence / game-over screen
+﻿// DeathScreen.cpp - Player death sequence / game-over screen
 //
 // Functions ported from ResidentEvil.exe:
 //   set_fading            (0x0047b980) - start a screen fade transition
@@ -69,8 +69,10 @@ static DieScreenTexEntry s_dieStripTemplate = {
 };
 
 // 0x004bd2b0 - one-shot flag: the first death screen hides joint 1 (the
-// head) by clearing its visibility bit, then clears the flag.
-static int s_dat4bd2b0 = 0x6C6C;
+// head) by clearing its visibility bit, then clears the flag. Shared with the
+// hunter's pounce grab, which sets it (Hunter.cpp 0x00417a20); defined in
+// Globals.cpp with its image value 0x00006C6C.
+extern int DAT_004bd2b0;
 
 // 0x004bd320 / 0x004bd328 - tyrant impale transform: rotation applied to
 // joint 2 and the offset applied through joint 0's transform.
@@ -273,10 +275,10 @@ void display_die_screen(void)
     StMask(0, 5);
 
     // One-shot: hide joint 1 (the head) on the first death screen.
-    if (s_dat4bd2b0 != 0) {
+    if (DAT_004bd2b0 != 0) {
         g_playerEntity.jointsStructs[1].flags &= 0xFE;
     }
-    s_dat4bd2b0 = 0;
+    DAT_004bd2b0 = 0;
 
     unsigned char state      = 0;   // local_a   - state machine index
     short         imageIdx   = 0x3B; // sVar4    - wave amplitude index

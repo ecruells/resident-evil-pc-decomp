@@ -31,6 +31,8 @@ extern void cerberus_update(void);
 extern void monster_plant_update(void);
 // Crow (em1005) update (0x0042e520) - Crow.cpp.
 extern void crow_update(void);
+// Hunter (em1006) update (0x004161f0) - Hunter.cpp.
+extern void hunter_update(void);
 // Adder (em100a, the regular-size snakes) update (0x004727f0) - Adder.cpp.
 extern void adder_update(void);
 // Wasp (em1007) update (0x0048daf0) - Wasp.cpp.
@@ -66,7 +68,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)web_spinner_update, // [3] web spinner / big spider (0x00478310)
     NULL,                  // [4]  black tiger (Giant spider boss)  (0x0044f300)
     (void*)crow_update,    // [5]  crow  (0x0042e520)
-    NULL,                  // [6]  hunter (0x004161f0)
+    (void*)hunter_update,  // [6]  hunter (0x004161f0) - Hunter.cpp
     (void*)wasp_update,    // [7]  wasp / bee  (0x0048daf0)
     (void*)plant42_update, // [8]  plant 42  (0x00464d10)
     NULL,                  // [9]  chimera  (0x00438a70)

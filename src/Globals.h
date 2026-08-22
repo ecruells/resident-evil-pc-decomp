@@ -489,6 +489,7 @@ extern unsigned char g_PlayerMaxHealth;                // 0x00be6459
 extern MATRIX        g_RoomCameraData;                 // 0x004bca88 - Room camera matrix
 extern DWORD         g_RoomCameraDataCopy;             // 0x00d1fdd4
 extern DWORD         g_deadMoveValue;                  // 0x00d1fdd0
+extern int           DAT_004bd2b0;                     // 0x004bd2b0 - hunter grab / death-screen one-shot
 extern DWORD         g_lightMatrixPtr;                 // 0x00d1fdcc
 extern MATRIX        g_identityMatrixData;             // 0x004bca68
 extern MATRIX        g_lightMatrix;                    // 0x004bcaa8

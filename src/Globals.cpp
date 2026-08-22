@@ -963,6 +963,12 @@ DWORD         g_RoomCameraDataCopy = 0;
 // 0x00d1fdd0 - Dead player move matrix pointer (holds → 0x4bca68, identity matrix)
 DWORD         g_deadMoveValue = 0;
 
+// 0x004bd2b0 - shared one-shot grab flag. The hunter's pounce grab sets it to
+// 1 (Hunter.cpp, 0x00417a20); the death screen consumes and clears it while
+// hiding the player's head joint (0x00443181). Image value 0x00006C6C - the
+// tail of the "dinput.dll" string it overlaps in .rdata.
+int           DAT_004bd2b0 = 0x00006C6C;
+
 // 0x00d1fdcc - Light direction matrix pointer (holds → g_lightMatrix)
 DWORD         g_lightMatrixPtr = 0;
 

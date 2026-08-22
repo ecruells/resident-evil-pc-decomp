@@ -143,6 +143,7 @@
     <ClCompile Include="src\game\entities\Cerberus.cpp" />
     <ClCompile Include="src\game\entities\Adder.cpp" />
     <ClCompile Include="src\game\entities\Crow.cpp" />
+    <ClCompile Include="src\game\entities\Hunter.cpp" />
     <ClCompile Include="src\game\entities\Wasp.cpp" />
     <ClCompile Include="src\game\entities\Neptune.cpp" />
     <ClCompile Include="src\game\entities\MonsterPlant.cpp" />
