@@ -233,10 +233,34 @@ static inline void ws_dist(void)
     g_playerDisplacement = ((int)((dz ^ sdz) - sdz) - sdx) + (int)(dx ^ sdx);
 }
 
+} // namespace
+
+// ============================================================================
+// Cross-file dependencies. SetAnimSlot / CreateAnimObject live in TmdAnimation
+// (EntityModelLoader.cpp); ResetJointTransforms in EntityModelLoader.cpp;
+// Flg_on in CmdFunctions.cpp; is_entity_in_switch_zone in Room.cpp.
+// ============================================================================
+extern void ResetJointTransforms(void);
+extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
+extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
+extern void Flg_on(int baseAddr, unsigned int bitIndex);
+extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData);
+extern unsigned int g_entity_bkp;   // 0x00be0df4 - shared scratch
+
+// The shared dispatch table (and its behaviour-picker alias, which is the same
+// memory starting six pointers in). Defined at the bottom of the file; declared
+// here so the state functions above can index it.
+extern void (*wsp_state_table[10])(void);
+extern void (**wsp_handler_table)(void);
+
 // ============================================================================
 // FUN_0048a630 - clone the current entity `count` times into the room data
 // buffer and give each clone its own animation object. Plant 42 and the
-// Tyrant carry their own file-static copy, per their convention.
+// Tyrant carry their own file-static copy, per their convention; this one has
+// external linkage (the same original function is the Black Tiger's clone
+// helper - BlackTiger.cpp declares it extern), and it sits at file scope now
+// for that reason. The spider-specific code above still calls it from inside
+// the anonymous namespace; the helper itself only touches entity-generic data.
 // ============================================================================
 void ws_clone_entity(unsigned char count, int /*animSlotBytes*/,
                      unsigned char jointIndex, unsigned int* out)
@@ -267,26 +291,6 @@ void ws_clone_entity(unsigned char count, int /*animSlotBytes*/,
         remaining--;
     } while (remaining != 0);
 }
-
-} // namespace
-
-// ============================================================================
-// Cross-file dependencies. SetAnimSlot / CreateAnimObject live in TmdAnimation
-// (EntityModelLoader.cpp); ResetJointTransforms in EntityModelLoader.cpp;
-// Flg_on in CmdFunctions.cpp; is_entity_in_switch_zone in Room.cpp.
-// ============================================================================
-extern void ResetJointTransforms(void);
-extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
-extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
-extern void Flg_on(int baseAddr, unsigned int bitIndex);
-extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData);
-extern unsigned int g_entity_bkp;   // 0x00be0df4 - shared scratch
-
-// The shared dispatch table (and its behaviour-picker alias, which is the same
-// memory starting six pointers in). Defined at the bottom of the file; declared
-// here so the state functions above can index it.
-extern void (*wsp_state_table[10])(void);
-extern void (**wsp_handler_table)(void);
 
 // ============================================================================
 // wsp_state0 @ 0x00478140 - one-time init, and the landing pad after death.

@@ -254,7 +254,9 @@ MATRIX neptune_capture_matrix = {};
 // ---------------------------------------------------------------------------
 // Forward declarations, in address order.
 // ---------------------------------------------------------------------------
-static void neptune_clear_hit_state(void);      // 0x0043d8a0
+// 0x0043d8a0 - external linkage: the Black Tiger's web-build (0x004502e0)
+// calls the same shared function, so BlackTiger.cpp declares it extern.
+void neptune_clear_hit_state(void);              // 0x0043d8a0
 static void neptune_state_init(void);           // 0x0043da40
 static void neptune_state_run(void);            // 0x0043dcb0
 static void neptune_choose_attack(void);        // 0x0043dd50
@@ -477,9 +479,10 @@ static unsigned char neptune_lfsr_bit(void)
 // player is holding a heavy weapon (`equippedWeaponId > 0x6e`). That is what
 // lets the rocket launcher and the flamethrower keep landing hits on a shark
 // that is already dying - without it the latch would swallow every hit after
-// the first. Called from the death thrash and the sink.
+// the first. Called from the death thrash and the sink, and (external linkage)
+// from the Black Tiger's web-build.
 // ============================================================================
-static void neptune_clear_hit_state(void)
+void neptune_clear_hit_state(void)
 {
     if (g_playerEntityPointer.equippedWeaponId > 0x6E &&
         (ENTITY->animation_frame_id % 5) == 0) {

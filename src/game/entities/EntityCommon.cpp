@@ -41,6 +41,8 @@ extern void wasp_update(void);
 extern void neptune_update(void);
 // Plant 42 roots (em100e) update (0x0047e1c0) - Plant42Roots.cpp.
 extern void plant42_roots_update(void);
+// Black Tiger (giant spider boss) update (0x0044f300) - BlackTiger.cpp.
+extern void black_tiger_update(void);
 
 // ============================================================================
 // Shared scratch globals (0x00be0de4 onward)
@@ -66,7 +68,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)zombie_update,  // [1]  zombie (naked)
     (void*)cerberus_update, // [2] cerberus (zombie dog) (0x00497fb0)
     (void*)web_spinner_update, // [3] web spinner / big spider (0x00478310)
-    NULL,                  // [4]  black tiger (Giant spider boss)  (0x0044f300)
+    (void*)black_tiger_update, // [4] black tiger (Giant spider boss)  (0x0044f300)
     (void*)crow_update,    // [5]  crow  (0x0042e520)
     (void*)hunter_update,  // [6]  hunter (0x004161f0) - Hunter.cpp
     (void*)wasp_update,    // [7]  wasp / bee  (0x0048daf0)

@@ -37,7 +37,7 @@ enum EnemyType {
     ENEMY_ZOMBIE_NAKED     = 1,   // zombie_update (naked variant)
     ENEMY_CERBERUS         = 2,   // 0x00497fb0 - dog
     ENEMY_WEB_SPINNER      = 3,   // 0x00478310 - web spinner (big spider)
-    ENEMY_SPIDER           = 4,   // 0x0044f300 - spider
+    ENEMY_BLACK_TIGER      = 4,   // 0x0044f300 - black tiger (giant spider boss)
     ENEMY_CROW             = 5,   // crow_update - Crow.cpp
     ENEMY_HUNTER           = 6,   // hunter_update
     ENEMY_BEE              = 7,   // 0x0048daf0 - bee
@@ -56,7 +56,7 @@ enum EnemyType {
     // and the fire/explosive weapons can burn it away - see SpiderWeb.cpp.
     ENEMY_SPIDER_WEB       = 19,  // 0x00443640 - spider web
     ENEMY_20               = 20,  // 0x00427330
-    ENEMY_BLACK_TIGER      = 21,  // 0x0040b760 - black tiger (giant spider)
+    ENEMY_21               = 21,  // 0x0040b760 - computer arm (left forearm, lab terminal)
     ENEMY_GENERIC          = 22,  // 0x0046acf0 - shared human character driver
     ENEMY_COUNT            = 32
 };
@@ -83,6 +83,7 @@ void wasp_update(void);            // 0x0048daf0 - Wasp.cpp (id 7)
 void neptune_update(void);         // 0x0043d8d0 - Neptune.cpp (id 11, the shark)
 void hunter_update(void);          // 0x004161f0 - Hunter.cpp (id 6)
 void web_spinner_update(void);     // 0x00478310 - WebSpinner.cpp (id 3, the big spider)
+void black_tiger_update(void);     // 0x0044f300 - BlackTiger.cpp (id 4, the giant spider boss)
 
 // ============================================================================
 // Angle / line-of-sight helpers
