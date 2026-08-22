@@ -81,6 +81,7 @@ void crow_update(void);            // 0x0042e520 - Crow.cpp (id 5)
 void adder_update(void);           // 0x004727f0 - Adder.cpp (id 10)
 void wasp_update(void);            // 0x0048daf0 - Wasp.cpp (id 7)
 void neptune_update(void);         // 0x0043d8d0 - Neptune.cpp (id 11, the shark)
+void web_spinner_update(void);     // 0x00478310 - WebSpinner.cpp (id 3, the big spider)
 
 // ============================================================================
 // Angle / line-of-sight helpers

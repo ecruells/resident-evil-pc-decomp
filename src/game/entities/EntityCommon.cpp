@@ -63,7 +63,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)zombie_update,  // [0]  zombie (white coat)
     (void*)zombie_update,  // [1]  zombie (naked)
     (void*)cerberus_update, // [2] cerberus (zombie dog) (0x00497fb0)
-    NULL,                  // [3]  web spinner  (0x00478310)
+    (void*)web_spinner_update, // [3] web spinner / big spider (0x00478310)
     NULL,                  // [4]  black tiger (Giant spider boss)  (0x0044f300)
     (void*)crow_update,    // [5]  crow  (0x0042e520)
     NULL,                  // [6]  hunter (0x004161f0)
