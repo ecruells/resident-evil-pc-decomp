@@ -1439,7 +1439,16 @@ int  AddSprite_Ex(TextureDesc* texture, unsigned short depth, int slot, int page
 int  SubmitEffectSprite_Ex(TextureDesc* texture, unsigned short fade, int slot,
                            int pageCount, int depthKey);                               // 0x0046edb0
 void display_computer_lab(void);                       // 0x00412390 - ComputerLab.cpp
+void display_slides(void);                             // 0x00463300 - LabSlides.cpp
+void lab_slides_start(void);                           // 0x00463320 - shared init block
+void lab_slides_update(void);                          // 0x004633c0 - shared update block
+void lab_slides_finish(void);                          // 0x004636b0 - shared finish block
 int  AddTintSprite(TextureDesc* texture, unsigned short brightness);
+int  AddTintSprite_Ex(TextureDesc* texture, unsigned short brightness);   // 0x0046f8a0
+// slide.tim CLUT-variant SRVs built by TexturePage_LoadImage (SpriteRenderer.cpp)
+MarniHandle Slides_GetVariantSRV(int variant);
+int         Slides_GetVariantCount(void);
+int         Slides_GetVariantSlot(int variant);
 
 // --- Misc game helpers ---
 void UpdateDemoTimer(void);

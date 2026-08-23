@@ -927,8 +927,135 @@ void delete_texture_set_secondary(int slotIndex) {
     TexturePage_DeleteSet(slotIndex + 0xF);
 }
 
+// ============================================================================
+// Slide projector CLUT variants (port-only helpers)
+//
+// load_slides_images (0x00478110) hands slide.tim to TexturePage_LoadImage,
+// and the original's TexturePage_LoadImage tail (0x0046d77e) walks the parsed
+// CLUT list and creates ONE texture page per CLUT - each slide frame is the
+// same image with its own palette. AddTintSprite_Ex then picks the page whose
+// index matches printClutTint - 0x1ed.
+//
+// The D3D11 path mirrors that with one pre-built RGBA SRV per CLUT at fixed
+// slots SLIDES_TEX_BASE..+7, so the projector never has to rebuild textures
+// mid-scroll (the original recreated its page on every sprite submission).
+// ============================================================================
+#define SLIDES_TEX_BASE 240
+static MarniHandle s_slidesVariantSRV[8];
+static int         s_slidesVariantCount = 0;
+
+MarniHandle Slides_GetVariantSRV(int variant) {
+    if (variant < 0 || variant >= 8) return MARNI_NULL_HANDLE;
+    return s_slidesVariantSRV[variant];
+}
+
+int Slides_GetVariantCount(void) {
+    return s_slidesVariantCount;
+}
+
+int Slides_GetVariantSlot(int variant) {
+    return SLIDES_TEX_BASE + variant;
+}
+
+static void Slides_ReleaseVariants(void) {
+    for (int i = 0; i < 8; i++) {
+        if (s_slidesVariantSRV[i] != MARNI_NULL_HANDLE) {
+            Marni_DX()->DestroyTexture(s_slidesVariantSRV[i]);
+            s_slidesVariantSRV[i] = MARNI_NULL_HANDLE;
+        }
+        const int slot = SLIDES_TEX_BASE + i;
+        if (slot >= 0 && slot < 256) g_TexturePageSRV[slot] = MARNI_NULL_HANDLE;
+    }
+    s_slidesVariantCount = 0;
+}
+
 void TexturePage_LoadImage(void* imageData, short param2, short param3) {
     ProcessTextureImage(imageData, param2, param3, 0);
+
+    // 0x0046d77e tail: parse the TIM again and build one RGBA texture per
+    // CLUT palette. slide.tim packs all six projector slides as 192x128
+    // cells tiled 3-across / 2-down inside the shared 8bpp pixel plane, and
+    // cell N is drawn with palette N - the per-variant copies the original
+    // uploads are these crops re-paletted, not the whole sheet.
+    Slides_ReleaseVariants();
+
+    PSXTexture psxTex;
+    if (psxTex.Store((int*)imageData, 1) == 0) return;
+    const int w = psxTex.m_WidthPixels;
+    const int h = psxTex.m_Height;
+    const int bpp = psxTex.m_BitDepth;
+    if (w <= 0 || h <= 0 || psxTex.m_pPixelData == NULL) return;
+
+    int numCluts = (int)psxTex.m_NumCLUTs;
+    if (numCluts < 1) numCluts = 1;
+    if (numCluts > 8) numCluts = 8;
+
+    // Cell geometry: the projector draws u in 0..153 and h = 0x7f out of a
+    // MarniBits__CreateWork(0xc0, 0x80) page, i.e. every cell is 192x128.
+    const int cellW = 192;
+    const int cellH = 128;
+
+    const int entriesPerCLUT = (bpp == 4) ? 16 : 256;
+    DWORD* clutRGBA = new DWORD[entriesPerCLUT];
+
+    const int drawW = (cellW < w) ? cellW : w;
+    const int drawH = (cellH < h) ? cellH : h;
+
+    for (int c = 0; c < numCluts; c++) {
+        WORD* clut = psxTex.m_pCLUTData + (size_t)c * entriesPerCLUT;
+        for (int i = 0; i < entriesPerCLUT; i++) {
+            WORD clr = clut[i];
+            // Same conversion as LoadEffectTextureSheet: STP is not alpha,
+            // index 0 is the black colour key.
+            DWORD r = ((clr >> 0)  & 0x1F) * 255 / 31;
+            DWORD g = ((clr >> 5)  & 0x1F) * 255 / 31;
+            DWORD b = ((clr >> 10) & 0x1F) * 255 / 31;
+            DWORD a = (i == 0) ? 0x00 : 0xFF;
+            clutRGBA[i] = (a << 24) | (b << 16) | (g << 8) | r;
+        }
+
+        // Crop cell c. The original uploads each variant to VRAM
+        // CalcAddress((c & ~1) * 0x60, (c & 1) << 7): cells are tiled in
+        // column PAIRS - slide 0 above slide 1 in column 0, 2 above 3 in
+        // column 1, 4 above 5 in column 2 - which is also why the sprite's
+        // texV (slideIndex << 7) only ever lands on rows 0 and 128.
+        const int cellX = (c >> 1) * cellW;
+        const int cellY = (c & 1) * cellH;
+
+        DWORD* rgba = new DWORD[drawW * drawH];
+        for (int y = 0; y < drawH; y++) {
+            const int srcY = cellY + y;
+            for (int x = 0; x < drawW; x++) {
+                const int srcX = cellX + x;
+                DWORD colour = 0xFF000000;
+                if (srcX < w && srcY < h) {
+                    const BYTE* pix = (const BYTE*)psxTex.m_pPixelData;
+                    if (bpp == 8) {
+                        colour = clutRGBA[pix[srcY * w + srcX]];
+                    } else if (bpp == 4) {
+                        BYTE byteVal = pix[srcY * (w / 2) + srcX / 2];
+                        BYTE nibble = (srcX & 1) ? (byteVal >> 4) : (byteVal & 0xF);
+                        colour = clutRGBA[nibble];
+                    }
+                }
+                rgba[y * drawW + x] = colour;
+            }
+        }
+
+        MarniCreateTexture(drawW, drawH, 32, rgba, &s_slidesVariantSRV[c]);
+        delete[] rgba;
+
+        const int slot = SLIDES_TEX_BASE + c;
+        if (slot >= 0 && slot < 256) {
+            g_TexturePageSRV[slot] = s_slidesVariantSRV[c];
+            g_TexturePageWidth[slot] = drawW;
+            g_TexturePageHeight[slot] = drawH;
+            g_TexturePageBpp[slot] = bpp;
+        }
+    }
+
+    delete[] clutRGBA;
+    s_slidesVariantCount = numCluts;
 }
 
 // Display_SetParams (0x00470750)

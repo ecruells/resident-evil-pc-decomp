@@ -12,11 +12,6 @@
 extern unsigned int set_message_display(unsigned short msg_id, unsigned short pause_game);
 extern void Flg_on(int baseAddr, unsigned int bitIndex);
 extern void room_event_item_pickup(void);        // 0x00451700
-extern void lab_slides_stop_snd(short slot);      // 0x0047f960
-extern void lab_slides_set_snd_slot(short slot);  // 0x0047f930
-extern void lab_slides_set_snd_params(int a, int b, int c); // 0x0047f990
-extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex); // 0x00473f10
-extern int AddTintSprite_Ex(TextureDesc* texture, unsigned short brightness); // 0x0046f8a0
 extern void display_room_camera_bg(void);
 extern void rearrange_item_slots(void);
 
@@ -1211,12 +1206,15 @@ msg_next_char:
 // handle_message_post_action (0x00455fb0)
 // Handles the action that follows a dismissed message: item usage,
 // room events, lab slides, follow-up messages, and other conditional actions.
+//
+// Lab-slides note: the original's action switch is a tail-jump table at
+// 0x004c2130 whose actions 4/5/6 jump straight INTO the shared lab-slides
+// blocks (0x00463320/0x004633c0/0x004636b0) that display_slides also
+// dispatches to. Those blocks are ported once in LabSlides.cpp and called
+// from here.
 // ============================================================================
 static void handle_message_post_action(void)
 {
-    short* psVar6;
-    short* psVar7;
-
     g_MessageCurrentPtr = (unsigned char*)((int)g_MessageCurrentPtr + 1);
     unsigned char* pbVar2 = g_MessageCurrentPtr;
     int iVar5 = (unsigned int)(g_menu_choice_id & 1) * (unsigned int)*g_MessageCurrentPtr;
@@ -1291,142 +1289,18 @@ static void handle_message_post_action(void)
     case 3: // No action
         return;
 
-    case 4: // Lab slides / cutscene start
-        g_cutId = g_roomCameraId;
-        g_labSlidesAnimState = 0;
-        g_bGameActive = 0;
-        g_labSlidesFuncIndex = 1;
-        g_roomCameraId = 4;
-        g_message_flags = g_message_flags & ~0x100;
-        display_room_camera_bg();
-        g_labSlidesSlideIndex = 0;
-        g_labSlidesLoopDone = 0;
-        g_labSlidesMsgId = 0;
-        g_labSlidesCountdown = 0x10;
-        lab_slides_stop_snd(0);
-        lab_slides_set_snd_slot(1);
-        lab_slides_set_snd_params(2, 0x14, 0x14);
-        lab_slides_set_snd_slot(2);
-        g_labSlidesScrollX = -96;
-        g_labSlidesScrollY = 0xffffffbe;
-        TexturePage_Refresh(0x2e, 0);
+    case 4: // Lab slides start (tail-jumps into 0x00463320)
+        lab_slides_start();
         return;
 
-    case 6: // Lab slides end
-        TexturePage_DeleteSet(0x2e);
-        g_roomCameraId = g_cutId;
-        display_room_camera_bg();
-        FUN_00473f10((int*)g_PlayerFlags, 0x20);
-        lab_slides_stop_snd(1);
-        lab_slides_stop_snd(2);
-        lab_slides_set_snd_slot(0);
-        g_message_flags = g_message_flags | 0x100;
-        g_main_state_flags = g_main_state_flags & 0xfffeffff;
-        g_bGameActive = 2;
+    case 6: // Lab slides end (tail-jumps into 0x004636b0)
+        lab_slides_finish();
         return;
     }
 
-    // Default: Lab slides animation state machine
-    switch (g_labSlidesAnimState) {
-    case 0:
-        g_labSlidesCountdown = g_labSlidesCountdown - 1;
-        if (g_labSlidesCountdown != 0) break;
-        g_labSlidesAnimState = 1;
-        g_labSlidesScrollX = 0x66;
-        // fall through
-    case 1:
-        g_labSlidesScrollX = g_labSlidesScrollX - 0x12;
-        if (g_labSlidesScrollX == 0x1e) {
-            play_sfx(2, 0x1b);
-        }
-        if (g_labSlidesScrollX == -0x60) {
-            g_labSlidesAnimState = 2;
-            set_message_display(g_labSlidesMsgId, 0);
-        }
-        break;
-    case 2:
-        if ((g_menu_choice_id & 0x80) == 0) {
-            g_labSlidesAnimState = 3;
-            play_sfx(2, 0x1a);
-        }
-        break;
-    case 3:
-        g_labSlidesScrollX = g_labSlidesScrollX - 0x12;
-        if (g_labSlidesScrollX < -0x127) {
-            g_labSlidesAnimState = 0;
-            g_labSlidesCountdown = 0x10;
-            if (g_labSlidesSlideIndex < 5) {
-                g_labSlidesSlideIndex = g_labSlidesSlideIndex + 1;
-                g_labSlidesMsgId = g_labSlidesMsgId + 1;
-            }
-            else if (g_labSlidesLoopDone == 0) {
-                g_labSlidesLoopDone = 1;
-                g_labSlidesMsgId = g_labSlidesMsgId + 1;
-            }
-            else {
-                g_labSlidesFuncIndex = 2;
-                g_labSlidesMsgId = g_labSlidesMsgId + 1;
-            }
-        }
-        break;
-    }
-
-    // Draw lab slides background rectangles
-    g_rect.r = 0x80;
-    g_rect.g = 0x80;
-    g_rect.b = 0x80;
-    g_rect.textureId = 0x60000000;
-    psVar6 = (short*)0x4c2170;
-    do {
-        g_rect.h = psVar6[-1];
-        psVar7 = psVar6 + -4;
-        g_rect.w = psVar6[-2];
-        g_rect.y = psVar6[-3];
-        g_rect.x = *psVar7;
-        draw_rect(&g_rect, 4, 1);
-        psVar6 = psVar7;
-    } while ((short*)0x4c2150 < psVar7);
-
-    // Draw lab slides scroll sprite
-    if (g_labSlidesAnimState != 0) {
-        g_TextureDesc.texU = 0;
-        g_rect.y = -0x42;
-        g_rect.h = 0x7f;
-        if ((unsigned int)(g_labSlidesScrollX + 0x67) < 0xe) {
-            g_rect.w = 0xbf;
-            g_rect.x = (short)g_labSlidesScrollX;
-        }
-        else if (g_labSlidesAnimState == 1) {
-            g_rect.w = 0x66 - (short)g_labSlidesScrollX;
-            g_rect.x = (short)g_labSlidesScrollX;
-        }
-        else {
-            g_rect.x = -0x67;
-            g_rect.w = (short)g_labSlidesScrollX + 0x126;
-            g_TextureDesc.texU = 0x99 - (char)g_labSlidesScrollX;
-        }
-        if ((g_labSlidesLoopDone == 0) && (g_labSlidesSlideIndex == 5)) {
-            g_rect.r = 0x38;
-            g_rect.g = 0x38;
-            g_rect.b = 0x38;
-        }
-        else {
-            g_TextureDesc.screenX = g_rect.x;
-            g_rect.r = 0x70;
-            g_rect.g = 0x70;
-            g_rect.b = 0x70;
-            g_TextureDesc.flags = 0x41000040;
-            g_TextureDesc.screenY = -0x42;
-            g_TextureDesc.height = 0x7f;
-            g_TextureDesc.texV = g_labSlidesSlideIndex << 7;
-            g_TextureDesc.width = g_rect.w;
-            g_TextureDesc.unk10 = 0;
-            g_TextureDesc.printClutTint = g_labSlidesSlideIndex + 0x1ed;
-            g_TextureDesc.depth = (short)(((unsigned short)g_labSlidesSlideIndex & 0xfffe) * 0x60 >> 7) + 9;
-            AddTintSprite_Ex(&g_TextureDesc, 4);
-        }
-        draw_rect(&g_rect, 4, 1);
-    }
+    // Any other action value tail-jumps into the shared lab-slides update
+    // block at 0x004633c0 (action 5 advances the strip one step).
+    lab_slides_update();
 }
 
 // ============================================================================

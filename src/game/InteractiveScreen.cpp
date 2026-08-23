@@ -348,11 +348,13 @@ void check_and_display_interactive_screen(void)
 
         // 0x0042a05e: the SysFlags bit picks which screen. 0x1d is the numeric
         // panel (room 4080), 0x1e the lab computer terminal (room 5060), 0x1f
-        // the slide projector - still a separate unported subsystem.
+        // the slide projector (room 4070, LabSlides.cpp).
         if (Flg_ck((int)g_SysFlags, 0x1d) != 0) {
             display_passcode_panel();
         } else if (Flg_ck((int)g_SysFlags, 0x1e) != 0) {
             display_computer_lab();
+        } else if (Flg_ck((int)g_SysFlags, 0x1f) != 0) {
+            display_slides();
         }
     }
     // 0x0042a0ad: the flag is re-read AFTER the dispatch, not reused from the
