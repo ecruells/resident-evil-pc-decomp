@@ -26,6 +26,7 @@ extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex);
 extern void run_command_functions(unsigned short* scd_opcodes);
 extern void room_events_check(void);
 extern void room_state_reset(void);
+extern void BuildSndFadeTbl(char distSteps, int fadeType);   // GameState.cpp (0x0047ff90)
 
 // Debug: F2 save-screen request state machine (0 = idle, 1 = fade out,
 // 2 = save screen open, 3 = fade back in). Port-added, debug builds only.
@@ -541,5 +542,42 @@ void UpdateDemoTimer(void) {
       g_DemoTimerCur = 0;
     }
   }
+}
+
+// ============================================================================
+// StartAttractDemo (0x004818b0)
+// Attract demo watchdog, called once per frame from game_loop. While the
+// attract/demo flag (msf2 bit 28) is set it ends the demo roll when the
+// playback timer runs out or the player presses a button, triggering the
+// same death-fade path that returns to the title screen.
+// ============================================================================
+void StartAttractDemo(void)
+{
+    // 0x004818b0: only active during attract demo playback
+    if ((g_main_state_flags2 & 0x10000000) == 0) {
+        return;
+    }
+
+    // 0x004818b9-0x004818e0: keep playing while DemoTimerCur+10 <= Max and
+    // no button is held (ReadPadBoth reads the live pad, not the scripted one)
+    if ((int)(unsigned short)g_DemoTimerCur + 10 <= (int)(unsigned short)g_DemoTimerMax &&
+        (ReadPadBoth() & 0xFFFF) == 0) {
+        return;
+    }
+
+    // 0x004818e2: don't restart the ending fade if one is already running
+    if ((g_main_state_flags & 0x1000000) != 0) {
+        return;
+    }
+
+    // 0x004818eb-0x0048191c: end the demo - reset the playback timer,
+    // stop the sound fade, request the death fade back to the title and
+    // restore the controller config saved by LoadAttractModePlayerData
+    g_DemoTimerCur = 1;
+    *(WORD*)&DAT_00ac98f8 = 0;              // 0x00ac98f8 (word write in original)
+    BuildSndFadeTbl((char)0xFD, 0x2B);
+    g_main_state_flags |= 0x1000000;
+    g_message_flags &= 0xFE70;
+    g_controllerConfig = (unsigned char)g_AttractMode_ControllerConfig;
 }
 

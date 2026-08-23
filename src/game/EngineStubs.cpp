@@ -88,9 +88,6 @@ int  empty_483510(void) { return 0; }
 // (0x00494050) - Debug save menu (F5 key)
 void DebugSaveMenu(void) { }
 
-// (0x004818b0) - Start attract mode demo playback
-void StartAttractDemo(void) { }
-
 // (0x0047eb60) - Post-death cleanup
 // Genuinely empty in the original (single RET at 0x0047eb60).
 void FUN_0047eb60(void) { }

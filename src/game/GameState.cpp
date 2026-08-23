@@ -1275,8 +1275,68 @@ void LoadItemImage(int item_id, int image_index, int img_buffer) // 0x00443000
     LoadImage(item_id * 1200 + img_buffer, 0, image_index + 1, 1, 108, (short)image_index << 5, 20, 30, 2);
 }
 
-// (0x00481060) - Load attract mode (demo) player save data
-void LoadAttractModePlayerData(void) { }
+// (0x00481750) - Load attract mode (demo) player save data
+// Cycles through ./usa/data/pdemo0.dat..pdemo3.dat. The original loads the
+// WHOLE 0x994-byte file at 0x00d21ce0, which overlaps three state areas:
+//   +0x000 header          -> demo state block (g_AttractDemoData)
+//   +0x030 input words     -> g_demoPadData (0x00d21d10)
+//   +0x990 tail (4 bytes)  -> g_AttractMode_ControllerConfig / _PlayerHealth
+void LoadAttractModePlayerData(void)
+{
+    // 0x00481753: wrap the demo index around after pdemo3.dat
+    if (g_CurrentAttractModeId > 3) {
+        g_CurrentAttractModeId = 0;
+    }
+
+    // 0x00481768-0x00481788: build the path from the "./usa/data/pdemo0.dat"
+    // template (0x004d22e8), patching the digit at offset 16 with the index
+    sprintf(FILE_PATH, GAME_DATA_ROOT "data\\pdemo%d.dat", g_CurrentAttractModeId);
+
+    // 0x0048178d: LoadFile copies the entire file; stage it here and then
+    // scatter the pieces onto the globals that overlap the original block.
+    static BYTE pdemoFile[0x994];
+    LoadFile(FILE_PATH, pdemoFile, 0x20);
+    memcpy(&g_AttractDemoData, pdemoFile, sizeof(g_AttractDemoData));
+    memcpy(g_demoPadData, pdemoFile + 0x30, sizeof(g_demoPadData));
+    g_AttractMode_ControllerConfig = *(WORD*)(pdemoFile + 0x990);
+    g_AttractMode_PlayerHealth     = *(short*)(pdemoFile + 0x992);
+
+    // 0x00481792: advance to the next demo for the following cycle
+    g_CurrentAttractModeId = g_CurrentAttractModeId + 1;
+
+    // 0x0048179c: back up the current controller config (restored by
+    // StartAttractDemo when the demo ends)
+    g_AttractMode_ControllerConfig = (WORD)g_controllerConfig;
+
+    // 0x004817ab-0x004817b7: switch to the recorded character
+    g_playerEntity.id = g_AttractDemoData.characterId;
+    g_SelectedCharactedId = g_AttractDemoData.characterId;
+    g_controllerConfig = g_controllerConfig & 0xfc;
+    g_CharacterModelId = g_AttractDemoData.characterId;
+    if (g_AttractDemoData.characterId != 0) {
+        g_main_state_flags = g_main_state_flags | 0x800000;
+    }
+
+    // 0x004817d8-0x00481816: apply the recorded room / camera / items
+    g_stageId = g_AttractDemoData.stageId;
+    g_roomId = g_AttractDemoData.roomId;
+    g_AttractMode_RoomCameraId = g_AttractDemoData.cameraId;
+    g_EquippedItemId = g_AttractDemoData.equippedItemId;
+    g_TotalHeldItems = g_AttractDemoData.totalHeldItems;
+    memcpy(g_ItemsSlots, &g_AttractDemoData.itemsSlots, 24);
+
+    // 0x00481832: restart demo playback input from frame 1
+    g_DemoTimerCur = 1;
+
+    // 0x00481821-0x00481863: restore the recorded player position / health
+    g_playerEntity.position.x = g_AttractDemoData.playerPosX;
+    g_playerEntity.position.z = g_AttractDemoData.playerPosZ;
+    g_playerEntity.directionAngle = g_AttractDemoData.playerDirAngle;
+    g_playerEntity.health = g_AttractMode_PlayerHealth;
+
+    // 0x00481870: reload the sound bank for the recorded weapon
+    LoadSoundBank(g_playerEntity.equippedWeaponId, g_DataBuffer);
+}
 
 // (0x0047eb90) - Restore game state from bio card on load
 void empty_0047eb90(int param) { }

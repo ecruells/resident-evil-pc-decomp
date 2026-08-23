@@ -393,8 +393,21 @@ WORD g_PlayerDpadHeldPrev = 0;
 // 0x00bf0a0e - placeholder for high WORD of g_button_pressed_id (use (WORD)(g_button_pressed_id >> 16))
 // 0x00bf0a12 - placeholder for high WORD of g_PlayerPadHeld (== g_RawPadState)
 // 0x00be9842 - g_PlayerDpadPressed is now a macro to g_BioCard.playerDpadPressed (see Items.h)
-// 0x00d21d10 - Attract demo input data (512 WORDs = 1024 bytes)
-WORD g_demoPadData[512] = {};
+// 0x00d21d10 - Attract demo input data. The whole-file pdemoN.dat load covers
+// this block up to the file tail at 0x00d22674: (0x994 - 0x30) / 2 = 1202
+// words, enough for the longest reel (1046 words). Do not shrink to 512 - the
+// playback index runs past 512 in every full-length demo.
+WORD g_demoPadData[1202] = {};
+
+// 0x00be41d6 - index of the pdemoN.dat attract demo currently playing
+WORD g_CurrentAttractModeId = 0;
+// 0x00d21ce0 - pdemoN.dat header image; g_DemoTimerCur/g_DemoTimerMax are
+// macro aliases into this struct (see Globals.h)
+AttractDemoData g_AttractDemoData = {};
+// 0x00d22670 - controller config carried in the pdemoN.dat tail (+0x990)
+WORD g_AttractMode_ControllerConfig = 0;
+// 0x00d22672 - player health carried in the pdemoN.dat tail (+0x992)
+short g_AttractMode_PlayerHealth = 0;
 
 // --- Menu / dialog flags ---
 // 0x00be9825 - g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see Items.h)
@@ -787,8 +800,6 @@ DWORD g_animSlotIndex = 0;               // 0x008f8c78
 int g_ScreenAccessCheck = 1;    // 0x004d2290 (start enabled so rendering happens)
 int g_RenderAccessCheck = 1;    // DAT_004d468c (start enabled so rendering happens)
 int g_demoTimer = 0;            // DEMO timer pattern field
-short g_DemoTimerCur = 0;      // 0x00d21cee - demo idle timer current value
-short g_DemoTimerMax = 0;      // 0x00d21cf0 - demo idle timer threshold
 BOOL g_bFullScreenFlag_68 = FALSE;  // used for cursor hiding logic
 
 // Object cleanup globals (Object_DeleteAll / ObjectCleanupCallback / ObjectList_Cleanup)

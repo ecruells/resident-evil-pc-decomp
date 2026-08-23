@@ -1740,8 +1740,13 @@ static void player_state_report_missing(const char* addr)
     static const char* lastAddr = NULL;
     if (addr != lastAddr) {
         lastAddr = addr;
-        dbg_printf("[player] unimplemented state animationId=%u -> %s\n",
-               (unsigned int)g_playerEntity.animationId, addr);
+        dbg_printf("[player] unimplemented state animationId=%u -> %s "
+               "(behavior=0x%02X actionState=%u animFrameId=%u msgFlags=%04X)\n",
+               (unsigned int)g_playerEntity.animationId, addr,
+               (unsigned int)g_playerEntity.action_behavior,
+               (unsigned int)g_playerEntity.action_state,
+               (unsigned int)g_playerEntity.animFrameId,
+               (unsigned int)(WORD)g_message_flags);
     }
 }
 
@@ -2972,56 +2977,17 @@ static void player_behavior_00_idle(void)
 
 // ============================================================================
 // player_ctrl_frame0 (0x00495320) — animFrameId 0
-// Read input, then run the handler for the resulting action_behavior. Behaviours
-// 10 and 0x11 are the door transition; the rest are locomotion and are still to
-// be transcribed.
+// Read input, then run the handler for the resulting action_behavior via the
+// full frame-2 dispatch table (player_ctrl_frame2, 0x00495330). This matters:
+// player_input_to_behavior can flip animFrameId to 1 AND set a locked-in
+// behavior (10 door, 0xB ladder, 0xC interact, 0x10 push) in the same frame,
+// and the original runs that behavior's handler immediately - it does NOT
+// re-dispatch under frame-0 semantics.
 // ============================================================================
 static void player_ctrl_frame0(void)
 {
     player_input_to_behavior();
-
-    switch (g_playerEntity.action_behavior) {
-    case 0:
-        player_behavior_00_idle();
-        return;
-    case 1:
-        player_ctrl_behavior_walk();
-        return;
-    case 2:
-        g_playerEntity.directionAngle = (g_playerEntity.directionAngle + 0x28) & 0xfff;
-        player_ctrl_behavior_walk();
-        return;
-    case 3:
-        g_playerEntity.directionAngle = (g_playerEntity.directionAngle - 0x28) & 0xfff;
-        player_ctrl_behavior_walk();
-        return;
-    case 4:
-        g_playerEntity.directionAngle = (g_playerEntity.directionAngle + 0x60) & 0xfff;
-        player_ctrl_behavior_back();
-        return;
-    case 5:
-        g_playerEntity.directionAngle = (g_playerEntity.directionAngle - 0x60) & 0xfff;
-        player_ctrl_behavior_back();
-        return;
-    case 6:
-        g_playerEntity.directionAngle = (g_playerEntity.directionAngle + 0x28) & 0xfff;
-        player_ctrl_behavior_run();
-        return;
-    case 7:
-        g_playerEntity.directionAngle = (g_playerEntity.directionAngle - 0x28) & 0xfff;
-        player_ctrl_behavior_run();
-        return;
-    case 8:
-        player_ctrl_behavior_run();
-        return;
-    case 10:      // door transition
-    case 0x11:
-        player_door_open_sequence();
-        return;
-    default:
-        player_state_report_missing("action_behavior under animFrameId 0");
-        return;
-    }
+    player_ctrl_frame2();
 }
 
 // ============================================================================
@@ -4802,6 +4768,265 @@ static void player_behavior_17_holster(void)
 }
 
 // ============================================================================
+// Hold-input fire family (behaviors 0x18 / 0x19 / 0x1A)
+// ============================================================================
+
+// FUN_0045a550 - once-per-trigger ammo gate. Sets the 0x80 bit on the equipped
+// slot's quantity byte; returns 1 only on the fresh consumption, so callers
+// testing the low byte see TRUE exactly once per trigger pull.
+static int fire_ammo_volley_gate(void)
+{
+    unsigned char* slotQty = ((unsigned char*)g_ItemSlotsPointer) + g_EquippedItemId * 2 - 1;
+    if ((*slotQty & 0x80) != 0) {
+        return 0;
+    }
+    *slotQty = (unsigned char)(*slotQty | 0x80);
+    return 1;
+}
+
+// FUN_0042a000 - arm the joint-15 recoil blend (first frame only)
+static void fire_reset_joint15_recoil(void)
+{
+    JointStruct* j = &g_playerEntity.jointsStructs[0xf];
+    if (j->velZ == 0) {
+        j->velZ = 1;
+        j->rotDeltaX = 0;
+    }
+}
+
+// FUN_0045a580 - consume one round from the largest ammo stack that fits.
+// The ammo item for a weapon is itemId weaponId+9; the cap comes from
+// g_ItemMaxQty[(weaponId+9)*4].
+static void fire_consume_ammo_stack(void)
+{
+    unsigned char weaponId = g_playerEntity.equippedWeaponId;
+    unsigned char maxQty = g_ItemMaxQty[((unsigned int)weaponId + 9) * 4];
+    unsigned char bestSlot = 0;
+    unsigned char bestQty = 0;
+    unsigned char slots = (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2);
+    for (unsigned char i = 0; i < slots; i++) {
+        unsigned char id = ((unsigned char*)g_ItemSlotsPointer)[i * 2];
+        unsigned char qty = ((unsigned char*)g_ItemSlotsPointer)[i * 2 + 1];
+        if (id == (unsigned char)(weaponId + 9) && qty > bestQty) {
+            bestSlot = i;
+            bestQty = qty;
+        }
+    }
+    if (maxQty < bestQty) {
+        ((unsigned char*)g_ItemSlotsPointer)[g_EquippedItemId * 2 - 1] = maxQty;
+        ((unsigned char*)g_ItemSlotsPointer)[bestSlot * 2 + 1] = bestQty - maxQty;
+        return;
+    }
+    ((unsigned char*)g_ItemSlotsPointer)[g_EquippedItemId * 2 - 1] = bestQty;
+    ((unsigned char*)g_ItemSlotsPointer)[bestSlot * 2] = 0;
+    rearrange_item_slots();
+}
+
+// Per-weapon fire-FX routine, dispatched from the table at 0x004c0fa0
+// (entries 0x00458ff0 / 0x00459040 / 0x00459090 x2 / 0x00459120 x4). Each
+// fires its effects on specific frames of the fire motion while unk_bf == 1.
+static void fire_weapon_fx(void)
+{
+    const int frame = (int)g_playerEntity.animation_frame_id;
+    int* muzzlePos = g_playerEntity.jointsStructs[0xe].world.t;   // [0xbe637c]+0x6c8+0x58
+
+    switch (g_playerEntity.equippedWeaponId) {
+    case 0: {   // 0x00458ff0
+        if (frame == 0xa && g_playerEntity.unk_bf == 1) {
+            if (fire_ammo_volley_gate() != 0) {
+                fire_reset_joint15_recoil();
+            }
+        }
+        if (frame == 0x11 && g_playerEntity.unk_bf == 1) {
+            fire_consume_ammo_stack();
+            Play3DSnd(1, 5, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        }
+        break;
+    }
+    case 1: {   // 0x00459040
+        if ((frame == 0xf || frame == 0x19 || frame == 0x23)
+            && g_playerEntity.unk_bf == 1) {
+            Play3DSnd(1, 9, 5, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+            if (frame == 0xf) {
+                fire_consume_ammo_stack();
+            }
+        }
+        break;
+    }
+    case 2:
+    case 3: {   // 0x00459090
+        if (frame == 0xc && g_playerEntity.unk_bf == 1) {
+            if (fire_ammo_volley_gate() != 0) {
+                Effect_CreateBillboard(5, 4, 0, NULL, muzzlePos, 5);
+            }
+        }
+        if (frame == 0x1c && g_playerEntity.unk_bf == 1) {
+            fire_consume_ammo_stack();
+            Play3DSnd(1, 9, 0xa, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        }
+        break;
+    }
+    default: {  // 0x00459120 (weapons 4..7)
+        if (frame == 0x12 && g_playerEntity.unk_bf == 1) {
+            fire_consume_ammo_stack();
+            Play3DSnd(1, 5, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        }
+        break;
+    }
+    }
+}
+
+// ============================================================================
+// player_behavior_18_hold_fire @ 0x00458ec0 - action_behavior 0x18
+// The hold-input gun fire entered from the raise-hold (b13 hold-input, weapon
+// < 6). State 1 plays the fire motion and runs the per-weapon FX routine; on
+// loop it returns to the hold (0x13), or for weapons > 6 chains into the
+// state-2 recoil blend before handing back to 0x13.
+// ============================================================================
+static void player_behavior_18_hold_fire(void)
+{
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.action_state = 1;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.healthStatusFlags |= 0x80;
+        g_message_flags &= 0xffbf;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.attackAnim = 0xe;
+        g_playerEntity.unk_8c = 3;
+        if ((g_main_state_flags2 & 1) != 0) {
+            PlayEntitySnd(0);
+        }
+    } else if (g_playerEntity.action_state == 1) {
+        fire_weapon_fx();
+
+        unsigned char ret = (unsigned char)Joint_move(0, g_playerEntity.jointMoveData0,
+                                                      g_playerEntity.jointMoveData1, 0x400);
+        if (ret != 0) {
+            g_playerEntity.healthStatusFlags &= 0x7f;
+            g_playerEntity.action_behavior = 0x13;
+            g_playerEntity.action_state = 0;
+            g_message_flags |= 0x40;
+            if (g_playerEntity.equippedWeaponId > 6) {
+                // special weapons blend the recoil before re-raising
+                g_playerEntity.action_behavior = 0x18;
+                g_playerEntity.action_state = 2;
+                g_playerEntity.animation_frame_id = 0;
+                g_playerEntity.unk_bf = 0;
+                g_playerEntity.healthStatusFlags |= 0x80;
+                g_message_flags &= 0xffbf;
+                g_playerEntity.unk_8c = 7;
+                g_playerEntity.attackAnim = 7;
+            }
+        }
+    } else if (g_playerEntity.action_state == 2) {
+        Joint_move(0, g_playerEntity.jointMoveData0,
+                   g_playerEntity.jointMoveData1, 0x200);
+        if (g_playerEntity.unk_8c != 0) {
+            return;
+        }
+        g_playerEntity.healthStatusFlags &= 0x7f;
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+        g_message_flags |= 0x40;
+    }
+}
+
+// ============================================================================
+// player_behavior_19_fire_click @ 0x00459310 - action_behavior 0x19
+// The empty-slot click: plays the dry-fire sfx once, counts attackDirection
+// down from 0xf, then hands back to the raise-hold (0x13).
+// ============================================================================
+static void player_behavior_19_fire_click(void)
+{
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.action_state = 1;
+        g_playerEntity.attackDirection = 0xf;
+        Play3DSnd(1, 9, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
+        if ((g_main_state_flags2 & 1) != 0) {
+            PlayEntitySnd(0);
+        }
+    }
+
+    short prev = g_playerEntity.attackDirection;
+    g_playerEntity.attackDirection--;
+    if (prev == 0) {
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+    }
+}
+
+// ============================================================================
+// player_behavior_1a_lockon_fire @ 0x00459150 - action_behavior 0x1A
+// The target-lock-on fire (raw pad bit 2 held with a lock): alternates the
+// weapon-joint fire motion (state 1, jmd buffers) with the body recover
+// blend (state 2, animHeader/animBase), steering toward the locked target.
+// When aligned, control returns to the raise-hold (0x13). Holding the fire
+// button re-acquires the target every frame outside state 0.
+// ============================================================================
+static void player_behavior_1a_lockon_fire(void)
+{
+    if (g_playerEntity.action_state != 0 && (g_PlayerPadHeld & 4) != 0) {
+        player_find_aim_target();
+    }
+
+    char dir = (char)(g_playerEntity.weaponAimFlags >> 7);          // 0/1 (ADD convention)
+    unsigned char up = (unsigned char)((g_playerEntity.weaponAimFlags & 0x20) >> 4);
+
+    if (g_playerEntity.action_state == 0) {
+        g_playerEntity.unk_8c = 0;
+        g_playerEntity.move_speed_current = 1;
+        g_playerEntity.action_state = 1;
+        goto state1_body;
+    }
+    if (g_playerEntity.action_state == 1) {
+        goto state1_body;
+    }
+    if (g_playerEntity.action_state == 2) {
+        if (g_playerEntity.unk_8c == 0) {
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.attackAnim =
+                (unsigned char)((up + dir) * 3 + 7);
+            g_playerEntity.unk_bf = 0;
+            g_playerEntity.action_state = 1;
+            g_playerEntity.unk_8c = 7;
+            return;
+        }
+        Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x200);
+        goto turn_tail;
+    }
+    goto turn_tail;
+
+state1_body:
+    if (g_playerEntity.unk_8c == 0) {
+        g_playerEntity.action_state = 2;
+        g_playerEntity.unk_bf = 0;
+        g_playerEntity.animation_frame_id = 0;
+        g_playerEntity.unk_8c = 7;
+        g_playerEntity.attackAnim =
+            (unsigned char)(up + dir + g_playerEntity.equippedWeaponId * 3 + 2);
+        if ((g_main_state_flags2 & 1) != 0) {
+            PlayEntitySnd(0);
+        }
+        return;
+    }
+    Joint_move(0, g_playerEntity.jointMoveData0,
+               g_playerEntity.jointMoveData1, 0x200);
+
+turn_tail:
+    g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+    if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
+        g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+    }
+    entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
+                                (unsigned short)g_animFrameIdSave);
+    if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x20) == 0) {
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state = 0;
+    }
+}
+
+// ============================================================================
 // player_behavior_12_knife_aim @ 0x00459370 - knife action_behavior 0x12
 // Knife aim pose: motion 5 with the reticle follow, turns of 0x20, and the
 // weapon joint update inline. The hold state takes over when the loop ends.
@@ -5165,13 +5390,13 @@ static void player_ctrl_frame3(void)
         player_behavior_17_holster();
         break;
     case 0x18:
-        player_state_report_missing("action_behavior 0x18 (0x00458ec0)");
+        player_behavior_18_hold_fire();
         break;
     case 0x19:
-        player_state_report_missing("action_behavior 0x19 (0x00459310)");
+        player_behavior_19_fire_click();
         break;
     case 0x1a:
-        player_state_report_missing("action_behavior 0x1a (0x00459150)");
+        player_behavior_1a_lockon_fire();
         break;
     default:
         player_state_report_missing("action_behavior under animFrameId 3");

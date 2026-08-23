@@ -236,7 +236,10 @@ extern const WORD* g_padRemapTable[4];                 // 0x004bf300 - pointers 
 extern WORD g_padRemapSubTable3[16];                   // 0x00be9a3c - runtime configurable remap table
 extern WORD g_PlayerDpadHeldPrev;                      // 0x00bf0a14 - previous dpad held state
 // g_PlayerDpadHeld / g_PlayerDpadPressed are macros to g_BioCard fields (see Items.h)
-extern WORD g_demoPadData[512];                        // 0x00d21d10 - attract demo input data
+extern WORD g_demoPadData[1202];                        // 0x00d21d10 - attract demo input data
+                                                        // (0x00d21d10..0x00d22674, filled by the
+                                                        // whole-file pdemoN.dat load; a reel is up
+                                                        // to 1046 words, NOT 512)
 extern unsigned char g_controllerConfig;               // 0x00be9a5c
 
 // Player input configuration fields (set by InitPlayerInputData)
@@ -842,8 +845,45 @@ extern int           g_titleTextureSlotId;             // 0x004c331c
 extern DWORD         g_AttractModeIdleTimer;           // 0x004c44d8
 #define g_demoIdleTimer1 g_AttractModeIdleTimer
 extern int           g_demoTimer;                      // 0x004bcb5c
-extern short         g_DemoTimerCur;                   // 0x00d21cee
-extern short         g_DemoTimerMax;                   // 0x00d21cf0
+
+// 0x00be41d6 - index of the pdemoN.dat attract demo currently being played
+// (cycles 0..3; wiped by ClearGameStateFlags' dword run in the original)
+extern WORD          g_CurrentAttractModeId;
+// 0x00d21ce0 - image of the pdemoN.dat header (first 0x30 bytes of the demo
+// file, staged by LoadAttractModePlayerData). g_DemoTimerCur/g_DemoTimerMax
+// live INSIDE this block in the original (0x00d21cee/0x00d21cf0): the file
+// load overwrites them, which is where the demo frame length comes from.
+#pragma pack(push, 1)
+struct AttractDemoData {
+    BYTE roomId;            // +0x00 -> g_roomId
+    BYTE stageId;           // +0x01 -> g_stageId
+    BYTE totalHeldItems;    // +0x02 -> g_TotalHeldItems
+    BYTE equippedItemId;    // +0x03 -> g_EquippedItemId
+    BYTE characterId;       // +0x04 -> player character id
+    BYTE pad05;
+    short playerPosX;       // +0x06
+    short playerPosZ;       // +0x08
+    short playerDirAngle;   // +0x0A
+    short pad0C;
+    short demoTimerCur;     // +0x0E - playback frame counter (reset to 1 after load)
+    short demoTimerMax;     // +0x10 - demo length in frames
+    short pad12;
+    BYTE cameraId;          // +0x14 -> g_AttractMode_RoomCameraId
+    BYTE pad15[3];
+    BYTE itemsSlots[24];    // +0x18 - 12 item slots (id/qty pairs), file
+                            //        bytes 0x18..0x2F
+};
+static_assert(sizeof(AttractDemoData) == 0x30, "AttractDemoData size mismatch");
+#pragma pack(pop)
+extern AttractDemoData g_AttractDemoData;
+#define g_DemoTimerCur   (g_AttractDemoData.demoTimerCur)   // 0x00d21cee
+#define g_DemoTimerMax   (g_AttractDemoData.demoTimerMax)   // 0x00d21cf0
+
+// 0x00d22670 - controller config carried in the pdemoN.dat file tail (+0x990),
+// applied while an attract demo plays, restored by StartAttractDemo when it ends
+extern WORD          g_AttractMode_ControllerConfig;
+// 0x00d22672 - player health carried in the pdemoN.dat file tail (+0x992)
+extern short         g_AttractMode_PlayerHealth;
 
 // ============================================================================
 // SECTION 13: Save / load
