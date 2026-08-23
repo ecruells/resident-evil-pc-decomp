@@ -338,6 +338,29 @@ static void DoorCreateTexturePage(void)
 {
     VideoDriver_ClearState348(g_pMarniDirect3D, g_pMarniDirect3D);
     LoadPSXImage((PSXTexture*)g_doorTexPage, g_doorTexSrc, 1);
+
+    // 0x00484856: overwrite every CLUT descriptor's material key with a fixed
+    // constant set (0, 0x1FF, 0x140, 0x100). Every shipped .dor primitive
+    // packet encodes clut position 0x7FC0 (= VRAM 0,511) and page low bits
+    // 0x15, so PSXObject_Store always builds the slot key
+    // (0, 0x1FF, 0x140, 0x100) - stamping the descriptors with that same key
+    // makes CMarniDirect3DTMD::Create's texture match succeed no matter where
+    // the TIM itself placed its CLUT. Without this the descriptors keep the
+    // TIM's real coordinates and any .dor whose CLUT is NOT at VRAM (0,511)
+    // fails the match: ele01a.dor / ele01b.dor place theirs at (0,480), so
+    // room50c0's elevator transition created no TMD objects and drew nothing,
+    // while every doorNN.dor (CLUT really at 0,511) matched by coincidence.
+    {
+        DWORD count = *(DWORD*)(g_doorTexPage + 0x340);
+        BYTE* desc = g_doorTexPage;
+        for (DWORD j = 0; j < count; j++, desc += 0x68) {
+            *(DWORD*)(desc + 0x54) = 0;
+            *(DWORD*)(desc + 0x58) = 0x1FF;
+            *(DWORD*)(desc + 0x5C) = 0x140;
+            *(DWORD*)(desc + 0x60) = 0x100;
+        }
+    }
+
     Direct3DTIM_Create(g_doorTexPage, g_pMarniDirect3D);
     g_doorTexCreated = 1;
 }
