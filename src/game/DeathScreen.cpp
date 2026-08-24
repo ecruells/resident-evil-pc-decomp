@@ -31,10 +31,9 @@
 
 // Locally-declared helpers (declared here because Globals.h does not cover
 // every original symbol; the definitions live in SoundSystem.cpp /
-// CmdFunctions.cpp / EngineStubs.cpp).
+// CmdFunctions.cpp).
 extern void play_sound_and_voice_effect(int type, int id);   // SoundSystem.cpp
 extern void BuildSndFadeTbl(char distSteps, int fadeType);   // GameState.cpp (0x0047ff90)
-void vram_clr(int x, int y, int w, int h);                   // EngineStubs.cpp (PSX leftover)
 
 // ============================================================================
 // 0x10-byte texture template entries (0x004bd2b8 / 0x004bd308)
@@ -452,14 +451,15 @@ void die_state(void)
 
     StMask(0, 1);
     Task_sleep(1);
-    vram_clr(0, 0, 0x140, 0x1E0);
+    // vram_clr(0, 0, 0x140, 0x1E0): PS1 leftover, returns immediately in this
+    // build (0x00412370) - call dropped
 
     // Wait for the death sound fade to finish.
     while (g_SndFadeType != 0) {
         Task_sleep(1);
     }
 
-    FUN_0047eb60();
+    // FUN_0047eb60: empty in the original (single RET at 0x0047eb60)
     g_BGM_STATE  = 0xFF;
     g_DemoTimerCur = 0;
 }

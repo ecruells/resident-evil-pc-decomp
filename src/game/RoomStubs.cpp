@@ -295,7 +295,8 @@ void setup_effect_sprite_textures(unsigned char startSlot)
             pageRow = pageRow + 1;
         }
 
-        empty_0047b950(0);
+        // 0x0047bd82: the original calls 0x00483510 here, a stub that just
+        // returns 0 - call dropped
 
         unsigned short* spriteInfo = (unsigned short*)g_effectSpriteInfo[spriteIdx];
         spriteInfo[2] = curV * 0x40 + pageRow + 0x7810;
@@ -715,8 +716,8 @@ void SetupTextureBankData(short param_1)
     // 0x00473a6d: Advance load pointer
     g_loadDataDestPointer = (char*)g_loadDataDestPointer + (DWORD)DAT_00ae9f06 * 0x400;
 
-    // 0x00473a7e: Process pending texture operations
-    empty_0047b950(0);
+    // 0x00473a7e: Process pending texture operations. The original calls
+    // 0x00483510 here, a stub that just returns 0 - call dropped
 
     // 0x00473a86: Copy texture data to secondary buffer
     unsigned short idx = 0;

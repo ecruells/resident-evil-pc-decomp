@@ -2607,7 +2607,7 @@ void options_menu(void)
     LoadFile(s_optBgKeyConfig, &g_TimImageBuffer, 0x20);
     display_image(8, g_TimImageBuffer__bitmap, 320, 240);
     title_setup_texture_pages(8, 1);
-    empty_00470960(8);
+    // empty_00470960(8): empty in the original - call dropped
     StMask(0, 3);
     set_title_render_param(0xcf);
     MatrixToCamera(&localCamMatrix);
@@ -2674,7 +2674,7 @@ stateMainNav:
                             LoadFile(s_optBgKeyConfig, &g_TimImageBuffer, 0x20);
                             display_image(8, g_TimImageBuffer__bitmap, 0x140, 0xf0);
                             title_setup_texture_pages(8, 1);
-                            empty_00470960(8);
+                            // empty_00470960(8): empty in the original - call dropped
                             StMask(0, 3);
                             goto loadKeyConfigBg;
                         }
@@ -2687,7 +2687,7 @@ stateMainNav:
                             LoadFile(s_optBgDisplayCfg, &g_TimImageBuffer, 0x20);
                             display_image(8, g_TimImageBuffer__bitmap, 0x140, 0xf0);
                             title_setup_texture_pages(8, 1);
-                            empty_00470960(8);
+                            // empty_00470960(8): empty in the original - call dropped
                             StMask(0, 3);
                             s_optCurrentTab = 1;
                         }
@@ -2704,7 +2704,7 @@ stateMainNav:
                         LoadFile(s_optBgJoystick, &g_TimImageBuffer, 0x20);
                         display_image(8, g_TimImageBuffer__bitmap, 0x140, 0xf0);
                         title_setup_texture_pages(8, 0);
-                        empty_00470960(8);
+                        // empty_00470960(8): empty in the original - call dropped
                         StMask(0, 3);
                         s_optCurrentTab = 2;
                     }

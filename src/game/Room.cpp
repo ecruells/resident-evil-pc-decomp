@@ -794,7 +794,7 @@ void load_room_bg(void) // 0x00462b00
 void load_room_bg_image(void) // 0x004629c0
 {
     if (g_bgCacheMode == 0 && (g_stageId != 2 || g_roomId != 0x11)) {
-        empty_00470960(g_roomCameraId);
+        // empty_00470960(g_roomCameraId): empty in the original - call dropped
         return;
     }
 
@@ -831,7 +831,7 @@ void load_room_bg_image(void) // 0x004629c0
 
     display_image(8, g_TimImageBuffer__bitmap, width, height);
     title_setup_texture_pages(8, 1);
-    empty_00470960(8);
+    // empty_00470960(8): empty in the original - call dropped
 }
 
 // ============================================================================

@@ -455,7 +455,8 @@ void title_state(void)
     // empty_0040abb0((void*)0, 0, 0, 0);
 
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
-    empty_0047b950(0);
+    // 0x0047b950 call site: the original calls 0x00483510 here, a stub that
+    // just returns 0 - call dropped
 
     setMenuScreenOffset(320, 240, 0, 0, 1);
     Task_sleep(1);

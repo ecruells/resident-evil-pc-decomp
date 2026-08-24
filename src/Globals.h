@@ -405,6 +405,9 @@ extern int           g_dwCameraLightingEnabled;         // 0x004d46a4 - gates ro
 extern int           g_dwEntityRenderEnabled;           // 0x004d46a8 - gates calc_entity_lighting (all entities)
 extern int           g_displayDebugSaveMenu;           // 0x004d4680 - debug save menu trigger
 extern int           g_debugSaveMenuFlag;              // 0x004d4684 - debug save menu state flag
+extern BYTE          g_VideoModeOverlayActive;         // 0x004d461c - video-mode overlay flag
+extern int           g_ShowVideoModeOverlay;           // 0x004d4600 - video-mode overlay toggle latch
+extern int           g_VideoModeOverlayTimer;          // 0x004d475c - overlay frame countdown
 extern int           DAT_004d228c;                     // 0x004d228c - menu processing active flag
 
 // Port-added debug helpers (no original address; set by F2/F3/F6 in WindowProc,
@@ -1396,8 +1399,6 @@ void PauseSounds(void);
 void ResumePausedSounds(void);
 void UpdateSoundFadeState(void);
 void UpdateSoundDecay(void);
-void empty_0047b950(int param);
-int  empty_483510(void);
 void UpdateMusicWaitState(void);
 void sounds_reset(void);
 void LoadSoundBank(int sound_bank_id, void* buffer);
@@ -1419,6 +1420,7 @@ void load_character_sfx(unsigned char charId);
 // --- Video / FMV ---
 void UpdateVideoPlayback(void);
 void ClearScreen(void);
+void QueueVideoPlayback(int fmvId, int flag);         // 0x004422d0
 
 // --- Marni system ---
 BOOL IsGraphicsSystemReadyForOperation(void);
@@ -1439,7 +1441,7 @@ void ResetScreenAndRebuildSprites(int param);
 void ApplyShakeAndRebuildSprites(void);
 void SetScreenReadyWithDebugColor(int r, int g, int b);
 void SetScreenReady(int param);
-void FUN_004973a0(int param);
+void ResetFmvRenderState(void);                       // 0x004973a0 - FMV cleanup on state change
 void FUN_00470a90(void);
 void FrameRateGovernor(void);
 void FUN_0040a8f0(void* param);
@@ -1498,6 +1500,11 @@ void CenterScreenOrigin(void);
 void SetSubpixelOffset(int x, int y);
 void CreateTimestampedLogFile(void);
 void ShowVideoModeDebugText(void);
+// --- Entity path/trail animation (PathTrail.cpp) ---
+void FUN_0048a210(void* joint);                       // 0x0048a210 - path animation step
+void FUN_00485820(void* trailObj, int count);         // 0x00485820 - stage geometry build
+void FUN_00485a00(void* trailObj, int brightness);    // 0x00485a00 - stage trail draw
+void FUN_00485aa0(void* trailObj);                    // 0x00485aa0 - stage slot release
 
 // --- game_loop dependency functions (called per-frame from 0x00480b30) ---
 void check_camera_switch(int param);                  // 0x00462cc0
@@ -1507,7 +1514,6 @@ void check_itembox_state(void);                       // 0x0041c240
 void check_typewriter_state(void);                    // 0x0041c330
 void check_event_item_usage(void);                    // 0x0041c490
 void check_and_display_interactive_screen(void);      // 0x0042a030
-void empty_00412380(void);                            // 0x00412380 - unknown init/cleanup
 void TexturePage_ClearAll(void);                      // 0x0046c360
 void SetupJointStructures(void* buf);                 // 0x0048b9e0
 // 0x00462620 - implemented in EntityModelLoader.cpp. The parameter types must
@@ -1519,7 +1525,6 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
                                 unsigned int anim_buffer, unsigned int param_4);
 void FUN_0048c020(int param);                         // 0x0048c020 - entity weapon setup
 void FUN_004844b0(void);                              // 0x004844b0 - menu cleanup sub
-void FUN_00470a40(void);                              // 0x00470a40 - texture cleanup
 void FUN_0047d0e0(void);                              // 0x0047d0e0 - effect cleanup
 void RestoreRoomCamera(void);                         // 0x00462940 - re-apply RDT room camera after menu
 void FUN_0040ac80(int idx, void* lightData);          // 0x0040ac80 - set light data
@@ -1589,7 +1594,6 @@ void display_die_screen(void);                        // 0x00443090 - death scre
 void update_image_fading_(const void* param1, short param2);  // 0x00443500 - fill g_TextureDesc from a 0x10-byte template
 void image_update(int param);                         // 0x00443550 - wavy died.tim strip effect
 int  _fsin(int angle);                                // 0x0040a960 - fix12 sine (angle 0..32768 = 2pi)
-void FUN_0047eb60(void);                              // 0x0047eb60 - post-death cleanup
 unsigned int set_message_display(unsigned short msgId, unsigned short flags); // 0x00455670
 unsigned int set_item_description_message(unsigned short descIndex, unsigned short pauseGame); // 0x00455730
 
@@ -1631,16 +1635,13 @@ void  operator_delete(void* ptr);
 void set_display_resolution(int w, int h, int mode);
 void display_image(int slot, void* buffer, int width, int height);
 void title_setup_texture_pages(int slot, int mode);
-void empty_00470960(int slot);
 int  check_save_files_exist(void);
 void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId);
 void title_exit_loop(void);
 void fade_update(void);
 void init_title_screen(void);
 void title_select_sfx(void);
-void empty_0040abb0(void* ptr, int a, int b, int c);
 void set_title_render_param(int value);
-void empty_00497c10(int value);
 void update_title_options(void);
 
 // --- Save / load ---

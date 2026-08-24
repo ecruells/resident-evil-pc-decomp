@@ -386,6 +386,24 @@ void UpdateVideoPlayback(void)
 }
 
 // ============================================================================
+// QueueVideoPlayback (0x004422d0)
+// Software-renderer FMV queue. g_pSharedMemory[4] is the queue fill count;
+// the FMV id goes to +0x0C+count and its sub-flag to +0x14+count (both slots
+// pre-initialised to 8 entries by InitSoftwareRenderer). No-op when the
+// software-renderer shared memory was never mapped (D3D path plays FMVs via
+// the main_loop 0x40000 state flag instead).
+// ============================================================================
+void QueueVideoPlayback(int fmvId, int flag)
+{
+    if (g_pSharedMemory != NULL) {
+        int count = g_pSharedMemory[4];
+        g_pSharedMemory[0x0C + count] = (BYTE)fmvId;
+        g_pSharedMemory[0x14 + count] = (BYTE)flag;
+        g_pSharedMemory[4] = (BYTE)(count + 1);
+    }
+}
+
+// ============================================================================
 // StartVideoPlayback - Signal software video player to start (0x004423b0)
 // ============================================================================
 void StartVideoPlayback(void)

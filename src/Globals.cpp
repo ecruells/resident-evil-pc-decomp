@@ -1950,6 +1950,17 @@ int            g_displayDebugSaveMenu = 0;
 // 0x004d4684 - Debug save menu state flag (prevents re-trigger until re-armed)
 int            g_debugSaveMenuFlag = 0;
 
+// 0x004d461c - Video-mode debug overlay active flag (cleared by
+// ResetFmvRenderState 0x004973a0; read/written by ShowVideoModeDebugText)
+BYTE           g_VideoModeOverlayActive = 0;
+
+// 0x004d4600 - Video-mode debug overlay toggle latch (set by the debug key
+// handler, consumed + turned into a 60-frame timer by ShowVideoModeDebugText)
+int            g_ShowVideoModeOverlay = 0;
+
+// 0x004d475c - Video-mode debug overlay frame countdown
+int            g_VideoModeOverlayTimer = 0;
+
 // 0x004d228c - Menu processing active flag (set during menu open/close)
 int            DAT_004d228c = 0;
 

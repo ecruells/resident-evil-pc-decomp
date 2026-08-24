@@ -332,7 +332,7 @@ void characterSelectionScreen(void)
     display_image(0, g_TimImageBuffer__bitmap, 320, 240);
 
     title_setup_texture_pages(0, 1);
-    empty_00470960(0);
+    // empty_00470960(0): empty in the original - call dropped
 
     // Initialize rotation matrix
     g_selRotVec[0] = 0;

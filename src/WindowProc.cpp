@@ -158,12 +158,22 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (wParam == VK_SNAPSHOT) {
                 CreateTimestampedLogFile();
             }
-            // Not in the original: F5 toggles the collision boundary overlay.
-            // Handled on KEYUP, like PrintScreen above, because that fires once
-            // per press - WM_KEYDOWN autorepeats while the key is held and would
-            // flip the toggle every repeat. Debug builds only.
+            // Not in the original: F5 arms the ORIGINAL debug save menu
+            // (0x00494050). Nothing in the retail binary ever writes the flag
+            // at 0x004d4680 - Capcom devs set it with a debugger - so the key
+            // reproduces exactly that: raise the flag, game_loop's 0x00480f70
+            // branch runs the save task once and clears it. KEYUP (single-fire,
+            // no autorepeat); debug builds only.
 #ifdef _DEBUG
             else if (wParam == VK_F5) {
+                g_displayDebugSaveMenu = 1;
+            }
+            // Not in the original: F8 toggles the collision boundary overlay.
+            // Handled on KEYUP like PrintScreen above, because WM_KEYDOWN
+            // autorepeats while the key is held and would flip the toggle
+            // every repeat. Debug builds only. (Was F5 before the original
+            // debug save menu took that key.)
+            else if (wParam == VK_F8) {
                 g_bShowCollisionDebug = g_bShowCollisionDebug ? FALSE : TRUE;
             }
 #endif

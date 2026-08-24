@@ -528,8 +528,8 @@ void check_menus_state(void)
     // 0x00481648: Clear menu processing flag
     DAT_004d228c = 0;
 
-    // 0x00481655: Cleanup (tail call to empty_00412380)
-    empty_00412380();
+    // 0x00481655: Cleanup tail call to 0x00412380 - empty in the original,
+    // call dropped
 }
 
 // UpdateDemoTimer (0x00429ce0) - increments demo idle timer and resets when threshold reached

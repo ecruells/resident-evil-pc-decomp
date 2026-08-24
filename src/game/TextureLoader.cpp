@@ -218,6 +218,52 @@ void destroy_texture_page(int id)
     ExecAsync((void*)AsyncDestroyTexturePage);
 }
 
+// 0x0046cfd0 - cleanup_texture_slot
+// Frees a texture slot's page set. The original adds 0xF to the caller's slot
+// (pages live under slot+0xF), zeroes the 9-word texture descriptor at
+// g_VideoDriverArray_838 + slot*0x37C, then — gated by the flag at
+// g_VideoDriverArray_814 + off and bounded by the count at
+// g_VideoDriverArray_810 + off — destroys every live page handle in the
+// slot's run of g_TexturePageTable_DAT. Finally it releases the slot's stored
+// PSXTexture copy (thiscall VideoDriver_ClearArrayD0 on &DAT_008ed4d0 + off);
+// the port keeps no such shadow copy (see create_texture_page), so that
+// release is a no-op here, same as in ProcessTextureImage.
+void cleanup_texture_slot(int slot)
+{
+    int    p   = slot + 0xF;
+    size_t off = (size_t)p * 0x37C;
+
+    if (off + 9 * sizeof(WORD) <= sizeof(g_VideoDriverArray_838)) {
+        WORD* desc = (WORD*)((BYTE*)&g_VideoDriverArray_838 + off);
+        for (int i = 0; i < 9; i++) {
+            desc[i] = 0;
+        }
+    }
+
+    if (off + sizeof(DWORD) > sizeof(g_VideoDriverArray_814) ||
+        off + sizeof(DWORD) > sizeof(g_VideoDriverArray_810) ||
+        off + sizeof(DWORD) > sizeof(g_TexturePageTable_DAT)) {
+        return;
+    }
+
+    DWORD* gate  = (DWORD*)((BYTE*)&g_VideoDriverArray_814 + off);
+    DWORD  count = *(DWORD*)((BYTE*)&g_VideoDriverArray_810 + off);
+    DWORD* pages = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + off);
+
+    if (*gate == 0 || count == 0) {
+        return;
+    }
+
+    size_t room = (sizeof(g_TexturePageTable_DAT) - off) / sizeof(DWORD);
+    if ((size_t)count > room) count = (DWORD)room;
+    for (DWORD i = 0; i < count; i++) {
+        if (pages[i] != 0) {
+            destroy_texture_page((int)pages[i]);
+            pages[i] = 0;
+        }
+    }
+}
+
 // 0x0046c160 - create_texture_page
 // Copies PSXTexture data into work buffer, stores flags, queues async creation
 int create_texture_page(void* psxTexData, int flags)

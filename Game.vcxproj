@@ -133,7 +133,7 @@
     <ClCompile Include="src\game\Room.cpp" />
     <ClCompile Include="src\game\RoomEvents.cpp" />
     <ClCompile Include="src\game\CmdFunctions.cpp" />
-    <ClCompile Include="src\game\EngineStubs.cpp" />
+    <ClCompile Include="src\game\PathTrail.cpp" />
     <ClCompile Include="src\game\ComputerLab.cpp" />
     <ClCompile Include="src\game\InteractiveScreen.cpp" />
     <ClCompile Include="src\game\LabSlides.cpp" />

@@ -458,13 +458,13 @@ static void ending_result_build(void)
     memcpy((char*)g_RdtPointer + 0x9C, s_camera, sizeof(s_camera));
     s_endingRdt.cams[g_roomCameraId].fov = 0x82;
 
-    empty_483510();
+    // empty_483510(): returns 0 in the original - call dropped
 
     if (s_endingTable[s_endingId].background != 0) {
         setSomeColor(0, 0, 0);
         display_image(0, s_bgImageBuffer, 0x140, 0xF0);
         title_setup_texture_pages(0, 1);
-        empty_00470960(0);
+        // empty_00470960(0): empty in the original - call dropped
     }
 }
 
@@ -638,10 +638,10 @@ static void ending_result_update(void)
 static void ending_epilogue_build(void)
 {
     LoadFile(GAME_DATA_ROOT "data\\rc1121.pix", s_bgImageBuffer, 0x20);
-    empty_483510();
+    // empty_483510(): returns 0 in the original - call dropped
     display_image(0, s_bgImageBuffer, 0x140, 0xF0);
     title_setup_texture_pages(0, 1);
-    empty_00470960(0);
+    // empty_00470960(0): empty in the original - call dropped
 
     // Entries 5 and 6 are the epilogue's two caption plates, both fully faded
     // in from the start (fadeLevel 0x8000).
@@ -840,13 +840,12 @@ void ending_state(void)
     g_loadDataDestPointer = s_dat4d69f8;
 
     memset_((unsigned int*)g_effectPool, 0x840);
-    empty_00497c10(0);
+    // empty_00497c10(0): returns 0 in the original - call dropped
 
-    // 0x004109a1: a clip rect built on the caller's own frame; the callee is
-    // empty in this build, so only the call itself is reproduced.
-    short clipRect[2] = { 0, 0 };
-    empty_0040abb0(clipRect, 0, 0, 0);
-    empty_483510();
+    // 0x004109a1: a clip rect built on the caller's own frame; the callee
+    // (empty_0040abb0) just returns 0 in this build, so only the call itself
+    // was reproduced and is now dropped.
+    // empty_483510(): returns 0 in the original - call dropped
 
     // ------------------------------------------------------------------
     // The ending movies. The original branches on 0x004bcda8 (the MCI/video

@@ -447,7 +447,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
     g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
     display_image(8, g_TimImageBuffer__bitmap, 320, 240);
     title_setup_texture_pages(8, 1);
-    empty_00470960(8);
+    // empty_00470960(8): empty in the original - call dropped
 
     // Main loop
     do {
@@ -942,4 +942,85 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
         Task_sleep(1);
 
     } while (true);
+}
+
+// ============================================================================
+// DebugSaveMenu (0x00494050) - F5 debug save picker, driven as a task from
+// game_loop's debug branch (GameLoop.cpp 0x00480f70).
+//
+// Draws an 8-slot list at the screen's left edge (rows y=10..122 step 16,
+// entries "1".."8", the selected row prefixed with ">"). Confirm/cancel use
+// the same remapped d-pad edges (0x4000 / 0x8000) as every other menu in
+// the game - the same keys that confirm/cancel the regular save screen.
+// On confirm it snapshots the player's position/angle/character into the bio
+// card and writes the whole 0x800-byte bio card block to
+// GAME_SAVE_ROOT savedat<N>.dat - exactly what LoadSaveGameState writes, so
+// the slot shows up on the load screen.
+// Every frame logs both pressed words under "[DBGSAVE]" so input issues are
+// diagnosable from the debugger output.
+//
+// Original quirk kept: it patched the '1' in "savedat1.dat" by the selection
+// instead of formatting the number (0x004d441c template + byte add).
+// ============================================================================
+void DebugSaveMenu(void)
+{
+    int selected = 0;
+    for (;;) {
+        int row = 10;
+        int entry = 0;
+        do {
+            sprintf(PRINT_TEXT_BUFFER,
+                    (selected == entry) ? "> %d" : "  %d",   // 0x004d4414 / 0x004d440c
+                    entry + 1);
+            PrintText8x8(0, (short)row, 0, 1);
+            row += 0x10;
+            entry++;
+        } while (row < 0x8a);
+
+#ifdef _DEBUG
+        {
+            char dbg[96];
+            sprintf(dbg, "[DBGSAVE] raw=%04X dpad=%04X sel=%d\n",
+                    (unsigned)(WORD)g_PlayerPadPressed,
+                    (unsigned)(WORD)g_PlayerDpadPressed, selected);
+            OutputDebugStringA(dbg);
+        }
+#endif
+
+        if ((g_PlayerPadPressed & 0x1000) != 0 && 0 < selected) {
+            selected--;
+        }
+        if ((g_PlayerPadPressed & 0x4000) != 0 && selected < 7) {
+            selected++;
+        }
+        if ((g_PlayerDpadPressed & 0x4000) != 0) {   // confirm (same edge as the save screen)
+            break;
+        }
+        if ((g_PlayerDpadPressed & 0x8000) != 0) {   // cancel
+            OutputDebugStringA("[DBGSAVE] cancelled\n");
+            return;
+        }
+        Task_sleep(1);
+    }
+
+    g_PlayerPosXCopy      = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+    g_PlayerPosZCopy      = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+    g_SelectedCharactedId = g_playerEntity.id;
+    g_PlayerDirAngleCopy  = g_playerEntity.directionAngle;
+
+    // Write through GAME_SAVE_ROOT so the slot lands where the load screen
+    // scans (the original hardcoded "SAVE\\" because its installer created
+    // that folder; debug builds keep saves under .\assets\save\).
+    EnsureDirectoryExists(GAME_SAVE_ROOT);
+
+    char path[260];
+    sprintf(path, "%ssavedat%d.dat", GAME_SAVE_ROOT, selected + 1);
+    int written = FileWrite(path, g_BioCardData, 0x800);
+    {
+        char dbg[320];
+        sprintf(dbg, "[DBGSAVE] confirm sel=%d write '%s' -> %s (%d bytes)\n",
+                selected, path, (written < 0) ? "FAILED" : "OK", written);
+        OutputDebugStringA(dbg);
+    }
+    g_SavesCounter++;
 }

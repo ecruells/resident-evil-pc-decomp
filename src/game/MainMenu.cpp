@@ -132,9 +132,7 @@ static unsigned char  SUBMENU_STATE_ID;   // 0x00ae9f1d
 static char           DAT_008e1cb0[128];  // 0x008e1cb0
 
 // External function stubs (pending decompilation)
-extern void empty_00470a20(void);
 extern void FUN_004844b0(void);
-extern void FUN_00470a40(void);
 extern void FUN_0047d0e0(void);
 extern void FUN_0040ac80(int idx, void* lightData);
 extern void FUN_00484420(void* src, void* dst);
@@ -296,7 +294,7 @@ void main_menu(void)
     // 0x00463710-0x0046373e: Suspend gameplay task and set up menu environment
     g_bGameActive = 0;
     Task_suspend(0);
-    empty_00470a20();
+    // empty_00470a20(): empty in the original - call dropped
     TexturePage_ClearAll();
     setMenuScreenOffset(320, 240, 4, 0, 0);
     SetSubpixelOffset(112, 76);
@@ -660,7 +658,7 @@ static void menu_exit_cleanup(void)
     g_spriteAnimB = 0;
     for (int i = 0; i < 3; i++) cleanup_texture_slot(i + 0xC);
     for (int i = 0; i < 8; i++) cleanup_texture_slot(i + 0xF);
-    FUN_00470a40();
+    // FUN_00470a40(): empty in the original - call dropped
     FUN_0047d0e0();
 }
 
@@ -3912,7 +3910,7 @@ static void pickup_load_texture(const char* path, unsigned int texId, int mode)
     void* loadBuffer = (void*)((int)g_TimImageBuffer__bitmap + 0x10000);
     if (SUBMENU_STATE_ID != texId) {
         SUBMENU_STATE_ID = (unsigned char)texId;
-        empty_483510();
+        // empty_483510(): returns 0 in the original - call dropped
         LoadFile(path, loadBuffer, 0x20);
         if (mode == 0) {
             // 0x00482783 / 0x0048278d: mode 0 only clears the loaded flag and
@@ -5952,6 +5950,28 @@ void FUN_00484420(void* src, void* dst)
         g_itemModelTmdBase = (int)(p + 8 + clutLen + imgLen);
     }
     ExecAsync((void*)FUN_004841f0);
+}
+
+// (0x004844b0) - menu cleanup sub: queues the async teardown of the item
+// viewer's D3D state. Async body 0x00484450:
+//   VideoDriver_ClearState348(DAT_008fc0b0 = item page, pD3D)
+//   VideoDriver_ClearState348(DAT_008f8908 = STP page,  pD3D)
+//   CMarniDirect3DTMD::CleanupObjects on the item TMD slots
+//     0x008f8d88 and 0x008fa31c (stride 0x1594, loop bound 0x008fb8b0 = 2)
+//   CMarniDirect3DTMD::CleanupObjects on the shared slot DAT_00920b28.
+static void menu_viewer_teardown_async(void)
+{
+    VideoDriver_ClearState348(&g_psxTextureArray[0x15 * 0x1b60], g_pMarniDirect3D); // item page (DAT_008fc0b0)
+    VideoDriver_ClearState348(g_itemStpPage, g_pMarniDirect3D);                     // STP page (DAT_008f8908)
+    for (int i = 0; i < 2; i++) {
+        ((CMarniDirect3DTMD*)g_itemTmdSlots[i])->CleanupObjects(g_pMarniDirect3D);
+    }
+    ((CMarniDirect3DTMD*)g_itemSharedTmdSlot)->CleanupObjects(g_pMarniDirect3D);
+}
+
+void FUN_004844b0(void)
+{
+    ExecAsync((void*)menu_viewer_teardown_async);
 }
 
 // ============================================================================

@@ -48,7 +48,6 @@ extern void InitScaMatrix(int parentPtr, ScaMatrixData* matrix);
 extern unsigned char QueueTextureForProcessing(char bank, unsigned char depth);
 extern void SetupEntityJointAnimation(void);
 extern void ScdEventEntry_Create(unsigned int slot, int scriptIndex);  // RoomEvents.cpp
-extern void empty_00470960(int param);
 
 // Externs for globals used by cmd functions
 extern void*          g_RoomInitScd;

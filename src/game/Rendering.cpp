@@ -7,6 +7,7 @@
 #include "SpriteRenderer.h"
 #include "TmdRenderer.h"
 #include <cstdlib>
+#include <cstdio>
 #include <time.h>
 
 extern unsigned int set_message_display(unsigned short msg_id, unsigned short pause_game);
@@ -441,7 +442,7 @@ void FrameRateGovernor(void)
             }
 
 #ifdef _DEBUG
-            // Debug-only collision boundary overlay ([Debug] ShowCollision, F5).
+            // Debug-only collision boundary overlay ([Debug] ShowCollision, F8).
             // Between the background and the 3D so characters occlude the
             // outlines and it reads as geometry lying on the floor.
             CollisionDebug_Draw();
@@ -629,6 +630,53 @@ void ResetSpriteQueue(void)
     g_pendingSpriteCount = 0;
     SpriteQueue_Reset();
     TmdQueue_Reset();
+}
+
+// ============================================================================
+// ResetFmvRenderState (0x004973a0) - FMV cleanup on state change, called from
+// main_loop when the 0x40000 state flag drops. Calls CMarniDirect3D vtable[11]
+// ResetTextures (0x00448380), marks m_scratch (0x324) = 3, resets all
+// sprite/TMD queues and clears the video-mode debug overlay flag.
+// ============================================================================
+void ResetFmvRenderState(void)
+{
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (pD3D != NULL && pD3D->vtable != NULL && pD3D->vtable[11] != NULL) {
+        ((void(*)(void*))pD3D->vtable[11])(pD3D);
+        pD3D->m_scratch = 3;
+    }
+    ResetSpriteQueue();
+    g_VideoModeOverlayActive = 0;
+}
+
+// ============================================================================
+// ShowVideoModeDebugText (0x00497af0) - debug overlay showing the current
+// video mode ("%dx%dx%d", top-left) for 60 frames after the toggle key.
+// g_ShowVideoModeOverlay is the edge-trigger latch (cleared here, timer armed
+// to 60); ResetFmvRenderState clears the active flag.
+//
+// D3D adaptation: the original queues per-glyph descriptors through the
+// MarniSystem DirectFont class (DrawFormattedBitmapText 0x0040c8d0). The port
+// renders all text through the fontus.tim pipeline instead, so the draw goes
+// through PRINT_TEXT_BUFFER / PrintText8x8 with the same position and timing.
+// ============================================================================
+void ShowVideoModeDebugText(void)
+{
+    if (g_ShowVideoModeOverlay != 0) {
+        g_ShowVideoModeOverlay = 0;
+        g_VideoModeOverlayTimer = 60;
+    }
+
+    if (g_VideoModeOverlayTimer > 0) {
+        g_VideoModeOverlayTimer--;
+        CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+        sprintf(PRINT_TEXT_BUFFER, "%dx%dx%d",
+                pD3D ? pD3D->m_width : 0,
+                pD3D ? pD3D->m_height : 0,
+                pD3D ? pD3D->m_bitDepth : 0);
+        PrintText8x8(0, 0, 0, 1);
+        g_VideoModeOverlayActive = 0;
+    }
 }
 
 // ============================================================================

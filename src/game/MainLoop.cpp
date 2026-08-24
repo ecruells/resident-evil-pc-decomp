@@ -433,13 +433,13 @@ _fade_done:
         SetScreenReady(1);
     }
 
-    empty_483510();
+    // empty_483510(): returns 0 in the original - call dropped
     UpdateMusicWaitState();
 
 _post:
     // 0x0042a060: FMV cleanup on state change
     if ((g_main_state_flags & 0x40000) != 0) {
-        FUN_004973a0(0);
+        ResetFmvRenderState();
         g_window_rect.x = -g_ScreenOffsetX;
         g_window_rect.textureId = 0;
         g_window_rect.r = 0;

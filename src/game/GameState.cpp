@@ -11,15 +11,12 @@
 #include <cstdio>
 #include "../system/AssetPath.h"
 
-extern void FUN_00470a30(void);
 extern void Object_DeleteAll(int a);
 extern void SetVideoResolution(int w, int h);
 extern void setSomeColor(int r, int g, int b);
-extern void empty_00412380(void);
 extern void SetSpriteBufferFlag(void);
 extern void setBackColor(unsigned short r, unsigned short g, unsigned short b);
 extern void empty_40ae40(int);
-extern void vram_clr(int x, int y, int w, int h);
 
 // Forward declarations
 // ---------------------------------------------------------------------------
@@ -576,7 +573,7 @@ void logos_state(void)
     g_demoIdleTimer1 = 1;
 
     clear_textures();
-    FUN_00470a30();
+    // 0x00470a30: empty in the original (single RET) - call dropped
     Object_DeleteAll(1);
 
     SetVideoResolution(640, 480);
@@ -1090,7 +1087,8 @@ void InitializeGame(void)
 
     g_AttractModeIdleTimer = 1;
     ScheduleInputFlush();
-    vram_clr(0, 0, 320, 480);
+    // vram_clr(0, 0, 320, 480): PS1 leftover, returns immediately in this
+    // build (0x00412370) - call dropped
 
     g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x40000000;
 
@@ -1100,7 +1098,7 @@ void InitializeGame(void)
     g_main_state_flags = g_main_state_flags & 0xd4e900f0;
     g_main_state_flags = g_main_state_flags | 0x4000000;
 
-    empty_00412380();
+    // 0x00412380: empty in the original - call dropped
 
     // memclr(&g_defaultItemSlot, g_BioCardData);
 

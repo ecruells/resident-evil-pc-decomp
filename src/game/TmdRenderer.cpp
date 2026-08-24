@@ -37,8 +37,8 @@
 
 // Forward declarations for dependencies defined elsewhere
 extern unsigned int AsyncCreateTmdObject(unsigned int param1, unsigned int param2, unsigned int param3);
-extern void FUN_004896c0(void* joint, short p1, short p2, int p3); // 0x004896c0 (EngineStubs.cpp)
-extern void FUN_0048a210(void* joint);                      // 0x0048a210 (EngineStubs.cpp)
+extern void FUN_004896c0(void* joint, short p1, short p2, int p3); // 0x004896c0 (GteMatrix.cpp)
+extern void FUN_0048a210(void* joint);                      // 0x0048a210 (PathTrail.cpp)
 extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData); // 0x00462d90 (Room.cpp)
 extern void FUN_00483580(int* joint, MATRIX* out);          // 0x00483580 item_viewer_compose_matrix (MainMenu.cpp)
 #include <algorithm>
