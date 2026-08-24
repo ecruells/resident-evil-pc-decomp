@@ -1,4 +1,11 @@
-// RoomStubs.cpp - Room initialization functions (decompiled from Ghidra)
+// EffectSprites.cpp - Effect sprite loading and texture-page setup
+// (decompiled from Ghidra)
+//
+// Owns the room/weapon effect-sprite pipeline: the RDT effect table walk,
+// the 256-tall texture page packing (FUN_0047bc80), the per-room TIM blit
+// (0x0047d020), the global weapon-FX sheet loader core00.esp/.etm
+// (0x0045fa80) and InitRoomEffSprite (0x0047b9b0). The behaviour dispatchers
+// live in EffectSystem.cpp, which indexes the tables declared here.
 #include "../Globals.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
@@ -8,11 +15,6 @@
 #include <cstring>
 #include "../system/AssetPath.h"
 #include "../DebugPrint.h"
-
-// Forward declarations for functions defined in other files
-extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
-extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
-extern void SetSpriteBufferFlag(void);
 
 // TMD texture header struct (output of ParseTmdTextureHeader)
 // Packed struct matching the original byte layout (28 bytes = 0x1C)
@@ -32,7 +34,7 @@ struct TmdTextureHeader {
 };
 #pragma pack(pop)
 
-// Forward declaration for ParseTmdTextureHeader (defined in EntityModelLoader.cpp)
+// ParseTmdTextureHeader is defined in TmdAnimation.cpp
 extern void ParseTmdTextureHeader(void* data, TmdTextureHeader* header);
 
 // ============================================================================
@@ -83,13 +85,11 @@ extern const unsigned char g_RoomEffectSpriteTable[7 * 32 * 4] = {
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0x0A,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
-    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     // Stage 2 (32 rooms x 4 bytes)
     0x00,0x09,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x0E,0x0F,0x10, 0x00,0x04,0x11,0xFF,
     0x00,0x04,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x04,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x04,0xFF,0xFF, 0x00,0x04,0x12,0xFF,
     0x00,0x13,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x14,0xFF,0xFF,
-    0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
     0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF, 0x00,0x01,0xFF,0xFF,
@@ -605,297 +605,4 @@ void InitRoomEffSprite(void)
 
     // 0x0047ba64: Load room effect sprite TIM files
     load_effect_sprites();
-}
-
-// ============================================================================
-// reverse_anim_frame_data (0x0048bea0) - Reverse animation frame data order
-// Swaps animation entries to reverse the playback order.
-// param_1: pointer to joint anim_field (offset 0x0C within JointStruct)
-// Externally visible: FUN_0048c020 (SCD opcode 0x0F) also calls this.
-// ============================================================================
-void reverse_anim_frame_data(int param_1)
-{
-    AnimSlot* slot = *(AnimSlot**)(param_1 + 8);
-    unsigned short count = slot->entryCount;
-    int baseAddr = count * 0x1c + (int)slot->data2;
-
-    short* pRot = (short*)(baseAddr - 0x14);
-    int* pTiming = (int*)(baseAddr - 8);
-
-    do {
-        short tmpRot = pRot[0];
-        pRot[0] = pRot[2];
-        pRot[2] = tmpRot;
-
-        int tmpTiming = pTiming[0];
-        pTiming[0] = pTiming[1];
-        pTiming[1] = tmpTiming;
-
-        count = count - 1;
-        pRot = (short*)((int)pRot - 0x1c);
-        pTiming = (int*)((int)pTiming - 0x1c);
-    } while (count != 0);
-}
-
-// ============================================================================
-// SetupEntityJointAnimation (0x0048bef0) - Entity joint animation copy and setup
-// Copies entity joint data to the load buffer, resolves animation pointers,
-// and creates animation objects for each joint.
-// ============================================================================
-void SetupEntityJointAnimation(void)
-{
-    // 0x0048bef0: Save load data pointer to entity weapon joints ptr
-    ENTITY->weaponJointsPtr = (unsigned int)g_loadDataDestPointer;
-    int jointBase = (int)g_loadDataDestPointer;
-
-    // 0x0048bf05: Advance load pointer past joint data
-    unsigned char jointCount = ENTITY->jointCount;
-    g_loadDataDestPointer = (char*)g_loadDataDestPointer + (unsigned int)jointCount * 0x7c;
-
-    // 0x0048bf1e: Copy animation slot data
-    JointStruct* joints = ENTITY->jointsStructs;
-    int* animSlotSrc = (int*)joints->anim_slot_ptr;
-    int animEnd = *animSlotSrc;
-    memcpy(g_loadDataDestPointer, animSlotSrc, animEnd - (int)animSlotSrc);
-
-    // 0x0048bf37: Copy joint structs
-    memcpy((void*)jointBase, joints, (unsigned int)jointCount * 0x7c);
-
-    // 0x0048bf4d: Set up new animation slot base
-    DAT_00be0e00 = (int)g_loadDataDestPointer;
-    *(int*)(jointBase + 0x14) = (int)g_loadDataDestPointer;
-    g_loadDataDestPointer = (char*)g_loadDataDestPointer + (animEnd - (int)animSlotSrc & 0xFFFFFFFCU);
-
-    // 0x0048bf6c: Save new and original anim slot pointers for delta fixup
-    int newAnimSlotPtr = *(int*)(jointBase + 0x14);
-    unsigned int origAnimSlotPtr = (unsigned int)joints->anim_slot_ptr;
-
-    // 0x0048bf7e: Process each joint
-    unsigned char j = 0;
-    if (jointCount != 0) {
-        unsigned char nextJ;
-        do {
-            int animFieldAddr = jointBase + 0x0c;
-            nextJ = j + 1;
-
-            SetAnimSlot((AnimSlot*)DAT_00be0e00, animFieldAddr, j);
-
-            // Point data_ptr to &scale_flag
-            *(int*)(jointBase + 0x10) = jointBase + 0x20;
-
-            // Fix up animation data pointer with relocation delta
-            int* fixupPtr = (int*)(*(int*)(jointBase + 0x14) + 0x10);
-            *fixupPtr = *fixupPtr + (newAnimSlotPtr - (int)origAnimSlotPtr);
-
-            reverse_anim_frame_data(animFieldAddr);
-
-            g_loadDataDestPointer = CreateAnimObject(animFieldAddr, (unsigned int*)g_loadDataDestPointer);
-
-            jointBase = jointBase + 0x7c;
-            j = nextJ;
-        } while (nextJ < jointCount);
-    }
-}
-
-// ============================================================================
-// SetupTextureBankData (0x00473a30) - Process texture queue bank data
-// Sets up texture bank pointers and copies initial texture state when the
-// texture queue has entries. Called during room initialization.
-// param_1: texture bank ID (short, typically _g_TextureBankID >> 8)
-// ============================================================================
-void SetupTextureBankData(short param_1)
-{
-    // 0x00473a30: Skip if no texture queue entries
-    if (DAT_00ae9f04 == 0) return;
-
-    // 0x00473a3e: Calculate bank count and pointers
-    DAT_00ae9f06 = (DWORD)(param_1 - 10);
-    DAT_00ae9f00 = (DWORD)g_loadDataDestPointer;
-    DAT_00ae9efc = (DWORD)DAT_00ae9f06 * 0x200 + (DWORD)g_loadDataDestPointer;
-
-    // 0x00473a6d: Advance load pointer
-    g_loadDataDestPointer = (char*)g_loadDataDestPointer + (DWORD)DAT_00ae9f06 * 0x400;
-
-    // 0x00473a7e: Process pending texture operations. The original calls
-    // 0x00483510 here, a stub that just returns 0 - call dropped
-
-    // 0x00473a86: Copy texture data to secondary buffer
-    unsigned short idx = 0;
-    if (DAT_00ae9f06 != 0) {
-        do {
-            unsigned int i = (unsigned int)idx;
-            idx = idx + 1;
-            *(DWORD*)(DAT_00ae9efc + i * 4) = *(DWORD*)(DAT_00ae9f00 + i * 4);
-        } while ((unsigned int)idx < (DWORD)DAT_00ae9f06 * 0x80);
-    }
-}
-
-// ============================================================================
-// load_slides_images (0x00478110)
-// Loads the projector slide TIM image and creates a texture page from it.
-// Called during room_set for stage 4, room 4 (the lab projector room).
-// ============================================================================
-void load_slides_images(void)
-{
-    // 0x00478110: Load slide TIM file into display image buffer
-    LoadFile(GAME_DATA_ROOT "data\\slide.tim", g_TimImageBuffer__bitmap, 0x20);
-    // 0x00478124: Create texture page from loaded TIM data
-    TexturePage_LoadImage(g_TimImageBuffer__bitmap, 9, 0xd);
-}
-
-// ============================================================================
-// LZW Decompression (unpack_pakfile_ at 0x00425ab0)
-// Helper functions and main decompression routine for PAK files.
-// ============================================================================
-
-// FUN_00425a70 - Reset LZW decompression dictionary
-static void pak_decomp_reset(void)
-{
-    // 0x00425a70-0x00425a5e: set field +0 of every 12-byte record to -1. Note
-    // this clears the record's UNUSED word, not the prefix — the decoder never
-    // reads it, so the reset is effectively vestigial. Reproduced as-is.
-    for (int i = 0; i < PAK_DICT_ENTRIES; i++) {
-        g_pakDict[i].unused = -1;
-    }
-    g_pakDecompNextCode = 0x103;
-    g_pakDecompCodeSize = 9;
-    g_pakDecompMaxCode = 0x1ff;   // 0x00425a68: _DAT_00d2b0a0
-}
-
-// FUN_00425a00 - Read a code of 'codeSize' bits from the input bitstream
-static unsigned int pak_decomp_read_code(void* src, unsigned int codeSize)
-{
-    unsigned int result = 0;
-    unsigned int bit = 1 << (codeSize - 1);
-
-    while (bit != 0) {
-        // 0x00425a10: Refill bit buffer when empty
-        if (g_pakDecompBitMask == 0x80) {
-            g_pakDecompCurByte = ((unsigned char*)src)[g_pakDecompInputPos];
-            g_pakDecompInputPos++;
-        }
-        // 0x00425a30: Test current bit
-        if ((g_pakDecompCurByte & g_pakDecompBitMask) != 0) {
-            result |= bit;
-        }
-        // 0x00425a48: Advance to next bit
-        g_pakDecompBitMask >>= 1;
-        bit >>= 1;
-        if (g_pakDecompBitMask == 0) {
-            g_pakDecompBitMask = 0x80;
-        }
-    }
-    return result;
-}
-
-// FUN_00425bc0 - Decode a string from the LZW dictionary into g_pakStringBuf
-// Returns the count of characters written (starting from param_1)
-static int pak_decomp_decode_string(int startPos, unsigned int code)
-{
-    if (code > 0xFF) {
-        // Multi-character: walk the prefix chain, emitting characters in reverse
-        int pos = startPos;
-        do {
-            unsigned int idx = code;
-            code = (unsigned int)g_pakDict[idx].prefix;
-            g_pakStringBuf[pos] = g_pakDict[idx].ch;
-            pos++;
-        } while (code > 0xFF);
-        g_pakStringBuf[pos] = (char)code;
-        return pos + 1;
-    }
-    // Single character
-    g_pakStringBuf[startPos] = (char)code;
-    return startPos + 1;
-}
-
-// unpack_pakfile_ (0x00425ab0) - LZW decompression of a PAK file
-// src: pointer to compressed PAK data
-// dst: pointer to output buffer for decompressed data
-// Returns: number of bytes written to dst
-int unpack_pakfile_(void* src, void* dst)
-{
-    int outPos = 0;
-    g_pakDecompInputPos = 0;
-    g_pakDecompBitMask = 0x80;
-    g_pakDecompCurByte = 0;
-
-    do {
-        // 0x00425abf: Reset dictionary
-        pak_decomp_reset();
-
-        // 0x00425ac4: Read first code
-        unsigned int curCode = pak_decomp_read_code(src, g_pakDecompCodeSize);
-        if (curCode == 0x100) {
-            return outPos;
-        }
-
-        // 0x00425ade: Output first character
-        ((unsigned char*)dst)[outPos] = (unsigned char)curCode;
-        outPos++;
-        unsigned int prevCode = curCode;
-
-        // The original tracks the first character of the PREVIOUSLY decoded
-        // string separately from the previous code (local_4 vs local_8). They
-        // only coincide while codes are single characters, so they must not be
-        // conflated — the KwKwK case below appends this character.
-        unsigned int prevFirstChar = curCode;
-
-        // 0x00425aee: Main decompression loop
-        while (true) {
-            curCode = pak_decomp_read_code(src, g_pakDecompCodeSize);
-
-            // 0x100 = end of data
-            if (curCode == 0x100) {
-                return outPos;
-            }
-            // 0x102 = reset dictionary (restart outer loop)
-            if (curCode == 0x102) {
-                break;
-            }
-            // 0x101 = increase code size
-            if (curCode == 0x101) {
-                g_pakDecompCodeSize++;
-                continue;
-            }
-
-            // 0x00425b20: KwKwK case — the code is not in the table yet, so
-            // decode the PREVIOUS string and append its first character. That
-            // trailing character goes in stringBuf[0], which the reversed output
-            // loop below emits last.
-            unsigned int lookupCode = curCode;
-            bool special = (g_pakDecompNextCode <= curCode);
-            if (special) {
-                g_pakStringBuf[0] = (char)prevFirstChar;
-                lookupCode = prevCode;
-            }
-
-            // 0x00425b3d: Decode string (reversed into g_pakStringBuf)
-            int charCount = pak_decomp_decode_string(special ? 1 : 0, lookupCode);
-
-            // 0x00425b50: The decoded string is reversed, so its first character
-            // is the last one written. The original reads this uniformly, with no
-            // special-case branch.
-            char firstChar = g_pakStringBuf[charCount - 1];
-            prevFirstChar = (unsigned int)firstChar;
-
-            // 0x00425b64: Emit the string forwards by walking the buffer back
-            // down to index 0 (which is the appended char in the KwKwK case).
-            for (int i = charCount; i != 0; i--) {
-                ((unsigned char*)dst)[outPos] = (unsigned char)g_pakStringBuf[i - 1];
-                outPos++;
-            }
-
-            // 0x00425b90: Add the new dictionary entry. Its prefix is the code
-            // from the PREVIOUS iteration, so prevCode must not be advanced
-            // until after this write.
-            unsigned int newIdx = g_pakDecompNextCode;
-            g_pakDecompNextCode = newIdx + 1;
-            g_pakDict[newIdx].prefix = (int)prevCode;
-            g_pakDict[newIdx].ch = firstChar;
-
-            // 0x00425ba9: Update state for next iteration
-            prevCode = curCode;
-        }
-    } while (true);
 }

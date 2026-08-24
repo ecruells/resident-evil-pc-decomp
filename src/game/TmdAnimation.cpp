@@ -975,3 +975,93 @@ void ProcessTmdAsync(unsigned int param1)
     g_tmdAsyncData = param1;
     ExecAsync((void*)TmdProcessingCallback);
 }
+
+// ============================================================================
+// reverse_anim_frame_data (0x0048bea0) - Reverse animation frame data order
+// Swaps animation entries to reverse the playback order.
+// param_1: pointer to joint anim_field (offset 0x0C within JointStruct)
+// Externally visible: FUN_0048c020 (SCD opcode 0x0F) also calls this.
+// ============================================================================
+void reverse_anim_frame_data(int param_1)
+{
+    AnimSlot* slot = *(AnimSlot**)(param_1 + 8);
+    unsigned short count = slot->entryCount;
+    int baseAddr = count * 0x1c + (int)slot->data2;
+
+    short* pRot = (short*)(baseAddr - 0x14);
+    int* pTiming = (int*)(baseAddr - 8);
+
+    do {
+        short tmpRot = pRot[0];
+        pRot[0] = pRot[2];
+        pRot[2] = tmpRot;
+
+        int tmpTiming = pTiming[0];
+        pTiming[0] = pTiming[1];
+        pTiming[1] = tmpTiming;
+
+        count = count - 1;
+        pRot = (short*)((int)pRot - 0x1c);
+        pTiming = (int*)((int)pTiming - 0x1c);
+    } while (count != 0);
+}
+
+// ============================================================================
+// SetupEntityJointAnimation (0x0048bef0) - Entity joint animation copy and setup
+// Copies entity joint data to the load buffer, resolves animation pointers,
+// and creates animation objects for each joint.
+// ============================================================================
+void SetupEntityJointAnimation(void)
+{
+    // 0x0048bef0: Save load data pointer to entity weapon joints ptr
+    ENTITY->weaponJointsPtr = (unsigned int)g_loadDataDestPointer;
+    int jointBase = (int)g_loadDataDestPointer;
+
+    // 0x0048bf05: Advance load pointer past joint data
+    unsigned char jointCount = ENTITY->jointCount;
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + (unsigned int)jointCount * 0x7c;
+
+    // 0x0048bf1e: Copy animation slot data
+    JointStruct* joints = ENTITY->jointsStructs;
+    int* animSlotSrc = (int*)joints->anim_slot_ptr;
+    int animEnd = *animSlotSrc;
+    memcpy(g_loadDataDestPointer, animSlotSrc, animEnd - (int)animSlotSrc);
+
+    // 0x0048bf37: Copy joint structs
+    memcpy((void*)jointBase, joints, (unsigned int)jointCount * 0x7c);
+
+    // 0x0048bf4d: Set up new animation slot base
+    DAT_00be0e00 = (int)g_loadDataDestPointer;
+    *(int*)(jointBase + 0x14) = (int)g_loadDataDestPointer;
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + (animEnd - (int)animSlotSrc & 0xFFFFFFFCU);
+
+    // 0x0048bf6c: Save new and original anim slot pointers for delta fixup
+    int newAnimSlotPtr = *(int*)(jointBase + 0x14);
+    unsigned int origAnimSlotPtr = (unsigned int)joints->anim_slot_ptr;
+
+    // 0x0048bf7e: Process each joint
+    unsigned char j = 0;
+    if (jointCount != 0) {
+        unsigned char nextJ;
+        do {
+            int animFieldAddr = jointBase + 0x0c;
+            nextJ = j + 1;
+
+            SetAnimSlot((AnimSlot*)DAT_00be0e00, animFieldAddr, j);
+
+            // Point data_ptr to &scale_flag
+            *(int*)(jointBase + 0x10) = jointBase + 0x20;
+
+            // Fix up animation data pointer with relocation delta
+            int* fixupPtr = (int*)(*(int*)(jointBase + 0x14) + 0x10);
+            *fixupPtr = *fixupPtr + (newAnimSlotPtr - (int)origAnimSlotPtr);
+
+            reverse_anim_frame_data(animFieldAddr);
+
+            g_loadDataDestPointer = CreateAnimObject(animFieldAddr, (unsigned int*)g_loadDataDestPointer);
+
+            jointBase = jointBase + 0x7c;
+            j = nextJ;
+        } while (nextJ < jointCount);
+    }
+}

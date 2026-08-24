@@ -43,7 +43,7 @@ extern unsigned char check_weapon_line_of_sight(VECTOR* targetPos); // WeaponDam
 extern unsigned char Effect_CreateBillboard(unsigned char type, unsigned char depthGroup,
                                             short yaw, void* spriteInfo, void* pos,
                                             char lightFactor);       // PlayerAnimations.cpp
-extern const unsigned char g_RoomEffectSpriteTable[7 * 32 * 4]; // RoomStubs.cpp 0x004c48b8
+extern const unsigned char g_RoomEffectSpriteTable[7 * 32 * 4]; // EffectSprites.cpp 0x004c48b8
 extern unsigned int g_entity_bkp;          // EntityCommon.cpp 0x00be0df4
 extern int  ProjectEffectSprite(SVECTOR* world, int* outxy);   // GteMatrix.cpp 0x0040aa50
 extern int  is_entity_in_switch_zone(VECTOR* position, void* zoneData); // Room.cpp 0x00462d90

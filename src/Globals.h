@@ -1675,6 +1675,21 @@ void rearrange_item_slots(void);
 unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
 void         FUN_00473f10(int* baseAddr, unsigned int bitIndex);  // 0x00473f10 - clear a bit flag
 
+// --- Effect sprites / room init ---
+// EffectSprites.cpp
+unsigned char load_effect_sprite_data(unsigned char* effectAnimIndex,
+                                      unsigned char* effectAnimData,
+                                      void* rdtBase, unsigned char startSlot);   // 0x0047bbe0
+void setup_effect_sprite_textures(unsigned char startSlot);                      // FUN_0047bc80
+void InitRoomEffSprite(void);                                                    // 0x0047b9b0
+// TmdAnimation.cpp
+void reverse_anim_frame_data(int animFieldAddr);                                 // 0x0048bea0
+void SetupEntityJointAnimation(void);                                            // 0x0048bef0
+// TextureLoader.cpp
+void SetupTextureBankData(short param_1);                                        // 0x00473a30
+// LabSlides.cpp
+void load_slides_images(void);                                                   // 0x00478110
+
 // --- Game state / character setup ---
 void SetupCharacterData(void);
 void display_game_loading_message(void);

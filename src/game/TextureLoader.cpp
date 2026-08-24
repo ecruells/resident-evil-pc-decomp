@@ -1449,3 +1449,36 @@ void LoadPSXImage(PSXTexture* tex, void* buf, int mode)
     tex->Store((int*)buf, mode);
 }
 
+// ============================================================================
+// SetupTextureBankData (0x00473a30) - Process texture queue bank data
+// Sets up texture bank pointers and copies initial texture state when the
+// texture queue has entries. Called during room initialization.
+// param_1: texture bank ID (short, typically _g_TextureBankID >> 8)
+// ============================================================================
+void SetupTextureBankData(short param_1)
+{
+    // 0x00473a30: Skip if no texture queue entries
+    if (DAT_00ae9f04 == 0) return;
+
+    // 0x00473a3e: Calculate bank count and pointers
+    DAT_00ae9f06 = (DWORD)(param_1 - 10);
+    DAT_00ae9f00 = (DWORD)g_loadDataDestPointer;
+    DAT_00ae9efc = (DWORD)DAT_00ae9f06 * 0x200 + (DWORD)g_loadDataDestPointer;
+
+    // 0x00473a6d: Advance load pointer
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + (DWORD)DAT_00ae9f06 * 0x400;
+
+    // 0x00473a7e: Process pending texture operations. The original calls
+    // 0x00483510 here, a stub that just returns 0 - call dropped
+
+    // 0x00473a86: Copy texture data to secondary buffer
+    unsigned short idx = 0;
+    if (DAT_00ae9f06 != 0) {
+        do {
+            unsigned int i = (unsigned int)idx;
+            idx = idx + 1;
+            *(DWORD*)(DAT_00ae9efc + i * 4) = *(DWORD*)(DAT_00ae9f00 + i * 4);
+        } while ((unsigned int)idx < (DWORD)DAT_00ae9f06 * 0x80);
+    }
+}
+

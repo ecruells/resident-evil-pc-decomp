@@ -16,18 +16,14 @@ extern void object_delete_00442170(int category);
 extern void texture_queue_reset(void);
 extern void Flg_on(int baseAddr, unsigned int bitIndex);
 
-// Room sub-function stubs from RoomStubs.cpp
-extern void InitRoomEffSprite(void);
+// Room sub-functions (see Globals.h for the full set)
 extern void room_events_check(void);
-extern void load_slides_images(void);
 extern void load_room_bg(void);
 extern void load_room_bg_masks(void);
 extern void check_camera_switch(int param);
 extern void display_room_camera_bg(void);
 extern void Room_SetupCollisionCallbacks(void);
 extern void Room_LoadEnemySoundBanks(void);
-extern void SetupEntityJointAnimation(void);
-extern void SetupTextureBankData(short param);
 
 // Entity model loading functions from EntityModelLoader.cpp
 extern void LoadEntityEMD(Entity* em, unsigned char entity_id);

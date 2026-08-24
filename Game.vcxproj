@@ -129,7 +129,7 @@
     <ClCompile Include="src\game\CollisionDebug.cpp" />
     <ClCompile Include="src\game\RoomCollision.cpp" />
     <ClCompile Include="src\game\RoomInit.cpp" />
-    <ClCompile Include="src\game\RoomStubs.cpp" />
+    <ClCompile Include="src\game\EffectSprites.cpp" />
     <ClCompile Include="src\game\Room.cpp" />
     <ClCompile Include="src\game\RoomEvents.cpp" />
     <ClCompile Include="src\game\CmdFunctions.cpp" />

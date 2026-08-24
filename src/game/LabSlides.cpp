@@ -14,6 +14,8 @@
 #include "../Globals.h"
 #include "Items.h"
 #include "SpriteRenderer.h"
+#include "FileLoader.h"
+#include "../system/AssetPath.h"
 
 extern void Flg_on(int baseAddr, unsigned int bitIndex);              // 0x00473ef0
 extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex);       // 0x00473f10 - Flg_off
@@ -218,4 +220,17 @@ void display_slides(void)
     default:
         break;
     }
+}
+
+// ============================================================================
+// load_slides_images (0x00478110)
+// Loads the projector slide TIM image and creates a texture page from it.
+// Called during room_set for stage 4, room 4 (the lab projector room).
+// ============================================================================
+void load_slides_images(void)
+{
+    // 0x00478110: Load slide TIM file into display image buffer
+    LoadFile(GAME_DATA_ROOT "data\\slide.tim", g_TimImageBuffer__bitmap, 0x20);
+    // 0x00478124: Create texture page from loaded TIM data
+    TexturePage_LoadImage(g_TimImageBuffer__bitmap, 9, 0xd);
 }
