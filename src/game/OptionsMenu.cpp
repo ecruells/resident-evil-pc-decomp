@@ -29,8 +29,44 @@ extern void FUN_004896c0(void* joint, short p1, short p2, int p3);
 extern void FUN_0048a210(void* joint);
 extern void FUN_00483250(int p0, int p1, int p2, int p3, int p4, int p5, void* p6);
 extern int  is_entity_in_switch_zone(VECTOR* pos, void* zoneData);
-extern unsigned char FUN_00497de0(void);  // options_read_keyboard_scancode
 extern void menu_update_equipped_weapon(void); // 0x00463ec0 in MainMenu.cpp
+
+// ============================================================================
+// FUN_00497de0 (0x00497de0) - Options-menu keyboard scan.
+// Original: ExecAsync(options_key_scan_task / 0x00497d90) then return the
+// result byte at 0x00ac4020. The async task walks the 67-entry VK watch table
+// at 0x004d46e8 with GetAsyncKeyState and stores the first key that is
+// currently held (high bit) without the "pressed since last call" edge bit
+// (low bit). The port scans synchronously, which is equivalent at menu frame
+// rates.
+// ============================================================================
+static unsigned char g_nOptKeyScanResult = 0;   // 0x00ac4020
+static const unsigned char g_abOptKeyScanTable[67] = {   // 0x004d46e8
+    0x0d, 0x20, 0x11, 0x1b,                         // Enter, Space, Ctrl, Esc
+    0x25, 0x26, 0x27, 0x28,                         // arrows
+    0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39,  // 0-9
+    0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48, 0x49, 0x4a,  // A-J
+    0x4b, 0x4c, 0x4d, 0x4e, 0x4f, 0x50, 0x51, 0x52, 0x53, 0x54,  // K-T
+    0x55, 0x56, 0x57, 0x58, 0x59, 0x5a,             // U-Z
+    0x60, 0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68, 0x69,  // numpad 0-9
+    0x6e,                                           // numpad decimal
+    0xba, 0xbb, 0xbc, 0xbd, 0xbe, 0xbf, 0xc0,       // ; = , - . / `
+    0xdb, 0xdc, 0xdd, 0xde,                         // [ \ ] '
+    0xe2,                                           // OEM 102
+};
+
+unsigned char FUN_00497de0(void)
+{
+    g_nOptKeyScanResult = 0;
+    for (int i = 0; i < 67; i++) {
+        SHORT state = GetAsyncKeyState((int)g_abOptKeyScanTable[i]);
+        if ((state & 0x8000) != 0 && (state & 1) == 0) {
+            g_nOptKeyScanResult = g_abOptKeyScanTable[i];
+            break;
+        }
+    }
+    return g_nOptKeyScanResult;
+}
 
 // Helper for byte-offset access to ENTITY (matching Ghidra's raw pointer arithmetic)
 // In Ghidra, _ENTITY is an undefined1* (byte pointer), but in our code ENTITY is Entity*,
@@ -235,6 +271,8 @@ static int    s_optWalkAnimTrigger;   // 0x00bcb3b4
 static int    s_optAnimFrameCounter;  // 0x00bcb3b8
 static int    s_optCursorHighlight[11]; // 0x00bcb3c0 (44 bytes, 11 ints)
 static unsigned char s_optKeyScanResult;   // 0x00bcb3ec
+static int    s_optJoyLabelYOffset;   // 0x00bcb3f0 - joypad tab label Y offset
+                                     // (read at 0x00453303, never written: always 0)
 static int    s_optAnimFrameData;     // 0x00bcb3f4
 static int    s_optJoyButtonScan;     // 0x00bcb3f8
 static unsigned char s_optPrevKeyScan;     // 0x00bcb3fc
@@ -265,6 +303,11 @@ static const int s_optKeyLabelY[5] = {34, 75, 119, 161, 204}; // 0x004c43a8
 
 // Y positions for display config labels (10 entries, 0x004c4380)
 static const int s_optDisplayLabelY[10] = {25, 45, 65, 90, 110, 130, 150, 178, 204, 0}; // 0x004c4380
+
+// X/Y positions for the 8 sidewinder config rows (0x004c0580 / 0x004c05a0).
+// Rows 0-2 are the left label column, rows 3-7 the right one.
+static const short s_optJoyLabelX[8] = {238, 238, 238, 13, 13, 13, 13, 238}; // 0x004c0580
+static const short s_optJoyLabelY[8] = {175, 143, 111, 175, 143, 111, 79, 79}; // 0x004c05a0
 
 // Text resource data — compile-time encoded via STR() macro (0x004c4308)
 static constexpr auto s_optText_ActionSelect = STR("ACTION/SELECT");   // 0x004c4308
@@ -842,7 +885,7 @@ void options_menu_render(void)
             }
             pY++;
             pEntry += 0x14;
-        } while (pEntry < (unsigned char*)&s_keyBindDisplay[9].symbolChar + 2);
+        } while (pEntry < (unsigned char*)&s_keyBindDisplay[9].symbolChar); // 0x00ac9db6 - 9 entries only
 
         // Render current/up/down/left/right column labels
         options_map_vk_to_font_index((unsigned char*)&s_keyBindDisplay[0]);
@@ -949,8 +992,13 @@ void options_menu_render(void)
 // ============================================================================
 unsigned int options_display_config_handler(void)
 {
-    // Find L1 button mask from joystick table
-    int l1ButtonMask = 0;
+    // Find L1 button mask from joystick table.
+    // NOTE: the original leaves this scan result uninitialized when 0x800 is
+    // not in the table (stack garbage, never 0 in practice). Initializing to 0
+    // made the exit gate below fire instantly whenever the table has no 0x800
+    // entry (read_sidewinder_pad() is 0 with no pad connected), so use a
+    // never-matching sentinel instead.
+    int l1ButtonMask = -1;
     const int* pJoy = &g_JoyWarnPrinted;
     int i = 0x20;
     int foundIdx;
@@ -1157,6 +1205,18 @@ unsigned int options_display_config_input(void)
             play_sfx(3, 5, 0);
             return 0;
         }
+        else if ((padByte & 0x80) != 0) {
+            // Square (raw) → back to EXIT slot (0x00451c62)
+            play_sfx(3, 4, 0);
+            s_optCursorPos = 2;
+            return 0;
+        }
+        else if ((padByte & 0x20) != 0) {
+            // Circle (raw) → back to JOY PAD slot (0x00451c76)
+            play_sfx(3, 4, 0);
+            s_optCursorPos = 0;
+            return 0;
+        }
         else if ((padByte & 0x10) != 0) {
             // Triangle (raw) → cursor UP
             play_sfx(3, 4, 0);
@@ -1239,10 +1299,10 @@ unsigned int options_display_config_input(void)
                                 unsigned char* pSrc = (unsigned char*)&s_optTempEntries[0] + srcOff;
                                 unsigned char* pDst = (unsigned char*)&s_optTempEntries[0] + dstOff;
 
-                                // Swap vkCode
-                                unsigned char tmp = pDst[0];
-                                pDst[0] = pSrc[0];
-                                pSrc[0] = tmp;
+                                // Move old binding to the duplicate entry and
+                                // assign the new key to the current entry (0x00451f7a)
+                                pSrc[0] = pDst[0];
+                                pDst[0] = scanResult;
 
                                 // Set anim state for both
                                 ((int*)&s_optTempEntries[0])[s_optCursorIndex * 5 + 2] = 1;
@@ -1680,23 +1740,23 @@ unsigned int options_key_config_input(void)
         do {
             int joyVal = *pJoy;
             if (joyVal == 0x80) {
-                s_optTempEntries[0].animState = 0x80;
+                s_optTempEntries[0].pad2 = 0x80;
                 s_optTempEntries[0].keyIndex = i;
             }
             else if (joyVal == 0x40) {
-                s_optTempEntries[1].animState = 0x40;
+                s_optTempEntries[1].pad2 = 0x40;
                 s_optTempEntries[1].keyIndex = i;
             }
             else if (joyVal == 8) {
-                s_optTempEntries[2].animState = 8;
+                s_optTempEntries[2].pad2 = 8;
                 s_optTempEntries[2].keyIndex = i;
             }
             else if (joyVal == 0x800) {
-                s_optTempEntries[3].animState = 0x800;
+                s_optTempEntries[3].pad2 = 0x800;
                 s_optTempEntries[3].keyIndex = i;
             }
             else if (joyVal == 0x900) {
-                s_optTempEntries[4].animState = 0x900;
+                s_optTempEntries[4].pad2 = 0x900;
                 s_optTempEntries[4].keyIndex = i;
             }
             pJoy--;
@@ -1868,7 +1928,7 @@ unsigned int options_key_config_input(void)
         s_optDebounceTimer--;
     }
 
-    // Render joystick config labels
+    // Render joypad binding values - 5 rows only (0x004532e8)
     unsigned char* pEntry = (unsigned char*)&s_optTempEntries[0];
     KeyBindEntry* next;
     i = 0;
@@ -1876,29 +1936,18 @@ unsigned int options_key_config_input(void)
         next = (KeyBindEntry*)(pEntry + 0x14);
         options_map_key_to_print_index((int)pEntry);
         sprintf(PRINT_TEXT_BUFFER, s_fmt_c, (int)(char)pEntry[1]);
-
-        // Use max of animState and cursorHighlight for tint
-        int tint = s_optCursorHighlight[i / 4];
-        if (*(int*)(pEntry + 8) > tint) {
-            tint = *(int*)(pEntry + 8);
-        }
-
-        PrintText8x14(0x91, s_optDisplayLabelY[i / 4] + 1,
-            tint, 0);
+        PrintText8x14(0x91, s_optKeyLabelY[i / 4] + s_optJoyLabelYOffset + 1,
+            (unsigned char)s_optCursorHighlight[i / 4], 0);
         pEntry = (unsigned char*)next;
         i += 4;
-    } while (next < &s_optTempEntries[9]);
+    } while (next < &s_optTempEntries[5]);
 
-    // Print action labels with highlight tints
-    PrintFormattedText(0xa2, s_optDisplayLabelY[0], s_optCursorHighlight[0], s_optLabelText_Action);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[1], s_optCursorHighlight[1], s_optLabelText_Cancel);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[2], s_optCursorHighlight[2], s_optLabelText_Start);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[3], s_optCursorHighlight[3], s_optLabelText_LRotate);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[4], s_optCursorHighlight[4], s_optLabelText_RRotate);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[5], s_optCursorHighlight[5], s_optLabelText_Run);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[6], s_optCursorHighlight[6], s_optLabelText_Aim);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[7], s_optCursorHighlight[7], s_optLabelText_QuickTurn);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[8], s_optCursorHighlight[8], s_optLabelText_Map);
+    // Action labels (0x00453318)
+    PrintFormattedText(0xa2, s_optKeyLabelY[0], s_optCursorHighlight[0], s_optLabelText_Action);
+    PrintFormattedText(0xa2, s_optKeyLabelY[1], s_optCursorHighlight[1], s_optLabelText_Cancel);
+    PrintFormattedText(0xa2, s_optKeyLabelY[2], s_optCursorHighlight[2], s_optLabelText_Start);
+    PrintFormattedText(0xa2, s_optKeyLabelY[3], s_optCursorHighlight[3], s_optLabelText_QuickTurn);
+    PrintFormattedText(0xa2, s_optKeyLabelY[4], s_optCursorHighlight[4], s_optLabelText_Map);
 
     // Player model animation
     if (s_optAnimSkipFlag == 0) {
@@ -2055,142 +2104,428 @@ unsigned int options_joystick_config_handler(void)
 
 // ============================================================================
 // options_joystick_config_input (0x00453c10)
-// Joystick config input handler.
-// 10-cursor-position handler with sensitivity sliders and button remapping.
-// Returns 0 to keep running, non-zero to exit.
+// SideWinder game pad config input handler - 4-state machine.
+// 10 cursor positions: 8 remappable pad buttons (g_JoyRemapTbl[1][8..15])
+// laid out around the pad picture, plus DEFAULT (8) and EXIT (9).
+// Each row cycles through the button choice list; sidewinder buttons 8-15
+// pick a row directly. Green connector lines are drawn with the EKG line
+// primitive (FUN_00470c60).
+// Returns 0 to keep running... inverted: returns 1 while running, and the
+// caller (0x00453a80) returns 0 while this keeps running. A 0 return here
+// exits the sidewinder screen (and with it the whole options menu).
 // ============================================================================
 unsigned int options_joystick_config_input(void)
 {
-    unsigned int buttonMasks[6];
-    short posOffsets[20];
-    int  widthValues[20];
-    unsigned char texUValues[40];
+    // EKG line struct accessors (g_EkgPrimaryLine at 0x00be1198)
+    #define OPT_EKG_FLAGS (*(unsigned int*)&g_EkgPrimaryLine[0])
+    #define OPT_EKG_X0    (*(short*)&g_EkgPrimaryLine[4])
+    #define OPT_EKG_Y0    (*(short*)&g_EkgPrimaryLine[6])
+    #define OPT_EKG_X1    (*(short*)&g_EkgPrimaryLine[8])
+    #define OPT_EKG_Y1    (*(short*)&g_EkgPrimaryLine[10])
+    #define OPT_EKG_R     (g_EkgPrimaryLine[12])
+    #define OPT_EKG_G     (g_EkgPrimaryLine[13])
+    #define OPT_EKG_B     (g_EkgPrimaryLine[14])
 
-    // Button masks for joystick actions
-    buttonMasks[0] = 0x80;    // ACTION
-    buttonMasks[1] = 0x40;    // CANCEL
-    buttonMasks[2] = 8;       // START
-    buttonMasks[3] = 0x800;   // L1
-    buttonMasks[4] = 0x900;   // R1
-    buttonMasks[5] = 0;
+    // Button choice list per row: ACTION, DASH, GET READY, MENU, OPTION, NOT USED
+    static const unsigned int btnChoices[6] = { 0x80, 0x40, 8, 0x800, 0x900, 0 };
 
-    // Position and rendering tables for 10 cursor positions
-    posOffsets[0] = 0x13;  posOffsets[1] = 0;    posOffsets[2] = 7;    posOffsets[3] = 0;
-    posOffsets[4] = 0;     posOffsets[5] = 0;    posOffsets[6] = 4;    posOffsets[7] = 0;
-    posOffsets[8] = -5;    posOffsets[9] = -1;   posOffsets[10] = -0xc; posOffsets[11] = -1;
-    posOffsets[12] = -0x20; posOffsets[13] = -1;  posOffsets[14] = -0x1e; posOffsets[15] = -1;
-    posOffsets[16] = 0x5d;  posOffsets[17] = 0;   posOffsets[18] = 0x5d;  posOffsets[19] = 0;
+    // Cursor box X positions (local_208[0x46..0x4f])
+    static const short cursorBoxX[10] = {
+        0xc, 0x17, 0x24, 6, 0x11, 0x1c, -66, 0x1d, -150, 0x4c
+    };
+    // Cursor box Y positions (local_c8, even entries: 0x13,7,0,4,-5,-0xc,-0x20,-0x1e,0x5d,0x5d)
+    static const short cursorBoxY[10] = {
+        0x13, 7, 0, 4, -5, -0xc, -0x20, -0x1e, 0x5d, 0x5d
+    };
+    // Cursor box widths [0..9] / heights [10..19] (local_a0)
+    static const short cursorBoxW[20] = {
+        0xe, 0xe, 0xe, 0xb, 0xb, 0xb, 0x23, 0x22, 0x4a, 0x4a,
+        0xd, 0xf, 0xe, 0xb, 0xc, 0xc, 0x20, 0x1f, 0x12, 0x12
+    };
+    // Cursor box texture U/V coordinates (local_50)
+    static const unsigned char cursorBoxTexU[10] = {
+        0x4d, 0x5c, 0x6b, 0x4e, 0x5a, 0x66, 0x01, 0x26, 0x00, 0x00
+    };
+    static const unsigned char cursorBoxTexV[10] = {
+        0x31, 0x31, 0x31, 0x24, 0x23, 0x23, 0x23, 0x23, 0x58, 0x45
+    };
 
-    widthValues[0] = 0xe;   widthValues[1] = 0xe;   widthValues[2] = 0xe;
-    widthValues[3] = 0xb;   widthValues[4] = 0xb;   widthValues[5] = 0xb;
-    widthValues[6] = 0x23;  widthValues[7] = 0x22;  widthValues[8] = 0x4a;
-    widthValues[9] = 0x4a;  widthValues[10] = 0xd;  widthValues[11] = 0xf;
-    widthValues[12] = 0xe;  widthValues[13] = 0xb;  widthValues[14] = 0xc;
-    widthValues[15] = 0xc;  widthValues[16] = 0x20; widthValues[17] = 0x1f;
-    widthValues[18] = 0x12; widthValues[19] = 0x12;
+    // Green connector line coordinates (local_208[6..0x45])
+    static const short lineUnderX0[8] = { 0xea, 0xe6, 0xd7, 9, 9, 9, 9, 0xe9 };
+    static const short lineUnderY0[8] = { 0xc0, 0xa0, 0x7d, 0xbe, 0x9e, 0x7e, 0x5e, 0x60 };
+    static const short lineUnderX1[8] = { 0x137, 0x138, 0x138, 0x56, 0x59, 0x5a, 0x59, 0x138 };
+    static const short lineUnderY1[8] = { 0xc0, 0xa0, 0x7d, 0xbe, 0x9e, 0x7e, 0x5e, 0x60 };
+    static const short lineDiagX0[8]  = { 0xea, 0xe6, 0xd7, 0x56, 0x59, 0x5a, 0x59, 0xe9 };
+    static const short lineDiagY0[8]  = { 0xbf, 0x9f, 0x7f, 0xbe, 0x9e, 0x7e, 0x5e, 0x5f };
+    static const short lineDiagX1[8]  = { 0xbb, 0xc6, 0xd7, 0xa6, 0xad, 0xb8, 0x6d, 0xd4 };
+    static const short lineDiagY1[8]  = { 0x9b, 0x8f, 0x7f, 0x86, 0x7a, 0x71, 0x68, 0x68 };
 
-    texUValues[0] = 0x4d; texUValues[1] = 0; texUValues[2] = 0; texUValues[3] = 0;
-    texUValues[4] = 0x5c; texUValues[5] = 0; texUValues[6] = 0; texUValues[7] = 0;
-    texUValues[8] = 0x6b; texUValues[9] = 0; texUValues[10] = 0; texUValues[11] = 0;
-    texUValues[12] = 0x4e; texUValues[13] = 0; texUValues[14] = 0; texUValues[15] = 0;
-    texUValues[16] = 0x5a; texUValues[17] = 0; texUValues[18] = 0; texUValues[19] = 0;
-    texUValues[20] = 0;    texUValues[21] = 0; texUValues[22] = 0; texUValues[23] = 0;
-    texUValues[24] = 0;    texUValues[25] = 0; texUValues[26] = 0; texUValues[27] = 0;
-    // Additional entries for sensitivity/offset rendering...
+    int i, j;
 
-    // Simplified navigation handling for joystick config
-    // The original has 10 cursor positions: 5 button remaps + 5 sensitivity sliders
+    switch (s_optSubSubState) {
+    case 0: {
+        // Populate the 8 temp entries from g_JoyRemapTbl[1][8..15] (0x00453e6b)
+        int btnIdx = 8;
+        s_optCursorIndex = 8;
+        s_optCursorHighlight[8] = 1;
+        s_optDefaultSensIdx = 5;
+        for (i = 0; i < 8; i++) {
+            s_optTempEntries[i].pad2 = g_JoyRemapTbl[1][8 + i];
+            s_optTempEntries[i].keyIndex = btnIdx++;
+        }
+        s_optPrevKeyScan = FUN_00497de0();
 
-    // Render joystick button labels
-    options_map_key_to_print_index((int)&s_optTempEntries[0]);
-    sprintf(PRINT_TEXT_BUFFER, s_fmt_c, (int)(char)s_optTempEntries[0].displayChar);
-    PrintText8x14(0x91, s_optDisplayLabelY[0] + 1, s_optCursorHighlight[0], 0);
+        // Derive each row's button choice index (0x00453ec2); the search
+        // resumes from the previous row's match like the original.
+        j = 0;
+        for (i = 0; i < 8; i++) {
+            while (j <= 5 && btnChoices[j] != s_optTempEntries[i].pad2) j++;
+            if (j > 5) j = 5;
+            s_optSensitivityIdx[i] = j;
+        }
+        s_optSubSubState = 1;
+        break;
+    }
 
-    options_map_key_to_print_index((int)&s_optTempEntries[1]);
-    sprintf(PRINT_TEXT_BUFFER, s_fmt_c, (int)(char)s_optTempEntries[1].displayChar);
-    PrintText8x14(0x91, s_optDisplayLabelY[1] + 1, s_optCursorHighlight[1], 0);
-
-    options_map_key_to_print_index((int)&s_optTempEntries[2]);
-    sprintf(PRINT_TEXT_BUFFER, s_fmt_c, (int)(char)s_optTempEntries[2].displayChar);
-    PrintText8x14(0x91, s_optDisplayLabelY[2] + 1, s_optCursorHighlight[2], 0);
-
-    options_map_key_to_print_index((int)&s_optTempEntries[3]);
-    sprintf(PRINT_TEXT_BUFFER, s_fmt_c, (int)(char)s_optTempEntries[3].displayChar);
-    PrintText8x14(0x91, s_optDisplayLabelY[3] + 1, s_optCursorHighlight[3], 0);
-
-    options_map_key_to_print_index((int)&s_optTempEntries[4]);
-    sprintf(PRINT_TEXT_BUFFER, s_fmt_c, (int)(char)s_optTempEntries[4].displayChar);
-    PrintText8x14(0x91, s_optDisplayLabelY[4] + 1, s_optCursorHighlight[4], 0);
-
-    // Print action labels
-    PrintFormattedText(0xa2, s_optDisplayLabelY[0], s_optCursorHighlight[0], s_optLabelText_Action);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[1], s_optCursorHighlight[1], s_optLabelText_Cancel);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[2], s_optCursorHighlight[2], s_optLabelText_Start);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[3], s_optCursorHighlight[3], s_optLabelText_QuickTurn);
-    PrintFormattedText(0xa2, s_optDisplayLabelY[4], s_optCursorHighlight[4], s_optLabelText_Map);
-
-    // Player model animation
-    if (s_optAnimSkipFlag == 0) {
-        if ((*(char*)(((unsigned char*)ENTITY) + 0xbe) == 0) && (*(char*)(((unsigned char*)ENTITY) + 0xbf) == 1)) {
-            // Advance the demo script for the highlighted joystick option row
-            unsigned char charId = *(unsigned char*)(((unsigned char*)ENTITY) + 1) & 1;
-            const int* script = PTR_PTR_004c04a8[charId][s_optCursorIndex];
-            if (script != NULL) {  // row 5 is the table terminator
-                s_optAnimFrameData = script[s_optAnimFrameCounter + 1];
-                *(unsigned char*)(((unsigned char*)ENTITY) + 0xbd) =
-                    (unsigned char)script[s_optAnimFrameCounter];
-                s_optAnimFrameCounter += 2;
-                if (PTR_DAT_004c0538[charId][s_optCursorIndex] <= s_optAnimFrameCounter) {
-                    s_optAnimFrameCounter = 0;
+    case 1: {
+        // Navigation (0x00453ef5)
+        bool done = false;
+        unsigned char scan;
+        s_optKeyScanResult = FUN_00497de0();
+        if ((s_optKeyScanResult == 0x11) || (s_optKeyScanResult == 0x1b) ||
+            (s_optCancelKeyVK == s_optKeyScanResult)) {
+            s_optKeyScanResult = 0;
+            play_sfx(3, 5, 0);
+            return 0;
+        }
+        scan = s_optKeyScanResult;
+        if ((scan != 0x20) && (scan != 0x0d) && (s_optAcceptKeyVK != scan)) {
+            unsigned short padByte = (unsigned short)(g_PlayerPadPressed >> 8);
+            if ((padByte & 0xa0) != 0) {
+                // Circle/Square → move between columns
+                s_optCursorHighlight[s_optCursorIndex] = 0;
+                play_sfx(3, 4, 0);
+                if (s_optCursorIndex < 6) {
+                    j = s_optCursorIndex + 3;
+                    if (j > 5) j = s_optCursorIndex - 3;
+                    s_optCursorHighlight[j] = 1;
+                    s_optCursorIndex = j;
+                }
+                else if (s_optCursorIndex == 6) {
+                    s_optCursorIndex = 7;
+                    s_optCursorHighlight[7] = 1;
+                }
+                else if (s_optCursorIndex == 7) {
+                    s_optCursorIndex = 6;
+                    s_optCursorHighlight[6] = 1;
+                }
+                else if (s_optCursorIndex == 8) {
+                    s_optCursorIndex = 9;
+                    s_optCursorHighlight[9] = 1;
+                }
+                else if (s_optCursorIndex == 9) {
+                    s_optCursorIndex = 8;
+                    s_optCursorHighlight[8] = 1;
+                }
+                done = true;
+            }
+            if (!done && ((padByte & 0x10) != 0)) {
+                // Triangle → next row (0x00453f8c)
+                int cur;
+                play_sfx(3, 4, 0);
+                cur = s_optCursorIndex;
+                s_optCursorHighlight[s_optCursorIndex] = 0;
+                if ((cur != 2) && (cur < 6)) {
+                    s_optCursorIndex = (cur + 1) & 7;
+                    s_optCursorHighlight[s_optCursorIndex] = 1;
+                }
+                else if (cur == 6) {
+                    s_optCursorIndex = 8;
+                    s_optCursorHighlight[8] = 1;
+                }
+                else if (cur == 7) {
+                    s_optCursorIndex = 9;
+                    s_optCursorHighlight[9] = 1;
+                }
+                else if (cur == 8) {
+                    s_optCursorIndex = 3;
+                    s_optCursorHighlight[3] = 1;
+                }
+                else if (cur == 9) {
+                    s_optCursorIndex = 0;
+                    s_optCursorHighlight[0] = 1;
+                }
+                else if (cur == 2) {
+                    s_optCursorIndex = 7;
+                    s_optCursorHighlight[7] = 1;
+                }
+                done = true;
+            }
+            if (!done && ((padByte & 0x40) != 0)) {
+                // Cross → previous row (0x00454042)
+                int cur;
+                play_sfx(3, 4, 0);
+                cur = s_optCursorIndex;
+                s_optCursorHighlight[s_optCursorIndex] = 0;
+                if (cur != 3) {
+                    if ((cur != 0) && (cur < 7)) {
+                        s_optCursorHighlight[cur - 1] = 1;
+                        s_optCursorIndex = cur - 1;
+                        done = true;
+                    }
+                    else if (cur == 7) {
+                        s_optCursorIndex = 2;
+                        s_optCursorHighlight[2] = 1;
+                        done = true;
+                    }
+                    else if (cur == 8) {
+                        s_optCursorIndex = 6;
+                        s_optCursorHighlight[6] = 1;
+                        done = true;
+                    }
+                    else if (cur == 9) {
+                        s_optCursorIndex = 7;
+                        s_optCursorHighlight[7] = 1;
+                        done = true;
+                    }
+                    else if (cur == 0) {
+                        s_optCursorIndex = 9;
+                        s_optCursorHighlight[9] = 1;
+                        done = true;
+                    }
+                    // else: fall through to sidewinder scan (0x00454443)
+                }
+                else {
+                    s_optCursorIndex = 8;
+                    s_optCursorHighlight[8] = 1;
+                    done = true;
+                }
+            }
+            if (!done) {
+                // Sidewinder buttons 8-15 jump straight to select (0x00454443)
+                s_optJoyButtonScan = read_sidewinder_pad();
+                if (s_optPrevJoyButtonScan != s_optJoyButtonScan) {
+                    if (s_optJoyButtonScan == 0) {
+                        s_optPrevJoyButtonScan = 0;
+                        done = true;
+                    }
+                    else {
+                        bool validBit = false;
+                        j = 8;
+                        do {
+                            if (s_optJoyButtonScan & (1 << (j & 0x1f))) {
+                                validBit = true;
+                                break;
+                            }
+                            j++;
+                        } while (j < 0x10);
+                        scan = s_optPrevKeyScan;
+                        s_optPrevJoyButtonScan = s_optJoyButtonScan;
+                        if (!validBit &&
+                            (((g_PlayerDpadPressed >> 8) & 0x40) == 0)) {
+                            done = true;
+                        }
+                    }
+                }
+                else {
+                    done = true;
                 }
             }
         }
+        s_optPrevKeyScan = scan;
+        if (done) break;
 
-        switch (s_optCursorIndex) {
-        case 0:
-            s_optIdleAnimTrigger = 0;
-            break;
-        case 1:
-            if ((*(char*)(((unsigned char*)ENTITY) + 0xbd) == 3) && (s_optAnimFrameCounter > 5) &&
-                (*(unsigned char*)(((unsigned char*)ENTITY) + 0xbe) > 7)) {
-                *(char*)(((unsigned char*)ENTITY) + 0xbd) = 2;
-                *(unsigned char*)(((unsigned char*)ENTITY) + 0xbe) = 0x18;
-                *(unsigned char*)(((unsigned char*)ENTITY) + 0x8c) = 3;
-            }
-            if ((s_optAnimFrameData == 1) &&
-                ((((*(char*)(((unsigned char*)ENTITY) + 1) == 0) && (*(unsigned char*)(((unsigned char*)ENTITY) + 0xbe) > 0x1f)) ||
-                  ((*(char*)(((unsigned char*)ENTITY) + 1) == 1) && (*(unsigned char*)(((unsigned char*)ENTITY) + 0xbe) > 0x12))) &&
-                 (*(char*)(((unsigned char*)ENTITY) + 0xbd) == 0))) {
-                *(unsigned char*)(((unsigned char*)ENTITY) + 0x8c) = 3;
-            }
-            break;
-        case 3:
-            if (s_optWalkAnimTrigger == 0) {
-                *(unsigned char*)(((unsigned char*)ENTITY) + 0xbd) = 0;
-                s_optWalkAnimTrigger = 1;
-            }
-            s_optIdleAnimTrigger = 0;
-            break;
-        case 4:
-            if (s_optIdleAnimTrigger == 0) {
-                *(unsigned char*)(((unsigned char*)ENTITY) + 0xbd) = 0;
-                s_optIdleAnimTrigger = 1;
-            }
-        case 2:
-            s_optWalkAnimTrigger = 0;
-            break;
-        default:
-            goto joyConfigRender;
+        // Select (0x0045447c)
+        if (s_optCursorIndex < 8) {
+            play_sfx(3, 6, 0);
+            s_optDefaultSensIdx = s_optSensitivityIdx[s_optCursorIndex];
+            s_optSubSubState = 2;
+            s_optCursorHighlight[s_optCursorIndex] = 2;
         }
-
-        Joint_move(s_optAnimFrameData, g_playerEntity.jointMoveData0,
-            g_playerEntity.jointMoveData1, 0x400);
+        else if (s_optCursorIndex == 8) {
+            // DEFAULT - restore the default sidewinder mapping (0x004544b4)
+            play_sfx(3, 6, 0);
+            for (i = 0; i < 8; i++) {
+                g_JoyRemapTbl[1][8 + i] = 0;
+                s_optTempEntries[i].pad2 = 0;
+            }
+            g_JoyRemapTbl[1][8] = 0x80;
+            g_JoyRemapTbl[1][9] = 0x40;
+            g_JoyRemapTbl[1][0xa] = 0x800;
+            g_JoyRemapTbl[1][0xb] = 0x900;
+            g_JoyRemapTbl[1][0xf] = 8;
+            s_optTempEntries[0].pad2 = 0x80;
+            s_optTempEntries[1].pad2 = 0x40;
+            s_optTempEntries[2].pad2 = 0x800;
+            s_optTempEntries[3].pad2 = 0x900;
+            s_optTempEntries[7].pad2 = 8;
+            options_init_keybind_display();
+            s_optSubSubState = 3;
+            s_optDebounceTimer = 2;
+        }
+        else {
+            // EXIT (0x00454563)
+            return 0;
+        }
+        break;
     }
 
-joyConfigRender:
-    EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
-    EntityApplyLookAtRotation();
-    options_render_entity((int)&g_playerEntity);
+    case 2: {
+        // Edit the highlighted row (0x00454578)
+        s_optKeyScanResult = FUN_00497de0();
+        s_optJoyButtonScan = read_sidewinder_pad();
+        if ((s_optPrevJoyButtonScan != s_optJoyButtonScan) ||
+            (s_optKeyScanResult != s_optPrevKeyScan)) {
+            bool commit = true;
+            s_optPrevKeyScan = s_optKeyScanResult;
+            if ((s_optKeyScanResult == 0x11) || (s_optKeyScanResult == 0x1b) ||
+                (s_optCancelKeyVK == s_optKeyScanResult)) {
+                s_optKeyScanResult = 0;
+                play_sfx(3, 5, 0);
+                return 0;
+            }
+            if ((s_optKeyScanResult != 0x20) && (s_optKeyScanResult != 0x0d) &&
+                (s_optAcceptKeyVK != s_optKeyScanResult)) {
+                unsigned short padByte = (unsigned short)(g_PlayerPadPressed >> 8);
+                if ((padByte & 0x80) != 0) {
+                    // Square → previous button choice (0x00454608)
+                    play_sfx(3, 4, 0);
+                    s_optSensitivityIdx[s_optCursorIndex]--;
+                    if (s_optSensitivityIdx[s_optCursorIndex] < 0) {
+                        s_optSensitivityIdx[s_optCursorIndex] = 5;
+                    }
+                    s_optTempEntries[s_optCursorIndex].pad2 =
+                        btnChoices[s_optSensitivityIdx[s_optCursorIndex]];
+                    commit = false;
+                }
+                else if ((padByte & 0x20) != 0) {
+                    // Circle → next button choice (0x00454646)
+                    play_sfx(3, 4, 0);
+                    s_optSensitivityIdx[s_optCursorIndex]++;
+                    if (s_optSensitivityIdx[s_optCursorIndex] > 5) {
+                        s_optSensitivityIdx[s_optCursorIndex] = 0;
+                    }
+                    s_optTempEntries[s_optCursorIndex].pad2 =
+                        btnChoices[s_optSensitivityIdx[s_optCursorIndex]];
+                    commit = false;
+                }
+                else if (s_optPrevJoyButtonScan == s_optJoyButtonScan) {
+                    commit = false;
+                }
+                else if (s_optJoyButtonScan == 0) {
+                    s_optPrevJoyButtonScan = 0;
+                    commit = false;
+                }
+                else {
+                    bool validBit = false;
+                    j = 8;
+                    do {
+                        if (s_optJoyButtonScan & (1 << (j & 0x1f))) {
+                            validBit = true;
+                            break;
+                        }
+                        j++;
+                    } while (j < 0x10);
+                    s_optPrevJoyButtonScan = s_optJoyButtonScan;
+                    if (!validBit) {
+                        commit = false;
+                    }
+                    else if ((padByte & 0x80) != 0) {
+                        // Sidewinder press + square cancels back to the
+                        // default choice (0x004546d8)
+                        play_sfx(3, 5, 0);
+                        s_optTempEntries[s_optCursorIndex].pad2 =
+                            btnChoices[s_optDefaultSensIdx];
+                        s_optSensitivityIdx[s_optCursorIndex] = s_optDefaultSensIdx;
+                        s_optCursorHighlight[s_optCursorIndex] = 1;
+                        s_optSubSubState = 1;
+                        commit = false;
+                    }
+                }
+            }
+            if (commit) {
+                // Commit the selected choice to the remap table (0x00454730)
+                unsigned int val = btnChoices[s_optSensitivityIdx[s_optCursorIndex]];
+                play_sfx(3, 6, 0);
+                g_JoyRemapTbl[1][s_optCursorIndex + 8] = val;
+                s_optTempEntries[s_optCursorIndex].pad2 = val;
+                options_init_keybind_display();
+                s_optSubSubState = 3;
+                s_optDebounceTimer = 2;
+                s_optCursorHighlight[s_optCursorIndex] = 1;
+            }
+        }
+        break;
+    }
+
+    case 3:
+        // Debounce delay (0x0045477c)
+        if (s_optDebounceTimer == 0) {
+            s_optSubSubState = 1;
+        }
+        s_optDebounceTimer--;
+        break;
+    }
+
+    // Render the 8 row labels (0x00454790)
+    for (i = 0; i < 8; i++) {
+        const unsigned char* text;
+        switch (s_optTempEntries[i].pad2) {
+        case 0x80:  text = s_joyBtnText_Action;   break;
+        case 0x40:  text = s_joyBtnText_Dash;     break;
+        case 8:     text = s_joyBtnText_GetReady; break;
+        case 0x800: text = s_joyBtnText_Menu;     break;
+        case 0x900: text = s_joyBtnText_Option;   break;
+        default:    text = s_joyBtnText_NotUsed;  break;
+        }
+        PrintFormattedText(s_optJoyLabelX[i], (short)(s_optJoyLabelY[i] - 0xf),
+            (unsigned char)s_optCursorHighlight[i], text);
+    }
+
+    // Render the green connector lines (0x00454818): an underline below each
+    // label plus a diagonal line to the pad button, each drawn twice 1px apart.
+    for (i = 0; i < 8; i++) {
+        OPT_EKG_FLAGS = 0;
+        OPT_EKG_R = 0;
+        OPT_EKG_G = (i == s_optCursorIndex) ? 200 : 0x68;
+        OPT_EKG_B = 0;
+        OPT_EKG_X0 = lineUnderX0[i];
+        OPT_EKG_X1 = lineUnderX1[i];
+        OPT_EKG_Y0 = (short)(lineUnderY0[i] - 0xf);
+        OPT_EKG_Y1 = (short)(lineUnderY1[i] - 0xf);
+        FUN_00470c60(g_EkgPrimaryLine, 0);
+        OPT_EKG_Y0++;
+        OPT_EKG_Y1++;
+        FUN_00470c60(g_EkgPrimaryLine, 0);
+        OPT_EKG_X0 = lineDiagX0[i];
+        OPT_EKG_X1 = lineDiagX1[i];
+        OPT_EKG_Y0 = (short)(lineDiagY0[i] - 0xf);
+        OPT_EKG_Y1 = (short)(lineDiagY1[i] - 0xf);
+        FUN_00470c60(g_EkgPrimaryLine, 0);
+        OPT_EKG_Y0++;
+        OPT_EKG_Y1++;
+        FUN_00470c60(g_EkgPrimaryLine, 0);
+    }
+
+    // Render the cursor box around the selected row (0x00454908)
+    g_TextureDesc.flags = 0x01000040;
+    g_TextureDesc.screenX = cursorBoxX[s_optCursorIndex];
+    g_TextureDesc.depth = 2;
+    g_TextureDesc.screenY = (short)((s_optCursorIndex < 8 ? -0xf : -5) +
+        cursorBoxY[s_optCursorIndex]);
+    g_TextureDesc.width = (unsigned short)cursorBoxW[s_optCursorIndex];
+    g_TextureDesc.height = (unsigned short)cursorBoxW[s_optCursorIndex + 10];
+    g_TextureDesc.colorMulR = 0x80;
+    g_TextureDesc.colorMulG = 0x80;
+    g_TextureDesc.colorMulB = 0x80;
+    g_TextureDesc.texU = cursorBoxTexU[s_optCursorIndex];
+    g_TextureDesc.pivotX = 0;
+    unk_00be1180 = 0;
+    g_TextureDesc.pivotY = 0;
+    g_TextureDesc.texV = cursorBoxTexV[s_optCursorIndex];
+    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.printClutTint = 0x1e0;
+    display_texture(&g_TextureDesc, 2, 0xb, 1);
     return 1;
 }
 

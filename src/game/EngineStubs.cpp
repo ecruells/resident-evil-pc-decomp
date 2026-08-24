@@ -123,6 +123,3 @@ void FUN_00443040(int imgType, int slot) { }
 // (0x0048a210) - Entity path animation step
 void FUN_0048a210(void* joint) { }
 
-// (0x00497de0) - Keyboard scancode read (async)
-unsigned char FUN_00497de0(void) { return 0; }
-
