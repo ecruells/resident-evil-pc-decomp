@@ -146,6 +146,11 @@ struct MarniDX::Impl {
     ID3D11SamplerState*      sampPoint     = nullptr;
     ID3D11DepthStencilState* depthDisabled = nullptr;
     ID3D11DepthStencilState* depthEnabled  = nullptr;
+    // Test-only depth (write off) for the translucent ground-shadow / blood
+    // pool quads: the original rendered them as world-space viewport quads
+    // against the same Z-buffer as the TMD objects, so a character in front
+    // clipped them no matter where the ordering table put the primitive.
+    ID3D11DepthStencilState* depthTestNoWrite = nullptr;
 
     // shaders / buffers
     ID3D11VertexShader*      quadVS        = nullptr;
@@ -426,6 +431,7 @@ void MarniDX::Impl::ReleaseAllState()
     if (model3DVB)     { model3DVB->Release();     model3DVB     = nullptr; }
     if (depthEnabled)  { depthEnabled->Release();  depthEnabled  = nullptr; }
     if (depthDisabled) { depthDisabled->Release(); depthDisabled = nullptr; }
+    if (depthTestNoWrite) { depthTestNoWrite->Release(); depthTestNoWrite = nullptr; }
     if (depthStencilView){ depthStencilView->Release(); depthStencilView = nullptr; }
     if (depthStencil)    { depthStencil->Release();     depthStencil     = nullptr; }
     if (rtv)            { rtv->Release();              rtv              = nullptr; }
@@ -571,6 +577,19 @@ BOOL MarniDX::Create(HWND hWnd, int width, int height, BOOL fullScreen,
     de.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ALL;
     de.DepthFunc      = D3D11_COMPARISON_LESS_EQUAL;
     if (FAILED(p->device->CreateDepthStencilState(&de, &p->depthEnabled))) {
+        p->ReleaseAllState(); return FALSE;
+    }
+
+    // depth test WITHOUT write - translucent world quads (the ground shadow /
+    // blood pool fade polys). They must clip against the model geometry the
+    // way the original's Z-buffered viewport quads did, but as alpha-blended
+    // primitives they must not poison the buffer for the painter-ordered
+    // draws around them.
+    D3D11_DEPTH_STENCIL_DESC dt = {};
+    dt.DepthEnable    = TRUE;
+    dt.DepthWriteMask = D3D11_DEPTH_WRITE_MASK_ZERO;
+    dt.DepthFunc      = D3D11_COMPARISON_LESS_EQUAL;
+    if (FAILED(p->device->CreateDepthStencilState(&dt, &p->depthTestNoWrite))) {
         p->ReleaseAllState(); return FALSE;
     }
 
@@ -1135,7 +1154,8 @@ void MarniDX::DrawTriangles(const float* verts, int triCount, MarniHandle tex,
 }
 
 void MarniDX::DrawTriangles3D(const float* verts, int triCount, MarniHandle tex,
-                              MarniSampler sampler, MarniBlend blend)
+                              MarniSampler sampler, MarniBlend blend,
+                              bool depthWrite)
 {
     Impl* p = m_pImpl;
     if (!p || !p->ready || !verts || triCount <= 0) return;
@@ -1184,8 +1204,15 @@ void MarniDX::DrawTriangles3D(const float* verts, int triCount, MarniHandle tex,
     float bf[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     p->context->OMSetBlendState(bs, bf, 0xFFFFFFFFu);
 
-    if (p->depthEnabled)
-        p->context->OMSetDepthStencilState(p->depthEnabled, 0);
+    // depthWrite=false: translucent geometry (water, glass - record +0x68
+    // alpha < 1). Test against what is already in the buffer but never write:
+    // the original's alpha-blended D3D7 primitives ran with ZWRITEOFF too.
+    // Writing would hide the fade polys (ground shadows / blood pools) that
+    // sit BEHIND such surfaces - e.g. every shadow under room40E0's water -
+    // and would poison the buffer for the far-to-near painter walk around it.
+    ID3D11DepthStencilState* ds = depthWrite ? p->depthEnabled : p->depthTestNoWrite;
+    if (ds)
+        p->context->OMSetDepthStencilState(ds, 0);
 
     p->context->Draw((UINT)(triCount * 3), 0);
 
@@ -1195,7 +1222,8 @@ void MarniDX::DrawTriangles3D(const float* verts, int triCount, MarniHandle tex,
 }
 
 void MarniDX::DrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex,
-                                 MarniSampler sampler, MarniBlend blend)
+                                 MarniSampler sampler, MarniBlend blend,
+                                 bool depthTest)
 {
     Impl* p = m_pImpl;
     if (!p || !p->ready || !verts || triCount <= 0) return;
@@ -1244,11 +1272,23 @@ void MarniDX::DrawTrianglesPersp(const float* verts, int triCount, MarniHandle t
     float bf[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
     p->context->OMSetBlendState(bs, bf, 0xFFFFFFFFu);
 
-    // No depth: the shadow draws over the room like a sprite. This used to
-    // inherit whatever the caller had set, which held only while the whole 2D
-    // pass ran after the 3D one. FlushTmdObjects now interleaves scene sprites
-    // between DrawTriangles3D batches, so state it outright rather than depend
-    // on that call having restored it.
+    // No depth by default: the shadow draws over the room like a sprite. This
+    // used to inherit whatever the caller had set, which held only while the
+    // whole 2D pass ran after the 3D one. FlushTmdObjects now interleaves
+    // scene sprites between DrawTriangles3D batches, so state it outright
+    // rather than depend on that call having restored it.
+    //
+    // depthTest=true instead clips against the model geometry like the
+    // original's Z-buffered viewport quads (test only - never write). The
+    // caller supplies real per-corner NDC z in that case.
+    if (depthTest) {
+        if (p->depthTestNoWrite)
+            p->context->OMSetDepthStencilState(p->depthTestNoWrite, 0);
+        p->context->Draw((UINT)(triCount * 3), 0);
+        if (p->depthDisabled)
+            p->context->OMSetDepthStencilState(p->depthDisabled, 0);
+        return;
+    }
     if (p->depthDisabled)
         p->context->OMSetDepthStencilState(p->depthDisabled, 0);
 

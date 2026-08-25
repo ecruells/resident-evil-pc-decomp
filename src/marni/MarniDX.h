@@ -171,26 +171,36 @@ public:
                        MarniSampler sampler = MARNI_SAMPLER_POINT,
                        MarniBlend  blend   = MARNI_BLEND_ALPHA);
 
-    // Perspective-correct textured triangles WITHOUT depth testing. verts use
-    // the Model3DVertex layout { x, y (screen px), z (unused), w (view-space
+    // Perspective-correct textured triangles. verts use the Model3DVertex
+    // layout { x, y (screen px), z (normalised [0,1] depth), w (view-space
     // Z), u, v, r, g, b, a }: the perspective VS multiplies the ortho-mapped
     // screen position by w and hands the rasteriser that w, so after the
     // divide the position is unchanged but UV/colour interpolate
     // perspective-correctly. Used by the ground-shadow quads, where
     // screen-space (affine) interpolation sheared the two halves oppositely.
+    //
+    // depthTest=false (default) disables the depth test outright. true clips
+    // against the model geometry like the original's Z-buffered viewport
+    // quads - test only, no write - and requires real NDC z in each vertex.
     void DrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex,
                             MarniSampler sampler = MARNI_SAMPLER_POINT,
-                            MarniBlend  blend   = MARNI_BLEND_ALPHA);
+                            MarniBlend  blend   = MARNI_BLEND_ALPHA,
+                            bool depthTest = false);
 
     // Depth-buffered variant of DrawTriangles for 3D models: 9 floats per
     // vertex, { x, y (screen px, Y-down), z (normalised [0,1] depth), u, v,
-    // r, g, b, a }. Writes and tests the depth buffer (LESS_EQUAL) so faces of
-    // the same model resolve correctly whatever order they arrive in, then
-    // restores the depth-disabled state the 2D path assumes. The depth buffer
-    // is cleared once per frame by Clear(). Max 1024 triangles per call.
+    // r, g, b, a }. Tests and writes the depth buffer (LESS_EQUAL) when
+    // depthWrite is set (default) so faces of the same model resolve correctly
+    // whatever order they arrive in; with depthWrite=false it only TESTS, for
+    // translucent geometry (water, glass) that must not hide the depth-tested
+    // fade polys (ground shadows / blood pools) behind it. Either way the
+    // depth-disabled state the 2D path assumes is restored afterwards. The
+    // depth buffer is cleared once per frame by Clear(). Max 1024 triangles
+    // per call.
     void DrawTriangles3D(const float* verts, int triCount, MarniHandle tex,
                          MarniSampler sampler = MARNI_SAMPLER_POINT,
-                         MarniBlend  blend   = MARNI_BLEND_ALPHA);
+                         MarniBlend  blend   = MARNI_BLEND_ALPHA,
+                         bool depthWrite = true);
 
     // ----------------------------------------------------------------------
     // Backbuffer readback (used by CMarniBits::SaveBitmapToFile, the original

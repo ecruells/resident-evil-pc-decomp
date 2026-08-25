@@ -97,5 +97,11 @@ void  FUN_00486df0(void* spriteData);
 // near, and submitted with adjacent same-texture runs merged.
 void  FlushTmdObjects(void);
 
+// View-space Z -> the normalised [0,1] depth the TMD triangles write into the
+// D3D11 depth buffer. The translucent ground-shadow / blood pool quads test
+// against that buffer, so they must map their per-corner view Z through this
+// exact function (see SpriteRenderer.cpp's type-12 branch).
+float TmdViewZToNdc(float vz);
+
 // Drop every queued object without drawing (frame reset).
 void  TmdQueue_Reset(void);

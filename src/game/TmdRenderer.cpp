@@ -81,6 +81,15 @@ static inline float TmdDepthNdc(float vz)
     return d;
 }
 
+// Shared with the fade-poly (ground shadow / blood pool) path in
+// SpriteRenderer.cpp: its type-12 quads carry the same per-corner view-space
+// Z and must land on the SAME [0,1] ramp the model triangles write, or the
+// depth comparison between the two is meaningless.
+float TmdViewZToNdc(float vz)
+{
+    return TmdDepthNdc(vz);
+}
+
 struct TmdDrawEntry {
     BYTE* slot;        // owning CMarniDirect3DTMD slot in g_tmdObjectBuffer,
                        // NULL for the complex-object pool (see FUN_00486df0)
@@ -137,6 +146,12 @@ struct TmdTri {
     float v[TMD_TRI_FLOATS];
     float depth;   // mean view-space Z (larger = farther)
     DWORD tex;
+    float alpha;   // record +0x68 alpha this triangle was emitted with;
+                   // < 1 marks translucent geometry (water, glass), which
+                   // must NOT write depth or it hides the fade polys
+                   // (ground shadows / blood pools) behind it - see
+                   // room40E0 flooded, where the water plane silenced
+                   // every shadow once they became depth-tested.
 };
 static TmdTri g_tmdTris[TMD_MAX_TRIS_COLLECT];
 static int    g_tmdTriOrder[TMD_MAX_TRIS_COLLECT];
@@ -633,6 +648,7 @@ void FlushTmdObjects(void)
                     o[26] = cr[i2]; o[27] = cg[i2]; o[28] = cb[i2]; o[29] = triAlpha;
                     t3->depth = (vzArr[i0] + vzArr[i1] + vzArr[i2]) * (1.0f / 3.0f);
                     t3->tex   = tex;
+                    t3->alpha = triAlpha;
                     g_tmdTriOrder[collected] = collected;
                     collected++;
                 }
@@ -652,9 +668,11 @@ void FlushTmdObjects(void)
         static float triVerts[TMD_MAX_TRIS_FLUSH * TMD_TRI_FLOATS];
         int   triCount = 0;
         DWORD triTex   = 0;
+        bool  triWrite = true;   // depth-WRITE mode of the batch in flight
 
         for (int k = 0; k < collected; k++) {
             const TmdTri* t3 = &g_tmdTris[g_tmdTriOrder[k]];
+            const bool triWriteThis = t3->alpha >= 0.999f;
 
             // Every scene sprite farther than this triangle has to be on
             // screen before it. The batch in flight is behind them too, so it
@@ -662,7 +680,8 @@ void FlushTmdObjects(void)
             while (maskIdx < maskCount && (float)maskDepths[maskIdx] > t3->depth) {
                 if (triCount > 0) {
                     Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
-                                                MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
+                                                MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA,
+                                                triWrite);
                     triCount = 0;
                 }
                 FlushSpriteCommandsRange(maskDepths[maskIdx], maskCursor, SPRITE_CLASS_SCENE);
@@ -670,18 +689,22 @@ void FlushTmdObjects(void)
                 maskIdx++;
             }
 
-            if ((triCount > 0 && t3->tex != triTex) || triCount >= TMD_MAX_TRIS_FLUSH) {
+            if ((triCount > 0 && (t3->tex != triTex || triWriteThis != triWrite)) ||
+                triCount >= TMD_MAX_TRIS_FLUSH) {
                 Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
-                                            MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
+                                            MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA,
+                                            triWrite);
                 triCount = 0;
             }
             triTex = t3->tex;
+            triWrite = triWriteThis;
             memcpy(triVerts + triCount * TMD_TRI_FLOATS, t3->v, sizeof(t3->v));
             triCount++;
         }
         if (triCount > 0) {
             Marni_DX()->DrawTriangles3D(triVerts, triCount, (MarniHandle)triTex,
-                                        MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA);
+                                        MARNI_SAMPLER_POINT, MARNI_BLEND_ALPHA,
+                                        triWrite);
         }
     }
 

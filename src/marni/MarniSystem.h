@@ -135,13 +135,20 @@ void  MarniDrawSprite(float x, float y, float w, float h,
                       float u0, float v0, float u1, float v1,
                       DWORD color, MarniHandle tex);
 
-// Draw perspective-correct textured triangles without depth testing.
-// verts: triCount*3 vertices, each 10 floats { x, y (screen px, Y-down),
-// z (unused), w (view-space Z), u, v, r, g, b, a (0..1) }. Used for the
+// Draw perspective-correct textured triangles. verts: triCount*3 vertices,
+// each 10 floats { x, y (screen px, Y-down), z (NDC [0,1], used when
+// depthTest), w (view-space Z), u, v, r, g, b, a (0..1) }. Used for the
 // ground-shadow quads, whose clipped projected polygon an axis-aligned
 // sprite cannot reproduce and whose screen-space (affine) interpolation
 // sheared the two halves oppositely.
-void  MarniDrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex);
+//
+// depthTest: clip against the model geometry's depth buffer (test only, no
+// write) - what the original's Z-buffered viewport quads did. Without it a
+// shadow whose ordering-table key collapsed (the flag!=1 placement records
+// force alpha = forceAlpha+1, a near-constant key) would paint over every
+// model and mask in the scene.
+void  MarniDrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex,
+                               BOOL depthTest = FALSE);
 
 // Game-space (320x240) -> real D3D11 backbuffer scale factors. Use this for
 // ALL game-space -> screen-space conversion; never derive the scale from

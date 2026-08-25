@@ -645,12 +645,14 @@ void MarniDrawSprite(float x, float y, float w, float h,
 // faceted edges; the original's D3D7 device filtered it, which is what makes
 // the shadow in the retail game a smooth oval. Everything else in the sprite
 // path stays POINT on purpose - that is the PS1 look for the 2D art.
-void MarniDrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex)
+void MarniDrawTrianglesPersp(const float* verts, int triCount, MarniHandle tex,
+                              BOOL depthTest)
 {
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (!pD3D || !pD3D->m_isInitialized) return;
     pD3D->m_pDX->DrawTrianglesPersp(verts, triCount, tex,
-                                    MARNI_SAMPLER_LINEAR, MARNI_BLEND_ALPHA);
+                                    MARNI_SAMPLER_LINEAR, MARNI_BLEND_ALPHA,
+                                    depthTest != FALSE);
 }
 
 // ============================================================================

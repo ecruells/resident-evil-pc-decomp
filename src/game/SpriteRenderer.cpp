@@ -4,6 +4,7 @@
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "../marni/MarniBits.h"
+#include "TmdRenderer.h"
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>
@@ -202,6 +203,19 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
             // view-space z goes in as w, so the UVs interpolate with the
             // perspective divide the way the original's D3D7 hardware did.
             //
+            // The per-corner view z ALSO becomes real NDC depth and the quad
+            // is drawn with a test-only depth state. The original rendered
+            // this poly as a world-space viewport quad against the same
+            // Z-buffer as the TMD objects, so a model in front clipped it no
+            // matter where its ordering-table key landed - which matters,
+            // because the placement records with flag != 0 (0x00456f6d:
+            // alpha = forceAlpha + 1) collapse that key to a near-constant
+            // ~400 and would otherwise sort the shadow NEARER THAN EVERYTHING
+            // in the painter walk (rendered above every model and room mask;
+            // most visible in the stage-3 lab cameras, which all use those
+            // records). The ramp must be TmdViewZToNdc, i.e. exactly the one
+            // DrawTriangles3D writes, or the comparison is meaningless.
+            //
             // The fan MUST be (0,1,2) + (0,2,3). DrawFadeSpr's near-plane
             // clipper walks the quad's edges in ring order (0->1->3->2) and
             // emits its vertices in that sequence, so cmd->x0..x3 are a CYCLIC
@@ -228,7 +242,7 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
                 int k = idx[t];
                 verts[t][0] = (float)cxy[k][0] * scaleX;
                 verts[t][1] = (float)cxy[k][1] * scaleY;
-                verts[t][2] = 0.0f;                            // NDC z (unused)
+                verts[t][2] = TmdViewZToNdc((float)cwz[k]);     // NDC z (depth test)
                 verts[t][3] = (float)cwz[k];                   // view z = w
                 verts[t][4] = (float)cuv[k][0] * (1.0f / 4096.0f);
                 verts[t][5] = (float)cuv[k][1] * (1.0f / 4096.0f);
@@ -237,7 +251,7 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
                 verts[t][8] = (float)cb * (1.0f / 255.0f);
                 verts[t][9] = (float)ca * (1.0f / 255.0f);
             }
-            MarniDrawTrianglesPersp((const float*)verts, 2, srv);
+            MarniDrawTrianglesPersp((const float*)verts, 2, srv, TRUE);
             continue;
         }
         if (cmd->type != 10) continue;
