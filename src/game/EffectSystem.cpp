@@ -2689,6 +2689,33 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     }
     int texSlot = 3 + (int)sheetSlot;
 
+    // ---- weapon-FX sheets: pick the CLUT row variant matching the tint ----
+    //
+    // The core00.etm sheets carry up to four 16-entry CLUT rows that are
+    // palette VARIANTS of the same art, and the selector is the tint index
+    // (printClutTint = depthGroup >> 3): the blood sheet (esp index 0) holds
+    // row 0 dark red / row 1 green / row 2 orange / row 3 white-lavender.
+    // That is how one blood sprite renders red for a zombie (tint 0), green
+    // for a hunter (tint 1) and WHITE for Plant 42 - whose damage splashes
+    // spawn with depthGroup 0x18/0x1B/0x1C (Plant42.cpp), i.e. tint 3. The
+    // port baked only row 0, so the sap came out red. The rows are baked to
+    // SRV 120 + sheetSlot*4 + row by load_shoot_direction_data; fall back
+    // downwards when a sheet has fewer rows (slot 5's single-row sheet).
+    // Room RDT sprites (sheetSlot >= 8) are unaffected - their TIM palette is
+    // single-variant authored art (see the roomArt note above).
+    if (sheetSlot < 8) {
+        int clutRow = (int)g_TextureDesc.printClutTint;
+        if (clutRow > 3) clutRow = 3;
+        int varSlot = 120 + (int)sheetSlot * 4 + clutRow;
+        while (clutRow > 0 && g_TexturePageSRV[varSlot] == MARNI_NULL_HANDLE) {
+            clutRow--;
+            varSlot--;
+        }
+        if (g_TexturePageSRV[varSlot] != MARNI_NULL_HANDLE) {
+            texSlot = varSlot;
+        }
+    }
+
     int submitted = SubmitEffectSprite(&g_TextureDesc, (int)depthArg, texSlot,
                                        color[0], color[1], color[2],
                                        scaleXadd, scaleYadd, (int)blendMode, (short)brightness);

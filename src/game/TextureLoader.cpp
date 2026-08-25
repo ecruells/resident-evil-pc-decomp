@@ -96,6 +96,88 @@ void LoadEffectTextureSheet(int slot, void* timData)
 }
 
 // ============================================================================
+// LoadEffectTextureSheetVariants — bake one SRV per CLUT row of an effect
+// sheet TIM (port-only companion to LoadEffectTextureSheet).
+//
+// The weapon-FX sheets in core00.etm carry MULTIPLE 16-entry CLUT rows, and
+// the rows are palette VARIANTS of the same art, selected per spawn by the
+// tint index (printClutTint = depthGroup >> 3). The blood sheet (esp index 0,
+// etm offset 0x8200) is the proof: row 0 dark red (zombie), row 1 green
+// (hunter), row 2 orange, row 3 white/lavender - and Plant 42's damage
+// splashes spawn with depthGroup 0x18/0x1B/0x1C (Plant42.cpp), i.e. tint 3,
+// which is why its blood is white in the original game while a zombie's is
+// red. LoadEffectTextureSheet bakes only row 0, so every tint drew red.
+//
+// Row r of the sheet lands in SRV baseSlot + r. Returns the number of rows
+// baked (0 if the TIM has no CLUT or is not 4bpp).
+// ============================================================================
+int LoadEffectTextureSheetVariants(int baseSlot, void* timData, int maxRows)
+{
+    if (baseSlot < 0 || baseSlot + 4 > 256 || maxRows <= 0) return 0;
+    if (timData == NULL) return 0;
+
+    DWORD* tim = (DWORD*)timData;
+    if (tim[0] != 0x10) return 0;              // TIM magic
+    DWORD flags = tim[1];
+    if ((flags & 0x8) == 0) return 0;          // no CLUT block
+    if ((flags & 0x3) != 0) return 0;          // effect sheets are 4bpp
+
+    BYTE* b = (BYTE*)timData;
+    // CLUT block: +8 size(4), +12 origin x(2), +14 origin y(2), +16 w(2),
+    // +18 h(2), +20 entries. (The first draft read w/h at +24/+26 - those are
+    // CLUT data bytes - so clutW read as 0 and every bake bailed out.)
+    WORD clutW = *(WORD*)(b + 16);
+    WORD clutH = *(WORD*)(b + 18);
+    if (clutW != 16 || clutH == 0) return 0;
+    WORD* clut = (WORD*)(b + 20);
+
+    // Image block follows the CLUT data: size, origin(2), w(words), h.
+    BYTE* img = b + 20 + clutW * clutH * 2;
+    WORD imgW = *(WORD*)(img + 8);
+    WORD imgH = *(WORD*)(img + 10);
+    int w = imgW * 4;                          // 4bpp: 2 px per byte, 4 px per word
+    int h = imgH;
+    if (w <= 0 || h <= 0) return 0;
+    BYTE* pix = img + 12;
+
+    int rows = clutH < maxRows ? clutH : maxRows;
+    for (int row = 0; row < rows; row++) {
+        DWORD* clutRGBA = new DWORD[16];
+        for (int c = 0; c < 16; c++) {
+            WORD clr = clut[row * 16 + c];
+            DWORD r = ((clr >> 0) & 0x1F) * 255 / 31;
+            DWORD g = ((clr >> 5) & 0x1F) * 255 / 31;
+            DWORD bl = ((clr >> 10) & 0x1F) * 255 / 31;
+            // Same colour-key rule as LoadEffectTextureSheet: index 0 is the
+            // transparent key, STP is not alpha.
+            DWORD a = (c == 0) ? 0x00 : 0xFF;
+            clutRGBA[c] = (a << 24) | (bl << 16) | (g << 8) | r;
+        }
+        DWORD* rgba = new DWORD[w * h];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                BYTE nibblePair = pix[y * (w / 2) + x / 2];
+                int idx = (x & 1) ? (nibblePair >> 4) : (nibblePair & 0xF);
+                rgba[y * w + x] = clutRGBA[idx];
+            }
+        }
+        delete[] clutRGBA;
+
+        int slot = baseSlot + row;
+        if (g_TexturePageSRV[slot] != MARNI_NULL_HANDLE) {
+            Marni_DX()->DestroyTexture(g_TexturePageSRV[slot]);
+            g_TexturePageSRV[slot] = MARNI_NULL_HANDLE;
+        }
+        MarniCreateTexture(w, h, 32, rgba, &g_TexturePageSRV[slot]);
+        delete[] rgba;
+        g_TexturePageWidth[slot] = w;
+        g_TexturePageHeight[slot] = h;
+        g_TexturePageBpp[slot] = 4;
+    }
+    return rows;
+}
+
+// ============================================================================
 // RebuildTextureSRV — Rebuild the D3D11 SRV for a slot using a different CLUT
 // palette index. Uses cached pixel + CLUT data (no re-parsing).
 // Returns 1 on success, 0 on failure.

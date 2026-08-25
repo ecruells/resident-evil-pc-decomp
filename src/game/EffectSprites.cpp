@@ -539,9 +539,17 @@ void load_shoot_direction_data(void)
     // menu/item images own 15-30); the room's esp sprites use 11-14
     // (load_effect_sprites). UVs in the esp data are coordinates within each
     // sheet.
+    //
+    // Each sheet also carries up to four 16-entry CLUT rows - palette
+    // VARIANTS selected per spawn by the tint index (see the submit-side note
+    // in EffectSystem.cpp). They are baked to slots 120 + i*4 + row so
+    // effect_submit_sprite can pick the row matching printClutTint: the blood
+    // sheet (esp index 0) is row 0 red / row 1 green / row 2 orange / row 3
+    // white - Plant 42's sap (depthGroup 0x18/0x1B/0x1C -> tint 3).
     for (int i = 0; i < 8; i++) {
         if (DAT_00ac9cd0[i] != 0) {
             LoadEffectTextureSheet(3 + i, (void*)DAT_00ac9cd0[i]);
+            LoadEffectTextureSheetVariants(120 + i * 4, (void*)DAT_00ac9cd0[i], 4);
         }
     }
 }

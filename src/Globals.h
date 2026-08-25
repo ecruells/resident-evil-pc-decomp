@@ -1472,6 +1472,7 @@ void ProcessTextureImage(void* imageBuffer, short textureBankID, short pageOffse
 void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotIndex,
                      int unused, short posX, short posY, unsigned int flags);
 void LoadEffectTextureSheet(int slot, void* timData);   // effect sheets at explicit slots (TextureLoader.cpp)
+int  LoadEffectTextureSheetVariants(int baseSlot, void* timData, int maxRows);  // one SRV per CLUT row (TextureLoader.cpp)
 int  create_texture_page(void* data, int mode);
 void destroy_texture_page(int handle);
 void cleanup_texture_slot(int slot);
