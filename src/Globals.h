@@ -1,5 +1,13 @@
 #pragma once
 
+#include "DebugPrint.h"   // dbg_printf / dbg_safe_str
+
+// Ban raw OutputDebugStringA: it fail-fasts when called from a task on the
+// scheduler's switched stack with no debugger attached (killed standalone
+// Release runs at boot). All output must go through dbg_safe_str/dbg_printf.
+#undef OutputDebugStringA
+#define OutputDebugStringA(s) dbg_safe_str((const char*)(s))
+
 // Core types and structures
 #include "game/Types.h"
 #include "game/Entities.h"

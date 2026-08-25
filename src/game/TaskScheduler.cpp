@@ -53,8 +53,19 @@
 
 #define TASK_SIZE          0x7C       // sizeof(TaskControlBlock)
 
-// Task stacks: 3 x 256KB contiguous block
-static BYTE g_TaskStacks[TASK_MAX][TASK_STACK_SIZE];
+// Task stacks: allocated with GUARD PAGES between each 256KB slot. A task
+// that overflows its slot faults immediately on the guard page with the
+// culprit's instruction pointer in crash.log, instead of silently corrupting
+// a neighbouring task's saved registers (which killed standalone Release
+// runs at room load as POPAD-restored garbage).
+#define TASK_GUARD_SIZE   4096
+static BYTE* g_TaskStackBase = NULL;   // start of slot 0's usable area
+
+static DWORD TaskStackTop(int id)
+{
+    return (DWORD)(g_TaskStackBase + id * (TASK_STACK_SIZE + TASK_GUARD_SIZE)
+                   + TASK_STACK_SIZE);
+}
 
 #pragma warning(disable: 4731)  // frame pointer register modified by inline asm
 
@@ -142,7 +153,7 @@ _resume_task:
             }
         }
         else if (state == TASK_START) {
-            g_TasksESP[g_CurrentTaskID] = g_CurrentTaskID * TASK_STACK_SIZE + g_StackPointer + TASK_STACK_SIZE;
+            g_TasksESP[g_CurrentTaskID] = TaskStackTop(g_CurrentTaskID);
             SwitchToTask_Asm();
         }
         else if (state == TASK_YIELD) {
@@ -312,6 +323,24 @@ void TaskScheduler_Reset(void)
 // ============================================================================
 void TaskScheduler_Init(void)
 {
-    g_StackPointer = (DWORD)&g_TaskStacks[0][0];
+    if (g_TaskStackBase == NULL) {
+        SIZE_T total = (SIZE_T)TASK_MAX * (TASK_STACK_SIZE + TASK_GUARD_SIZE)
+                       + TASK_GUARD_SIZE;
+        BYTE* mem = (BYTE*)VirtualAlloc(NULL, total, MEM_RESERVE | MEM_COMMIT,
+                                        PAGE_READWRITE);
+        if (mem != NULL) {
+            // Poison every guard page with PAGE_NOACCESS: [G0][S0][G1][S1][G2][S2][G3]
+            for (int i = 0; i <= TASK_MAX; i++) {
+                BYTE* guard = mem + i * (TASK_STACK_SIZE + TASK_GUARD_SIZE);
+                DWORD oldProt = 0;
+                VirtualProtect(guard, TASK_GUARD_SIZE, PAGE_NOACCESS, &oldProt);
+            }
+            g_TaskStackBase = mem + TASK_GUARD_SIZE;  // skip G0 -> start of S0
+        } else {
+            MessageBoxA(NULL, "Failed to allocate task stacks", "RESIDENT EVIL", MB_OK);
+            ExitProcess(1);
+        }
+    }
+    g_StackPointer = (DWORD)g_TaskStackBase;
     TaskScheduler_Reset();
 }

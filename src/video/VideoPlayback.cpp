@@ -74,6 +74,15 @@ static const char* ResolveVideoPath(const char* originalPath, char* outPath, siz
 {
     if (originalPath == NULL || outPath == NULL || outSize == 0) return NULL;
 
+#ifndef _DEBUG
+    // Release builds use the retail root (".\usa\", see system/AssetPath.h),
+    // so video paths are already correct - rewriting them to .\assets\USA\
+    // redirected every FMV to a nonexistent folder and silently skipped the
+    // logo/intro videos.
+    (void)outPath;
+    (void)outSize;
+    return originalPath;
+#else
     const char* p = originalPath;
     while (*p) {
         if ((p[0] == '\\' || p[0] == '/') &&
@@ -100,6 +109,7 @@ static const char* ResolveVideoPath(const char* originalPath, char* outPath, siz
     if (len + 1 > outSize) return NULL;
     strcpy_s(outPath, outSize, originalPath);
     return outPath;
+#endif
 }
 
 // ============================================================================

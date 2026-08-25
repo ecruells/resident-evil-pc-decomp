@@ -542,6 +542,36 @@ void EnumerateD3DRenderers(void)
         &g_NumD3DRenderersAvailable);
 }
 
+// GetDirect3DDriverCount — 0x004486e0
+// Original: __fastcall on the CMarniDirect3D object; guards on +0x3C
+// (m_isInitialized) and prints "Direct3D::RequestDriverCount" when the
+// renderer was never initialized, otherwise returns the adapter count
+// filled in by EnumerateD3DRenderers (0x004977f0).
+int GetDirect3DDriverCount(void)
+{
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (!pD3D || !pD3D->m_isInitialized) {
+        printf("Direct3D::RequestDriverCount\n");
+        return 0;
+    }
+    return g_NumD3DRenderersAvailable;
+}
+
+// GetDirect3DDriverName — 0x00448710
+// Original: __thiscall; same m_isInitialized guard ("Direct3D::RequestDriverName"),
+// then bounds-checks index > 4 (the original driver table holds 5 entries of
+// 0x11C bytes at 0x007e0e10, name string first) and returns a pointer to that
+// entry's name. Port keeps the exact >4 check; g_D3DRenderers holds the names.
+const char* GetDirect3DDriverName(int index)
+{
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (!pD3D || !pD3D->m_isInitialized || index > 4) {
+        printf("Direct3D::RequestDriverName\n");
+        return NULL;
+    }
+    return g_D3DRenderers[index].name;
+}
+
 // InitJoysticks — 0x00420770
 void InitJoysticks(void)
 {
@@ -572,6 +602,10 @@ void CreateLights(int numLights)
 void MarniPresent(void)   { VTable_Present(g_pMarniDirect3D); }
 void MarniClear(void)     { VTable_Clear(g_pMarniDirect3D); }
 void PresentFrame(void)   { MarniPresent(); }
+// Original ClearScreen (0x004298c0) ends with clearscreen_present_tail
+// (0x00497640): vtable[3] Clear, FUN_0040a8f0 background quad insert,
+// vtable[4] Present, then state = 3. The port's MarniClear + the governor's
+// background-quad path cover that tail; this alias is the entry point.
 void ClearScreen(void)    { MarniClear(); }
 
 void* MarniGetDevice(void)

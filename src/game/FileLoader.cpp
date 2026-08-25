@@ -22,18 +22,14 @@ size_t LoadFile(const char* path, void* buffer, unsigned char flags)
     // there is nothing to rewrite here - the build config picked the root.
     const char* filePath = path;
 
-    // Original: if (DAT_004b3998 & flags) prepend the install directory, skipping
-    // the first 8 characters of ".\usa\data\...". That offset is only meaningful
-    // for the retail root, which is what GAME_DATA_ROOT expands to in a release
-    // build, so the branch is compiled out for development builds where assets are
-    // relative to the working directory.
-#ifndef _DEBUG
-    char fullInstallPath[MAX_PATH];
-    if ((flags & 0x20) != 0) {
-        sprintf(fullInstallPath, "%s%s", g_szInstallPath, filePath + 8);
-        filePath = fullInstallPath;
-    }
-#endif
+    // Original: if (DAT_004b3998 & flags) prepend the registry install
+    // directory for flagged loads. The port's GAME_DATA_ROOT (system/AssetPath.h)
+    // already yields a valid working-directory-relative path in both build
+    // configs, and a standalone run has no registry install entry - prepending
+    // an empty one while skipping the first 8 characters truncated every
+    // 0x20-flagged path ("ta\staitem.tim") and black-screened the Release
+    // title flow. The flag is therefore accepted and ignored here.
+    (void)flags;
 
     int retryCount = 0;
     BOOL showError = FALSE;

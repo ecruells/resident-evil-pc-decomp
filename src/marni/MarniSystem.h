@@ -119,6 +119,8 @@ BOOL  IsGraphicsSystemReadyForOperation(void);
 void  InitializeMarniSystem(void);
 void  EnumerateDisplayModes(void);
 void  EnumerateD3DRenderers(void);
+int   GetDirect3DDriverCount(void);           // 0x004486e0
+const char* GetDirect3DDriverName(int index); // 0x00448710
 void  InitJoysticks(void);
 int   IsSideWinderPadConnected(void);
 void  CreateLights(int numLights);

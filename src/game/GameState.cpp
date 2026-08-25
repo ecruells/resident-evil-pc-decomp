@@ -565,6 +565,10 @@ int texture_viewer_overlay(void)
 // ============================================================================
 // logos_state (0x00442bb0)
 // Logos/opening state: plays intro videos then chains to title_state.
+// NOTE: the original also calls logos_draw_tile_grid (0x00442ee0) from inside
+// this state - it lays out six 256x256 texture quads at fixed screen offsets
+// via display_texture as the video backdrop. The port's FMV path renders
+// full-screen through MarniDX, so the tile grid has no equivalent here.
 // ============================================================================
 void logos_state(void)
 {

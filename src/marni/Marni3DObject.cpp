@@ -1,6 +1,11 @@
 // Marni3DObject.cpp - 3D object / execute buffer / polyhedra / TMD implementations
 // All functions decompiled from Ghidra with original addresses
 #include "Marni3DObject.h"
+#include "DebugPrint.h"
+// Safe ODS wrapper (raw OutputDebugStringA fail-fasts on switched task stacks)
+#ifndef OutputDebugStringA
+#define OutputDebugStringA(s) dbg_safe_str((const char*)(s))
+#endif
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -35,6 +40,12 @@ CDirect3DObject::CDirect3DObject()
 }
 
 // Virtual destructor
+// Covers the original Direct3DObject_BaseDestructor (0x00430ef0): swaps the
+// vtable to CMarniViewport3_vtable and free()s the pointer at +0x38. In the
+// shipped binary nothing ever allocates +0x38 for these objects (the base
+// ctor at 0x00430e80 zeroes it and no writer exists), so that free is a
+// no-op; the buffers that DO carry allocations (+0x04 vertices, +0x08
+// indices) are released by Release() below, which the port keeps.
 CDirect3DObject::~CDirect3DObject()
 {
     Release();
@@ -442,9 +453,10 @@ static void PSXObjDebugPrint(const char* fmt, ...)
 // ============================================================================
 
 // 0x00415910 - constructor
-// Original calls FUN_00446cb0 which constructs 16 embedded CDirect3DObject variants
-// (stride 0x4C = 19 DWORDs) at offset 0, then sets m_objectCount=0, m_flag4C4=0,
-// m_unknown4C8=0x400. Then zeros m_initialized, m_objectData, and m_objectHandles.
+// Original calls Direct3DTMD_BaseInit (0x00446cb0) which constructs 16 embedded
+// CDirect3DObject variants (stride 0x4C = 19 DWORDs) at offset 0, then sets
+// m_objectCount=0, m_flag4C4=0, m_unknown4C8=0x400. Then zeros m_initialized,
+// m_objectData, and m_objectHandles.
 CMarniDirect3DTMD::CMarniDirect3DTMD()
 {
     // Initialize 16 embedded CDirect3DObject elements at stride 0x4C (76 bytes)
@@ -481,6 +493,10 @@ CMarniDirect3DTMD::CMarniDirect3DTMD()
 }
 
 // 0x00415990 - destructor
+// The original's Direct3DTMD_BaseCleanup (0x00446de0) is the cleanup leg of
+// this path: it calls FUN_004450a0 (release all 16 embedded elements and
+// clear the +0x4C0..+0x4C8 management fields) inside an SEH frame; the port
+// folds the SEH glue away and performs the equivalent release here.
 CMarniDirect3DTMD::~CMarniDirect3DTMD()
 {
     // Original calls base destructor chain for embedded CDirect3DObject elements

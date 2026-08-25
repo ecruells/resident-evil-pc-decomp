@@ -540,6 +540,13 @@ static void player_anim_thrown(void)
 // original applies no bound, this one reports instead of jumping into the pulse
 // table that follows.
 void player_anim_set_attacked_flag(void) {
+    // Original switch (0x004c2ac8 jumptable) cases are separate Ghidra
+    // functions; the port folds each into the handlers below. The inner
+    // grabbed/thrown sub-state machines also had their own case splits:
+    //   grabbed:  caseD_0 0x00469859  caseD_2 0x0046989d
+    //             caseD_4 0x004698d9  caseD_6 0x00469919
+    //   thrown:   caseD_0 0x004699e9  caseD_2 0x00469b0b  caseD_3 0x00469b37
+    //             caseD_4 0x00469b5c  caseD_5 0x00469b68
     switch (g_playerEntity.action_behavior) {
     case 0: player_anim_knockdown_recover(); break;   // 0x00469410
     case 1: player_anim_grabbed();           break;   // 0x00469840
@@ -4671,6 +4678,12 @@ static void player_behavior_14_autoaim(void)
         g_playerEntity.action_state = 5;
         return;
     default:
+        // Original auto-aim state table 0x004c0d28 entries (Ghidra names):
+        //   player_autoaim_fire_start   0x004585c0   player_autoaim_fire_arm    0x00458600
+        //   player_autoaim_fire_hold    0x004586c0   player_autoaim_reverse_start 0x00458c50
+        //   player_quickfire_start      0x00458cf0   (empty slot) 0x00458c40
+        // States 0..10 are handled above; the original has no case beyond 10
+        // either (the table is 11 entries), so this branch is unreachable.
         player_state_report_missing("auto-aim fire state (0x004c0d28)");
         return;
     }

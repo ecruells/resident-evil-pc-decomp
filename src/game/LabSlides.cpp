@@ -11,6 +11,8 @@
 // 0x00455fb0). Both entry paths execute the very same code - each block ends
 // with its own RET - so the port exposes them as lab_slides_start/update/
 // finish and shares them instead of duplicating the bodies.
+// The slide-change step FUN_0046336f (stop both sound slots, reset scroll to
+// (-96,-66), refresh texture page 0x2e) is inlined in the port's update path.
 #include "../Globals.h"
 #include "Items.h"
 #include "SpriteRenderer.h"

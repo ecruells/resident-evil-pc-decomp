@@ -20,6 +20,7 @@
 #include "../marni/MarniBits.h"
 #include "../marni/Marni3DObject.h"
 #include "TmdRenderer.h"     // TMD slot regions - see the slot-region note there
+#include "SpriteRenderer.h"  // g_SubpixelOffsetX/Y (item viewer OT quad records)
 #include <math.h>
 #include <cstdio>
 #include <cstring>
@@ -1689,6 +1690,7 @@ move_case3:
 move_skip_name:
     if ((DAT_00ae9f22 != 4) || (DAT_00ae9f29 != 0)) {
         // Draw the moving item cursor (4-part slide icon)
+        // Original: switchD_0040149e::caseD_0 at 0x004014a5 - same draw.
         g_TextureDesc.flags = 0x01000040;
         g_TextureDesc.texU = 0x6c;
         g_TextureDesc.depth = 0x1c;
@@ -5231,6 +5233,8 @@ static int  FUN_0040a990(int y, int x);
 static int  FUN_0040a530(int value);
 static void FUN_0040a250(MATRIX* src, MATRIX* dst);
 static int  FUN_0044ed40(void);
+void FUN_004846f0(int slot, int depth);   // 0x004846f0 - offset quad OT record
+void FUN_00484740(int slot, int depth);   // 0x00484740 - full-screen quad OT record
 static int  FUN_0044ef60(short angle, int axisMask);
 static void FUN_0044eca0(void);
 static void FUN_0044eb30(void);
@@ -6056,6 +6060,46 @@ void FUN_004846d0(int slot)
     ExecAsync((void*)FUN_004844c0);
 }
 
+// ----------------------------------------------------------------------------
+// Ordering-table quad records used by the async item draw (original buffers:
+// 0x00ac3508 and 0x00922100, three 0x58-byte records, one per render slot).
+// ----------------------------------------------------------------------------
+static DWORD g_itemViewerOffsetQuadRecs[3][0x58 / 4];     // 0x00ac3508
+static DWORD g_itemViewerFullQuadRecs[3][0x58 / 4];       // 0x00922100
+
+// (0x004846f0) - Insert the screen-offset background quad record for render
+// `slot` (< 3) at `depth`. Fields: +0x00 prim type 1, +0x4C code 4,
+// +0x50/+0x54 = g_SubpixelOffsetX/Y. Called from item_viewer_async_draw
+// (0x00484630) right before Direct3DTMD_Transform.
+// NOTE: this port's ordering table only consumes depth 0xFFF
+// (see OT_InsertPrimitive), so like every other sub-0xFFF OT record in the
+// original this one stays queued-but-unwalked; kept for pipeline parity.
+void FUN_004846f0(int slot, int depth)
+{
+    if (slot >= 3) return;
+    DWORD* rec = g_itemViewerOffsetQuadRecs[slot];
+    rec[0]        = 1;                          // +0x00: primitive type
+    rec[0x4C / 4] = 4;                          // +0x4C: code
+    rec[0x50 / 4] = (DWORD)g_SubpixelOffsetX;   // +0x50
+    rec[0x54 / 4] = (DWORD)g_SubpixelOffsetY;   // +0x54
+    OT_InsertPrimitive(rec, depth);
+}
+
+// (0x00484740) - Insert the fixed full-screen quad record (160x120) for
+// render `slot` (< 3) at `depth`. Same layout as 0x004846f0 but with hard
+// coded extents 0xA0 x 0x78 instead of the live subpixel offsets. Called at
+// the very end of item_viewer_async_draw, after the STP blend pass.
+void FUN_00484740(int slot, int depth)
+{
+    if (slot >= 3) return;
+    DWORD* rec = g_itemViewerFullQuadRecs[slot];
+    rec[0]        = 1;      // +0x00: primitive type
+    rec[0x4C / 4] = 4;      // +0x4C: code
+    rec[0x50 / 4] = 0xA0;   // +0x50: width  (160)
+    rec[0x54 / 4] = 0x78;   // +0x54: height (120)
+    OT_InsertPrimitive(rec, depth);
+}
+
 // (0x004844c0) - Async item model draw: build the transform matrix from the
 // GTE buffer and call CMarniDirect3DTMD::Transform on the item model slot.
 static void FUN_004844c0(void)
@@ -6090,6 +6134,8 @@ static void FUN_004844c0(void)
 
     int depth = slot + 10;
     if (slot >= 3) slot = 0;
+    // 0x004846f0: queue the screen-offset background quad record at `depth`.
+    FUN_004846f0(slot, depth);
     ((CMarniDirect3DTMD*)g_itemTmdSlots[slot])->Transform(g_pMarniDirect3D, (void*)(size_t)depth, transformMatrix, 0);
 
     // 0x00484670: the semi-transparency pass, and the only place the item
@@ -6116,6 +6162,9 @@ static void FUN_004844c0(void)
         // colour is identical - so the pass order does not matter.
         shared->Transform(g_pMarniDirect3D, (void*)(size_t)10, transformMatrix, 0);
     }
+    // 0x00484740: queue the fixed 160x120 full-screen quad record at `depth`
+    // (tail of item_viewer_async_draw).
+    FUN_00484740(slot, depth);
 }
 
 // (0x0044ea50) - Viewer render: compute the model matrices and queue the draw

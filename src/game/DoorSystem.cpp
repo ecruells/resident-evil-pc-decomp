@@ -1024,6 +1024,14 @@ static int door_op_clear_flags2(void)
 }
 
 typedef int (*DoorOpFn)(void);
+// Original opcode handlers (Ghidra door_phase_00..37, in table order):
+//   0x00443950 0x00443960 0x00443990 0x004439d0 0x004439e0 0x00443a60
+//   0x00443af0 0x00443b40 0x00443b80 0x00443bf0 0x00443c40 0x00443c70
+//   0x00443ca0 0x00443cd0 0x00443d00 0x00443d40 0x00443d80 0x00443e40
+//   0x00443eb0 0x00443ef0 0x00443f30 0x00443f60 0x00443fa0 0x00443fe0
+//   0x00444020 0x00444060 0x004440a0 0x004440f0 0x00444140 0x00444180
+//   0x004441d0 0x00444220 0x00444250 0x004442a0 0x004442d0 0x00444340
+//   0x00444380 0x004443a0
 static DoorOpFn const g_doorOps[38] = {
     door_op_end, door_op_clear, door_op_wait_free, door_op_yield2,
     door_op_jmp_byte, door_op_jmp_short, door_op_loop_push, door_op_loop,
@@ -1192,6 +1200,9 @@ static void DoorAsyncTeardown(void)
 
 // ============================================================================
 // DoorAnimTeardown (0x00444500)
+// NOTE: in the original the ExecAsync goes through a one-line wrapper at
+// 0x00484a20 (ExecAsync(&DoorAsyncTeardown)); the port calls the async body
+// from here directly.
 // ============================================================================
 static void DoorAnimTeardown(void)
 {

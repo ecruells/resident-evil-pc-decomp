@@ -199,10 +199,10 @@ int ReadSaveFile(const char* path, void* buffer)
 {
     // Try the direct path first
     FILE* fp = fopen(path, "rb");
-    if (fp == NULL) {
-        // Try with install path prefix
+    if (fp == NULL && g_szInstallPath[0] != '\0') {
+        // Registry-install fallback (only meaningful with a real install entry)
         char fullPath[260];
-        sprintf(fullPath, "%s%s", g_szInstallPath, path + 8);
+        sprintf(fullPath, "%s%s", g_szInstallPath, path);
         fp = fopen(fullPath, "rb");
         if (fp == NULL) return -1;
     }

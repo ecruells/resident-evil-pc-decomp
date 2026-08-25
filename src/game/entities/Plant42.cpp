@@ -3,6 +3,8 @@
 // Original PC addresses:
 //   plant42_init            0x004648d0   state 0
 //   plant42_state_check     0x00464e50   state 1
+//                             (0x00464e60 is its tail-jump body - Ghidra
+//                              lists it separately; port keeps one function)
 //   plant42_damaged         0x00465130   state 2   (-> 0x00465310)
 //   plant42_die             0x00465620   state 3
 //   plant42_attack          0x00465740   state 4   (empty)

@@ -93,6 +93,7 @@ Guarantees:
 | `63a8` | `g_heItemsX2Less1` | 0x00be63a8 * | 4 | Globals.cpp |
 | `63b0` | `g_itemSlotIndices[8]` | 0x00be63b0 * | 8 | Globals.cpp |
 | `6464` | `g_EnemiesList[30]` | 0x00be6464 | 0x2e68 | Globals.cpp |
+| `92cc` | `g_savedEnemyStates[16]` | 0x00be92cc | see Globals.cpp | Globals.cpp |
 | `9614` | `DAT_00be9614` | 0x00be9614 | 1 | Globals.cpp |
 | `961d` | `g_SpecialR1` | 0x00be961d | 4 (orig 1) | Globals.cpp |
 | `961e` | `g_SpecialG1` | 0x00be961e | 4 (orig 1) | Globals.cpp |
@@ -103,9 +104,11 @@ Guarantees:
 (the decompilation gave them separate storage); they carry tags so they are
 still wiped like the original bytes were.
 
-Unmapped gaps in the original range (e.g. `0x00be92cc..0x00be9613`) hold
-globals that have not been decompiled yet. When you name one in Ghidra and add
-it to the code, it **must** get a `.gwipe` tag.
+Unmapped gaps in the original range hold bytes the original wiped but no
+ported global uses. With the decomp function-complete, only one gap remains:
+`0x00be9320..0x00be9613` (between `g_savedEnemyStates[16]` and `DAT_00be9614`)
+— truly-unused scratch space in the original. If you ever name a global there
+in Ghidra and add it to the code, it **must** get a `.gwipe` tag.
 
 ### Adding a member (checklist)
 
@@ -153,13 +156,14 @@ only *membership and ordering* matter (wipes).
 |---|---|---|
 | `InitializeGame` → `memclr(&g_defaultItemSlot, g_BioCardData)` | 0x00be41e0..0x00be9620 | modeled by `.gwipe` |
 | bio_card.dat / save load `memcpy` (0x41C bytes) | 0x00be9620..0x00be9a3c | modeled by `BioCardLayout` |
-| `ClearGameStateFlags` (GameInit.cpp): zeroes **7 DWORDs from `&g_main_state_flags`** | 0x00be41c0..0x00be41dc | **UNFIXED HAZARD** — currently wipes whatever the linker placed after `g_main_state_flags`. Needs its own ordered cluster (identify the 5 dwords after flags/flags2 in Ghidra first). |
+| `ClearGameStateFlags` (GameInit.cpp): zeroes **7 DWORDs from `&g_main_state_flags`** | 0x00be41c0..0x00be41dc | **FIXED** — was a pointer walk over linker-placed globals; now an explicit clear of exactly the original members (`g_main_state_flags`, `g_main_state_flags2`, `g_spriteAnimActive/R/G/B`, `g_spriteAnimIntensity`; the unnamed scratch dwords at 0x00be41c8/41cc/41d8 have no port equivalent). See the comment in GameInit.cpp. |
 | `InitJoysticks`: zeroes `pState+0x28..+0x3B28` | inside `g_pMasterInputState` | safe (single struct, internal offsets) |
 
 ## Verifying the layout
 
 ```powershell
-# .gwipe should exist with size ~0x7D5E (grows as members are added)
+# .gwipe should exist and span nearly the full wiped range (~0x5400; the
+# original block is 0x5440 minus the unused gap)
 & "C:\Program Files\Microsoft Visual Studio\18\Community\VC\Tools\MSVC\<ver>\bin\Hostx64\x86\dumpbin.exe" `
     /HEADERS bin\Debug\residentevil.exe | Select-String -Context 0,3 "\.gwipe|\.sched"
 ```
@@ -169,8 +173,8 @@ For symbol-level checks, `dumpbin /SYMBOLS` on `obj\Debug\Globals.obj` shows the
 
 ## Incident history
 
-All three incidents were the same root cause — the `InitializeGame` memclr
-wiping a linker-placed bystander at game start:
+Incidents 1–3 and 5 share one root cause — a range operation touching
+linker-placed bystanders:
 
 1. **Task scheduler state** — `g_SchedulerESP` zeroed mid-task, crashed
    `TaskYield` (led to the `.sched` section).
@@ -198,3 +202,18 @@ Membership errors cut both ways.
    `g_tmdObjectSlotAnimPtrs[250]` (0x00aabd6c, the table `g_objectDeletePtr`
    statically points to in the original — it was `NULL` in the decomp, which
    silently disabled TMD slot reuse).
+
+5. **`ClearGameStateFlags` over-wipe** — the 7-DWORD pointer walk from
+   `&g_main_state_flags` zeroed five linker-placed globals past
+   `g_main_state_flags2` (in practice the fade/message scratch cluster).
+   Behaviorally masked because `InitSoundAndFadeState` reinitializes most of
+   them right after, but it was pure linker luck. Fixed by replacing the walk
+   with explicit clears of exactly the original members (see
+   [Known range-based operations](#known-range-based-operations)).
+
+## Status note
+
+The decompilation is function-complete: every global the original binary
+references has been identified, named, and placed per these rules. The
+mechanisms above remain load-bearing — if you ever add or move a global that
+overlays an original range-operation address, follow the checklist.

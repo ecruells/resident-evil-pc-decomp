@@ -1906,7 +1906,8 @@ static void npc_walk_behavior_00(void)
 // npc_walk_behavior_01 (0x00471b80) - behaviour 1: walk to the player
 // (animation 7, speed 0x5D). Walks while the heading is within +-0x180 of the
 // current yaw (an unsigned window test); otherwise it only turns, at half the
-// step.
+// step. NOTE: Ghidra splits this into an entry thunk at 0x00471b80 and the
+// body at 0x00471b85; the port keeps it as this single function.
 // ----------------------------------------------------------------------------
 static void npc_walk_behavior_01(void)
 {

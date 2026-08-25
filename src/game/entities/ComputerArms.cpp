@@ -429,6 +429,11 @@ static const signed char s_armCmdEntry[8] = {
 
 // ============================================================================
 // Command 0 (0x004274a0) - return to rest and idle there.
+// The original's command dispatch is a jump table at 0x00427483 whose cases
+// are separate Ghidra functions; the port implements each as arm_cmd_* below:
+//   caseD_1 0x004275c0  caseD_2 0x004276d0  caseD_3 0x00427720
+//   caseD_4 0x00427770  caseD_5 0x00427960  caseD_6 0x00427b60
+//   caseD_7 0x00427bb0
 // ============================================================================
 static void arm_cmd_rest(Entity* e)
 {

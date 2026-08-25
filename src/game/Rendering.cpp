@@ -378,6 +378,7 @@ void FrameRateGovernor(void)
             FUN_0040a8f0(NULL);
 
             // F7 (debug builds): dump one frame of every draw class.
+#ifdef _DEBUG
             if (g_debugDumpDrawFlag) {
                 dbg_printf("[dump] ===== frame stage=%d room=%d cam=%d"
                            " pending=%d sprites=%d =====\n",
@@ -394,6 +395,7 @@ void FrameRateGovernor(void)
                                (unsigned int)ps->color);
                 }
             }
+#endif
 
             // Sort pending sprites by depth (descending: high depth first = behind, low depth last = on top)
             for (int i = 0; i < g_pendingSpriteCount - 1; i++) {
@@ -529,7 +531,9 @@ void FrameRateGovernor(void)
         // of masks - each baked with a different screen-shake offset - could
         // end up on screen at once during the shake.
         ResetSpriteQueue();
+#ifdef _DEBUG
         g_debugDumpDrawFlag = 0;   // F7 dump covers exactly one frame
+#endif
 
         g_frameTimeAccumulator -= g_frameTargetTime;
         if (g_frameTimeAccumulator < 0) g_frameTimeAccumulator = 0;

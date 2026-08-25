@@ -1777,6 +1777,10 @@ void yawn_damaged_run(void)
 //
 // The full death: thrash (0/1), coil (2/3), collapse (4/5), then the two-phase
 // dissolve.  Phase 7 shrinks the model with ScaleMatrixCols on every joint
+// NOTE: Ghidra splits the death switch into separate case functions - caseD_6
+// at 0x004080de and caseD_8 at 0x00408705 are phases of THIS state machine
+// (the dissolve with tint flashes and bubble billboards); the port keeps them
+// inlined here.
 // while the RGB tint is bled out one channel at a time; phase 8 recolours the
 // segment sprites and finishes the collapse.  The ambient sparkle runs off
 // +0x180 for 800 frames regardless of phase.

@@ -20,15 +20,25 @@ static void setPolyF4(POLY_F4* entry)
 
 // ---------------------------------------------------------------------------
 // ClearGameStateFlags (0x004756c0)
-// Clears 7 dwords starting at g_main_state_flags, then clears g_menu_choice_id
+// The original zeroes seven DWORDs at 0x00be41c0..0x00be41dc:
+//   0x00be41c0 g_main_state_flags        0x00be41c4 g_main_state_flags2
+//   0x00be41c8 / 41cc unnamed scratch    0x00be41d0 g_spriteAnimActive/R/G/B
+//   0x00be41d4 g_spriteAnimIntensity     0x00be41d8 unnamed scratch
+// (g_bGameActive at 0x00be41dc is NOT part of the wipe.)
+// Port note: this used to be a literal pointer walk over &g_main_state_flags,
+// which zeroed whatever globals the linker placed next (see
+// docs/MEMORY_LAYOUT.md). It is now an explicit clear of exactly the original
+// members; the unnamed scratch dwords have no port equivalent.
 // ============================================================================
 static void ClearGameStateFlags(void)
 {
-    DWORD* p = &g_main_state_flags;
-    for (int i = 0; i < 7; i++) {
-        *p = 0;
-        p++;
-    }
+    g_main_state_flags = 0;
+    g_main_state_flags2 = 0;
+    g_spriteAnimActive = 0;
+    g_spriteAnimR = 0;
+    g_spriteAnimG = 0;
+    g_spriteAnimB = 0;
+    g_spriteAnimIntensity = 0;
     g_menu_choice_id = 0;
 }
 

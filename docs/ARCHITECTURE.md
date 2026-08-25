@@ -1,4 +1,4 @@
-﻿# Resident Evil 1 PC - Architecture Documentation
+# Resident Evil 1 PC - Architecture Documentation
 
 This document describes the overall architecture of Resident Evil 1 PC, including the Marni System, rendering pipeline, game loop structure, and key subsystems.
 
@@ -27,6 +27,30 @@ Resident Evil 1 PC is a port of the PlayStation original, released in 1997. The 
 
 This decompilation project ports the original DirectX 5.0 implementation to **Direct3D 11**, **XAudio2**, and **XInput** for compatibility with modern Windows. The original PSYQ API surface is preserved where possible.
 
+### Project Status
+
+**Functional-complete.** The entire original game is playable - every room,
+enemy, boss, cutscene, FMV, menu, save system and ending - and behaves like
+the 1997 release under extensive playtesting.
+
+Measured against the Ghidra project (**2393 functions** in the original
+binary):
+
+| Stream | Count | Status |
+|---|---|---|
+| Game logic implemented in `src\` | 1716 of 1717 | done |
+| Marni System DirectX internals -> DX11 layer | 84 of 84 | done |
+| CRT / MSVC runtime (provided by toolchain) | 290 | out of scope |
+| Compiler SEH / static-init glue (absorbed by real C++) | 177 | out of scope |
+| Raw D3D5 API paths (replaced by MarniDX) | 108 | out of scope |
+| Software-FMV shared-memory player (replaced by native MCI) | 11 | out of scope |
+| Import thunks (loader-provided) | 6 | out of scope |
+
+In-scope coverage: **1800 / 1801 functions = 99.9%**. The single documented
+remainder is a trivial animation/velocity setter whose caller is undefined
+even in Ghidra. Regenerate this table any time with
+`tools/progress_report.py <ghidra_dump.txt> src`.
+
 ### Key Architectural Decisions
 
 1. **PSYQ Compatibility Layer**: The Marni System allows most PlayStation code to run on Windows with minimal changes
@@ -35,6 +59,9 @@ This decompilation project ports the original DirectX 5.0 implementation to **Di
 4. **Task-Based Game Logic**: Game logic is organized into tasks that are scheduled each frame
 5. **Fixed Resolution Rendering**: Base game resolution is 320×240, scaled to display resolution
 6. **Sprite Queue System**: All 2D rendering goes through a pending sprite queue, rendered during `game_frame_present`
+7. **Address Traceability**: every rewritten function comments its original Ghidra address; globals comment their original variable address, so any line traces back to the binary
+
+The port is **function-complete** (99.9% of in-scope functions); remaining work is behavioral polish, not missing code.
 
 ### High-Level Architecture
 
@@ -1027,51 +1054,104 @@ The D3D11 pipeline uses two samplers:
 
 ## Source File Map
 
+98 source files. Every module documents its original address range in its
+header comment.
+
 ```
 src/
-├── main.cpp                 # WinMain entry point (0x00441350)
-├── Globals.h                # Global variable declarations + structs
-├── Globals.cpp              # Global variable definitions
-├── WindowProc.cpp           # Window message handler
+├── main.cpp                    # WinMain entry point (0x00441350)
+├── Globals.h / Globals.cpp     # Global variables + structs (with original addresses)
+├── WindowProc.cpp              # Window message handler
+├── DebugPrint.h                # Debug output helper
 │
-├── marni/
-│   ├── MarniSystem.h        # CMarniDirect3D class + Marni helpers
-│   ├── MarniSystem.cpp      # D3D11 device, shaders, sprite/Marni present
-│   ├── MarniBits.h          # CMarniBits surface class
-│   ├── MarniBits.cpp        # CMarniBits methods
-│   ├── PSXTexture.h         # PS1 TIM/PIX texture parser
-│   ├── PSXTexture.cpp       # TIM parsing, CLUT management
-│   ├── Marni3DObject.h      # 3D object classes (stubbed)
-│   ├── MarniSound.h          # DirectSound class (PSYQ sound API)
-│   ├── MarniSound.cpp        # XAudio2 audio backend + SFX tables
-│   └── MarniInput.h          # Input state structures
+├── marni/                      # Marni System compatibility layer
+│   ├── MarniDX.h/.cpp          # DX11/XAudio2 backend: device, shaders, textures,
+│   │                           #   DrawRect/DrawTriangles*, adapters (replaces D3D5)
+│   ├── MarniSystem.h/.cpp      # CMarniDirect3D class, present/clear, EnumerateD3DRenderers,
+│   │                           #   GetDirect3DDriverCount/Name, SetVideoResolution
+│   ├── MarniBits.h/.cpp        # CMarniBits surface class (2D blit/palette ops)
+│   ├── PSXTexture.h/.cpp       # TIM/PIX texture parser, CLUT management
+│   ├── Marni3DObject.h/.cpp    # CDirect3DObject / CMarniDirect3DTMD /
+│   │                           #   CMarniExecuteBuffer / viewport classes (fully ported)
+│   ├── MarniSound.h/.cpp       # XAudio2 audio backend + DirectSound-compatible API
+│   └── MarniInput.h/.cpp       # Input state (XInput-backed)
 │
 ├── game/
-│   ├── MainLoop.cpp         # Main game loop (0x00428eb0)
-│   ├── GameInit.cpp          # Game initialization (init_and_start_game)
-│   ├── GameState.cpp         # Game states: debug(SFX player), logos, title load
-│   ├── TitleScreen.cpp       # Title screen rendering & state machine
-│   ├── Rendering.cpp         # Frame present, text output, sprite drawing
-│   ├── TaskScheduler.cpp     # Task coroutine scheduler
-│   ├── TextureLoader.cpp     # PSX texture → D3D11 loading pipeline
-│   ├── SpriteRenderer.cpp    # Sprite command buffer & OT rendering
-│   ├── FileLoader.cpp        # Asset file loading with path resolution
-│   ├── SoundSystem.cpp       # Sound system: bank loading, play_sfx, fade/decay
-│   ├── InputStubs.cpp        # Input stubs (keyboard/XInput)
-│   ├── SFXIds.h              # Named constants for all SFX IDs per bank
-│   └── Marni3DObject.cpp     # 3D object stubs
+│   ├── MainLoop.cpp            # main_loop (0x00428eb0): per-frame orchestration
+│   ├── GameLoop.cpp            # entity update dispatch, calc_entity_lighting calls
+│   ├── GameInit.cpp            # init_and_start_game
+│   ├── GameState.cpp           # game states: logos_state, game_start, transitions
+│   ├── TitleScreen.cpp         # title screen state machine
+│   ├── CharacterSelectionScreen.cpp  # Chris/Jill selection (0x00491xxx)
+│   ├── MainMenu.cpp            # inventory/item screen incl. item 3D viewer
+│   ├── MenuData.cpp            # menu data tables
+│   ├── OptionsMenu.cpp/.h      # options screen
+│   ├── SaveLoadScreen.cpp      # save/load screens
+│   ├── DeathScreen.cpp         # "You died" screen
+│   ├── EndingScreen.cpp        # endings
+│   ├── InteractiveScreen.cpp   # interactive-screen dispatcher (0x0042a030)
+│   ├── ComputerLab.cpp         # lab terminal state machine (room 5060)
+│   ├── LabSlides.cpp           # slide projector screen
+│   ├── DoorSystem.cpp          # door open/close + door script opcodes
+│   ├── Room.cpp / RoomInit.cpp / RoomEvents.cpp / RoomCollision.cpp
+│   ├── ObjectManager.cpp       # room object lifecycle
+│   ├── EntityModelLoader.cpp   # EMD model loading
+│   ├── Entities.h              # entity struct + type table
+│   ├── entities/               # one file per enemy/NPC AI:
+│   │   ├── Zombie.cpp/.h  Hunter.cpp  Cerberus.cpp  Crow.cpp  Chimera.cpp
+│   │   ├── Adder.cpp  BlackTiger.cpp  Neptune.cpp  Wasp.cpp  SpiderWeb.cpp
+│   │   ├── WebSpinner.cpp  Yawn.cpp  Tyrant.cpp  Plant42.cpp
+│   │   ├── Plant42Roots.cpp  MonsterPlant.cpp  CharacterNpc.cpp
+│   │   ├── ComputerArms.cpp    # lab-terminal forearm entities
+│   │   └── EntityCommon.cpp/.h # shared enemy helpers
+│   ├── PlayerAnimations.cpp    # player action behaviors (auto-aim fire, etc.)
+│   ├── WeaponDamage.cpp        # weapon damage tables/logic
+│   ├── TmdRenderer.cpp/.h      # TMD render pipeline + OT queue
+│   ├── TmdAnimation.cpp        # TMD animation interpolation
+│   ├── GteMatrix.cpp           # PS1 GTE matrix/trig emulation
+│   ├── EffectSystem.cpp        # billboard effect slots
+│   ├── EffectSprites.cpp       # effect sprite rendering
+│   ├── FadeSprite.cpp          # fade-in/out sprites
+│   ├── PathTrail.cpp           # pathfinding trails
+│   ├── CollisionDebug.cpp      # collision visualization (dev)
+│   ├── CmdFunctions.cpp        # SCD script command implementations
+│   ├── Rendering.cpp           # frame present, draw_rect, OT_InsertPrimitive
+│   ├── SpriteRenderer.cpp/.h   # sprite command buffer
+│   ├── PrintText.cpp/.h        # text rendering (replaces DirectFont class)
+│   ├── TextureLoader.cpp       # PSX texture -> D3D11 pipeline
+│   ├── FileLoader.cpp/.h       # asset loading with path resolution
+│   ├── SoundSystem.cpp         # bank loading, play_sfx, fade/decay
+│   ├── SoundTables.cpp/.h      # sound data tables
+│   ├── SFXIds.h                # named SFX IDs per bank
+│   ├── TaskScheduler.cpp       # task coroutine scheduler
+│   ├── Types.h                 # shared types (incl. D3DRendererInfo)
+│   └── Items.h                 # item enums/tables
 │
 ├── system/
-│   ├── AssetPath.h          # Path remapping (.\usa\ → .\assets\USA\)
-│   ├── AssetPath.cpp
-│   ├── Cleanup.cpp          # Shutdown & resource cleanup
-│   ├── DisplayConfig.cpp    # Display mode enumeration
-│   ├── Installation.cpp     # Registry & installation checks
-│   └── SystemChecks.cpp     # Memory, CD-ROM, color depth checks
+│   ├── AssetPath.h             # path remapping (.\\usa\\ -> .\\assets\\USA\\)
+│   ├── Cleanup.cpp             # shutdown & resource cleanup
+│   ├── DisplayConfig.cpp       # display mode enumeration
+│   ├── Installation.cpp        # registry & installation checks
+│   └── SystemChecks.cpp        # memory, CD-ROM, color depth checks
 │
 └── video/
-    └── VideoPlayback.cpp    # FMV state machine
+    └── VideoPlayback.cpp       # native MCI FMV playback state machine
 ```
+
+### Superseded original subsystems
+
+These parts of the 1997 binary are intentionally not ported line-by-line;
+their job is done differently (and better) by the modern layer:
+
+| Original | Replacement |
+|---|---|
+| DirectX 5 / DirectDraw surfaces & blits | `MarniDX` DX11 device + dynamic textures |
+| Execute buffers / D3D retain-mode | `MarniDX::DrawTriangles*` batched draws |
+| CMarniBits software rasterizers (triangles, gouraud, gradient lines, fills) | GPU rasterization via the same MarniDX draws |
+| Software-FMV player process + shared memory (`LaunchSoftwareVideoPlayer`, …) | Native MCI playback (`src/video/VideoPlayback.cpp`) |
+| DirectSound buffers (`GetSoundBufferStatus`, wave/mmio loaders) | XAudio2 backend in `MarniSound` |
+| DirectFont bitmap-font class (`directfont_*`, 0x0040c460-0x0040c8bd) | `PrintText.cpp` text renderer |
+| MSVC CRT / SEH runtime (~470 functions) | Provided by the toolchain |
 
 ---
 

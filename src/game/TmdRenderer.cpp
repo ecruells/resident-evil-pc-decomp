@@ -539,6 +539,7 @@ void FlushTmdObjects(void)
 
             // F7 (debug builds): one line per queued TMD object with the
             // screen box its unclipped vertices cover.
+#ifdef _DEBUG
             if (g_debugDumpDrawFlag) {
                 float bx0 = 1e9f, by0 = 1e9f, bx1 = -1e9f, by1 = -1e9f;
                 int vis = 0;
@@ -557,6 +558,7 @@ void FlushTmdObjects(void)
                            vis, vtxCount, (unsigned int)tex, triAlpha,
                            unlit ? 1 : 0, e->depth, bx0, by0, bx1, by1);
             }
+#endif
 
             // Emit triangles
             for (int pIdx = 0; pIdx < listCount; pIdx++) {
@@ -818,9 +820,13 @@ checkSwitchZone:
 
 // (0x00483250) - Entity sprite rendering helper
 // Forwards joint sprite data and depth shift to the TMD renderer.
+// NOTE: 0x00483230 (tmd_render_object_cb) is a byte-identical twin of this
+// thunk used by tyrant_draw_heart / FUN_00429d50 / FUN_00469d20 call sites;
+// the port serves both from this single implementation.
 void FUN_00483250(int p0, int p1, int p2, int p3, int p4, int p5, void* p6)
 {
     // Assembly: MOV EAX,[ESP+0x18]; MOV ECX,[ESP+0x10]; PUSH EAX; PUSH ECX; CALL FUN_00483080
+    // (also covers 0x00483230)
     FUN_00483080((void*)p3, p5);
 }
 
@@ -1352,5 +1358,84 @@ void room_camera_and_lighting_update(void)
             }
         }
     }
+}
+
+// ============================================================================
+// Float vector / matrix helpers (original cluster 0x0048c5b0..0x0048cad0).
+// Self-contained float math used by the viewport normal recalculation in
+// CMarniViewport2::CopyFrom/Convert0 and by entity camera/web code. Angles
+// are expressed in "turns" (1/360 of a circle), matching the original's
+// atan * (180/pi) / 360 pipeline.
+// ============================================================================
+
+// (0x0048c5b0) - Normalize a 3-float vector in place.
+void vec3_normalize(float* v)
+{
+    float len = sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    v[0] /= len;
+    v[1] /= len;
+    v[2] /= len;
+}
+
+// (0x0048c690) - atan-based angle in turns: atan(tangent), negated when
+// signRef is negative (the original tests the raw sign bit of the first
+// stack argument), scaled by 180/pi then 1/360.
+static float angle_atan_turns(float signRef, float tangent)
+{
+    float deg = atanf(tangent) * 57.29577951f;
+    if (signRef < 0.0f) deg = -deg;
+    return deg * (1.0f / 360.0f);
+}
+
+// (0x0048c6d0) - Angle between two 2D points (x1,y1)-(x2,y2) in turns,
+// measured from the Y axis (atan(dx/r) with the dy sign as quadrant fix).
+float angle_between_points_turns(int x1, int y1, int x2, int y2)
+{
+    float dx = (float)(y2 - y1);
+    float dz = (float)(x2 - x1);
+    float r = sqrtf(dx * dx + dz * dz);
+    return angle_atan_turns(dx / r, dz / r);
+}
+
+// (0x0048c8f0) - Rotate one matrix row's [1]/[2] float pair by `turns`
+// (fraction of a full circle). Row is addressed as {float a; float y; float z;}
+// at base+0/+4/+8.
+static void rot_row_yz(float turns, float* row)
+{
+    float y = row[1];
+    float angle = turns * 6.2831855f;
+    float s = sinf(angle);
+    float c = cosf(angle);
+    row[1] = s * row[2] + c * y;
+    row[2] = c * row[2] - s * y;
+}
+
+// (0x0048c950) - Same rotation for the [0]/[2] pair of a float triple.
+static void rot_row_xz(float turns, float* row)
+{
+    float x = row[0];
+    float angle = turns * 6.2831855f;
+    float s = sinf(angle);
+    float c = cosf(angle);
+    row[0] = s * row[2] + c * x;
+    row[2] = c * row[2] - s * x;
+}
+
+// (0x0048ca10) - Rotate the three rows of a 3x4 float matrix about the axis
+// handled by rot_row_yz (each row's components 1 and 2).
+void matrix_rotate_rows_yz(float turns, float* m)
+{
+    rot_row_yz(turns, m + 0);   // row 0: elements 0,1,2
+    rot_row_yz(turns, m + 4);   // row 1: elements 4,5,6
+    rot_row_yz(turns, m + 8);   // row 2: elements 8,9,10
+}
+
+// (0x0048cad0) - Rotate the three rows of a 3x4 float matrix about the axis
+// handled by rot_row_xz (each row's components 0 and 2).
+void matrix_rotate_rows_xz(float turns, float* m)
+{
+    rot_row_xz(turns, m + 0);
+    rot_row_xz(turns, m + 4);
+    rot_row_xz(turns, m + 8);
 }
 

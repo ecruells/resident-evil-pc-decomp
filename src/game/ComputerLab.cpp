@@ -29,6 +29,26 @@
 // port keeps one array per logical step list and reproduces the shift as an
 // explicit base offset, which is why e.g. s_loginSteps is indexed [subSub2]
 // from one caller and [6 + subSub2] from another.
+//
+// Original step-handler tables (Ghidra names them lab_tN_stepM; every entry's
+// behaviour is implemented by this file's state machine):
+//   T1 @0x004b44a8: 0x004123d0 (computer_lab_init) 0x004125b0 0x00413920
+//                   (computer_lab_finish)
+//   T2 @0x004b44b8: 0x004125d0 0x00412920 0x00412df0 0x00413380 0x00413710
+//   T3 @0x004b44d0: 0x00412680 0x004126c0 0x00412730 0x00412790 0x00412940
+//                   0x00412a20 0x00412bf0
+//   T4 @0x004b44f0: 0x00412a40 0x00412a80 0x00412af0 0x00412a80 0x00412b50
+//                   0x00412bb0 0x00412c10 0x00412c30 0x00412c60 0x00412d10
+//                   0x00412d80   (step 3 reuses step 1's handler)
+//   T5 @0x004b4520: 0x00412f60 0x00412fd0 0x00413040 0x004130d0 0x00413170
+//                   0x004131b0 0x00413240 0x00413280 0x004132f0
+//   T6 @0x004b4548: 0x004133a0 0x004134a0 0x004134e0
+//   T7 @0x004b4558: 0x00413500 0x00413540 0x004135a0 0x004135d0 0x00413650
+//                   0x004136c0 0x00413780 0x00413820 0x00413850
+//   T8 @0x004b4580: 0x00413a00 0x00413b50 0x00413ba0
+//   T9 @0x004b4590: 0x00413ea0 0x00413ec0 0x00413f90
+//   plus computer_lab_finish_helper (0x00413c10), called once from
+//   computer_lab_finish (0x00413930).
 // ============================================================================
 #include "../Globals.h"
 #include "Types.h"

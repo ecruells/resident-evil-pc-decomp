@@ -384,6 +384,9 @@ static inline int GteFixedMul14(int a, int b)
 // m = Ry(r) * m
 // The original scales m up by 4, calls GteRotationMatrixYXZ(0, r, 0) and
 // composes, then scales back down by 4; this is the equivalent closed form.
+// The compose step is matrix_compose_yxz (0x00440e30) in the original:
+// GteRotationMatrixYXZ(0,r,0) into a scratch matrix followed by FUN_00440e80
+// (the covered compose helper); the closed form below replaces both.
 // ============================================================================
 MATRIX* RotMatrixY(int r, MATRIX* m)
 {

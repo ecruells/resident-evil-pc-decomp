@@ -9,6 +9,8 @@
 //   monster_plant_noop        0x0045c440   state 4  (bare RET)
 //   monster_plant_select      0x0045aec0   variant selector
 //   monster_plant_idle_fidget 0x0045c580   shared idle-sway helper
+//   (0x0045c1f0 - the damaged-state countdown case of the switch inside
+//    monster_plant_damaged/die; Ghidra lists it separately, port inlines it)
 //
 // ---------------------------------------------------------------------------
 // THREE OVERLAPPING TABLE BASES IN ONE POINTER BLOCK

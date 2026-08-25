@@ -77,6 +77,10 @@ static BOOL LoadIniConfiguration(void)
 // ============================================================================
 int PASCAL WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine, int nCmdShow)
 {
+    // Dev tooling: capture fail-fast precursors to crash.log (see CrashLog.cpp)
+    extern void crashlog_install(void);
+    crashlog_install();
+
     // 0x00441350: __chkstk() - stack probe for large stack frame
 
     // --- 0x0044136b: OS Version Check ---

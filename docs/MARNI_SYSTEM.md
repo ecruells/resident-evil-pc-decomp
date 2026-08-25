@@ -24,11 +24,18 @@
 
 The Marni System is Capcom's PSYQ-to-DirectX compatibility layer that allows PlayStation 1 game code to run on Windows PC with minimal changes. It wraps PS1 graphics, input, and audio APIs behind DirectX interfaces.
 
+**Status: fully ported.** Every Marni System function of the original binary
+is accounted for: the class methods and helpers are implemented in this layer,
+and the raw DirectDraw/D3D5 device paths plus the software rasterizers were
+replaced by the DX11 equivalents described here (tagged `d3d5-superseded` in
+the Ghidra project; see `docs/ARCHITECTURE.md`, "Superseded original
+subsystems").
+
 | Aspect | Original (1997) | Modern Port |
 |--------|-----------------|-------------|
-| Graphics | DirectX 5.0 (DirectDraw, Direct3D 5) | Direct3D 11 |
-| Audio | DirectSound | XAudio2 |
-| Input | DirectInput | XInput |
+| Graphics | DirectX 5.0 (DirectDraw, Direct3D 5) | Direct3D 11 (`src/marni/MarniDX.*`) |
+| Audio | DirectSound | XAudio2 (`src/marni/MarniSound.*`) |
+| Input | DirectInput | XInput (`src/marni/MarniInput.*`) |
 | Source Files | `src/marni/*`, `src/game/TextureLoader.cpp`, `src/game/SpriteRenderer.*` |
 
 ### Key Architectural Decisions
@@ -37,6 +44,7 @@ The Marni System is Capcom's PSYQ-to-DirectX compatibility layer that allows Pla
 2. **32-bit Architecture**: The game is strictly 32-bit, using Win32 API (no 64-bit types or functions)
 3. **VTable Compatibility**: All original class vtables are preserved at their original addresses to maintain binary layout compatibility with the original code that calls through function pointers
 4. **Task-Based Game Logic**: Game logic is organized into tasks scheduled each frame
+5. **Backend Isolation**: no ported game code calls raw DirectX APIs - everything routes through the Marni classes, which forward to `MarniDX`. This is what made the D3D5 -> DX11 swap possible without touching game code.
 
 ### Entry Point
 
@@ -997,6 +1005,13 @@ Screen
 | `src/game/SpriteRenderer.h` | SpriteCommand struct, OT entry, sprite functions |
 | `src/game/SpriteRenderer.cpp` | PSYQ GPU sprite emulation (19 functions) |
 | `src/Globals.h` | Global variable declarations for all Marni subsystems |
+| `src/marni/MarniDX.h` | Backend interface: device/shader setup, texture create/destroy, DrawRect/DrawTriangles*, adapter enumeration |
+| `src/marni/MarniDX.cpp` | The actual DX11 implementation behind every vtable method |
+| `src/marni/MarniSound.h/.cpp` | DirectSound-compatible sound API on XAudio2 (banks, play_sfx, fade/decay live in `src/game/SoundSystem.*`) |
+
+Every original address in the `0x0041xxxx-0x0049xxxx` Marni region is either
+implemented above or triaged out of scope (compiler SEH/static-init glue,
+raw-API plumbing replaced by MarniDX) - see `tools/progress_report.py`.
 
 ---
 
@@ -1025,3 +1040,19 @@ Screen
 4. **Palette Handling**: Original CLUT was stored as a D3D palette object. Modern converts indexed pixel data to RGBA on CPU upload, eliminating the need for palette textures.
 
 5. **Async Creation**: Original used the Marni async system to defer texture creation to the main thread (D3D APIs must be called from the creation thread). This pattern is preserved with `ExecAsync`.
+
+6. **Software rasterizers retired**: the original's CPU pixel pipelines -
+   CMarniBits triangle/gouraud/gradient-line rasterizers, sprite blitters
+   with CLUT and color-multiply paths, fill rects, and the TransAlpha
+   polygon/rect execute-buffer paths - are all replaced by the GPU draws of
+   `MarniDX::DrawTriangles*` / `MarniDX::DrawRect`. Their original functions
+   are documented in Ghidra (names like `bits_sprite_blit_dispatch`,
+   `d3d_transalpha_polygon`) but intentionally not ported.
+
+7. **Driver/adapter enumeration**: the original walked DirectDraw/D3D5
+   enumeration callbacks into a 0x11C-byte-stride table at `0x007e0e10`
+   (`md3d_detect_drivers`, `d3d_enum_mode_callback`). Modern:
+   `EnumerateD3DRenderers` (0x004977f0) fills `g_D3DRenderers` via DXGI, and
+   `GetDirect3DDriverCount/Name` (0x004486e0/0x00448710) read it back with
+   their original guards ("Direct3D::RequestDriverCount" /
+   "Direct3D::RequestDriverName").

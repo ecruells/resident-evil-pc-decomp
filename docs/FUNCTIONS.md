@@ -833,7 +833,7 @@ int GetDisplayModeCount(void);
 
 **Return Value:** Number of display modes
 
-**Status:** ⚠️ Stub implementation (returns 0)
+**Status:** Implemented (DXGI-backed) in src/system/DisplayConfig.cpp - enumerates adapters/modes instead of DirectDraw.
 
 ---
 
@@ -855,7 +855,7 @@ void GetDisplayModeRect(
 - `modeIndex` - Index of the display mode
 - `pRect` - Buffer to receive: [width, height, bpp, refresh, flags]
 
-**Status:** ⚠️ Stub implementation (returns 640x480 defaults)
+**Status:** Implemented (DXGI-backed) in src/system/DisplayConfig.cpp.
 
 ---
 
