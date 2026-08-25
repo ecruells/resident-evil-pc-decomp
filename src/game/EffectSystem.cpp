@@ -2617,6 +2617,37 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
 
     const unsigned char* color = g_EffectColorRecords[colorIdx].table + tint * 3;
 
+    // ---- room effect sprites draw in their OWN authored colours ----
+    //
+    // The original resolves the RGB through g_EffectColorRecords (0x004c5288)
+    // + tint*3 exactly as above (0x0047c99e), but its texture layer also
+    // carries a per-primitive CLUT coordinate for these sprites
+    // (g_TextureDesc.unk10 = (spriteInfo[2] & 0x3f) << 4, stored by
+    // setup_effect_sprite_textures at 0x0047bdab) that selects which 16-entry
+    // CLUT row of the resident page the art indexes - a second palette axis
+    // that has no equivalent once the page is baked to RGBA. Baking CLUT row 0
+    // AND multiplying by the record tint applies the variant selection twice.
+    //
+    // The flooded rooms' type-0x17 water ripple (ROOM40D0/40E0) shows it: rec
+    // 24, band [147,211) -> colour record 41 (0x29) = {ffffff, b4c8b4}, tint =
+    // depthGroup>>3 = 1 (spawners: room_action_effect 0x0041ba10 with
+    // depthGroup 8, and SCD cmd_effect_spawn 0x004316c0 - ROOM40D0's script at
+    // RDT+0x13CE4/0x13CF0 - with parentParam 0x000B), so the ripple's light-
+    // blue RDT art came out green. The per-room TIM is authored with its final
+    // palette (the ripple's CLUT row 0 IS the light-blue ramp), so sprites
+    // served from the room pages (SRV 11-14) render untinted; weapon-FX sheets
+    // (core00, SRV 3-10) keep their records - those differentiate blood red
+    // from spray yellow on one shared sheet.
+    bool roomArt = false;
+    for (int rSlot = 0; rSlot < 8; rSlot++) {
+        if (g_abEffSpriteIndexTable[8 + rSlot] == eff->effectType) {
+            roomArt = true;
+            break;
+        }
+    }
+    static const unsigned char kRoomArtNoTint[3] = { 0xff, 0xff, 0xff };
+    if (roomArt) color = kRoomArtNoTint;
+
     unsigned int stage = (unsigned int)g_stageId;
     if (g_stageId > 4) stage -= 5;
     unsigned int iCam = ((unsigned int)g_roomId + stage * 0x20) * 8 + (unsigned int)g_roomCameraId;
