@@ -3,81 +3,118 @@
 RDT files (.rdt) define all data for a single room in Resident Evil 1.
 Each room has its own .rdt file located at:
 
-    .\usa\stage{X}\room{YY}.rdt
+    .\usa\stage{S}\room{S}{RR}{V}.rdt
 
-Where `X` is the stage ID + 1 (hex digit) and `YY` is the room ID (two hex digits).
+Where `S` is the stage ID + 1 (hex digit), `RR` is the room ID (two hex
+digits), and the trailing digit `V` is the **scenario/character selector**:
+`'0'` for the Chris scenario, `'1'` for Jill — chosen by `g_main_state_flags`
+bit 0x800000, which character selection sets whenever the picked character ID
+is non-zero (`CharacterSelectionScreen.cpp:700`, `SaveLoadScreen.cpp:662`;
+built by `LoadRoomRdt`, 0x00477d90, from the path template at 0x004c44f8).
+E.g. stage 1 room 06 is `.\usa\stage1\room1060.rdt`.
 
 ## File Structure
 
 The RDT file is a contiguous binary blob. After loading via `LoadFile()`, all
 embedded relative pointers are relocated to absolute memory addresses by
-`LoadRoomRdt()` (0x00477d90).
+`LoadRoomRdt()` (0x00477d90). The C++ mirror of the whole structure lives in
+`src/game/Types.h` (`struct RDT`, `RDT_Light`, `RDT_Camera`, `CAM_SWITCH_ZONE`,
+`RDT_Boundary`, `RDT_BoundaryHeader`).
 
-### Header (0x00 - 0x0B)
+The layout below describes the file **as shipped**; several fields change
+meaning once relocated or rewritten at load time. Those cases are called out.
 
-| Offset | Size  | Type  | Description |
-|--------|-------|-------|-------------|
-| 0x00   | 1     | char  | Unknown |
-| 0x01   | 1     | char  | Number of cameras in this room |
-| 0x02   | 1     | char  | Number of sound bank table entries |
-| 0x03   | 3     | char  | Unknown |
-| 0x06   | 2     | short | Ambient light � Red component |
-| 0x08   | 2     | short | Ambient light � Green component |
-| 0x0A   | 2     | short | Ambient light � Blue component |
+### Header (0x00 - 0x47)
+
+| Offset | Size  | Type   | Description |
+|--------|-------|--------|-------------|
+| 0x00   | 1     | uchar  | `sprites_count` — number of active room sprite entries (`g_RoomSprEntries`). Overwritten at runtime by `Room_LoadCameraSprites` (0x004757c0), so the file value is never used as-is |
+| 0x01   | 1     | uchar  | `cameras_count` — number of camera entries following the header (also drives background PAK loading) |
+| 0x02   | 1     | uchar  | `omodel_slot_count` — number of `{TMD,TIM}` model pairs at `items_models` **and** number of 0xA4-byte omodel records `room_set` carves out of the VB block. Never read by any sound path on the PC engine |
+| 0x03   | 1     | uchar  | `obstacles_count` — number of `{TMD,TIM}` pairs at `obstacles_models` and of 0xA4-byte interactable-obstacle records carved after the omodel records (`g_interactable_table`) |
+| 0x04   | 2     | uchar  | Reserved — no reader anywhere in the decompiled binary |
+| 0x06   | 2     | short  | Ambient light — Red component (12-bit PS1 channel) |
+| 0x08   | 2     | short  | Ambient light — Green component (12-bit PS1 channel) |
+| 0x0A   | 2     | short  | Ambient light — Blue component (12-bit PS1 channel) |
+| 0x0C   | 0x3C  | Light[3]| Room-wide light set, see below |
+
+Ambient light is fed straight into `setBackColor()`, which scales the 12-bit
+channels by 255/4096. Reading these as bytes instead of shorts under-exposes
+every room 8x (see the comment at `src/game/GameState.cpp:1431`).
 
 ### Lights (0x0C - 0x47)
 
-3 light structures, each 0x14 (20) bytes:
+3 light structures, each 0x14 (20) bytes. One room-wide set shared by every
+camera — `update_entity_lighting` walks them at `g_RdtPointer + i*0x14`
+(SCD command 0x47 can swap them at runtime; the computer-lab cutscene backs up
+and restores all three):
 
-| Offset | Size  | Type  | Description |
-|--------|-------|-------|-------------|
-| 0x00   | 4     | int   | Position X |
-| 0x04   | 4     | int   | Position Y |
-| 0x08   | 4     | int   | Position Z |
-| 0x0C   | 1     | char  | Red component |
-| 0x0D   | 1     | char  | Green component |
-| 0x0E   | 1     | char  | Blue component |
-| 0x0F   | 1     | char  | Zero (padding) |
-| 0x10   | 1     | char  | Zero (padding) |
-| 0x11   | 1     | char  | Zero (padding) |
-| 0x12   | 2     | short | Light radius |
+| Offset | Size  | Type   | Description |
+|--------|-------|--------|-------------|
+| 0x00   | 4     | int    | Position X |
+| 0x04   | 4     | int    | Position Y |
+| 0x08   | 4     | int    | Position Z |
+| 0x0C   | 1     | uchar  | Red component |
+| 0x0D   | 1     | uchar  | Green component |
+| 0x0E   | 1     | uchar  | Blue component |
+| 0x0F   | 1     | uchar  | Zero (padding) |
+| 0x10   | 2     | ushort | Light type — ONE 16-bit field. 0 = point light with radial falloff, non-zero = directional (colour passed through unchanged). Selected by a **word** compare at 0x00481673; modelling it as two bytes made high-byte-coloured lights render wrong |
+| 0x12   | 2     | short  | Light radius (point lights only) |
 
 ### Data Type Pointers (0x48 - 0x93)
 
-All pointers are relative offsets within the .rdt file. After loading,
-`LoadRoomRdt()` relocates them to absolute addresses by adding the file's
-base address minus 3 (due to the PS1 pointer format).
+All 19 pointer fields are relative offsets within the .rdt file, stored as
+`target - (file_base + 3)` — a PS1-era bias. `LoadRoomRdt` relocates every
+dword from 0x48 to 0x94 by adding the load base minus 3.
 
-| Offset | Size  | Type   | Description | Asset Type |
-|--------|-------|--------|-------------|------------|
-| 0x48   | 4     | ptr    | Camera switch zone definitions | � |
-| 0x4C   | 4     | ptr    | Room collision boundaries | .blk |
-| 0x50   | 4     | ptr    | Room 3D item models & textures | .tmd/.tim |
-| 0x54   | 4     | ptr    | Obstacles & movable object models | .tmd/.tim |
-| 0x58   | 4     | ptr    | Block data | .blk |
-| 0x5C   | 4     | ptr    | Footstep sound zone map | .flr |
-| 0x60   | 4     | ptr    | Initialization scripts (run once at room load) | .scd |
-| 0x64   | 4     | ptr    | Main scripts (run every frame) | .scd |
-| 0x68   | 4     | ptr    | Event/conditional scripts | .scd |
-| 0x6C   | 4     | ptr    | Unknown | � |
-| 0x70   | 4     | ptr    | Unknown | � |
-| 0x74   | 4     | ptr    | Message text data | .msg |
-| 0x78   | 4     | ptr    | Unknown | � |
-| 0x7C   | 4     | ptr    | Effect animation index | .esp |
-| 0x80   | 4     | ptr    | Effect animation data | .eff |
-| 0x84   | 4     | ptr    | Effect sprite image textures | .tim |
-| 0x88   | 4     | ptr    | Sound attribute table | .snd |
-| 0x8C   | 4     | ptr    | VAB sound bank header | .vh |
-| 0x90   | 4     | ptr    | VAB sound bank data | .vb |
+| Offset | Size | Type   | Field (Types.h)          | Description | Asset |
+|--------|------|--------|--------------------------|-------------|-------|
+| 0x48   | 4    | ptr    | `cam_switch_zones`       | Camera switch zone table (see below) | — |
+| 0x4C   | 4    | ptr    | `boundaries`             | Room collision boundaries (see `.blk` section) | .blk |
+| 0x50   | 4    | ptr    | `items_models`           | Room-object (omodel) models — pushable/climbable objects: `omodel_slot_count` × `{TMD*, TIM*}` pairs, consumed by SCD 0x1F | .tmd/.tim |
+| 0x54   | 4    | ptr    | `obstacles_models`       | Interactable obstacle models (desks/containers): header byte 0x03 × `{TMD*, TIM*}` pairs | .tmd/.tim |
+| 0x58   | 4    | ptr    | `walk_zones`             | Walkable-zone grid used for NPC navigation (see below) | — |
+| 0x5C   | 4    | ptr    | `footstep_sound_zones`   | Footstep sound zone map (see below) | .flr |
+| 0x60   | 4    | ptr    | `initialization_scd`     | Init script (run once at room load) | .scd |
+| 0x64   | 4    | ptr    | `scd_opcodes`            | Main script (run every frame) | .scd |
+| 0x68   | 4    | ptr    | `scd_opcodes2`           | Event script table (see SCD section) | .scd |
+| 0x6C   | 4    | ptr    | `player_anim_header`     | Room-specific player animation **header**, copied into `g_playerEntity.jointMoveData2` by `room_set` and driven with `Joint_move` (e.g. the scripted door-push / stair motions in `PlayerAnimations.cpp`) | — |
+| 0x70   | 4    | ptr    | `player_anim_base`       | Matching animation **frame-data base** → `jointMoveData3` | — |
+| 0x74   | 4    | ptr    | `messages`               | Message text table (see `.msg` section) | .msg |
+| 0x78   | 4    | ptr    | —                        | Reserved: no reader anywhere in the decompiled binary | ? |
+| 0x7C   | 4    | ptr    | `effect_anim_index`      | Effect animation index block | .esp |
+| 0x80   | 4    | ptr    | `effect_anim_data`       | Effect animation frame data | .eff |
+| 0x84   | 4    | ptr    | `effect_anim_sprite`     | 8 dwords of effect sprite-sheet relative pointers (see below) | .tim |
+| 0x88   | 4    | ptr    | `sound_attribute_table`  | Sound attribute table (.snd). Relocated like the rest but **never dereferenced** by the PC engine — PS1 leftover; the port plays WAVs instead | .snd |
+| 0x8C   | 4    | ptr    | `vab_header_file`        | VAB header (.vh). Loaded, also unused on PC (WAV replacement) | .vh |
+| 0x90   | 4    | ptr    | `vab_sound_file`         | VAB body (.vb). On PC this region is **reused as scratch memory**: `room_set` carves `omodel_slot_count` + byte-0x03 0xA4-byte room-object records out of it (`g_omodel_table`, `g_interactable_table`) before the init script runs | .vb |
+
+### Pointer relocation passes (`LoadRoomRdt`, 0x00477d90)
+
+1. **Header pointers 0x48..0x93**: `value += file_base - 3`.
+2. **Camera entries**: for each of `cameras_count` cameras, both `mask_pointer`
+   and `tim_mask_pointer` get the same treatment.
+3. **Item model pairs**: `omodel_slot_count` pairs at `items_models`; each
+   non-null half gets `+= file_base - 3`. The matching slot in
+   `g_omodel_table` is zeroed in reverse order.
+4. **Obstacle model pairs**: same, count = header byte 0x03, into
+   `g_interactable_table`.
+5. **Event script table** (RDT+0x68) is special: its leading dword offsets are
+   relative to the *table itself* and are relocated with plain
+   `offset += table_base` (no -3), terminated by a zero dword.
+
+The -3 bias means a stored value of 3 points at the start of the file; a null
+pointer stays null and is skipped by every pass.
 
 ### Cameras (0x94 +)
 
-Variable-length array of camera entries. The number of entries is given by
-`cameras_count` in the header. Each camera is 0x2C (44) bytes:
+Variable-length array of camera entries immediately after the 0x94-byte header
+(`(RDT_Camera*)((char*)g_RdtPointer + sizeof(RDT))`). The number of entries is
+given by `cameras_count` in the header. Each camera is 0x2C (44) bytes:
 
 | Offset | Size  | Type  | Description |
 |--------|-------|-------|-------------|
-| 0x00   | 4     | int   | Mask data pointer (relocated) |
+| 0x00   | 4     | int   | Mask data pointer (relocated) — camera sprite/mask block, see below |
 | 0x04   | 4     | int   | TIM mask texture pointer (relocated) |
 | 0x08   | 4     | int   | Camera position X |
 | 0x0C   | 4     | int   | Camera position Y |
@@ -86,8 +123,127 @@ Variable-length array of camera entries. The number of entries is given by
 | 0x18   | 4     | int   | Camera look-at target Y |
 | 0x1C   | 4     | int   | Camera look-at target Z |
 | 0x20   | 4     | int   | Camera roll angle |
-| 0x24   | 4     | int   | Light index / reserved |
+| 0x24   | 4     | int   | Reserved (always read as part of the view block, never used alone) |
 | 0x28   | 4     | int   | Field of view (FOV) |
+
+`Room_SetupCamera` (0x00462970) feeds `fov` to `set_scene_render_param` and the
+8-int block at +0x08 to `MatrixToCamera` as a `MATRIX`, so the position/look-at
+pairs are really the camera view transform in the engine's matrix layout.
+
+### Camera switch zones (RDT+0x48)
+
+A flat table of 0x14 (20)-byte records (`CAM_SWITCH_ZONE` in Types.h). The
+table is grouped by source camera: every record sharing `camFrom` belongs to one
+camera and the first record of each group is that group's header; the following
+records are the trigger quads tested against the player. Entering a quad sets
+`g_roomCameraId = camTo`. SCD commands rewrite zone entries at runtime:
+0x09 / `cmd_cut_lock_set` force a cut, and 0x3A / `cmd_cut_zone_set`
+(0x00431e50) writes a zone's `camFrom` (+0x02) and `camTo` (+0x00).
+
+| Offset | Size | Type   | Description |
+|--------|------|--------|-------------|
+| 0x00   | 2    | short  | `camTo` — camera to cut to on entry |
+| 0x02   | 2    | short  | `camFrom` — camera this group belongs to |
+| 0x04   | 2    | short  | Quad corner 0, X (XZ plane) |
+| 0x06   | 2    | short  | Quad corner 0, Z |
+| 0x08.. | ...  |        | Corners 1-3 as `(x, z)` short pairs |
+
+All eight coordinates are **zero-extended from 16 bits** by the original test
+(`is_entity_in_switch_zone`), i.e. they behave unsigned.
+
+### Walkable zone table (RDT+0x58)
+
+The NPC navigation grid. Layout:
+
+```
+uchar  count                 // zone count
+uchar  pad
+{ short x1, z1, x2, z2; ushort field_08; ushort flags; }  // × count, 0xC stride
+```
+
+* Containment test is half-open: `x ∈ [x1, x2)`, `z ∈ [z1, z2)` via unsigned
+  wrap-around compare — `walk_zone_find` (0x00460230) returns the containing
+  zone index or 0xFF.
+* On a hit, `field_08`/`flags` are parked in `g_playerDisplacement` /
+  `player_distance_z` as a side effect (overwritten again downstream).
+* Entities remember their current/target zone in Entity+0x174/+0x175;
+  `zone_walk_ccw` (0x0045fdb0) / `zone_walk_cw` (0x0045fae0) BFS across shared
+  edges through this table, and `walk_zone_shared_edge` computes edge midpoints
+  between adjacent zones.
+
+### Item & obstacle model tables (RDT+0x50 / RDT+0x54)
+
+Both are flat arrays of 8-byte `{ TMD*, TIM* }` pairs (either half may be null).
+The item pairs are consumed by SCD command 0x1F `cmd_omodel_set`
+(`items_models + slot * 8`, `CmdFunctions.cpp:914`) to build the pushable/
+climbable room objects; the obstacle pairs by the interactable item-event
+command (`obstacles_models + index * 8`, `CmdFunctions.cpp:611`) that builds
+desks/containers. Counts come from the header: item pair count is
+**`omodel_slot_count`**, obstacle pair count is header byte 0x03 — each table
+feeds its own 0xA4-byte record pool (`g_omodel_table` / `g_interactable_table`).
+
+### Footstep sound zones (RDT+0x5C, .flr)
+
+```
+ushort header[?]            // skipped, never read
+{ ushort baseX; ushort baseZ; ushort width; ushort height; ushort soundData; }
+```
+
+`LookupFootstepZone` (0x00460480) scans linearly until `(posX,posZ)` falls in
+`[baseX, baseX+width) × [baseZ, baseZ+height)` and returns
+`(height >> 8) << 8 | (soundData & 0xFF)` — high byte = surface type, low byte
+= sound offset for that surface. There is **no terminator**: every shipped room
+ends its table with a catch-all zone that always matches, so an entity outside
+the room runs the scan off the end of the RDT (the port adds a 256-entry guard).
+
+### Camera mask/sprite block (`cameras[i].mask_pointer`)
+
+Parsed per camera cut by `Room_LoadCameraSprites` (0x004757c0), which fills
+`g_RoomSprEntries[128]` (max 128 sprites; the final count is written back into
+header byte 0x00):
+
+```
+int32  groupCount
+// group headers, 8 bytes each:
+{ ushort spriteCount; ushort texBits; short originX; short originY; } × groupCount
+// sprite records follow the last group header:
+ushort w0                    // low byte = tex U, high byte = tex V
+ushort w1                    // low byte = screen X delta, high byte = screen Y delta
+ushort posData
+ushort flags
+[ushort width; ushort height]           // present only when (flags & 0xF000) == 0
+```
+
+Screen position = `(originX - 0xA0 + xDelta, originY - 0x78 + yDelta)`
+(centred on the 320×240 frame). `texBits & 0x3F` selects the texture page;
+`flags` bits 0-4 add to the texture bank depth, bits 5-6 pick the blend mode,
+bits 7-8 the transparency mode, bit 11 toggles a render flag, and when bit 15
+region is non-zero the sprite size comes from `(flags & 0xF1FF) >> 9` (square)
+instead of explicit width/height. Sprites are grouped: each group's id
+(`grpIdx + 1`) is what SCD visibility commands toggle via
+`Room_ApplySpriteFlags` (0x00432220). `tim_mask_pointer` holds the TIM image
+used to mask the pre-rendered background (`load_room_masks`,
+`load_room_bg_masks`).
+
+### Effect sprite data (RDT+0x7C / 0x80 / 0x84)
+
+`InitRoomEffSprite` loads the animation index + frame-data pair with
+`load_effect_sprite_data(effect_anim_index, effect_anim_data, ...)`, then reads
+**8 dword relative pointers** out of `effect_anim_sprite` (negative offsets —
+the table is walked backwards) into the sheet-pointer table `DAT_00ac9cd0`,
+again with the `-3` bias. The sheets themselves are TIM images loaded by
+`load_effect_sprites`.
+
+### Sound blocks (RDT+0x88 / 0x8C / 0x90)
+
+PS1 legacy. The `.snd` attribute table and `.vh` header are relocated but never
+dereferenced by the PC engine; all audio loads from `.wav` banks instead
+(`bgm_load_and_start`, `load_character_sfx`, `Room_LoadEnemySoundBanks` use
+their own stage/room name tables). The `.vb` body has a second life as heap
+space: `room_set` slices it into 0xA4-byte room-object records — first
+`omodel_slot_count` for `g_omodel_table`, then header byte 0x03 more
+for `g_interactable_table` — before running the init script, which is why the
+room-object system indexes those two tables rather than allocating.
 
 ## Collision Boundary Data (.blk)
 
@@ -163,7 +319,7 @@ in the scratch dword at 0x00be0dfc. The distance actually travelled is left at
 it classifies is always `g_playerPosScratch` (0x00be11b0); the `SVECTOR*` first
 parameter is only an offset added to it. Every caller has to publish the point
 it means into that global first. `check_room_collision` does so at the top of
-each pass, and `FUN_0047d6f0` does so once per endpoint (0x0047d80a) and again
+each pass, and `check_room_collision_two_point` does so once per endpoint (0x0047d80a) and again
 before its re-walk (0x0047d8ec) — as a plain 16-byte VECTOR copy that Ghidra
 renders as five stores through short halves (`player_pos.x._0_2_ = centre->x`
 and friends), which reads like scratch bookkeeping and is easy to mistake for
@@ -172,7 +328,7 @@ previous caller left behind.
 
 ### Two-point body test (0x0047d6f0)
 
-`FUN_0047d6f0(endA, endB)` resolves a body that is too long for the single-point
+`check_room_collision_two_point(endA, endB)` resolves a body that is too long for the single-point
 `check_room_collision`: a prone zombie, or a pushed room object's footprint. The
 two `SVECTOR` endpoints are in body-local space and get rotated twice — by the
 entity yaw (+0x74) to produce the test centres, and by the mirror angle (+0x7E)
@@ -195,8 +351,7 @@ saved slot holds `&group[cellB]` and the loop reads through `[-1]`.
 
 Room 3D objects do NOT go through `check_room_collision` — that function only
 ever walks the boundary records. Objects have their own resolver,
-`update_room_objects` (0x00474090, Ghidra's `update_sounds` — the name is
-wrong, it touches no sound code), called once per frame from `game_loop`
+`update_room_objects` (0x00474090), called once per frame from `game_loop`
 between `DrawFadeSpr` and the camera/lighting update.
 
 #### The `omodel_set` instruction (SCD 0x1F, 0x1C bytes)
@@ -231,7 +386,7 @@ Y rotation cannot mix Y into X or Z, and the boundary test is 2D.
 
 #### The runtime record
 
-The block lives in `g_itemboxes_covers_table[0 .. RDT.sound_banks_count)` and is
+The block lives in `g_omodel_table[0 .. RDT.omodel_slot_count)` and is
 laid out like the head of an `Entity`, so the shared helpers can take one on
 either side of a collision test:
 
@@ -248,7 +403,7 @@ either side of a collision test:
 | +0x88  | 0x8000 — the negative terminator of the size list |
 | +0x8A / +0x8C / +0x8E | half-extents X / Y / Z (`Sca_info` +2/+4/+6) |
 | +0x90 / +0x92 | the entity-side extents (`Sca_info` +8/+10) |
-| +0x94, +0x9C | the two floor-probe endpoints fed to `FUN_0047d6f0` |
+| +0x94, +0x9C | the two floor-probe endpoints fed to `check_room_collision_two_point` |
 
 Flag byte bits: 0x01 = active, 0x02 = intangible, 0x04 = skip the floor probe,
 0x08 = no collision at all, 0x20 = not pushable, 0x40 = climbable.
@@ -268,7 +423,7 @@ For every active record:
 3. at counter == 9 (nine straight frames of pushing into it) the push starts:
    the player's facing snaps to the nearest cardinal, `DAT_00ae9ee8` remembers
    the record, and the push is cancelled again if the object's own floor probe
-   (`FUN_0047d6f0` on +0x94/+0x9C, skipped when flag bit 0x04 is set) hits a
+   (`check_room_collision_two_point` on +0x94/+0x9C, skipped when flag bit 0x04 is set) hits a
    wall, if an enemy is in the way, or if another object overlaps
    (`ChkObjSlide`), each of which parks the counter at 10;
 4. `ChkEntitySlide(player, obj, 0)` resolves the player out of the object —
@@ -360,11 +515,19 @@ Global messages (msg_id bit 6 set) use the `global_messages[]` table at
 
 ## SCD Script Format (.scd)
 
-The SCD (Script) data contains bytecode opcodes that control room behavior:
+The SCD (Script) data contains bytecode opcodes that control room behavior.
+All three blocks are relocated by `LoadRoomRdt` and their base pointers stashed
+in `g_RoomInitScd` / `g_RoomScdOpcodes` / `g_RoomEventScripts`:
 
 - **initialization_scd** (RDT+0x60): Runs once when the room is loaded
+  (`run_command_functions(g_RoomInitScd)` from `room_set`)
 - **scd_opcodes** (RDT+0x64): Runs every frame (main loop)
-- **scd_opcodes2** (RDT+0x68): Event handlers and conditional checks
+- **scd_opcodes2** (RDT+0x68): Event script table. Its leading dwords are
+  offsets relative to the block start, terminated by a zero dword —
+  `LoadRoomRdt` rewrites each one in place into an absolute pointer
+  (`offset += table_base`). Each entry is an independently scheduled event
+  script executed through the 8-slot `ScdEventEntry` context table at
+  0x00bf084c (`room_events_check`).
 
 Script opcodes are processed by `run_command_functions()` during `game_loop()`.
 
@@ -379,16 +542,21 @@ Script opcodes are processed by `run_command_functions()` during `game_loop()`.
 | `ChkOutsideCell` | 0x0047d270 | Boundary quadrant index for a position |
 | `boundary_classify` | 0x0047d1b0 | Shape index if `g_playerPosScratch` is inside a record, else 0xFFFF |
 | `check_room_collision` | 0x0047d310 | Resolves an entity against the room boundaries |
-| `FUN_0047d6f0` | 0x0047d6f0 | Two-point body test (prone entities, pushed objects) |
+| `check_room_collision_two_point` | 0x0047d6f0 | Two-point body test (prone entities, pushed objects) |
 | `cmd_omodel_set` | 0x00461ac0 | SCD 0x1F — builds a room 3D-object record |
-| `update_room_objects` | 0x00474090 | Per-frame object collision + push driver (Ghidra: `update_sounds`) |
+| `update_room_objects` | 0x00474090 | Per-frame object collision + push driver |
 | `ChkEntitySlide` | 0x00474330 | Entity vs object box resolve |
 | `ChkObjSlide` | 0x00474500 | Object vs object box resolve |
 | `ChkPlReachEntity` | 0x00474a20 | Player's 470-unit forward probe vs an object box |
 | `check_climb_object` | 0x00474930 | Action-key climb candidate scan |
 | `behavior_10_push` | 0x00457230 | The push animation (`action_behavior` 0x10) |
 | `set_message_display` | 0x00455670 | Resolves message from RDT or global table |
-| `run_command_functions` | � | Processes SCD script opcodes |
+| `Room_LoadCameraSprites` | 0x004757c0 | Parses the camera mask/sprite block into `g_RoomSprEntries` |
+| `Room_SetupCamera` | 0x00462970 | Applies camera FOV + view matrix |
+| `LookupFootstepZone` | 0x00460480 | Footstep-zone lookup for a position |
+| `walk_zone_find` | 0x00460230 | Walkable-zone lookup (RDT+0x58 grid) |
+| `cmd_cut_zone_set` | 0x00431e50 | SCD 0x3A — writes a camera switch zone's camFrom/camTo |
+| `run_command_functions` | — | Processes SCD script opcodes |
 
 ## Memory Layout
 

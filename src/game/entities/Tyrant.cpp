@@ -1657,7 +1657,7 @@ static void tyrant_think(void)                  // 0x00421eb0
 static void tyrant_act(void)                    // 0x00421e60
 {
     g_animFrameIdSave = (unsigned int)entity_pathfind_update();
-    FUN_0045f970(g_playerEntity.scaMatrixData.localMatrix.t[0],
+    zone_path_find(g_playerEntity.scaMatrixData.localMatrix.t[0],
                  g_playerEntity.scaMatrixData.localMatrix.t[2],
                  reinterpret_cast<int*>(&ew(ENTITY, 0x166)),
                  reinterpret_cast<int*>(&ew(ENTITY, 0x168)));

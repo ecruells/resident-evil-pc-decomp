@@ -886,7 +886,7 @@ static void hunter_behavior_update(void) // 0x00416740
         }
     }
 
-    FUN_0045f970(PLAYER_T_INT[0], PLAYER_T_INT[2],
+    zone_path_find(PLAYER_T_INT[0], PLAYER_T_INT[2],
                  (int*)&ENTITY->player_pos_x, (int*)&ENTITY->player_pos_z);
 
     hunter_behavior_table[ENTITY->action_behavior]();

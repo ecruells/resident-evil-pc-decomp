@@ -155,7 +155,7 @@ void zombie_update(void)
     // [ESP+0xc..0x1a]; they are two adjacent 8-byte SVECTORs, +600 first and
     // -600 second, and only the laying-down branch below uses them.
     //
-    // FUN_0047d6f0 rotates each by the entity's yaw, adds the entity position,
+    // check_room_collision_two_point rotates each by the entity's yaw, adds the entity position,
     // and runs the full boundary push at BOTH points - a zombie on the floor is
     // ~1200 units long, so the single-point check_room_collision test above is
     // not enough. If either end is still inside geometry afterwards it rolls the
@@ -216,7 +216,7 @@ void zombie_update(void)
                 *(unsigned short*)((char*)ENTITY + 0x17a) = (unsigned short)(unsigned int)g_tempVar;
 
                 // Argument order is the original's: the -600 end goes first.
-                unsigned char floorResult = FUN_0047d6f0(&bodyEndBack, &bodyEndFront);
+                unsigned char floorResult = check_room_collision_two_point(&bodyEndBack, &bodyEndFront);
                 ENTITY->dir_control_flags |= floorResult;
             }
         }
@@ -680,7 +680,7 @@ static void explode_leg_and_drop(void)
         saved.pad = *(int*)((char*)ENTITY + 0x40);
 
         ENTITY->status_flags |= 0x0E;
-        g_playerDisplacement = FUN_0047d6f0(&bodyEndBack, &bodyEndFront);
+        g_playerDisplacement = check_room_collision_two_point(&bodyEndBack, &bodyEndFront);
 
         ENTITY->scaMatrixData.localMatrix.t[0] = saved.x;
         ENTITY->scaMatrixData.localMatrix.t[1] = saved.y;
@@ -1233,7 +1233,7 @@ void zombie_dead_animation(void)
         savedPos.z   = ENTITY->scaMatrixData.localMatrix.t[2];
         savedPos.pad = *(int*)((char*)ENTITY + 0x40);
 
-        unsigned char blocked = FUN_0047d6f0(&bodyEndBack, &bodyEndFront);
+        unsigned char blocked = check_room_collision_two_point(&bodyEndBack, &bodyEndFront);
         g_playerDisplacement = blocked;
 
         ENTITY->scaMatrixData.localMatrix.t[0] = savedPos.x;
@@ -2525,7 +2525,7 @@ static void* const zombie_move_behavior_tbl[12] = {
 // zombie_update_player_distance @ 0x00434330
 // Computes Manhattan distance to player and dispatches via the zombie move
 // behavior table indexed by behavior_flags & 0x0F. If is_moving != 0, also
-// calls FUN_0045f970 to update the distance-based pathfinding.
+// calls zone_path_find to update the distance-based pathfinding.
 //
 // Named entity_update_player_distance in the first pass; the switch below is the
 // zombie move behaviour table (0x004bb280), so it is zombie logic and stays here
@@ -2534,7 +2534,7 @@ static void* const zombie_move_behavior_tbl[12] = {
 void zombie_update_player_distance(void)
 {
     if (*(unsigned short*)&ENTITY->is_moving != 0) {
-        FUN_0045f970(
+        zone_path_find(
             g_playerEntityPointer.scaMatrixData.localMatrix.t[0],
             g_playerEntityPointer.scaMatrixData.localMatrix.t[2],
             (int*)&ENTITY->player_pos_x,

@@ -130,7 +130,7 @@ static const CreditEntry s_creditEntries[12] = {
 //
 // The ending never loads an RDT, so ending_result_build installs this one:
 // zeroed everywhere except camera 0's fov, which it stamps with the same
-// value it hands set_title_render_param. The boundary block is a zeroed
+// value it hands set_scene_render_param. The boundary block is a zeroed
 // RDT_BoundaryHeader, so every quadrant span is empty and the effect probes
 // walk nothing.
 // ============================================================================
@@ -446,7 +446,7 @@ static void ending_result_build(void)
     s_camera[5] = 0;
     s_camera[6] = 0;          // roll
     s_camera[7] = 0;
-    set_title_render_param(0x82);
+    set_scene_render_param(0x82);
     MatrixToCamera((MATRIX*)s_camera);
 
     g_CurrentRdtDataTypePtr = (void*)s_endingCamSwitchZone;
@@ -686,7 +686,7 @@ static void ending_epilogue_build(void)
     s_camera[6] = 0;
     s_camera[7] = 0;
     MatrixToCamera((MATRIX*)s_camera);
-    set_title_render_param(0x1A4);
+    set_scene_render_param(0x1A4);
 
     s_lightData[0] = 100;
     s_lightData[1] = 100;

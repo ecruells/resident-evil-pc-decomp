@@ -79,7 +79,7 @@ update_entities (0x0048f0f0)
           │   ├─ SetEntityScaHitData / ResolveEntityScaCollision(player, ENTITY)
           │   ├─ HandleEnemyPlayerCollisions
           │   ├─ check_room_collision(pos, Sca_info+0x0A)
-          │   └─ if laying down: FUN_0047d6f0(±600 body ends)   two-point push
+          │   └─ if laying down: check_room_collision_two_point(±600 body ends)   two-point push
           ├─ if *(u16*)0x174 != 0: blood_splatter_physics(joint+0xF8, 6)
           ├─ is_entity_in_switch_zone → has_enter_switch_zone
           └─ entity_add_fade_sprite ×2 (body, and hand joint if flagged)
@@ -390,7 +390,7 @@ The tail of every death, and the only place a "dead" zombie can stand back up.
 0 → death_timer = 70, blend = 3, hit_state = 1
     moan unless behavior_step & 1 or head joint & 0xCC   (already blown apart)
 1 → action_state += Joint_move(...)
-2 → probe the prone body with FUN_0047d6f0(±800), saving and restoring
+2 → probe the prone body with check_room_collision_two_point(±800), saving and restoring
     localMatrix.t[0..2] + 0x40 and the angle so the probe cannot move anything
     ┌ gets back up if ALL hold:
     │   not SCD-controlled (0x40), behaviour byte != 4, head intact,

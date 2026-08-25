@@ -1448,7 +1448,7 @@ static void npc_state8_action_update(void)
 //   first frame only:  FUN_00471e70 - ignore_player_flag = 1, reset look-at
 //   entity_pathfind_update()        - generic obstacle pathfinder (EntityCommon)
 //   FUN_00471e90                    - behaviour swap by player distance
-//   zone = FUN_00460230(position)   - which RDT+0x58 zone the character is in
+//   zone = walk_zone_find(position)   - which RDT+0x58 zone the character is in
 //   dispatch g_npcWalkBehaviors[action_behavior]
 //   Joint_move(...), blend = 0x1000 / (blend_counter + 1) - animate; the return
 //     (animation-done flag) lands in attacking_direction, which the behaviours
@@ -1578,21 +1578,21 @@ static unsigned char FUN_004720d0(char flag, int pos_x, int pos_z)
 }
 
 // ----------------------------------------------------------------------------
-// FUN_00460090 (0x00460090) - path-heading fallback, used when the crossing
+// zone_crossing_heading (0x00460090) - path-heading fallback, used when the crossing
 // point FUN_004720d0 accepted is inside a wall. The waypoint is the
 // character's own position clamped into the shared corridor between its zone
 // (entityZone) and the path's next zone (pathZone), with the same wall-probe
 // nudges. Returns the heading angle toward the waypoint; the waypoint itself
 // lands in g_playerDisplacement / player_distance_z.
 // ----------------------------------------------------------------------------
-static unsigned short FUN_00460090(short pos_x, short pos_z,
+static unsigned short zone_crossing_heading(short pos_x, short pos_z,
                                    char pathZone, unsigned char entityZone)
 {
     unsigned char* zoneBase = g_RdtPointer->unknown_58;
     unsigned char count = *zoneBase;
 
     if ((char)entityZone < 0) {
-        entityZone = (unsigned char)FUN_00460230(pos_x, pos_z);
+        entityZone = (unsigned char)walk_zone_find(pos_x, pos_z);
     } else {
         entityZone &= 0xF;
     }
@@ -1766,15 +1766,15 @@ static void FUN_00472330(char param_1)
 
 // ----------------------------------------------------------------------------
 // npc_walk_choose_heading (0x00471f20) - pick the walking heading and waypoint.
-// Runs the zone-graph pathfinder from the PLAYER's position (FUN_0045f970
+// Runs the zone-graph pathfinder from the PLAYER's position (zone_path_find
 // seeds the start zone from ENTITY and the target from the given point), then:
 //   - bit 4 of the result set (same zone, or a failed walk): head straight at
 //     the player
 //   - otherwise: the crossing point of the shared edge between the character's
 //     zone and the path's next zone, extrapolated onto the character-player
-//     line (FUN_004602b0's return picks which axis is fixed); if the corridor
+//     line (walk_zone_shared_edge's return picks which axis is fixed); if the corridor
 //     test passes and the point is not inside a wall it becomes the waypoint,
-//     else FUN_00460090 clamps the character's own position into the corridor
+//     else zone_crossing_heading clamps the character's own position into the corridor
 // Stores the heading at +0x176 and the waypoint at +0x166/+0x168.
 // ----------------------------------------------------------------------------
 static void npc_walk_choose_heading(void)
@@ -1782,7 +1782,7 @@ static void npc_walk_choose_heading(void)
     int* playerT = g_playerEntity.scaMatrixData.localMatrix.t;
     int* entityT = ENTITY->scaMatrixData.localMatrix.t;
 
-    ENTITY->bob_speed = (unsigned char)FUN_0045f970(
+    ENTITY->bob_speed = (unsigned char)zone_path_find(
         playerT[0], playerT[2], (int*)&ENTITY->player_pos_x, (int*)&ENTITY->player_pos_z);
 
     if ((ENTITY->bob_speed & 0x10) != 0) {
@@ -1790,12 +1790,12 @@ static void npc_walk_choose_heading(void)
         return;
     }
 
-    // FUN_004602b0 returns 0 when the shared edge runs along X (the crossing x
+    // walk_zone_shared_edge returns 0 when the shared edge runs along X (the crossing x
     // is g_playerDisplacement and z is extrapolated onto the character-player
     // line) and 1 when it runs along Z (the roles swap). The integer division
     // is the original's - a degenerate line divides by zero.
     int pos_x, pos_z;
-    char edgeFlag = (char)FUN_004602b0(ENTITY->splatter_flag, ENTITY->bob_speed);
+    char edgeFlag = (char)walk_zone_shared_edge(ENTITY->splatter_flag, ENTITY->bob_speed);
     if (edgeFlag == 0) {
         pos_z = entityT[2] + (g_playerDisplacement - entityT[0]) *
                 (playerT[2] - entityT[2]) / (playerT[0] - entityT[0]);
@@ -1808,7 +1808,7 @@ static void npc_walk_choose_heading(void)
 
     // Same edge flag selects which span FUN_004720d0 tests. The crossing point
     // is used when the corridor is open AND the point is not inside a wall;
-    // otherwise FUN_00460090 clamps the character's own position instead.
+    // otherwise zone_crossing_heading clamps the character's own position instead.
     if (FUN_004720d0(edgeFlag, pos_x, pos_z) != 0 &&
         FUN_00460390((short)pos_x, (short)pos_z) == 0) {
         *(unsigned short*)((char*)ENTITY + 0x176) = getAngleTowardsTarget(pos_x, pos_z);
@@ -1817,7 +1817,7 @@ static void npc_walk_choose_heading(void)
         return;
     }
 
-    *(unsigned short*)((char*)ENTITY + 0x176) = FUN_00460090(
+    *(unsigned short*)((char*)ENTITY + 0x176) = zone_crossing_heading(
         (short)entityT[0], (short)entityT[2],
         (char)ENTITY->bob_speed, ENTITY->splatter_flag);
     ENTITY->player_pos_x = (short)g_playerDisplacement;
@@ -2087,7 +2087,7 @@ static void npc_state9_pathfind(void)
     entity_pathfind_update();
     FUN_00471e90();
 
-    ENTITY->splatter_flag = (unsigned char)FUN_00460230(
+    ENTITY->splatter_flag = (unsigned char)walk_zone_find(
         (short)ENTITY->scaMatrixData.localMatrix.t[0],
         (short)ENTITY->scaMatrixData.localMatrix.t[2]);
 

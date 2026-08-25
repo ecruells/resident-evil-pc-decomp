@@ -2017,7 +2017,7 @@ static void player_state_01_control(void)
 // Helpers the control state reaches for.
 //
 // CORRECTION: 0x00474930 is NOT a door check, despite feeding action_behavior 10.
-// It walks g_itemboxes_covers_table through ChkPlReachEntity and an angle window,
+// It walks g_omodel_table through ChkPlReachEntity and an angle window,
 // so behaviour 10 is "climb over / push object". Doors do not come through here at
 // all - check_door sets unk_03 |= 0x20 and the branch on that bit in
 // player_input_to_behavior selects action_behavior 0x11 instead.
@@ -2080,7 +2080,7 @@ static int is_point_in_action_zone(VECTOR* pos, unsigned short* zone); // 0x0041
 // ============================================================================
 // check_climb_object (0x00474930)
 // Action-key probe for climbable/pushable room objects (crates, boxes). Walks
-// g_itemboxes_covers_table from g_omodelCount-1 down to 0, keeping the first
+// g_omodel_table from g_omodelCount-1 down to 0, keeping the first
 // object whose first byte has flag 0x40 (climbable), that ChkPlReachEntity
 // accepts, and whose facing angle is within ~26 degrees (299/4096) of the
 // player's, on either wrap-around side.
@@ -2094,12 +2094,12 @@ static int is_point_in_action_zone(VECTOR* pos, unsigned short* zone); // 0x0041
 int check_climb_object(void)
 {
     if ((g_main_state_flags & 0x80) == 0) {
-        void** p = &g_itemboxes_covers_table[(unsigned char)g_omodelCount];
+        void** p = &g_omodel_table[(unsigned char)g_omodelCount];
         unsigned char* obj;
         do {
             // Original compares the raw byte address against &table + 1; on a
             // pointer-aligned walk that is exactly "scanned past element 0".
-            if ((char*)p < (char*)g_itemboxes_covers_table + 1) {
+            if ((char*)p < (char*)g_omodel_table + 1) {
                 return 0;
             }
             obj = (unsigned char*)p[-1];
@@ -5200,7 +5200,7 @@ static void player_behavior_14_knife_swing(void)
     // Flash + sound effects, only above the covers-table height
     if ((g_main_state_flags2 & 1) != 0
         && 1000 < g_playerEntity.scaMatrixData.localMatrix.t[1]
-                  - *(int*)((char*)g_itemboxes_covers_table[0] + 0x38)) {
+                  - *(int*)((char*)g_omodel_table[0] + 0x38)) {
         if (g_playerEntity.attackAnim == 7) {
             if (g_playerEntity.animation_frame_id < 3) {
                 g_playerPosScratch.y = *(int*)((char*)g_deadMoveValue + 0x18);
@@ -6726,7 +6726,7 @@ int set_room_event_flag(unsigned char* entry)
 //     (0x3d) or Jill's lockpick (PlayerFlags bit 0x7c) - otherwise "locked"
 //     (0xd8); with the key it arms the desk-open state (g_desk_check_state 1)
 //   - an unlocked desk swings open: mark the desk model opened (byte 0 of
-//     g_desks_pointers_table[entry[deskIdx].field4] |= 1), cut to the desk
+//     g_interactable_table[entry[deskIdx].field4] |= 1), cut to the desk
 //     camera (entry+6), and run the camera-zone walk to the new cut.
 // ============================================================================
 int check_desk(unsigned char* deskId)
@@ -6756,7 +6756,7 @@ int check_desk(unsigned char* deskId)
             // Desk already unlocked: swing the lid open and cut to its camera.
             g_room_event_index = deskId;
             unsigned short deskSlot = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 4 + (unsigned int)deskIdx * 0xc);
-            ((unsigned char*)g_desks_pointers_table[deskSlot])[0] |= 1;
+            ((unsigned char*)g_interactable_table[deskSlot])[0] |= 1;
             play_sfx(2, 0x24, 0);
             g_cutId = g_roomCameraId;
             g_roomCameraId = *(unsigned char*)(deskId + 6);
@@ -6793,7 +6793,7 @@ static void set_room_item_seen_flag(int itemIdMinus4e)
 int pickup_key_event(unsigned char* entry)
 {
     *entry = 0;
-    ((unsigned char*)g_desks_pointers_table[*(unsigned short*)(entry + 4)])[0] = 0;
+    ((unsigned char*)g_interactable_table[*(unsigned short*)(entry + 4)])[0] = 0;
     FUN_00473f10((int*)&g_roomItemsFlags, *(unsigned char*)(*(unsigned char**)(entry + 8) + 0x14));
     set_room_item_seen_flag(*(unsigned char*)(*(unsigned char**)(entry + 8) + 8) - 0x4e);
     DAT_00be9833 = *(unsigned char*)(*(unsigned char**)(entry + 8) + 8);

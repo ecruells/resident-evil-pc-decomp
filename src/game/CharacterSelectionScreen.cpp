@@ -345,9 +345,9 @@ void characterSelectionScreen(void)
     MatrixSetTranslation((MATRIX*)g_selMatrix, g_selTransVec);
     SetGlobalScaledRotationMatrix((MATRIX*)g_selMatrix);
     GetMatrixTranslation((MATRIX*)g_selMatrix);
-    // 0x004924b5 calls set_title_render_param2 (0x0040aba0), a one-line tail
-    // wrapper around set_title_render_param - served by the same function here.
-    set_title_render_param(0xF0);
+    // 0x004924b5 calls set_scene_render_param_tail (0x0040aba0), a one-line tail
+    // wrapper around set_scene_render_param - served by the same function here.
+    set_scene_render_param(0xF0);
 
     //Init Character Sprite Data
     for (int local_6 = 1; local_6 >= 0; local_6--) {

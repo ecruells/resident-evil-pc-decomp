@@ -1396,10 +1396,10 @@ void LoadRoomRdt(void)
     // 0x00477e7e-0x00477ec0: Resolve item model pointers
     // Iterates forward through entries, zeros table backward
     int* itemPtr = (int*)g_RdtPointer->items_models;
-    int itemCount = g_RdtPointer->sound_banks_count;
+    int itemCount = g_RdtPointer->omodel_slot_count;
     for (int i = itemCount; i > 0; i--) {
         // Zero out table entry (reverse order: table[count-1] down to table[0])
-        ((int*)g_itemboxes_covers_table)[i - 1] = 0;
+        ((int*)g_omodel_table)[i - 1] = 0;
         if (itemPtr[0] != 0) itemPtr[0] += (int)g_RdtPointer;
         if (itemPtr[1] != 0) itemPtr[1] += (int)g_RdtPointer;
         itemPtr += 2;
@@ -1410,7 +1410,7 @@ void LoadRoomRdt(void)
     int* obstPtr = (int*)g_RdtPointer->obstacles_models;
     int obstCount = g_RdtPointer->unknown_03[0];
     for (int i = obstCount; i > 0; i--) {
-        ((int*)g_desks_pointers_table)[i - 1] = 0;
+        ((int*)g_interactable_table)[i - 1] = 0;
         if (obstPtr[0] != 0) obstPtr[0] += (int)g_RdtPointer;
         if (obstPtr[1] != 0) obstPtr[1] += (int)g_RdtPointer;
         obstPtr += 2;
@@ -1419,12 +1419,12 @@ void LoadRoomRdt(void)
     // 0x00477f12-0x00477f27: Set up SCD script pointers
     g_RoomInitScd = g_RdtPointer->initialization_scd;
     g_RoomScdOpcodes = g_RdtPointer->scd_opcodes;
-    g_EvtScripts = g_RdtPointer->scd_opcodes2;
+    g_RoomEventScripts = g_RdtPointer->scd_opcodes2;
 
     // 0x00477f2d-0x00477f3f: Resolve EVT script relative offsets
-    int* evtPtr = (int*)g_EvtScripts;
+    int* evtPtr = (int*)g_RoomEventScripts;
     while (*evtPtr != 0) {
-        *evtPtr += (int)g_EvtScripts;
+        *evtPtr += (int)g_RoomEventScripts;
         evtPtr++;
     }
 
@@ -1632,7 +1632,7 @@ static void TmdObjectSetLightScale(void* modelObj, int value)
 //     matching id and tint every joint. Ids 8, 0x0F and 0x12 use the absolute
 //     TmdObjectTintSet with the CLAMPED queue bytes; every other id uses the
 //     accumulating TmdObjectTintAdd with the RAW deltas.
-//   p6 bit 7 set   -> an object index into g_itemboxes_covers_table. When all
+//   p6 bit 7 set   -> an object index into g_omodel_table. When all
 //     three clamped bytes are equal the tint is a pure luminance change and goes
 //     through TmdObjectSetLightScale; otherwise TmdObjectTintAdd.
 //
@@ -1693,10 +1693,10 @@ void scd_model_tint_apply(short p1, short p2, short p3, unsigned short p4, unsig
     }
 
     if (e[3] == e[4] && e[3] == e[5]) {
-        int obj = (int)g_itemboxes_covers_table[(unsigned char)p6 & 0x7F];
+        int obj = (int)g_omodel_table[(unsigned char)p6 & 0x7F];
         TmdObjectSetLightScale(*(void**)(obj + 0x18), (int)(char)e[3]);
     } else {
-        int obj = (int)g_itemboxes_covers_table[(unsigned char)p6 & 0x3F];
+        int obj = (int)g_omodel_table[(unsigned char)p6 & 0x3F];
         TmdObjectTintAdd(*(void**)(obj + 0x18), (int)p1, (int)p2, (int)p3);
     }
 }
@@ -2619,13 +2619,13 @@ void room_event_item_pickup(void)
     unsigned char* record = *(unsigned char**)(evt + 8);
 
     *evt = 0;                                     // deactivate the event entry
-    ((unsigned char*)g_desks_pointers_table[record[10]])[0] = 0;
-    if (*(short*)((char*)g_desks_pointers_table[record[10]] + 0x86) != 0) {
+    ((unsigned char*)g_interactable_table[record[10]])[0] = 0;
+    if (*(short*)((char*)g_interactable_table[record[10]] + 0x86) != 0) {
         g_freeEffectSlots++;
         // The original indexes the pool in DWORDs (stride 4), clearing 0x21
         // dwords = exactly one 0x84-byte effect slot.
         memset_((unsigned int*)g_effectPool +
-                *(unsigned short*)((char*)g_desks_pointers_table[record[10]] + 0x86),
+                *(unsigned short*)((char*)g_interactable_table[record[10]] + 0x86),
                 0x21);
     }
     FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
@@ -2725,7 +2725,7 @@ void check_event_item_usage(void)
 // ============================================================================
 // check_itembox_state (0x0041c240)
 // Per-frame itembox lid animation. State 1 arms the travel accumulator and
-// latches the lid omodel (g_itemboxes_covers_table[entry+4]); states 2/3
+// latches the lid omodel (g_omodel_table[entry+4]); states 2/3
 // rotate the lid open past -199 then let it settle back; state 4 (the box
 // menu closed) resets. The lid angle lives at omodel+0x76, the step at
 // g_counter_increase (reversed at the -199 stop so the lid eases back).
@@ -2738,7 +2738,7 @@ void check_itembox_state(void)
         g_counter_increase = 1;
         g_itembox_state = 2;
         g_itembox_cover_pointer =
-            g_itemboxes_covers_table[*(unsigned short*)((char*)g_room_event_index + 4)];
+            g_omodel_table[*(unsigned short*)((char*)g_room_event_index + 4)];
         // fall through
     case 2:
         *(short*)((char*)g_itembox_cover_pointer + 0x76) -= g_short_itembox_open_timer;
@@ -2813,7 +2813,7 @@ void check_desk_state(void)
     case 4:
         display_room_camera_bg();
         g_desk_check_state = 0;
-        ((unsigned char*)g_desks_pointers_table[*(unsigned short*)((char*)g_room_event_index + 4)])[0] &=
+        ((unsigned char*)g_interactable_table[*(unsigned short*)((char*)g_room_event_index + 4)])[0] &=
             0xfe;
         return;
     case 5:

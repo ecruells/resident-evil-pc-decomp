@@ -455,7 +455,7 @@ extern unsigned int  DAT_00ae9ef0;                     // 0x00ae9ef0 - omodel ch
 // omodel update_room_objects is currently pushing, and it is what
 // behavior_10_push reads to pick the grunt SFX.
 extern unsigned int  DAT_00ae9ee8;                     // 0x00ae9ee8 - omodel being pushed
-// Dead constant read by room_check_actions[0x0B] (0x00d226e8, past g_itemboxes_covers_table)
+// Dead constant read by room_check_actions[0x0B] (0x00d226e8, past g_omodel_table)
 extern unsigned int  DAT_00d226e8;                     // 0x00d226e8 - always 0, never written
 // Screen-distortion effect struct (0x00be63c8) - FUN_004567d0 writes it; the
 // consumer (0x00456a10 camera scroll) is not ported yet, so it is inert.
@@ -609,9 +609,9 @@ extern void*         g_RoomItemEventHead;              // 0x00d91bc0
 // Room event index (SCD event pointer for current room entity)
 extern void*         g_room_event_index;               // 0x00d226a4
 
-// Sound bank pointer tables (populated by room_set from RDT vab_sound_file data)
-extern void*         g_itemboxes_covers_table[8];      // 0x00d226b0
-extern void*         g_desks_pointers_table[8];        // 0x00d21360
+// Room model record tables (populated by room_set from the RDT VB region)
+extern void*         g_omodel_table[8];      // 0x00d226b0 - room-object (omodel) records
+extern void*         g_interactable_table[8];// 0x00d21360 - interactable obstacle records (desks etc.)
 
 // Enemy model loading state (used by room_set and cmd_omodel_set)
 extern int           g_omodelCount;                    // 0x00ae9ef4 - object model count (cmd_omodel_set)
@@ -637,7 +637,7 @@ extern ScdEventEntry* g_pScdEventCurrent;              // 0x00bf0848 - current e
 extern unsigned char* g_ScdOpcodes;                    // 0x00bf0800 - current SCD opcode pointer
 extern unsigned int*  g_CmdOpcodesPointer;             // 0x00bf0804 - SCD call stack pointer
 extern unsigned char  g_ScriptContinueFlag;            // 0x00bf07fa - SCD call depth counter
-extern unsigned char* g_EvtScripts;                    // 0x00d213b4 - event script table pointer
+extern unsigned char* g_RoomEventScripts;                    // 0x00d213b4 - event script table pointer
 extern unsigned char* g_RoomScdOpcodes;                // 0x00d213b8 - room SCD opcodes pointer
 extern void*          script_command_funcs_table[256]; // 0x004c1110 - SCD command dispatch table
 
@@ -1650,7 +1650,7 @@ void title_exit_loop(void);
 void fade_update(void);
 void init_title_screen(void);
 void title_select_sfx(void);
-void set_title_render_param(int value);
+void set_scene_render_param(int value);
 void update_title_options(void);
 
 // --- Save / load ---

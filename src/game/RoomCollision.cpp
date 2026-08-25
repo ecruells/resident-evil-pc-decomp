@@ -632,7 +632,7 @@ unsigned int room_check_sight_blocked(VECTOR* delta, unsigned char cell)
 }
 
 // ===========================================================================
-// FUN_0047d6f0 (0x0047d6f0)
+// check_room_collision_two_point (0x0047d6f0)
 // Two-point boundary push for a PRONE body: rotate both ends by the entity
 // yaw (endA first, endB second - the callers pass the -600/-800 end first),
 // push each against its quadrant's boundary list with the SCA radius, and if
@@ -648,7 +648,7 @@ unsigned int room_check_sight_blocked(VECTOR* delta, unsigned char cell)
 // result bytes are the (flags & 0x300) >> 8 bits, ORed the same way
 // check_room_collision reports them.
 // ===========================================================================
-unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB)
+unsigned char check_room_collision_two_point(SVECTOR* endA, SVECTOR* endB)
 {
     // Status bit 2 set: entity is deactivated - nothing to push.
     if ((ENTITY->status_flags & 0x04) != 0) return 0;
@@ -789,7 +789,7 @@ unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB)
 // code at all. Renamed here and in the Ghidra database.
 //
 // Objects are the 0xA4-byte blocks cmd_omodel_set fills in, held in
-// g_itemboxes_covers_table[0 .. RDT.sound_banks_count). They are laid out like
+// g_omodel_table[0 .. RDT.omodel_slot_count). They are laid out like
 // the head of an Entity - Sca_info at +4, localMatrix.t at +0x34, position at
 // +0x6C, yaw at +0x74 - which is exactly why the entity helpers below can take
 // one on either side. Everything is addressed by raw offset because a 0xA4
@@ -964,8 +964,8 @@ void update_room_objects(void)
 {
     int pushStarted = 0;
 
-    for (int i = 0; i < (int)(unsigned char)g_RdtPointer->sound_banks_count; i++) {
-        unsigned char* obj = (unsigned char*)g_itemboxes_covers_table[i];
+    for (int i = 0; i < (int)(unsigned char)g_RdtPointer->omodel_slot_count; i++) {
+        unsigned char* obj = (unsigned char*)g_omodel_table[i];
         if (obj == NULL || (obj[0] & 1) == 0) continue;
 
         // ---- 1. enemies get pushed out of the object ----
@@ -1018,7 +1018,7 @@ void update_room_objects(void)
             // never needs one" (objects that cannot leave their footprint).
             int blockedByRoom = 0;
             if ((obj[0] & 0x04) == 0) {
-                if (FUN_0047d6f0((SVECTOR*)(obj + 0x94),
+                if (check_room_collision_two_point((SVECTOR*)(obj + 0x94),
                                  (SVECTOR*)(obj + 0x9c)) != 0) {
                     blockedByRoom = 1;
                 }
@@ -1059,8 +1059,8 @@ void update_room_objects(void)
                 // So does another object in the way - and that one aborts the
                 // whole push, jumping straight to the position restore.
                 int vetoed = 0;
-                for (int j = 0; j < (int)(unsigned char)g_RdtPointer->sound_banks_count; j++) {
-                    unsigned char* other = (unsigned char*)g_itemboxes_covers_table[j];
+                for (int j = 0; j < (int)(unsigned char)g_RdtPointer->omodel_slot_count; j++) {
+                    unsigned char* other = (unsigned char*)g_omodel_table[j];
                     if (other == NULL || (other[0] & 1) == 0 || other == obj) continue;
                     if (ChkObjSlide(other, obj) != 0) {
                         obj[0x86] = 10;
@@ -1100,8 +1100,8 @@ void update_room_objects(void)
         // ---- 5. commit a moved object, shoving whatever it ran into ----
         if ((int)*(short*)(obj + 0x6c) != *(int*)(obj + 0x34) ||
             (int)*(short*)(obj + 0x70) != *(int*)(obj + 0x3c)) {
-            for (int j = 0; j < (int)(unsigned char)g_RdtPointer->sound_banks_count; j++) {
-                unsigned char* other = (unsigned char*)g_itemboxes_covers_table[j];
+            for (int j = 0; j < (int)(unsigned char)g_RdtPointer->omodel_slot_count; j++) {
+                unsigned char* other = (unsigned char*)g_omodel_table[j];
                 if (other == NULL || (other[0] & 1) == 0 || other == obj) continue;
                 ChkObjSlide(obj, other);
             }

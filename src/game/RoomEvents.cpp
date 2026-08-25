@@ -16,7 +16,7 @@ static void ScdEventEntry_Init(ScdEventEntry* entry, int scriptIndex)
 {
     entry->active = 1;
     entry->state = 0;
-    entry->scriptPtr = ((unsigned char**)g_EvtScripts)[scriptIndex];
+    entry->scriptPtr = ((unsigned char**)g_RoomEventScripts)[scriptIndex];
     entry->stackDepth = 0xFF;
     entry->entity = ENTITY;
 }
@@ -60,10 +60,10 @@ static void scd_event_cmd_set_entity(void)
         g_pScdEventCurrent->entity = &g_EnemiesList[p[1]];
         break;
     case 2: // Item box/cover
-        g_pScdEventCurrent->entity = (Entity*)g_itemboxes_covers_table[p[1]];
+        g_pScdEventCurrent->entity = (Entity*)g_omodel_table[p[1]];
         break;
     case 3: // Desk object
-        g_pScdEventCurrent->entity = (Entity*)g_desks_pointers_table[p[1]];
+        g_pScdEventCurrent->entity = (Entity*)g_interactable_table[p[1]];
         break;
     }
     g_pScdEventCurrent->scriptPtr += 2;
@@ -388,10 +388,10 @@ static int scd_event_state1_anim(void)
                         ent->scd_target_ptr = (unsigned int)&g_EnemiesList[targetIndex];
                         break;
                     case 2:
-                        ent->scd_target_ptr = (unsigned int)g_itemboxes_covers_table[targetIndex];
+                        ent->scd_target_ptr = (unsigned int)g_omodel_table[targetIndex];
                         break;
                     case 3:
-                        ent->scd_target_ptr = (unsigned int)g_desks_pointers_table[targetIndex];
+                        ent->scd_target_ptr = (unsigned int)g_interactable_table[targetIndex];
                         break;
                     }
                 } else {
@@ -622,7 +622,7 @@ static int scd_event_state1_anim(void)
 //   4. another slot's opcode 0x09 (or command 0x44)
 // Recording the opcodes each slot executed and naming the exit path separates "the
 // script ended as written" from "an unimplemented opcode killed it". Offsets are
-// relative to g_EvtScripts so they line up with an RDT dump.
+// relative to g_RoomEventScripts so they line up with an RDT dump.
 // Remove once the door transition works.
 // ============================================================================
 #define SCD_TRACE_LEN 48
@@ -654,7 +654,7 @@ static void scd_trace_record(int slot, unsigned char* p, unsigned char state)
         }
     }
 
-    g_scdTraceOff[slot][i] = (unsigned short)(p - (unsigned char*)g_EvtScripts);
+    g_scdTraceOff[slot][i] = (unsigned short)(p - (unsigned char*)g_RoomEventScripts);
     g_scdTraceOp[slot][i]  = op;
     g_scdTraceSt[slot][i]  = state;
     g_scdTraceCmd[slot][i] = cmd;
@@ -693,7 +693,7 @@ static void scd_trace_dump(int slot, const char* reason)
     if (g_scdTraceLastPtr[slot] != NULL) {
         unsigned char* p = g_scdTraceLastPtr[slot] - 8;
         n += sprintf(buf + n, " | bytes@%04X:",
-                     (unsigned int)(p - (unsigned char*)g_EvtScripts));
+                     (unsigned int)(p - (unsigned char*)g_RoomEventScripts));
         for (int k = 0; k < 24; k++) {
             n += sprintf(buf + n, "%02X ", (unsigned int)p[k]);
         }

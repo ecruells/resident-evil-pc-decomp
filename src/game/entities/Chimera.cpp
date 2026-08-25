@@ -813,7 +813,7 @@ static void chimera_behavior_walk(void) // 0x00439760
         int turn = turn_toward_target(CH_PLAYER_T, 0x10);
         ENTITY->angle = (short)(ENTITY->angle + (short)turn * (int)(C_PATH_LATCH & 1));
     } else {
-        FUN_0045f970(CH_PLAYER_T_INT[0], CH_PLAYER_T_INT[2],
+        zone_path_find(CH_PLAYER_T_INT[0], CH_PLAYER_T_INT[2],
                      (int*)&ENTITY->player_pos_x, (int*)&ENTITY->player_pos_z);
         g_playerPosScratch.x = ENTITY->player_pos_x;
         g_playerPosScratch.y = 0;

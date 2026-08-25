@@ -122,9 +122,9 @@ void init_title_screen(void)
 }
 
 // ============================================================================
-// set_title_render_param (0x0040a8e0)
+// set_scene_render_param (0x0040a8e0)
 // ============================================================================
-void set_title_render_param(int value)
+void set_scene_render_param(int value)
 {
     g_sceneRenderParam = value;
 }
@@ -437,7 +437,7 @@ void title_state(void)
     setMenuScreenOffset(320, 240, 0, 0, 0);
     CenterScreenOrigin();
     clear_textures();
-    set_title_render_param(0xc0);
+    set_scene_render_param(0xc0);
     sounds_reset();
 
     g_loadDataDestPointer = g_DataBuffer;

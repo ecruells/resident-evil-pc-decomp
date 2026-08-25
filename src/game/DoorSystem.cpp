@@ -792,7 +792,7 @@ static int door_op_order_setup(void)
 static int door_op_cam_matrix(void)
 {
     unsigned char* p = DATA;
-    set_title_render_param(0x101);      // 0x00443e43 - title/render mode for the door scene
+    set_scene_render_param(0x101);      // 0x00443e43 - title/render mode for the door scene
     int shift = p[1] & 0x1f;
     int* dst = (int*)&g_doorCameraMatrix;
     for (int i = 0; i < 6; i++) {

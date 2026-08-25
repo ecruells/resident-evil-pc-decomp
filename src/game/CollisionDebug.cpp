@@ -105,7 +105,7 @@ static bool CollDbg_BuildView(CollDbgView& V, float scaleX)
     V.u[1] = V.n[2]*V.r[0] - V.n[0]*V.r[2];
     V.u[2] = V.n[0]*V.r[1] - V.n[1]*V.r[0];
 
-    // The camera's own fov field is what set_title_render_param loads into
+    // The camera's own fov field is what set_scene_render_param loads into
     // g_sceneRenderParam, in 320x240 space.
     V.f  = (float)C->fov * scaleX;
     return true;

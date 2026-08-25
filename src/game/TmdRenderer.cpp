@@ -1122,8 +1122,8 @@ void FUN_00483080(void* spriteData, int depthShift)
 // Room item / 3D object per-frame rendering (0x00473ff0 -> 0x004745f0 ->
 // 0x00483270). This is the per-frame pass the original runs between the player
 // update and the entity render in game_loop; the port had it as an empty stub
-// in EngineStubs.cpp, so the RDT's item models (g_itemboxes_covers_table) and
-// obstacle models (g_desks_pointers_table) were never queued and FlushTmdObjects
+// in EngineStubs.cpp, so the RDT's item models (g_omodel_table) and
+// obstacle models (g_interactable_table) were never queued and FlushTmdObjects
 // only ever drew entities.
 //
 // Item/desk record layout (0xA4 bytes, one per RDT model slot):
@@ -1350,8 +1350,8 @@ static void RoomObjectRender(unsigned char* obj)
 
 // (0x00473ff0) - room_camera_and_lighting_update
 // Per-frame render pass for the room's own 3D content. Pass 0 walks the item
-// models (g_itemboxes_covers_table, count = RDT sound_banks_count), pass 1 the
-// desk/obstacle models (g_desks_pointers_table, count = RDT unknown_03[0]).
+// models (g_omodel_table, count = RDT omodel_slot_count), pass 1 the
+// desk/obstacle models (g_interactable_table, count = RDT unknown_03[0]).
 // Each visible record with a bound model gets its rotation matrix rebuilt from
 // its +0x72 SVECTOR, its ScaMatrixData marked dirty for the compose, and is
 // handed to RoomObjectRender. Called from game_loop while
@@ -1361,14 +1361,14 @@ void room_camera_and_lighting_update(void)
 {
     for (int pass = 0; pass < 2; pass++) {
         int count = (pass == 0)
-            ? g_RdtPointer->sound_banks_count
+            ? g_RdtPointer->omodel_slot_count
             : g_RdtPointer->unknown_03[0];
         DAT_008f8688 = pass;
 
         for (int i = 0; i < count; i++) {
             unsigned char* obj = (pass == 0)
-                ? (unsigned char*)g_itemboxes_covers_table[i]
-                : (unsigned char*)g_desks_pointers_table[i];
+                ? (unsigned char*)g_omodel_table[i]
+                : (unsigned char*)g_interactable_table[i];
 
             // Visible (bit 0) and with a bound model (AnimSlot ptr at +0x14).
             if ((obj != NULL) && ((*obj & 1) != 0) && (*(int*)(obj + 0x14) != 0)) {

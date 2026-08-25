@@ -24,18 +24,18 @@ wires three RDT sections into globals:
 ```c
 g_RoomInitScd    = g_RdtPointer->initialization_scd;  // 0x00d213bc — block list for the command VM
 g_RoomScdOpcodes = g_RdtPointer->scd_opcodes;         // 0x00d213b8
-g_EvtScripts     = g_RdtPointer->scd_opcodes2;        // 0x00d213b4 — event script pointer table
+g_RoomEventScripts     = g_RdtPointer->scd_opcodes2;        // 0x00d213b4 — event script pointer table
 ```
 
-`g_EvtScripts` is a NULL-terminated array of `int` **relative** offsets that
+`g_RoomEventScripts` is a NULL-terminated array of `int` **relative** offsets that
 `room_set` relocates in place to absolute pointers:
 
 ```c
-int* evtPtr = (int*)g_EvtScripts;
-while (*evtPtr != 0) { *evtPtr += (int)g_EvtScripts; evtPtr++; }
+int* evtPtr = (int*)g_RoomEventScripts;
+while (*evtPtr != 0) { *evtPtr += (int)g_RoomEventScripts; evtPtr++; }
 ```
 
-So `((unsigned char**)g_EvtScripts)[scriptIndex]` is the entry point of event
+So `((unsigned char**)g_RoomEventScripts)[scriptIndex]` is the entry point of event
 script `scriptIndex`.
 
 ---
@@ -140,7 +140,7 @@ sentinel means the first push lands at index 0 (`0xFF + 1`).
 ```c
 entry->active     = 1;
 entry->state      = 0;
-entry->scriptPtr  = ((u8**)g_EvtScripts)[scriptIndex];
+entry->scriptPtr  = ((u8**)g_RoomEventScripts)[scriptIndex];
 entry->stackDepth = 0xFF;
 entry->entity     = ENTITY;
 ```
@@ -171,7 +171,7 @@ free slot.
 | `0x01` | 1 | → state 1 (wait animation). |
 | `0x02` | 1 | → state 2, and `entity->ignore_player_flag = 2`, `action_behavior = 0`, `action_state = 0`. |
 | `0x03` | 1 | → state 2 without touching the entity. |
-| `0x04` | 3 | Set `entity` from `[type][index]`: 0=player, 1=`g_EnemiesList[i]`, 2=`g_itemboxes_covers_table[i]`, 3=`g_desks_pointers_table[i]`. |
+| `0x04` | 3 | Set `entity` from `[type][index]`: 0=player, 1=`g_EnemiesList[i]`, 2=`g_omodel_table[i]`, 3=`g_interactable_table[i]`. |
 | `0x05` | 3 | `ScdEventEntry_Create(p[1], p[2])`. |
 | `0x06` | var | `run_command_functions(p+2)`, then `scriptPtr += p[1]`. |
 | `0x07` | var | Set `g_ScdOpcodes = p+2`, `scriptPtr += (*(u16*)p >> 8)`, then dispatch one command through the table. |
@@ -254,7 +254,7 @@ value is a condition (0 aborts the straight-line run).
 | `0x06` | `cmd_obj06_test` | `00460760` | 4 | **Cond.** `[op, fieldIdx][mode, cmpVal]`. Compares the byte at `(&g_stageId)[fieldIdx]`. `mode` 0 `==`, 1 `>`, 2 `>=`, 3 `<`, 4 `<=`, 5 `!=` (relative to `cmpVal`). |
 | `0x07` | `cmd_obj07_test` | `00460800` | 6 | **Cond.** `[op, pad][fieldIdx, mode][cmpVal:u16]`. Compares `((u16*)&g_fading_state)[fieldIdx]`. |
 | `0x08` | `cmd_room_cam_set` | `004608a0` | 4 | `[op, fieldIdx][value, pad]`. `(&g_stageId)[fieldIdx] = value`. |
-| `0x09` | `cmd_cut_set_0x09` | `00460920` | 2 | `[op, camId]`. Saves the current camera in `g_cutId`, switches to `camId`, walks `cam_switch_zones` (stride `0x14`, id at `+2`) to find it, calls `cut_set`, sets `g_main_state_flags |= 0x100000` (lock camera). |
+| `0x09` | `cmd_cut_lock_set` | `00460920` | 2 | `[op, camId]`. Saves the current camera in `g_cutId`, switches to `camId`, walks `cam_switch_zones` (stride `0x14`, id at `+2`) to find it, calls `cut_set`, sets `g_main_state_flags |= 0x100000` (lock camera). |
 | `0x0A` | `cmd_current_cut_set` | `00460990` | 2 | Restores the camera saved in `g_cutId` and clears `0x100000`. |
 | `0x0B` | `cmd_message_set` | `004609f0` | 4 | `[op, msgId][pause:u16]`. `set_message_display(msgId, pause)`. The pause operand is a word, not a byte. |
 | `0x0C` | `cmd_door_set` | `004611b0` | 26 | `[op, slot]` + a 24-byte door record. Writes `g_RoomItemEventTable[slot*0xC]`: `[0]=1`, `[1]=p[0x19]`, `[2..3]=slot`, `[8..11]= p+2` (record pointer). Bumps `g_RoomItemEventHead`. |
@@ -270,7 +270,7 @@ value is a condition (0 aborts the straight-line run).
 | `0x16` | `cmd_volume_set` | `00460c70` | 2 | `[op, ch]`. If `g_BGM_STATE` bit `ch+3` set: `setSndStop`, clear the bit, `set_volume(bank, -1)`. |
 | `0x17` | `cmd_player_pos_0x17` | `00460d80` | 6 or 10 | `[op, bank][sndId, vol][posType, enemyIdx]` then 4 more bytes for `posType` 0-3. `posType` 0 = explicit `(x,0,z)` written into `g_playerPosScratch` (`0x00be11b0`, three **ints**); 1 = `g_playerEntity.scaMatrixData.localMatrix.t` (`+0x34`); 2 = `g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t`; 3 = `play_sfx(bank, bank)`. `posType > 3` consumes only 6 bytes. Positions come from the 3-int `localMatrix.t`, **not** the packed `position` SVECTOR at `+0x6C`. |
 | `0x18` | `cmd_item_model_set` | `00461220` | 26 | Interactive obstacle/desk model. `p[1] & 0x7F` = event slot (bit 7 = alt rotation), `p[0xA]` = item type, `p[0xC]` = desk index, `p[0xD]` = SCA parent (`0xFF` none, `0xFE` player, else itembox), `p[0xE..0x13]` = position `s16 x/y/z`, `p[0x14..0x15]` = anim word, `p[0x16]` = `g_roomItemsFlags` bit, `p[0x17..0x19]` = entry flags. Loads the TMD, may spawn a billboard when the flag is set and bit `0x8000` is present. |
-| `0x19` | `cmd_obj19_set` | `00460f50` | 4 | `[op, deskIdx][value, pad]`. `*(u8*)g_desks_pointers_table[deskIdx] = value`. |
+| `0x19` | `cmd_obj19_set` | `00460f50` | 4 | `[op, deskIdx][value, pad]`. `*(u8*)g_interactable_table[deskIdx] = value`. |
 | `0x1A` | `cmd_item_search` | `00460f80` | 2 | **Cond.** `[op, itemId]`. Scans `g_ItemSlotsPointer` (stride 2) over `g_TotalHeldItems`. |
 | `0x1B` | `cmd_em_set` | `004617d0` | 22 | Enemy spawn. `p[1]` = enemy type id, `p[2]` = `behavior_flags`, `p[3]` = `g_RoomEventFlags` guard bit (`0xFF` = none; if already set, skip the spawn), `p[4]` = force-init, `p[5]` = SCA hit-data size / 6, `p[6..7]` = `position.pad`, `p[8..9]` = yaw, `p[0xA..0xB]` = pitch, `p[0xC..0xD]` = x, `p[0xE..0xF]` = y, `p[0x10..0x11]` = z, `p[0x12] & 0xF` = slot, `p[0x13]` = `animationId`, `p[0x14]` = `animation_frame_id`, `p[0x15]` = extra flags. |
 | `0x1C` | `cmd_0x1c` | `00462210` | 6 | `[op, lightR][delta:s16][rgbMask:u16]`. Special room light: `delta != 0` seeds `g_SpecialRoomLightState` to `0` or `0x7FFF` by sign. Mask bits 0/1/2 → B/G/R = `0xFF`. |
@@ -298,12 +298,12 @@ value is a condition (0 aborts the straight-line run).
 | `0x32` | `cmd_skip_4bytes` | `00431b00` | 4 | No-op that advances. |
 | `0x33` | `cmd_damage_set` | `004314b0` | 2/4 | `[op, subCmd][param:u16]`. `subCmd`: 0 unequip (2 bytes), 1 set `isBeingAttackedFlag` + reset anim, 3 `flags` SET/OR/XOR, 4 `action_behavior=1, action_state=6` (2 bytes), 5 `directionAngle`, 6 clear `unk_8c` (2 bytes), 7 reset to idle (2 bytes), 8 `healthStatusFlags` SET/OR/XOR, 9 toggle joint flags, 10 set/clear `unk_e0 & 0x40`. |
 | `0x34` | `cmd_0x34` | `00431b10` | 8 | `[op][variant][bias][p3][p4][p5][p6][p7]`, all bytes; `bias = byte - 0x80`. `variant` 0 → `FUN_00473b10`, 1 → `FUN_00473d10`, 2 → `FUN_00473d60`. |
-| `0x35` | `cmd_0x35` | `00431bf0` | 4 | `[op, table][objIdx, value]`. `table` 0 = `g_itemboxes_covers_table`, 1 = `g_desks_pointers_table`; writes byte `[0]`. Special-cases stage 3 / room 13 / object 5 → force 0. |
+| `0x35` | `cmd_0x35` | `00431bf0` | 4 | `[op, table][objIdx, value]`. `table` 0 = `g_omodel_table`, 1 = `g_interactable_table`; writes byte `[0]`. Special-cases stage 3 / room 13 / object 5 → force 0. |
 | `0x36` | `cmd_0x36` | `00431c90` | 4 | **Cond.** `[op, objIdx][mode, cmpVal]`. Compares the `u16` at `itembox[objIdx] + 0x86` (the billboard effect handle). |
 | `0x37` | `cmd_0x37` | `00460a30` | 4 | `[op, stage][roomIdx, value]`. `g_roomBgmState[stage*32 + roomIdx] = value`. |
 | `0x38` | `cmd_0x38` | `00431dc0` | 4 | **Cond.** `[op, invert][mask:u16]`. Tests `g_PlayerDpadHeld & mask`; `invert != 0` negates. |
 | `0x39` | `cmd_0x39` | `00431e10` | 2 | `[op, enemyIdx]`. `DAT_00be982a = g_EnemiesList[enemyIdx].behavior_flags`. |
-| `0x3A` | `cmd_cut_0x3a` | `00431e50` | 4 | `[op, zoneIdx][toCam, fromCam]`. Rewrites `cam_switch_zones[zoneIdx]` fields at `+2` and `+0`. |
+| `0x3A` | `cmd_cut_zone_set` | `00431e50` | 4 | `[op, zoneIdx][toCam, fromCam]`. Rewrites `cam_switch_zones[zoneIdx]` fields at `+2` and `+0`. |
 | `0x3B` | `cmd_0x3b` | `00431ea0` | 6 | `[op, sel][a:u16][b:u16]`. `sel < 0x8000` → desk `(sel >> 6) & 0x3F`, else itembox `(sel & 0x7F00) >> 8`. Writes `+0x72` and `+0x76` only when the object is active. |
 | `0x3C` | `cmd_0x3c` | `00431f20` | 6 | **Cond.** `[op, pad][targetSpec:u16][maxDist:u16]`. `targetSpec & 0xFF`: 0 = enemy `spec >> 8`, 1 = itembox, 2 = desk. Returns `SquareRoot0(dx²+dz²) <= maxDist` against the player. |
 | `0x3D` | `cmd_bullet_0x3d` | `00431770` | 12 | Same layout as `0x2A`. Additionally stashes the type in `DAT_00be982b` and the matrix in `DAT_00bf0a34` for `0x3E`. |
@@ -316,7 +316,7 @@ value is a condition (0 aborts the straight-line run).
 | `0x44` | `cmd_0x45` | `00461080` | 2 | `[op, slot]`. `g_ScdEventTable[slot].active = 0`. |
 | `0x45` | `cmd_0x46` | `004320f0` | 2 | `[op, delta]`. `g_playerEntity.unk_8e += (s8)delta`. |
 | `0x46` | `cmd_light_set_0x47` | `00432110` | 44 | `[op,pad]` then 3 × 12-byte light records `[x:s16][y:s16][z:s16][r][g][b][zero2:u8][radius:s16]` written into `RDT.lights[0..2]` (`+0x00/04/08` as ints, `+0x0C/0D/0E` bytes, word at `+0x10`, `radius` at `+0x12`), then 3 × `s16` into `RDT+6/8/10`. Ends with `setBackColor(RDT+6, RDT+8, RDT+10)`. |
-| `0x47` | `cmd_0x48` | `00431080` | 14 | `[op, objIdx]` + six `s16`: rotation `+0x72/+0x74/+0x76` and position `+0x6C/+0x6E/+0x70` (mirrored into `+0x34/+0x38/+0x3C`) of `g_itemboxes_covers_table[objIdx]`. |
+| `0x47` | `cmd_0x48` | `00431080` | 14 | `[op, objIdx]` + six `s16`: rotation `+0x72/+0x74/+0x76` and position `+0x6C/+0x6E/+0x70` (mirrored into `+0x34/+0x38/+0x3C`) of `g_omodel_table[objIdx]`. |
 | `0x48` | `cmd_0x49` | `004318a0` | 2 | Clears `animId`/`updateId` on all 64 effect-pool slots. |
 | `0x49` | `cmd_0x4a` | `00432290` | 2 | `[op, bit]`. `bit == 0xFF` clears `DAT_00d22770`, else sets bit `bit & 0x1F`. |
 | `0x4A` | `cmd_snd_set0x4b` | `00460ae0` | 2 | No-op unless `g_targetBgmState != 0xFF`. Restores the three sound channels saved by `0x4B`: `g_BGM_STATE >>= 8`, then `SetSndSlot` per set bit (`0x08` / `0x10` / `0x20`). |

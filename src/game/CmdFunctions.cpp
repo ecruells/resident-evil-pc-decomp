@@ -264,10 +264,10 @@ int cmd_room_cam_set(void)
 }
 
 // ============================================================================
-// 0x09 - cmd_cut_set_0x09 (0x00460920)
+// 0x09 - cmd_cut_lock_set (0x00460920)
 // Set camera cut and disable camera changes.
 // ============================================================================
-int cmd_cut_set_0x09(void)
+int cmd_cut_lock_set(void)
 {
     g_ScdOpcodes++;
     g_cutId = g_roomCameraId;
@@ -607,7 +607,7 @@ int cmd_item_model_set(void)
         g_RoomItemEventHead = entry;
     }
 
-    char* deskPtr = (char*)g_desks_pointers_table[g_ScdOpcodes[0xc]];
+    char* deskPtr = (char*)g_interactable_table[g_ScdOpcodes[0xc]];
     int* obstacleData = (int*)((char*)g_RdtPointer->obstacles_models + (unsigned int)g_ScdOpcodes[0xc] * 8);
 
     // spriteInfo is chosen per branch below (it is NOT always deskPtr+0x20).
@@ -657,8 +657,8 @@ int cmd_item_model_set(void)
             *(int*)(deskPtr + 100) = (int)&g_playerEntity + 0x1c;
             spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
         } else {
-            *(int*)(deskPtr + 100) = (int)g_itemboxes_covers_table[parentType] + 0x1c;
-            spriteInfo = (MATRIX*)((int)g_itemboxes_covers_table[parentType] + 0x20);
+            *(int*)(deskPtr + 100) = (int)g_omodel_table[parentType] + 0x1c;
+            spriteInfo = (MATRIX*)((int)g_omodel_table[parentType] + 0x20);
         }
         InitScaMatrix(*(int*)(deskPtr + 100), (ScaMatrixData*)(deskPtr + 0x1c));
     }
@@ -744,7 +744,7 @@ int cmd_obj19_set(void)
     unsigned char deskIdx = g_ScdOpcodes[1];
     unsigned char value = g_ScdOpcodes[2];
     g_ScdOpcodes += 4;
-    *(unsigned char*)g_desks_pointers_table[deskIdx] = value;
+    *(unsigned char*)g_interactable_table[deskIdx] = value;
     return 1;
 }
 
@@ -910,7 +910,7 @@ int cmd_omodel_set(void)
     dbg_printf("OMODEL SET START %s\n", "omodel_set");
 
     unsigned int slotIdx = (unsigned int)(g_ScdOpcodes[1] & 0x3f);
-    char* objPtr = (char*)g_itemboxes_covers_table[slotIdx];
+    char* objPtr = (char*)g_omodel_table[slotIdx];
     int* modelData = (int*)((char*)g_RdtPointer->items_models + slotIdx * 8);
 
     if (*modelData == 0) {
@@ -1040,7 +1040,7 @@ int cmd_omodel_set(void)
     } else if (parentIdx == 0xff) {
         *(int*)(objPtr + 100) = 0;
     } else if (parentByte < 0x80) {
-        *(int*)(objPtr + 100) = (int)g_itemboxes_covers_table[parentIdx] + 0x1c;
+        *(int*)(objPtr + 100) = (int)g_omodel_table[parentIdx] + 0x1c;
     } else {
         // Original: (parent & 0x7F) * 0x18C + 0xBE6480, i.e. the scaMatrixData (+0x1C)
         // of g_EnemiesList[parent & 0x7F] - g_EnemiesList is at 0x00BE6464. Must be
@@ -1470,7 +1470,7 @@ int cmd_effect_spawn(void)
         // own out-of-bounds read.
         spriteInfo = (MATRIX*)((char*)&g_effectPool[parentType * 3 + 0x3d] + 0x14);
     } else {
-        spriteInfo = (MATRIX*)((int)g_itemboxes_covers_table[(parentParam & 0x7f00) >> 8] + 0x20);
+        spriteInfo = (MATRIX*)((int)g_omodel_table[(parentParam & 0x7f00) >> 8] + 0x20);
     }
 
     Effect_CreateBillboard(
@@ -1745,15 +1745,15 @@ int cmd_obj_flag_set(void)
 
     // Special case: stage 3 room 13 object 5
     if (g_stageId == 3 && g_roomId == 13 && ((unsigned char)op2 & 0x3f) == 5) {
-        *(unsigned char*)g_itemboxes_covers_table[op2 & 0xff] = 0;
+        *(unsigned char*)g_omodel_table[op2 & 0xff] = 0;
         return 1;
     }
 
     unsigned char value = (unsigned char)(op2 >> 8);
     if (op1 >> 8 == 0) {
-        *(unsigned char*)g_itemboxes_covers_table[op2 & 0xff] = value;
+        *(unsigned char*)g_omodel_table[op2 & 0xff] = value;
     } else if (op1 >> 8 == 1) {
-        *(unsigned char*)g_desks_pointers_table[op2 & 0xff] = value;
+        *(unsigned char*)g_interactable_table[op2 & 0xff] = value;
     }
     return 1;
 }
@@ -1770,7 +1770,7 @@ int cmd_obj_field_test(void)
     g_ScdOpcodes += 2;
 
     unsigned short* objField = (unsigned short*)(
-        *(int*)((int)&g_itemboxes_covers_table + ((op1 >> 6) & 0xfffffffc)) + 0x86);
+        *(int*)((int)&g_omodel_table + ((op1 >> 6) & 0xfffffffc)) + 0x86);
     unsigned short fieldVal = *objField;
     unsigned short compareVal = op2 >> 8;
 
@@ -1833,10 +1833,10 @@ int cmd_enemy_flags_get(void)
 }
 
 // ============================================================================
-// 0x3A - cmd_cut_0x3a (0x00431e50)
+// 0x3A - cmd_cut_zone_set (0x00431e50)
 // Modify camera switch zone entries.
 // ============================================================================
-int cmd_cut_0x3a(void)
+int cmd_cut_zone_set(void)
 {
     unsigned char zoneIdx = g_ScdOpcodes[1];
     *(unsigned short*)((unsigned int)zoneIdx * 0x14 + 2 + (unsigned int)g_RdtPointer->cam_switch_zones) =
@@ -1863,9 +1863,9 @@ int cmd_obj_rotation_set(void)
     // Note the asymmetry is the original's: only the itembox branch masks with 0x7f.
     char* objPtr;
     if (op1 < 0x8000) {
-        objPtr = (char*)g_desks_pointers_table[op1 >> 8];
+        objPtr = (char*)g_interactable_table[op1 >> 8];
     } else {
-        objPtr = (char*)g_itemboxes_covers_table[(op1 >> 8) & 0x7f];
+        objPtr = (char*)g_omodel_table[(op1 >> 8) & 0x7f];
     }
     if (*objPtr != 0) {
         *(unsigned short*)(objPtr + 0x72) = scd_read_u16(0);
@@ -1892,9 +1892,9 @@ int cmd_player_dist_test(void)
     if ((targetSpec & 0xff) == 0) {
         targetPos = g_EnemiesList[targetSpec >> 8].scaMatrixData.localMatrix.t;
     } else if ((targetSpec & 0xff) == 1) {
-        targetPos = (int*)(*(int*)((int)&g_itemboxes_covers_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
+        targetPos = (int*)(*(int*)((int)&g_omodel_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
     } else if ((targetSpec & 0xff) == 2) {
-        targetPos = (int*)(*(int*)((int)&g_desks_pointers_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
+        targetPos = (int*)(*(int*)((int)&g_interactable_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
     } else {
         return 0;
     }
@@ -1942,7 +1942,7 @@ int cmd_bullet_0x3d(void)
         // The original indexes with the ALREADY-shifted high byte (`uVar2 >> 6` where
         // uVar2 == typeParam >> 8), so the byte offset is always 0 - i.e. itembox 0.
         // Using `typeParam >> 6` instead picked a different object entirely.
-        spriteInfo = (MATRIX*)(*(int*)((char*)&g_itemboxes_covers_table +
+        spriteInfo = (MATRIX*)(*(int*)((char*)&g_omodel_table +
                         (((unsigned int)(typeParam >> 8) >> 6) & 0xFFFFFFFC)) + 0x20);
     }
 
@@ -2115,7 +2115,7 @@ int cmd_obj_transform_set(void)
 {
     unsigned short slot = scd_read_u16(0);
     g_ScdOpcodes += 14;
-    int objBase = (int)g_itemboxes_covers_table[slot >> 8];
+    int objBase = (int)g_omodel_table[slot >> 8];
     *(short*)(objBase + 0x72) = scd_read_s16(-12);
     *(short*)(objBase + 0x74) = scd_read_s16(-10);
     *(short*)(objBase + 0x76) = scd_read_s16(-8);
@@ -2337,7 +2337,7 @@ void* script_command_funcs_table[256] = {
     /* 0x06 */ (void*)cmd_obj06_test,        // 0x00460760
     /* 0x07 */ (void*)cmd_obj07_test,        // 0x00460800
     /* 0x08 */ (void*)cmd_room_cam_set,      // 0x004608a0
-    /* 0x09 */ (void*)cmd_cut_set_0x09,      // 0x00460920
+    /* 0x09 */ (void*)cmd_cut_lock_set,      // 0x00460920
     /* 0x0A */ (void*)cmd_current_cut_set,   // 0x00460990
     /* 0x0B */ (void*)cmd_message_set,       // 0x004609f0
     /* 0x0C */ (void*)cmd_door_set,          // 0x004611b0
@@ -2386,7 +2386,7 @@ void* script_command_funcs_table[256] = {
     /* 0x37 */ (void*)cmd_room_bgm_state_set,              // 0x00460a30
     /* 0x38 */ (void*)cmd_dpad_test,              // 0x00431dc0
     /* 0x39 */ (void*)cmd_enemy_flags_get,              // 0x00431e10
-    /* 0x3A */ (void*)cmd_cut_0x3a,          // 0x00431e50
+    /* 0x3A */ (void*)cmd_cut_zone_set,          // 0x00431e50
     /* 0x3B */ (void*)cmd_obj_rotation_set,              // 0x00431ea0
     /* 0x3C */ (void*)cmd_player_dist_test,              // 0x00431f20
     /* 0x3D */ (void*)cmd_bullet_0x3d,       // 0x00431770

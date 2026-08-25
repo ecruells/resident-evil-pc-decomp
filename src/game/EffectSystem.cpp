@@ -1024,7 +1024,7 @@ static void effect_behavior_projectile(void)
             }
         }
     } else {
-        if (*(int*)&g_itemboxes_covers_table[7] < (int)eff->posY + (int)AH_SHORT(eff, 0xe)) {
+        if (*(int*)&g_omodel_table[7] < (int)eff->posY + (int)AH_SHORT(eff, 0xe)) {
             AH_USHORT(eff, 10) |= 0x400b;
             eff->animId = 0x2f;
             eff->updateId = 0;

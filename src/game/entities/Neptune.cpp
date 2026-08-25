@@ -578,7 +578,7 @@ static void neptune_state_init(void)
 // ============================================================================
 static void neptune_state_run(void)
 {
-    FUN_0045f970(PLAYER_T->x, PLAYER_T->z,
+    zone_path_find(PLAYER_T->x, PLAYER_T->z,
                  (int*)&ENTITY->player_pos_x, (int*)&ENTITY->player_pos_z);
 
     // Manhattan distance, computed and summed entirely in 32 bits - the two

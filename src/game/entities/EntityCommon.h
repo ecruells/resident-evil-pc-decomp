@@ -130,7 +130,7 @@ extern unsigned int HandleEnemyPlayerCollisions(void);                       // 
 // by the entity yaw, pushes at both, rolls position AND angle back on failure.
 // Returns 0 = clear, 1 = pushed clear, 0x80 = still stuck (rolled back).
 // Defined in RoomCollision.cpp (needs the static boundary_classify there).
-extern unsigned char FUN_0047d6f0(SVECTOR* endA, SVECTOR* endB);
+extern unsigned char check_room_collision_two_point(SVECTOR* endA, SVECTOR* endB);
 // check_room_collision (0x0047d310), ChkOutsideCell (0x0047d270) and
 // room_check_sight_blocked (0x0047db90) live in RoomCollision.cpp and are
 // declared in Globals.h. Do NOT re-declare them here: this header used to carry
@@ -154,13 +154,13 @@ extern void FUN_004565f0(SVECTOR* pos, SVECTOR* quad, int halfW, int halfH);  //
 extern void entity_add_fade_sprite(VECTOR* pos, short* velocity, short yOffset, short angle); // 0x00456810 - FadeSprite.cpp
 
 // ============================================================================
-// Zone-graph pathfinding (FUN_0045f970 + helpers, all in EntityCommon.cpp)
+// Zone-graph pathfinding (zone_path_find + helpers, all in EntityCommon.cpp)
 // ============================================================================
-extern unsigned char FUN_0045f970(int px, int pz, int* a, int* b);            // 0x0045f970
-extern unsigned int FUN_00460230(short x, short z);                           // 0x00460230
+extern unsigned char zone_path_find(int px, int pz, int* a, int* b);            // 0x0045f970
+extern unsigned int walk_zone_find(short x, short z);                           // 0x00460230
 // Returns 0 when the shared edge runs along X (g_playerDisplacement = crossing
 // x), 1 when along Z or not adjacent - the flag npc_walk_choose_heading uses.
-extern unsigned char FUN_004602b0(unsigned int zoneA, unsigned int zoneB);    // 0x004602b0
+extern unsigned char walk_zone_shared_edge(unsigned int zoneA, unsigned int zoneB);    // 0x004602b0
 
 // ============================================================================
 // Joint reach hit test (0x0048ae00) - defined in EntityCommon.cpp

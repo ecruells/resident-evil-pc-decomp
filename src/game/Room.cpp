@@ -291,7 +291,7 @@ void Room_LoadCameraSprites(void) // 0x004757c0
 void Room_SetupCamera(void) // 0x00462970
 {
     RDT_Camera* cameras = (RDT_Camera*)((char*)g_RdtPointer + sizeof(RDT));
-    set_title_render_param(cameras[g_roomCameraId].fov);
+    set_scene_render_param(cameras[g_roomCameraId].fov);
     MatrixToCamera((MATRIX*)&cameras[g_roomCameraId].cam_from_x);
 }
 

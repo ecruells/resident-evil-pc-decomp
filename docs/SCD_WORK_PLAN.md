@@ -1679,7 +1679,7 @@ the four empty stubs that used to sit in EngineStubs.cpp. Build passes.
   only fires entries with flag bit `0x80` set (the ones `update_player_position`
   deliberately skips, i.e. objects/items rather than doors); `check_climb_object`
   (`0x00474930`) + `ChkPlReachEntity` (`0x00474a20`) — the crate/climb-object scan of
-  `g_itemboxes_covers_table` with the ±299/4096 angle window; `door_transition_update`
+  `g_omodel_table` with the ±299/4096 angle window; `door_transition_update`
   (`0x00495d70`).
 - Handlers `room_check_actions[2..0x11]`: `display_msg_room_action`, `include_key`,
   `set_key_flag`, `check_door_side` (the Z-axis sibling of `check_door`), `flag_bank_set`
@@ -2235,7 +2235,7 @@ SCD behaviours 3/4/5/10. Nothing currently reaches either.
 follow-the-player mode `cmd_em_set` sub-command 8 selects (Barry after the dining-room
 scene). The driver, the four walk behaviours (0x00471a40/0x00471b80/0x00471c40/0x00471d50),
 the heading/waypoint helpers (0x00471f20, 0x004720d0, 0x00460090, 0x00460180, 0x00460390)
-and the look-at wander (0x00472330) are all in; `FUN_004602b0` now returns the
+and the look-at wander (0x00472330) are all in; `walk_zone_shared_edge` now returns the
 shared-edge flag its original leaves in AL (0 = X edge, 1 = Z edge). The 0x004c35f8
 dispatch block and the 0x004c3608/0x004c3618 threshold/swap tables are extracted. Note
 the swap-byte ring from 0x004c3618 is `{3,0,1,3}`/`{1,2,2,0}` - read the dump at

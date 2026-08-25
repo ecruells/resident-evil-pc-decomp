@@ -414,20 +414,20 @@ void room_set(void)
     object_delete_00442170(6);
 
     g_loadDataDestPointer = g_RdtPointer->vab_sound_file;
-    if (g_RdtPointer->sound_banks_count != 0) {
+    if (g_RdtPointer->omodel_slot_count != 0) {
         do {
-            g_itemboxes_covers_table[i] = g_loadDataDestPointer;
+            g_omodel_table[i] = g_loadDataDestPointer;
             *(unsigned char*)g_loadDataDestPointer = 0;
             g_loadDataDestPointer = (char*)g_loadDataDestPointer + 0xa4;
             i++;
-        } while (i < g_RdtPointer->sound_banks_count);
+        } while (i < g_RdtPointer->omodel_slot_count);
     }
 
     // Desk/unknown_03 processing
     i = 0;
     if (g_RdtPointer->unknown_03[0] != 0) {
         do {
-            g_desks_pointers_table[i] = g_loadDataDestPointer;
+            g_interactable_table[i] = g_loadDataDestPointer;
             *(unsigned char*)g_loadDataDestPointer = 0;
             g_loadDataDestPointer = (char*)g_loadDataDestPointer + 0xa4;
             i++;

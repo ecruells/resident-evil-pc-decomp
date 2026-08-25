@@ -992,7 +992,7 @@ unsigned char FUN_0048ae00(MATRIX* jointMtx, VECTOR* pos, short radius, int* pla
 }
 
 // ============================================================================
-// Zone-graph pathfinding scratch (0x00be0ee0-0x00be0f03), used by FUN_0045f970
+// Zone-graph pathfinding scratch (0x00be0ee0-0x00be0f03), used by zone_path_find
 // and the two walkers below. One contiguous block in the original, with the
 // byte arrays overlapping by one byte (0xbe0ee0[i] also reads as
 // 0xbe0edf[i+1], which the walkers use to reach the previous step's zone);
@@ -1007,16 +1007,16 @@ short         g_zonePathStep[16][2] = {};  // 0x00be0efc - per-step walk X/Z (st
 short         g_zonePathPrev[16][2] = {};  // 0x00be0f00 - per-step previous-position X/Z
 
 // ============================================================================
-// FUN_00460230 (0x00460230)
+// walk_zone_find (0x00460230)
 // Which zone of the RDT+0x58 grid contains (x, z)? Entry layout (verified
 // against the shipped RDTs): {x1, z1, x2, z2, field, flags} at a 0xC-byte
 // stride, count byte at the table base; the test is x in [x1, x2), z in
 // [z1, z2). On a hit the record's +8/+10 fields land in
 // g_playerDisplacement / player_distance_z (a side effect the zombie path
-// never reads back - FUN_004602b0 overwrites them) and the zone index is
+// never reads back - walk_zone_shared_edge overwrites them) and the zone index is
 // returned. Returns 0xFF when the point is outside every zone.
 // ============================================================================
-unsigned int FUN_00460230(short x, short z)
+unsigned int walk_zone_find(short x, short z)
 {
     unsigned char* zoneBase = g_RdtPointer->unknown_58;
     unsigned char count = *zoneBase;
@@ -1040,7 +1040,7 @@ unsigned int FUN_00460230(short x, short z)
 }
 
 // ============================================================================
-// FUN_004602b0 (0x004602b0)
+// walk_zone_shared_edge (0x004602b0)
 // Midpoint of the shared edge between two adjacent zones (given as zone
 // indices), into g_playerDisplacement / player_distance_z. Zones sharing an
 // X edge get the midpoint of the overlapping Z span and vice versa.
@@ -1049,7 +1049,7 @@ unsigned int FUN_00460230(short x, short z)
 // it runs along Z or the zones are not adjacent. The state-9 walk heading
 // (npc_walk_choose_heading) branches on it.
 // ============================================================================
-unsigned char FUN_004602b0(unsigned int zoneA, unsigned int zoneB)
+unsigned char walk_zone_shared_edge(unsigned int zoneA, unsigned int zoneB)
 {
     unsigned short* a = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneA & 0xFFFF) * 0xC);
     unsigned short* b = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneB & 0xFFFF) * 0xC);
@@ -1079,7 +1079,7 @@ unsigned char FUN_004602b0(unsigned int zoneA, unsigned int zoneB)
 
 // ============================================================================
 // zone_walk_ccw (0x0045fdb0) / zone_walk_cw (0x0045fae0)
-// The two zone-graph walks behind FUN_0045f970. Starting from
+// The two zone-graph walks behind zone_path_find. Starting from
 // g_zonePathIdx[0] (the entity's zone, set by the caller), each probes
 // adjacent zones - descending (ccw) or ascending (cw) index order - until the
 // target's zone is reached, keeping the shortest total path in
@@ -1189,7 +1189,7 @@ static unsigned char zone_walk_ccw(unsigned int zoneStart, unsigned char zoneTar
                 if (g_zonePathIdx[back] == zone) goto backtrack;
             }
 
-            FUN_004602b0(g_zonePathIdx[newLen], g_zonePathIdx[newLen - 1]);
+            walk_zone_shared_edge(g_zonePathIdx[newLen], g_zonePathIdx[newLen - 1]);
             dist += (unsigned int)SquareRoot0(
                 (g_zonePathStep[newLen][0] - g_playerDisplacement) * (g_zonePathStep[newLen][0] - g_playerDisplacement) +
                 (g_zonePathStep[newLen][1] - player_distance_z) * (g_zonePathStep[newLen][1] - player_distance_z));
@@ -1208,7 +1208,7 @@ static unsigned char zone_walk_ccw(unsigned int zoneStart, unsigned char zoneTar
 
         // ---- target adjacent: goal step ----
         g_zonePathDir[i] = zoneTarget;
-        FUN_004602b0(g_zonePathIdx[i], zoneTarget);
+        walk_zone_shared_edge(g_zonePathIdx[i], zoneTarget);
         dist += (unsigned int)SquareRoot0(
             (g_zonePathPrev[i][1] - player_distance_z) * (g_zonePathPrev[i][1] - player_distance_z) +
             (g_zonePathPrev[i][0] - g_playerDisplacement) * (g_zonePathPrev[i][0] - g_playerDisplacement));
@@ -1319,7 +1319,7 @@ static unsigned char zone_walk_cw(unsigned int zoneStart, unsigned char zoneTarg
                 if (g_zonePathIdx[back] == zone) goto backtrack;
             }
 
-            FUN_004602b0(g_zonePathIdx[newLen], g_zonePathIdx[newLen - 1]);
+            walk_zone_shared_edge(g_zonePathIdx[newLen], g_zonePathIdx[newLen - 1]);
             dist += (unsigned int)SquareRoot0(
                 (g_zonePathStep[newLen][1] - player_distance_z) * (g_zonePathStep[newLen][1] - player_distance_z) +
                 (g_zonePathStep[newLen][0] - g_playerDisplacement) * (g_zonePathStep[newLen][0] - g_playerDisplacement));
@@ -1338,7 +1338,7 @@ static unsigned char zone_walk_cw(unsigned int zoneStart, unsigned char zoneTarg
 
         // ---- target adjacent: goal step ----
         g_zonePathDir[i] = zoneTarget;
-        FUN_004602b0(g_zonePathIdx[i], zoneTarget);
+        walk_zone_shared_edge(g_zonePathIdx[i], zoneTarget);
         dist += (unsigned int)SquareRoot0(
             (g_zonePathPrev[i][1] - player_distance_z) * (g_zonePathPrev[i][1] - player_distance_z) +
             (g_zonePathPrev[i][0] - g_playerDisplacement) * (g_zonePathPrev[i][0] - g_playerDisplacement));
@@ -1383,7 +1383,7 @@ exit_check:
 }
 
 // ============================================================================
-// FUN_0045f970 (0x0045f970)
+// zone_path_find (0x0045f970)
 // Zone-graph waypoint recompute - the chase-target updater behind
 // zombie_update_player_distance. Locates the entity's zone and the target's
 // zone in the RDT+0x58 grid, then either hands back the target point (same
@@ -1391,12 +1391,12 @@ exit_check:
 // path segment. Returns the target zone (bit 4 set when taken directly), the
 // first step's zone after a walk, or 0xFF when no path exists.
 // ============================================================================
-unsigned char FUN_0045f970(int pos1_x, int pos1_z, int* pos2_x, int* pos2_z)
+unsigned char zone_path_find(int pos1_x, int pos1_z, int* pos2_x, int* pos2_z)
 {
     unsigned char* zoneBase = g_RdtPointer->unknown_58;
     unsigned char count = *zoneBase;
 
-    unsigned char startZone = (unsigned char)FUN_00460230(
+    unsigned char startZone = (unsigned char)walk_zone_find(
         (short)ENTITY->scaMatrixData.localMatrix.t[0],
         (short)ENTITY->scaMatrixData.localMatrix.t[2]);
     unsigned short targetZ = (unsigned short)pos1_z;
@@ -1409,7 +1409,7 @@ unsigned char FUN_0045f970(int pos1_x, int pos1_z, int* pos2_x, int* pos2_z)
         pos1_x = ((int)*(unsigned short*)(e + 2) + (int)*(unsigned short*)(e + 6)) >> 1;
         targetZ = (unsigned short)(((int)*(unsigned short*)(e + 4) + (int)*(unsigned short*)(e + 8)) >> 1);
     } else {
-        targetZone = (unsigned char)FUN_00460230((short)pos1_x, (short)targetZ);
+        targetZone = (unsigned char)walk_zone_find((short)pos1_x, (short)targetZ);
     }
 
     if (targetZone == startZone) {
@@ -1439,7 +1439,7 @@ unsigned char FUN_0045f970(int pos1_x, int pos1_z, int* pos2_x, int* pos2_z)
     }
     if (firstStep == 0xFF) return 0xFF;
 
-    FUN_004602b0(startZone, firstStep);
+    walk_zone_shared_edge(startZone, firstStep);
     *(short*)pos2_x = (short)g_playerDisplacement;
     *(short*)pos2_z = (short)player_distance_z;
     return firstStep;

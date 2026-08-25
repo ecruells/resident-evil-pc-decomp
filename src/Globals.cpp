@@ -1845,11 +1845,17 @@ char           g_pakStringBuf[512] = {};
 // Used by SCD scripts to track triggered events, doors, cutscenes, enemy deaths.
 // g_RoomEventFlags is now a macro to g_BioCard.roomEventFlags (see Items.h)
 
-// 0x00d226b0 - Sound bank cover pointer table (populated from RDT vab_sound_file)
-void*          g_itemboxes_covers_table[8] = {};
+// 0x00d226b0 - Room-object (omodel) record table. Each slot points at one
+// 0xA4-byte record carved from the RDT VB region by room_set (count = RDT
+// omodel_slot_count) and filled by cmd_omodel_set; walked by
+// update_room_objects / check_climb_object and targetable from SCD scripts.
+void*          g_omodel_table[8] = {};
 
-// 0x00d21360 - Desk data pointer table (populated from RDT unknown_03 data)
-void*          g_desks_pointers_table[8] = {};
+// 0x00d21360 - Interactable obstacle record table (desks, containers, lids).
+// One 0xA4-byte record per RDT obstacles_models pair (count = header byte
+// 0x03), loaded by the SCD item-event command and driven by check_desk /
+// open_itembox; also a generic entity target for event scripts.
+void*          g_interactable_table[8] = {};
 
 // 0x00ae9ef4 - Count of object models loaded by cmd_omodel_set in current room
 int            g_omodelCount = 0;
@@ -1878,7 +1884,7 @@ ScdEventEntry* g_pScdEventCurrent = NULL;               // 0x00bf0848
 unsigned char* g_ScdOpcodes = NULL;                     // 0x00bf0800
 unsigned int*  g_CmdOpcodesPointer = NULL;              // 0x00bf0804
 unsigned char  g_ScriptContinueFlag = 0;                // 0x00bf07fa
-unsigned char* g_EvtScripts = NULL;                     // 0x00d213b4
+unsigned char* g_RoomEventScripts = NULL;                     // 0x00d213b4
 unsigned char* g_RoomScdOpcodes = NULL;                  // 0x00d213b8
 
 // SCD flag bank 9

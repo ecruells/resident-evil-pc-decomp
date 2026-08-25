@@ -376,7 +376,7 @@ LAB_0046381c:
     // 0x004638e3-0x00463966: Set up camera and lighting for menu
     DAT_00ae9f12 = 0;
     DAT_00ae9f13 = 0;
-    set_title_render_param(0xC0);
+    set_scene_render_param(0xC0);
 
     MATRIX_00d22680.m[0][0] = 15000;
     MATRIX_00d22680.m[0][1] = 0;
@@ -4101,7 +4101,7 @@ static int menu_update_status_screen(void)
         // Pickup complete: consume the entry and clear its flags.
         unsigned char* evt = (unsigned char*)g_room_event_index;
         unsigned char* record = *(unsigned char**)(evt + 8);
-        ((unsigned char*)g_desks_pointers_table[record[10]])[0] = 0;
+        ((unsigned char*)g_interactable_table[record[10]])[0] = 0;
         *evt = 0;
         FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
         DAT_00be9833 = record[8];

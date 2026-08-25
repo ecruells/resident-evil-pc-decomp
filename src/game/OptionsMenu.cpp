@@ -2609,7 +2609,7 @@ void options_menu(void)
     title_setup_texture_pages(8, 1);
     // empty_00470960(8): empty in the original - call dropped
     StMask(0, 3);
-    set_title_render_param(0xcf);
+    set_scene_render_param(0xcf);
     MatrixToCamera(&localCamMatrix);
 
     // Save player entity state

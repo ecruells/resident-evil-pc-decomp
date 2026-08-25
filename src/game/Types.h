@@ -338,7 +338,9 @@ static_assert(sizeof(RDT_BoundaryHeader) == 0x18, "RDT_BoundaryHeader size misma
 struct RDT {
     unsigned char  sprites_count;       // 0x00 - number of room sprite entries in g_RoomSprEntries
     unsigned char  cameras_count;       // 0x01
-    unsigned char  sound_banks_count;   // 0x02
+    unsigned char  omodel_slot_count;   // 0x02 - item-model {TMD,TIM} pair count AND
+                                        //         omodel record slot count (never used
+                                        //         for sounds on PC)
     unsigned char  unknown_03[3];       // 0x03-0x05
     short          ambient_light_r;     // 0x06
     short          ambient_light_g;     // 0x08
