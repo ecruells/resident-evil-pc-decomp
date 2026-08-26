@@ -702,12 +702,12 @@ int RunMessageLoop(void)
                 //   0x00441f0c  CMP DAT_004d46d8, 0     / JZ  run   <- limiter gate
                 //   0x00441f14  CMP g_bUseFrameSkip, 1  / JNZ 16ms path
                 //   0x00441f1d  CMP g_bFrameSkipDetected, 0 / JNZ run
-                //   0x00441f25  pace to DAT_004bcb54 ms  (gameplay)
+                //   0x00441f25  pace to g_dwFrameIntervalMs ms  (gameplay)
                 //   0x00441f4f  pace to 16 ms            (menus, title, FMV)
                 //
                 // Both never-written gates matter. DAT_004d46d8 is read only at
                 // 0x00441f0e and is 1 in the image, so the limiter is always armed;
-                // DAT_004bcb54 is read only at 0x00441f26 and is 0x21 = 33 - the 30
+                // g_dwFrameIntervalMs is read only at 0x00441f26 and is 0x21 = 33 - the 30
                 // ticks/s the whole game is built on (the play clock divides by 30,
                 // 0x1A5E0 == 3600*30, and every scripted wait is a frame count).
                 //

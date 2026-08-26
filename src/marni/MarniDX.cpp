@@ -925,7 +925,7 @@ void MarniDX::Present()
     if (!p || !p->swapChain) return;
 
     // Do NOT wait on a vblank by default. This engine paces itself in software:
-    // the pump limits main_loop to one call per 33 ms (DAT_004bcb54) and
+    // the pump limits main_loop to one call per 33 ms (g_dwFrameIntervalMs) and
     // FrameRateGovernor decides which of those frames get presented. A blocking
     // Present puts the display in charge of both instead, and the two fight:
     // with SyncInterval 1 on a 60 Hz panel the real frame period becomes 33.33
