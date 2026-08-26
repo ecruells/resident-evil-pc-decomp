@@ -3645,7 +3645,28 @@ ladder_step_done:
 //   00495527: JMP dword ptr [EAX*0x4 + 0x4d456c]
 // Unlike frame0 there is no input read and no caller-applied angle tweak - these
 // are the locked-in actions, and each handler reads input itself if it needs to.
+//
+// Table dump (dwords at 0x004d456c, base for this dispatcher):
+//   0x09 -> 0x00495df0 (empty)   0x10 -> 0x00457230
+//   0x0a -> 0x00457390           0x11 -> 0x00457390
+//   0x0b -> 0x00496480           0x12 -> NULL
+//   0x0c -> 0x00495e00           0x13 -> 0x00459370
+//   0x0d -> 0x00496110           0x14 -> 0x004594c0
+//   0x0e -> 0x00496470 (empty)   0x15 -> 0x004596c0
+//   0x0f -> 0x00496470 (empty)   0x16 -> 0x00459960
+//                                0x17 -> 0x004599f0
+//
+// Note the knife block: under frameId 1 the entries sit ONE index lower than
+// under frameId 4's table (base 0x004d4570), so behavior 0x13 runs the AIM
+// handler (0x459370) here, not the hold. This table shares dwords with the
+// frame-4 table by design; each dispatcher reads it with its own base.
 // ============================================================================
+static void player_behavior_12_knife_aim(void);    // 0x00459370
+static void player_behavior_13_knife_hold(void);   // 0x004594c0
+static void player_behavior_14_knife_swing(void);  // 0x004596c0
+static void player_behavior_15_knife_holster(void);// 0x00459960
+static void player_behavior_16_knife_turn(void);   // 0x004599f0
+
 static void player_ctrl_frame1(void)
 {
     switch (g_playerEntity.action_behavior) {
@@ -3653,7 +3674,6 @@ static void player_ctrl_frame1(void)
         return;
     case 0x0a:                       // 0x004d4594 -> 0x00457390
     case 0x11:                       // 0x004d45b0 -> 0x00457390
-    case 0x13:                       // 0x004d45b8 -> 0x00457390
         player_door_open_sequence();
         return;
     case 0x0b:                       // 0x004d4598 -> 0x00496480
@@ -3671,7 +3691,26 @@ static void player_ctrl_frame1(void)
     case 0x10:                       // 0x004d45ac -> 0x00457230
         player_behavior_10_push();
         return;
+    case 0x13:                       // 0x004d45b8 -> 0x00459370 (knife aim)
+        player_behavior_12_knife_aim();
+        return;
+    case 0x14:                       // 0x004d45bc -> 0x004594c0 (knife hold)
+        player_behavior_13_knife_hold();
+        return;
+    case 0x15:                       // 0x004d45c0 -> 0x004596c0 (knife swing)
+        player_behavior_14_knife_swing();
+        return;
+    case 0x16:                       // 0x004d45c4 -> 0x00459960 (knife holster)
+        player_behavior_15_knife_holster();
+        return;
+    case 0x17:                       // 0x004d45c8 -> 0x004599f0 (knife turn)
+        player_behavior_16_knife_turn();
+        return;
     default:
+        // 0x004d4570/0x4d45b4 (behaviors 2, 8 and 0x12 from this base) are NULL:
+        // the original would fault on a wild jump, so these indices never occur.
+        // The bounds check in player_state_01_control covers indices past 0x17,
+        // which land in non-pointer data. Report instead of jumping anywhere.
         player_state_report_missing("action_behavior under animFrameId 1 (0x004d456c)");
         return;
     }
@@ -5578,7 +5617,17 @@ static void player_ctrl_frame2(void)
         player_behavior_10_push();
         return;
     default:
-        player_state_report_missing("action_behavior under animFrameId 2");
+        // 0x00495330: the behavior table behind this switch only spans 0x00-0x11;
+        // every other index falls through to a plain return in the original.
+        //
+        // This default is reached once per aim press and is NOT an unimplemented
+        // animation: player_ctrl_frame0 (0x00495320) is CALL 0x004956a0 (input)
+        // followed by JMP 0x00495330. When the input step raises a weapon it sets
+        // animFrameId=3/4 AND action_behavior=0x12 before this table runs, so the
+        // first pass lands here with a weapon behavior that has no frame-2 entry.
+        // The next tick re-dispatches on animFrameId and reaches the real gun/knife
+        // handler under frames 3/4, so returning silently is exactly what the
+        // original does - do not "fix" this by reporting.
         return;
     }
 }
