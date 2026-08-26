@@ -58,7 +58,16 @@ static void report(const char* kind, FILE* f)
 
 static FILE* open_log(void)
 {
-    return fopen("crash.log", "a");
+    // Write next to the EXE, not the process CWD. A shortcut or a launcher can
+    // change the working directory to somewhere the user never looks, which
+    // made it look like "no crash log written" when the log was actually going
+    // to the shortcut's start-in folder.
+    static char path[MAX_PATH];
+    GetModuleFileNameA(NULL, path, MAX_PATH);
+    char* slash = strrchr(path, '\\');
+    if (slash) *slash = '\0';
+    strcat_s(path, "\\crash.log");
+    return fopen(path, "a");
 }
 
 static void __cdecl on_invalid_parameter(const wchar_t*, const wchar_t*,
@@ -84,6 +93,24 @@ static void on_sigabrt(int)
 
 static LONG WINAPI on_unhandled(EXCEPTION_POINTERS* ep)
 {
+    // The vectored handler sees EVERY exception, including benign ones raised
+    // by the graphics driver and CRT internals (0x406D1388 GPU throttling,
+    // 0x40010006 debugger message, 0x40000015/0x4000001E debug events) that
+    // Windows intentionally passes around and nobody ever "handles" - they are
+    // not crashes. Only record the codes that actually kill the process.
+    switch (ep->ExceptionRecord->ExceptionCode) {
+    case 0xC0000005:  // access violation
+    case 0xC00000FD:  // stack overflow
+    case 0xC000001D:  // illegal instruction
+    case 0xC0000094:  // integer divide by zero
+    case 0xC0000096:  // privileged instruction
+    case 0x80000003:  // breakpoint
+    case 0x00000000:  // anything else genuinely odd
+        break;
+    default:
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     FILE* f = open_log();
     if (f) {
         fprintf(f, "\n==== UNHANDLED EXCEPTION 0x%08lX at 0x%08llX ====\n",
@@ -146,5 +173,6 @@ void crashlog_install(void)
     _set_invalid_parameter_handler(on_invalid_parameter);
     _set_purecall_handler(on_purecall);
     signal(SIGABRT, on_sigabrt);
+    AddVectoredExceptionHandler(1, on_unhandled);
     SetUnhandledExceptionFilter(on_unhandled);
 }

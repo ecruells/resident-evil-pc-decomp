@@ -373,7 +373,16 @@ void FlushTmdObjects(void)
         MarniGetRenderScale(&scaleX, &scaleY);
         float cx = (float)g_SubpixelOffsetX * scaleX;
         float cy = (float)g_SubpixelOffsetY * scaleY;
-        float f  = (float)g_sceneRenderParam * scaleX;
+        // Project in GAME-SPACE (320x240) exactly like the original GTE
+        // (GteMatrix.cpp: sx = x*param/z + 160, sy = ... + 120) and only then
+        // apply the render scales - X and Y SEPARATELY. The old code folded
+        // scaleX into f and applied it to both axes, which was fine while the
+        // backbuffer shared the logical 4:3 (640x480 of 320x240) but inflates
+        // the models by scaleX/scaleY on the 16:9 native-resolution
+        // fullscreen backbuffer (models render ~1.33x too tall, i.e. "closer
+        // to the camera"). The pre-rendered backgrounds stretch anisotropically,
+        // so the models must too.
+        float fg = (float)g_sceneRenderParam;
 
         // Near plane. The original marks a vertex clipped when its view-space Z
         // is under TWICE the projection distance (0x00447023-0x0044703c):
@@ -501,9 +510,9 @@ void FlushTmdObjects(void)
                 }
                 else {
                     clipped[v] = 0;
-                    float iz = f / vz;
-                    sx[v] = cx + vx * iz;
-                    sy[v] = cy - vy * iz;
+                    float iz = fg / vz;
+                    sx[v] = cx + vx * iz * scaleX;
+                    sy[v] = cy - vy * iz * scaleY;
                 }
 
                 if (unlit) {

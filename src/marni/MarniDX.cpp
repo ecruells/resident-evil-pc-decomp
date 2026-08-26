@@ -452,6 +452,28 @@ BOOL MarniDX::Create(HWND hWnd, int width, int height, BOOL fullScreen,
     if (width  < 320) width  = 640;
     if (height < 240) height = 480;
 
+    // Borderless-fullscreen presentation: NEVER create a DXGI exclusive
+    // swap chain. Exclusive scanout bypasses DWM composition, which made
+    // the GDI-drawn MCI FMV frames invisible (audio-only playback), its
+    // asynchronous mode switches exposed the desktop behind resizing
+    // windows after each FMV, and releasing an exclusive swap chain could
+    // hang the process at exit leaving the panel black. A windowed
+    // blt-model swap chain presented into a screen-sized WS_POPUP window
+    // gives the same full-screen result without any of those problems;
+    // DWM stretches the game-resolution back buffer over the monitor.
+    if (fullScreen) {
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfoA(MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+            // Done BEFORE the device exists so the resulting WM_SIZE lands
+            // while ready==FALSE and cannot trigger a swap-chain resize.
+            SetWindowPos(hWnd, HWND_TOPMOST,
+                         mi.rcMonitor.left, mi.rcMonitor.top,
+                         mi.rcMonitor.right - mi.rcMonitor.left,
+                         mi.rcMonitor.bottom - mi.rcMonitor.top,
+                         SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
+    }
+
     DXGI_SWAP_CHAIN_DESC sc = {};
     sc.BufferCount        = 2;
     sc.BufferDesc.Width   = width;
@@ -462,7 +484,7 @@ BOOL MarniDX::Create(HWND hWnd, int width, int height, BOOL fullScreen,
     sc.BufferUsage        = DXGI_USAGE_RENDER_TARGET_OUTPUT;
     sc.OutputWindow       = hWnd;
     sc.SampleDesc.Count   = 1;
-    sc.Windowed           = !fullScreen;
+    sc.Windowed           = TRUE;
     sc.Flags              = 0;
 
     D3D_FEATURE_LEVEL fls[] = {
@@ -662,6 +684,25 @@ BOOL MarniDX::Create(HWND hWnd, int width, int height, BOOL fullScreen,
     p->context->RSSetState(p->rasterScissor);
 
     p->ready = TRUE;
+
+    // In borderless fullscreen, render at the monitor's native resolution.
+    // The game-space -> backbuffer scale (MarniGetRenderScale = physical/
+    // logical) is applied at draw time with POINT sampling, so a native-
+    // resolution backbuffer keeps the 2D art crisp. Leaving the backbuffer
+    // at the game resolution would make DWM stretch it over the screen-
+    // sized window with bilinear filtering, blurring every glyph.
+    if (fullScreen) {
+        MONITORINFO mi = { sizeof(mi) };
+        if (GetMonitorInfoA(MonitorFromWindow(hWnd, MONITOR_DEFAULTTONEAREST), &mi)) {
+            int monW = mi.rcMonitor.right - mi.rcMonitor.left;
+            int monH = mi.rcMonitor.bottom - mi.rcMonitor.top;
+            if (monW >= 320 && monH >= 240 &&
+                (monW != (int)p->width || monH != (int)p->height)) {
+                ChangeDisplayMode((DWORD)monW, (DWORD)monH, FALSE);
+            }
+        }
+    }
+
     if (outWidth)  *outWidth  = (int)p->width;
     if (outHeight) *outHeight = (int)p->height;
     return TRUE;

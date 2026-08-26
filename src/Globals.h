@@ -1615,6 +1615,8 @@ unsigned int set_item_description_message(unsigned short descIndex, unsigned sho
 DWORD GetFreeDiskSpaceMB(LPCSTR lpPath);
 BOOL  EnumerateDriveTypes(void);
 int   ShowMessageBox(HWND hWnd, LPCSTR lpMsg, LPCSTR lpCaption, UINT uType);
+void  crashlog_install(void);
+void  crashlog_mark(const char* step);
 BOOL  IsGameInstalled(void);
 BOOL  LoadInstallationConfiguration(BYTE* pInstallPath);
 

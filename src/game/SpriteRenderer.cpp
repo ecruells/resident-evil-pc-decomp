@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <algorithm>
 #include <cstdlib>
+#include <cmath>
 
 // ============================================================================
 // Global variables
@@ -256,10 +257,26 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
         }
         if (cmd->type != 10) continue;
 
-        float x = (float)cmd->x0 * scaleX;
-        float y = (float)cmd->y0 * scaleY;
-        float w = (float)(cmd->x1 - cmd->x0 + 1) * scaleX;
-        float h = (float)(cmd->y1 - cmd->y0 + 1) * scaleY;
+        // Snap the quad to whole PIXEL bounds before drawing. Game-space
+        // coordinates are integers, but the render scale (physical/logical)
+        // is fractional on a native-resolution fullscreen backbuffer (e.g.
+        // 4.5x vertical for 240->1080). Scaling adjacent mask strips
+        // independently leaves their shared edges on half-pixels, and point
+        // sampling then shows a hairline seam of the neighbouring texel row
+        // (the full-width horizontal lines across the room background).
+        // Rounding the two edges of every quad to the same integer pixel
+        // lines makes abutting strips agree exactly - their shared boundary
+        // rounds to the same value because it is the same game coordinate.
+        float x0s = (float)cmd->x0 * scaleX;
+        float y0s = (float)cmd->y0 * scaleY;
+        float x1s = (float)(cmd->x1 + 1) * scaleX;
+        float y1s = (float)(cmd->y1 + 1) * scaleY;
+        float x = (float)floor(x0s + 0.5f);
+        float y = (float)floor(y0s + 0.5f);
+        float w = (float)floor(x1s + 0.5f) - x;
+        float h = (float)floor(y1s + 0.5f) - y;
+        if (w < 1.0f) w = 1.0f;
+        if (h < 1.0f) h = 1.0f;
 
         int cr = (int)(cmd->r * 255.0f);
         int cg = (int)(cmd->g * 255.0f);

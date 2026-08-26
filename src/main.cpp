@@ -593,15 +593,15 @@ int RunMessageLoop(void)
         if (PeekMessageA(&msg, NULL, 0, 0, peekFlags)) {
             // 0x00441d87: Get the message
             BOOL gotMsg = GetMessageA(&msg, NULL, 0, 0);
-            if (!gotMsg) {
+                if (!gotMsg) {
                 // 0x00441da0: WM_QUIT received - cleanup and exit
                 DestroyAllSoundBanks();
                 CleanupAsyncTasks();
-                
+
                 if (g_bHasFinalizedSettings) {
                     if (!g_isGameCursorHiddenFlag) {
-                        ShowCursor(TRUE);
-                    }
+                    ShowCursor(TRUE);
+                }
                     // Show error message if applicable
                     ShowMessageBox(NULL, "", "RESIDENT EVIL", MB_OK);
                 }

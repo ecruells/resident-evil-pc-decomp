@@ -336,7 +336,13 @@ static void DoorRequestDraw(int idx)
 // ============================================================================
 static void DoorCreateTexturePage(void)
 {
-    VideoDriver_ClearState348(g_pMarniDirect3D, g_pMarniDirect3D);
+    // obj must be the texture PAGE being repopulated, context the video driver.
+    // Passing g_pMarniDirect3D as obj made VideoDriver_ClearState348 treat the
+    // CMarniDirect3D object as a PSXTexture: ClearCLUTEntries then walked
+    // bogus offsets and Release() freed garbage heap pointers (0xC0000005 in
+    // RtlFreeHeap, release-only). Matches DoorAsyncTeardown below and every
+    // other call site (GameState/MainMenu/ObjectManager).
+    VideoDriver_ClearState348(g_doorTexPage, g_pMarniDirect3D);
     LoadPSXImage((PSXTexture*)g_doorTexPage, g_doorTexSrc, 1);
 
     // 0x00484856: overwrite every CLUT descriptor's material key with a fixed
@@ -1235,6 +1241,7 @@ static void DoorAnimTask(void)
 // Called BEFORE the task spawn so the animation starts with data ready.
 void door_system_load_data(void)
 {
+    crashlog_mark("door: door_system_load_data");
     DoorLoadData();
 }
 
@@ -1243,5 +1250,6 @@ void door_system_load_data(void)
 // room_transition_load waits for bit 0x4000000 to clear.
 void door_system_start_animation(void)
 {
+    crashlog_mark("door: door_system_start_animation");
     Task_execute(1, (void*)DoorAnimTask);
 }
