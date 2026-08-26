@@ -516,3 +516,6 @@ void title_state(void)
         return;
     }
 }
+
+// (0x0045a6d0) - Play title screen selection SFX
+void title_select_sfx(void) { }

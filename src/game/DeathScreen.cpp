@@ -33,7 +33,7 @@
 // every original symbol; the definitions live in SoundSystem.cpp /
 // CmdFunctions.cpp).
 extern void play_sound_and_voice_effect(int type, int id);   // SoundSystem.cpp
-extern void BuildSndFadeTbl(char distSteps, int fadeType);   // GameState.cpp (0x0047ff90)
+extern void BuildSndFadeTbl(char distSteps, int fadeType);   // SoundSystem.cpp (0x0047ff90)
 
 // ============================================================================
 // 0x10-byte texture template entries (0x004bd2b8 / 0x004bd308)

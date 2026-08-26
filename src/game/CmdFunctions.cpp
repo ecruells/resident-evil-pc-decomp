@@ -2414,3 +2414,575 @@ void* script_command_funcs_table[256] = {
     // Opcodes 0x51-0xFF: fill with cmd_nop as safe default
     // (entries 0x51-0xF5 may be accessed; 0xF6-0xFF are handled by room_events_check)
 };
+
+// ============================================================================
+// SCD command helper implementations (moved here from GameState.cpp).
+// These back the script_command_funcs_table entries above.
+// ============================================================================
+
+extern void ResolveAnimPointers(unsigned char* data);        // TmdAnimation.cpp
+
+// ---------------------------------------------------------------------------
+// Flg_on (0x00473ef0)
+// Sets a bit flag in a flag array.
+// baseAddr: base address of the flag array
+// bitIndex: bit position to set
+// ---------------------------------------------------------------------------
+void Flg_on(int baseAddr, unsigned int bitIndex)
+{
+    unsigned int* flagWord = (unsigned int*)(((bitIndex & 0xffffffe7) >> 3) + baseAddr);
+    *flagWord = *flagWord | (0x80000000U >> ((unsigned char)bitIndex & 0x1f));
+}
+
+// ============================================================================
+// FUN_00473f10 (0x00473f10) - Clear a bit flag
+// Exact counterpart of Flg_ck (0x00473f40): same byte-offset idiom
+// ((bitIndex & 0xFFFFFFE7) >> 3, i.e. (bitIndex >> 5) * 4) and the same MSB-first
+// bit order within the dword.
+// ============================================================================
+void FUN_00473f10(int* baseAddr, unsigned int bitIndex)
+{
+    unsigned int byteOffset = (bitIndex & 0xFFFFFFE7u) >> 3;
+    unsigned int bitMask    = 0x80000000u >> (bitIndex & 0x1F);
+    unsigned int* flagWord  = (unsigned int*)((unsigned char*)baseAddr + byteOffset);
+    *flagWord &= ~bitMask;
+}
+
+// ============================================================================
+// memset_ (0x0047cf60) - Zero N dwords
+// The original's 2-arg helper (distinct from _memset): writes 0 over
+// `dwordCount` consecutive dwords. Used by room_event_item_pickup to clear an
+// effect slot (0x21 dwords = one 0x84-byte Effect).
+// ============================================================================
+void memset_(unsigned int* dst, int dwordCount)
+{
+    for (; dwordCount != 0; dwordCount--) {
+        *dst = 0;
+        dst++;
+    }
+}
+
+// ============================================================================
+// Model colour-tint helpers used by SCD opcode 0x34 variant 0.
+//
+// All three walk the SAME per-object array JointSetColorTint (0x00485ac0) walks:
+// modelObj+0x20 is the CMarniDirect3DTMD, its object count is the dword at
+// +0x4C0, and the objects start at +0x4D0 with a stride of 0x84. The loop bound
+// is count * 2 (each object has a mirrored copy). Within an object,
+// +0x5C/+0x60/+0x64 are the R/G/B tint multipliers as floats and
+// +0x6C/+0x70/+0x74 are the second copy the renderer actually samples.
+//
+// Like the already-ported JointSetColorTint, only the `modelObj+0x10 == 0`
+// branch is transcribed. The original's else-branch drives the complex-TMD
+// staging buffer g_abComplexTmdObjectData (0x008ffd1c), which this port does not
+// model at all - the same omission, and made for the same reason.
+// ============================================================================
+
+// 1/31, the fixed-point scale the two tint helpers share (float at 0x004af2e8).
+static const float kTintScale = 0.032258064f;
+
+// ============================================================================
+// TmdObjectTintAdd (0x00485c60)
+// Adds a signed RGB delta to every object of a model, rebased so the brighter of
+// the R/G deltas becomes zero:
+//
+//   fr = r/31,  fg = g/31,  fmax = max(fr, fg)
+//   dR = fr - fmax,  dG = fg - fmax,  dB = b/31 - fmax
+//
+// so the tint only ever darkens. Each component is accumulated onto the existing
+// multiplier and clamped into [0, 1]; the second copy at +0x6C/+0x70/+0x74 is set
+// to a constant 2.0f rather than mirrored (that is the original's behaviour, not
+// a transcription slip). Green is then forced to 0 unconditionally, and blue is
+// snapped to 0 below 0.36 (double at 0x004af2f0).
+//
+// On the FIRST object only, the resulting tint is packed back into modelObj+0x18
+// as 0x00RRGGBB with each channel scaled by 255.0 (float at 0x004af2f8).
+// ============================================================================
+static void TmdObjectTintAdd(void* modelObj, int r, int g, int b)
+{
+    unsigned char* obj = (unsigned char*)modelObj;
+    if (obj == NULL || *(int*)(obj + 0x10) != 0) {
+        return;   // complex-TMD path, not modelled (see the note above)
+    }
+
+    unsigned char* tmd = *(unsigned char**)(obj + 0x20);
+    if (tmd == NULL || (*(unsigned int*)(tmd + 0x4C0) & 0x7FFFFFFF) == 0) {
+        return;
+    }
+
+    float fr   = (float)r * kTintScale;
+    float fg   = (float)g * kTintScale;
+    float fmax = (fr <= fg) ? fg : fr;
+    float dR   = fr - fmax;
+    float dG   = fg - fmax;
+    float dB   = (float)b * kTintScale - fmax;
+
+    unsigned char* rec = tmd + 0x4D0;
+    unsigned int count = (unsigned int)(*(int*)(tmd + 0x4C0) * 2);
+
+    for (unsigned int i = 0; i < count; i++) {
+        *(unsigned int*)(rec + 0x80) |= 2;
+
+        *(float*)(rec + 0x5C) += dR;
+        *(unsigned int*)(rec + 0x6C) = 0x40000000u;   // 2.0f
+        *(float*)(rec + 0x60) += dG;
+        *(unsigned int*)(rec + 0x70) = 0x40000000u;   // 2.0f
+        *(float*)(rec + 0x64) += dB;
+        *(unsigned int*)(rec + 0x74) = 0x40000000u;   // 2.0f
+
+        // The clamps are integer compares on the float bit patterns, exactly as
+        // the original: signed `> 0x3F800000` catches anything above 1.0f, and
+        // unsigned `> 0x80000000` catches any negative value except -0.0f.
+        for (int off = 0x5C; off <= 0x64; off += 4) {
+            if (*(int*)(rec + off) > 0x3F800000) {
+                *(unsigned int*)(rec + off) = 0x3F800000u;   // 1.0f
+            }
+            if (*(unsigned int*)(rec + off) > 0x80000000u) {
+                *(unsigned int*)(rec + off) = 0;
+            }
+        }
+
+        *(unsigned int*)(rec + 0x60) = 0;                    // 0x00485db3
+        if (*(float*)(rec + 0x64) < 0.36f) {
+            *(unsigned int*)(rec + 0x64) = 0;
+        }
+
+        if (i == 0) {
+            unsigned int pr = (unsigned int)(int)(*(float*)(rec + 0x5C) * 255.0f);
+            unsigned int pg = (unsigned int)(int)(*(float*)(rec + 0x60) * 255.0f);
+            unsigned int pb = (unsigned int)(int)(*(float*)(rec + 0x64) * 255.0f);
+            *(unsigned int*)(obj + 0x18) =
+                ((pr & 0xFF) << 16) | ((pg << 8) & 0xFF00) | (pb & 0xFF);
+        }
+
+        rec += 0x84;
+    }
+}
+
+// ============================================================================
+// TmdObjectTintSet (0x00485fa0)
+// Sets (rather than accumulates) the RGB multipliers from a signed delta scaled
+// by 5/31. The three values are rebased so that every positive component is
+// subtracted from all three - repeated for R, then G, then B - which drives the
+// brightest channel to exactly 0 and leaves the others negative. The stored
+// multiplier is `1.0f + delta`, so the result only ever darkens.
+//
+// Unlike TmdObjectTintAdd this branch does NOT set the +0x80 dirty bit, and it
+// writes the second copy (+0x6C/+0x70/+0x74) with the same value as the first.
+// ============================================================================
+static void TmdObjectTintSet(void* modelObj, int r, int g, int b)
+{
+    unsigned char* obj = (unsigned char*)modelObj;
+    if (obj == NULL || *(int*)(obj + 0x10) != 0) {
+        return;   // complex-TMD path, not modelled
+    }
+
+    unsigned char* tmd = *(unsigned char**)(obj + 0x20);
+    if (tmd == NULL || (*(unsigned int*)(tmd + 0x4C0) & 0x7FFFFFFF) == 0) {
+        return;
+    }
+
+    float fr = (float)(r * 5) * kTintScale;
+    float fg = (float)(g * 5) * kTintScale;
+    float fb = (float)(b * 5) * kTintScale;
+
+    if (fr > 0.0f) { fg -= fr; fb -= fr; fr = 0.0f; }
+    if (fg > 0.0f) { fr -= fg; fb -= fg; fg = 0.0f; }
+    if (fb > 0.0f) { fr -= fb; fg -= fb; fb = 0.0f; }
+
+    unsigned char* rec = tmd + 0x4D0;
+    unsigned int count = (unsigned int)(*(int*)(tmd + 0x4C0) * 2);
+
+    for (unsigned int i = 0; i < count; i++) {
+        *(float*)(rec + 0x5C) = fr + 1.0f;
+        *(float*)(rec + 0x6C) = fr + 1.0f;
+        *(float*)(rec + 0x60) = fg + 1.0f;
+        *(float*)(rec + 0x70) = fg + 1.0f;
+        *(float*)(rec + 0x64) = fb + 1.0f;
+        *(float*)(rec + 0x74) = fb + 1.0f;
+        rec += 0x84;
+    }
+}
+
+// ============================================================================
+// TmdObjectSetLightScale (0x004870a0)
+// Stores a single negated 1/32-scaled value at modelObj+0x14. The original is
+// called with FOUR arguments but its body reads only two - the same dead-argument
+// pattern as JointApplyColorTint / JointSetColorTint.
+// ============================================================================
+static void TmdObjectSetLightScale(void* modelObj, int value)
+{
+    if (modelObj != NULL) {
+        *(float*)((unsigned char*)modelObj + 0x14) = (float)(-value) * 0.03125f;
+    }
+}
+
+// ============================================================================
+// scd_model_tint_apply (0x00473b10) - Accumulate a colour tint on a queue entry and
+// apply it to the live model. SCD opcode 0x34 variant 0.
+//
+// Was an empty stub, so variant 0 of opcode 0x34 - the only variant that
+// actually tints anything - did nothing at all. Variants 1 and 2
+// (FUN_00473d10 / FUN_00473d60) only ever rewrote the queue entry.
+//
+// Finds the g_textureQueueData entry whose id byte matches p6, ADDS the three
+// signed deltas onto bytes +3/+4/+5 (clamping each into [-31, +31]), stores the
+// two 16-bit parameters at +6/+8 and arms the entry via +1. It then pushes the
+// tint straight into the live model:
+//
+//   p6 bit 7 clear -> an ENEMY id. Scan up to 30 entries of g_EnemiesList for a
+//     matching id and tint every joint. Ids 8, 0x0F and 0x12 use the absolute
+//     TmdObjectTintSet with the CLAMPED queue bytes; every other id uses the
+//     accumulating TmdObjectTintAdd with the RAW deltas.
+//   p6 bit 7 set   -> an object index into g_omodel_table. When all
+//     three clamped bytes are equal the tint is a pure luminance change and goes
+//     through TmdObjectSetLightScale; otherwise TmdObjectTintAdd.
+//
+// Two original quirks preserved deliberately:
+//   - the enemy bound is `if (0x1d < g_enemy_count) count = 0x1e`, i.e. clamp to
+//     30, not 32.
+//   - the two object branches mask the index differently (0x7f for the
+//     luminance path, 0x3f for the tint path). That asymmetry is the
+//     original's; it is not a transcription slip.
+// ============================================================================
+void scd_model_tint_apply(short p1, short p2, short p3, unsigned short p4, unsigned short p5, unsigned char p6)
+{
+    unsigned char* e = g_textureQueueData;
+    unsigned char slot = 0;
+    while (*e != (unsigned char)p6) {
+        e += 10;
+        slot++;
+        if (slot > 3) {
+            return;
+        }
+    }
+
+    e[3] = (unsigned char)(e[3] + (char)p1);
+    e[4] = (unsigned char)(e[4] + (char)p2);
+    e[5] = (unsigned char)(e[5] + (char)p3);
+    *(unsigned short*)(e + 6) = p4;
+    *(unsigned short*)(e + 8) = p5;
+
+    for (int i = 3; i <= 5; i++) {
+        if ((char)e[i] < -0x1F) e[i] = 0xE1;    // -31
+        if ((char)e[i] >  0x1F) e[i] = 0x1F;    // +31
+    }
+    e[1] = 1;
+
+    if (((unsigned char)p6 & 0x80) == 0) {
+        unsigned char count = g_enemy_count;
+        if (count > 0x1D) {
+            count = 0x1E;
+        }
+        for (unsigned int n = 0; n < (unsigned int)count; n++) {
+            Entity* enemy = &g_EnemiesList[n];
+            if (enemy->id != (unsigned char)p6) {
+                continue;
+            }
+            JointStruct* joints = enemy->jointsStructs;
+            if (enemy->id == 8 || enemy->id == 0x0F || enemy->id == 0x12) {
+                for (int j = 0; j < (int)(unsigned int)enemy->jointCount; j++) {
+                    TmdObjectTintSet(joints[j].anim_object,
+                                     (int)(char)e[3], (int)(char)e[4], (int)(char)e[5]);
+                }
+            } else {
+                for (int j = 0; j < (int)(unsigned int)enemy->jointCount; j++) {
+                    TmdObjectTintAdd(joints[j].anim_object, (int)p1, (int)p2, (int)p3);
+                }
+            }
+        }
+        return;
+    }
+
+    if (e[3] == e[4] && e[3] == e[5]) {
+        int obj = (int)g_omodel_table[(unsigned char)p6 & 0x7F];
+        TmdObjectSetLightScale(*(void**)(obj + 0x18), (int)(char)e[3]);
+    } else {
+        int obj = (int)g_omodel_table[(unsigned char)p6 & 0x3F];
+        TmdObjectTintAdd(*(void**)(obj + 0x18), (int)p1, (int)p2, (int)p3);
+    }
+}
+
+// ============================================================================
+// FUN_00473d10 (0x00473d10) - Retarget a texture-queue entry with explicit bytes
+// Same scan as FUN_00473d60 (match the id byte at +0 against p6, arm via +1), but
+// stores p1/p2/p3 into bytes +3/+4/+5 instead of clearing them, and p4/p5 into the
+// words at +6/+8. SCD opcode 0x34 variant 1.
+// Every source is a byte in cmd_model_tint_set, so the low byte of the wider parameters is
+// what the original actually stores - the declared widths differ from Ghidra's
+// inferred ones but the stored values are identical.
+// ============================================================================
+void FUN_00473d10(short p1, short p2, short p3, unsigned short p4, unsigned short p5, char p6)
+{
+    unsigned char* e = g_textureQueueData;
+    for (unsigned char i = 0; i < 4; i++) {
+        if ((char)e[0] == p6) {
+            e[3] = p1;
+            e[4] = (unsigned char)p2;
+            e[5] = (unsigned char)p3;
+            *(unsigned short*)(e + 6) = p4;
+            *(unsigned short*)(e + 8) = p5;
+            e[1] = 1;
+            return;
+        }
+        e += 10;
+    }
+}
+
+// ============================================================================
+// FUN_00473d60 (0x00473d60) - Retarget an existing texture-queue entry
+// Scans the 4 entries of g_textureQueueData (10 bytes each, 0x00d22740) for one
+// whose id byte matches p1; on a match, clears bytes +3..+5, stores the two
+// 16-bit parameters at +6 and +8, and arms the entry by setting +1 to 1.
+// No match = no-op. SCD opcode 0x34 variant 2.
+// ============================================================================
+void FUN_00473d60(char p1, unsigned char p2, unsigned char p3)
+{
+    unsigned char* e = g_textureQueueData;
+    for (unsigned char i = 0; i < 4; i++) {
+        if ((char)e[0] == p1) {
+            e[3] = 0;
+            e[4] = 0;
+            e[5] = 0;
+            *(unsigned short*)(e + 6) = p2;
+            *(unsigned short*)(e + 8) = p3;
+            e[1] = 1;
+            return;
+        }
+        e += 10;
+    }
+}
+
+// ============================================================================
+// FUN_00473e40 (0x00473e40) - Force semi-transparency on a TMD's textured prims
+// Resolves the TMD's animation pointers if needed, then walks each primitive
+// group (7 dwords per group, count at +8; prim list pointer at group+0x10, prim
+// count at group+0x14). Any primitive whose command dword has bit 0x04000000 set
+// also gets 0x02000000 set. Primitive stride is ((cmd >> 8) & 0xFF) + 1 dwords.
+// The original returns *param_1; every caller ignores it. SCD opcode 0x1F.
+// ============================================================================
+void FUN_00473e40(int param)
+{
+    unsigned int* p = (unsigned int*)param;
+    if (p[1] == 0) {
+        ResolveAnimPointers((unsigned char*)(p + 1));
+    }
+    unsigned int* group = p + 3;
+    for (int groups = (int)p[2]; groups != 0; groups--) {
+        unsigned int* prim = (unsigned int*)group[4];
+        for (int prims = (int)group[5]; prims != 0; prims--) {
+            unsigned int cmd = *prim;
+            if ((cmd & 0x04000000) != 0) {
+                *prim = cmd | 0x02000000;
+            }
+            prim += ((cmd >> 8) & 0xFF) + 1;
+        }
+        group += 7;
+    }
+}
+
+// ============================================================================
+// FUN_00473ea0 (0x00473ea0) - Bind a TMD to an object's animation slot
+// Resolves the TMD's animation pointers if needed, links the object's anim slot
+// to the TMD's slot table, stores the SCA matrix pointer at param2+4, zeroes
+// param2+0, and allocates the animation object from the load arena.
+// SCD opcodes 0x18 and 0x1F.
+// ============================================================================
+void FUN_00473ea0(int param1, void* param2, ScaMatrixData* param3)
+{
+    extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
+    extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
+
+    if (*(int*)(param1 + 4) == 0) {
+        ResolveAnimPointers((unsigned char*)(param1 + 4));
+    }
+    SetAnimSlot((AnimSlot*)(param1 + 0xc), (int)param2, 0);
+    ((unsigned int*)param2)[1] = (unsigned int)param3;
+    *((unsigned int*)param2) = 0;
+    g_loadDataDestPointer = CreateAnimObject((int)param2, (unsigned int*)g_loadDataDestPointer);
+}
+
+// ============================================================================
+// FUN_0047cf80 (0x0047cf80) - Free every effect slot matching selected criteria
+// param1 is a criteria MASK; each set bit enables one comparison, and a slot is
+// freed only when every enabled comparison matches (the original builds an
+// accumulator and tests `accumulator == mask`, so bits above 3 make it unmatchable):
+//   bit 0 -> effect->effectType     == (u8)param2   (+0x26)
+//   bit 1 -> effect->depthGroup     == (u8)param3   (+0x27)
+//   bit 2 -> effect->animHeader[2]  == (u8)param4   (+0x06, unnamed field)
+//   bit 3 -> effect->spriteInfo     == (int)param5  (+0x64)
+// Freeing = bump g_freeEffectSlots and zero updateId then animId (animId 0 marks
+// the slot free), the same two bytes SCD opcode 0x48 clears.
+//
+// The original walks the 64 slots backwards (index 63 down to 0), pointing at
+// effect+0x26 and stepping by -0x84; reproduced here as an index loop.
+// Callers: SCD opcode 0x3E (mask 9 = type + spriteInfo) and 0x42 (mask 3 = type +
+// depthGroup).
+// ============================================================================
+void FUN_0047cf80(int param1, unsigned int param2, unsigned int param3, unsigned int param4, MATRIX* param5)
+{
+    unsigned char mask = (unsigned char)param1;
+
+    for (int i = 63; i >= 0; i--) {
+        Effect* e = &g_effectPool[i];
+        unsigned char matched = 0;
+
+        if ((mask & 1) != 0 && e->effectType == (unsigned char)param2) {
+            matched = 1;
+        }
+        if ((mask & 2) != 0 && e->depthGroup == (unsigned char)param3) {
+            matched |= 2;
+        }
+        if ((mask & 4) != 0 && e->animHeader[2] == (unsigned char)param4) {
+            matched |= 4;
+        }
+        if ((mask & 8) != 0 && e->spriteInfo == (int)param5) {
+            matched |= 8;
+        }
+
+        if (matched == mask) {
+            g_freeEffectSlots++;
+            e->updateId = 0;
+            e->animId   = 0;
+        }
+    }
+}
+
+// ============================================================================
+// FUN_004870d0 (0x004870d0) - Set flag bit 1 on 32 consecutive 0x84-byte records
+// param is a pointer whose +0x20 field holds the base of a record array; each
+// record is 0x84 bytes and the flag dword sits at +0x4CC relative to that base.
+// The original increments the offset BEFORE using it, so the first record touched
+// is base+0x4CC+0x84 and the last is base+0x4CC+0x1080 (32 iterations).
+// Called from SCD opcode 0x18 when the item type is 0x1E.
+// Field names are left as raw offsets: the pointed-to type is not yet modeled.
+// ============================================================================
+void FUN_004870d0(int param)
+{
+    int base = *(int*)(param + 0x20);
+    int offset = 0;
+    do {
+        offset += 0x84;
+        unsigned int* flags = (unsigned int*)(base + 0x4CC + offset);
+        *flags |= 2;
+    } while (offset < 0x1080);
+}
+
+// ============================================================================
+// FUN_0048a190 / JointApplyColorTint (0x0048a190)
+// Marks a joint dirty (bit 0x80 of its first byte), publishes its vertex count
+// doubled into g_playerDisplacement, and applies a colour tint to its model
+// object. When g_main_state_flags bit 0 is set the same is repeated on the
+// mirrored weapon-joint copy, reached by adding
+// (ENTITY->weaponJointsPtr - ENTITY->jointsStructs) to the joint pointer.
+//
+// NOTE: JointSetColorTint (0x00485ac0) reads only TWO arguments - verified by
+// disassembly: it takes arg2 from [ESP+8] at entry and arg1 from [ESP+0x20], and
+// never references arg3/arg4. The original pushes four and cleans 0x10, so
+// param3/param4 are DEAD. The colour actually applied is param2, so SCD opcode
+// 0x4D tints with 0x30 (r=0x30,g=0,b=0), not with the 0x00606060 it also pushes.
+// ============================================================================
+void FUN_0048a190(void* param1, int param2, int param3, int param4)
+{
+    (void)param3;   // pushed by the original, never read by JointSetColorTint
+    (void)param4;
+
+    unsigned char* joint = (unsigned char*)param1;
+    *joint |= 0x80;
+    g_playerDisplacement = *(int*)(*(int*)(joint + 0x14) + 0x14) * 2;
+    JointSetColorTint(*(int*)(joint + 0x18), (unsigned int)param2);
+
+    if ((g_main_state_flags & 1) != 0) {
+        joint += (*(int*)((unsigned char*)ENTITY + 0xac) -
+                  *(int*)((unsigned char*)ENTITY + 0x98));
+        g_tempVar = joint;
+        *joint |= 0x80;
+        g_playerDisplacement = *(int*)(*(int*)(joint + 0x14) + 0x14) * 2;
+        JointSetColorTint(*(int*)(joint + 0x18), (unsigned int)param2);
+    }
+}
+
+// ============================================================================
+// FUN_0048bfe0 (0x0048bfe0) - Allocate two work buffers for the current entity
+// Carves 0x7A00 and 0x1A00 bytes off the load arena and stores the two pointers
+// at entity +0xB0 and +0xB4. Both offsets fall inside the unnamed padding of
+// Entity/PlayerEntity (pad_b0 / pad_a4), so they are written by offset rather
+// than invented field names. Called from SCD opcode 0x0F.
+// ============================================================================
+void FUN_0048bfe0(void)
+{
+    unsigned char* ent = (unsigned char*)ENTITY;
+    *(void**)(ent + 0xB0) = g_loadDataDestPointer;
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + 0x7A00;
+    *(void**)(ent + 0xB4) = g_loadDataDestPointer;
+    g_loadDataDestPointer = (char*)g_loadDataDestPointer + 0x1A00;
+}
+
+// ============================================================================
+// FUN_0048c020 (0x0048c020) - Clone one joint's animation into the weapon-joint copy
+// param is a joint index (SCD opcode 0x0F passes 0x0E). Copies the source joint's
+// animation slot table into the first buffer allocated by FUN_0048bfe0
+// (entity +0xB0), points the destination joint at that buffer and at the second
+// buffer (+0xB4), relinks the slot, fixes up the relocated animation-data pointer
+// by the buffer delta, reverses the frame order, and builds the anim object.
+//
+//   source joint      = ENTITY->jointsStructs   (+0x98) + index * 0x7C
+//   destination joint = ENTITY->weaponJointsPtr (+0xAC) + index * 0x7C
+//
+// The copy length is *animSlot - animSlot: the slot table stores its own end
+// pointer in the first dword.
+// ============================================================================
+void FUN_0048c020(int param)
+{
+    extern void SetAnimSlot(AnimSlot* slots, int slotPtr, int index);
+    extern unsigned int* CreateAnimObject(int slotPtr, unsigned int* param2);
+    extern void reverse_anim_frame_data(int animFieldAddr);
+
+    unsigned char* ent = (unsigned char*)ENTITY;
+    int dst = *(int*)(ent + 0xac) + (unsigned int)(unsigned char)param * 0x7c;
+    int src = *(int*)(ent + 0x98) + (unsigned int)(unsigned char)param * 0x7c;
+
+    int* animSlot = *(int**)(src + 0x14);
+    void* buf0 = *(void**)(ent + 0xb0);
+    void* buf1 = *(void**)(ent + 0xb4);
+    memcpy(buf0, animSlot, (size_t)(*animSlot - (int)animSlot));
+
+    int slotPtr = dst + 0xc;
+    *(void**)(dst + 0x14) = buf0;
+    *(void**)(dst + 0x18) = buf1;
+    SetAnimSlot((AnimSlot*)buf0, slotPtr, 0);
+
+    int* fixup = (int*)(*(int*)(dst + 0x14) + 0x10);
+    *fixup += *(int*)(dst + 0x14) - *(int*)(src + 0x14);
+
+    reverse_anim_frame_data(slotPtr);
+    CreateAnimObject(slotPtr, (unsigned int*)buf1);
+}
+
+// ============================================================================
+// FUN_0040c560 (0x0040c560) - Store the low bit of the parameter into g_bCostumeVariant
+// SCD opcode 0x4F writes this flag; opcode 0x50 (cmd_script_flag_test) returns it as its
+// condition result, so a script can set a flag with 0x4F and branch on it later.
+// ============================================================================
+void FUN_0040c560(int param)
+{
+    g_bCostumeVariant = (unsigned char)param & 1;
+}
+
+// ============================================================================
+// g_ScdAnimRemap (0x004bec80)
+// Animation remap table for SCD event state-1 opcode 0x89 (set animation frame).
+// 16 (actionStateBase, animationId) pairs indexed by the entity's incoming
+// animationId; the handler writes action_state = pair[0] + 1 and
+// animationId = pair[1]. Only applied for entity ids < 0x20 and animationId
+// <= 0x0F - the handler forces action_state = 3 above that, which is why the
+// table is 32 bytes with pairs 10-15 left zero in the original.
+//
+//   anim: 0     1     2     3     4     5     6     7     8     9
+//   pair: (0,0) (0,1) (0,2) (0,3) (0,4) (1,0) (1,1) (1,2) (1,3) (1,4)
+// ============================================================================
+extern const unsigned char g_ScdAnimRemap[32] = {
+    0, 0,   0, 1,   0, 2,   0, 3,   0, 4,
+    1, 0,   1, 1,   1, 2,   1, 3,   1, 4,
+    0, 0,   0, 0,   0, 0,   0, 0,   0, 0,   0, 0,
+};

@@ -1,7 +1,7 @@
 // ============================================================================
 // DoorSystem.cpp - the 3D door-opening transition (0x004443c0..0x00444763)
 //
-// When the player walks through a door, room_transition_load (GameState.cpp)
+// When the player walks through a door, room_transition_load (DoorSystem.cpp)
 // loads the door's .dor data file and spawns task 1 = FUN_00444770, which runs
 // the classic full-screen door animation while the destination room loads
 // underneath:
@@ -1252,4 +1252,318 @@ void door_system_start_animation(void)
 {
     crashlog_mark("door: door_system_start_animation");
     Task_execute(1, (void*)DoorAnimTask);
+}
+
+// ============================================================================
+// The door-driven room/stage transition, moved here from GameState.cpp.
+//
+// Helpers defined in other files
+// ============================================================================
+extern void object_delete_00442170(int category);   // 0x00442170 ObjectManager.cpp
+extern void SndCompactAsync(void);                  // MarniSound.cpp
+extern void load_room_sfx(unsigned char);           // SoundSystem.cpp
+extern void room_set(void);                         // RoomInit.cpp
+extern void init_room(void);                        // RoomInit.cpp
+
+// 0x00442180 - empty in the original. Kept as a named call so the shape of
+// room_transition_load still matches the disassembly.
+static void FUN_00442180(void) { }
+
+// ============================================================================
+// BuildEnemySnap (0x0048f1a0) - tear the outgoing room's enemy list down and
+// snapshot what should survive into g_savedEnemyStates.
+//
+// This was a report-only stub, and the missing half of it is the destructive
+// one: the ORIGINAL clears status_flags on every entity slot and drains
+// g_enemy_count to zero before the destination room loads. Without that, the
+// outgoing room's enemies stay flagged active, and update_entities keeps
+// dispatching them in the NEW room against data the load has already
+// overwritten. Plant 42 makes that fatal rather than merely wrong: its state-0
+// handler ALLOCATES (two entity clones plus their animation objects) out of
+// g_loadDataDestPointer, so a stale Plant 42 re-initialising after the load
+// writes straight through the freshly loaded room - observed leaving room 40C0
+// as a missing player model, cameras cycling, and entities reporting positions
+// outside every room zone.
+//
+// FUN_0048f330 (the restore side, called from cmd_enemy_set) was already ported,
+// so until now it scanned a table nothing ever filled.
+//
+// `valid` is a TTL, not a boolean: set to 5 here, aged by one on each room
+// change, and treated as "occupied" by the restore while non-zero.
+//
+// Two bounds are the port's, not the original's. The original's free-slot scan
+// walks off the end of the 16-entry table when more than 16 enemies need
+// saving, and its clear loop runs one entity past g_EnemiesList[29] into the
+// 0x40 gap that precedes the table in the original's .bss. Neither is safe to
+// reproduce here (see the .bss adjacency note in the docs), so both are clamped.
+// ============================================================================
+static void BuildEnemySnap(void)
+{
+    const unsigned char* record = (const unsigned char*)g_pendingDoorRecord;
+
+    // Age every snapshot when the destination is a different room than the one
+    // we last came from. g_AttractMode_RoomCameraId still holds the previous
+    // room here; the caller overwrites it right after this returns.
+    if (record != nullptr && (char)record[0x0D] != (char)g_AttractMode_RoomCameraId) {
+        for (int i = 0; i < 16; i++) {
+            if (g_savedEnemyStates[i].valid != 0) {
+                g_savedEnemyStates[i].valid--;
+            }
+        }
+    }
+
+    ENTITY = g_EnemiesList;
+    g_pSavedEnemyState = g_savedEnemyStates;
+
+    while (g_enemy_count != 0) {
+        // Advance to the first free slot. Bounded, unlike the original.
+        int slotIdx = (int)(g_pSavedEnemyState - g_savedEnemyStates);
+        while (slotIdx < 16 && g_savedEnemyStates[slotIdx].valid != 0) {
+            slotIdx++;
+        }
+        if (slotIdx >= 16) break;
+        g_pSavedEnemyState = &g_savedEnemyStates[slotIdx];
+        SavedEnemyState* slot = g_pSavedEnemyState;
+
+        bool store;
+        if (ENTITY->health < 0) {
+            slot->statusFlags = 0;
+            // A death with a room event attached is permanent: the event flag
+            // is what keeps it dead, so no snapshot is written.
+            store = ((char)ENTITY->death_event_id == -1);
+        } else {
+            slot->statusFlags = (unsigned char)(ENTITY->status_flags & 0x0F);
+            store = true;
+        }
+
+        // Bit 7 of +0x161 marks an entity cmd_enemy_set spawned unconditionally;
+        // those are never snapshotted.
+        if (store && (char)ENTITY->pad_160[1] >= 0) {
+            slot->behaviorFlags = ENTITY->behavior_flags;
+            slot->roomId        = g_roomId;
+            slot->enemyType     = ENTITY->pad_160[1];
+            *(unsigned int*)&slot->pad_04[0] = (unsigned int)ENTITY->state;
+            slot->posX  = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+            slot->posY  = (short)ENTITY->scaMatrixData.localMatrix.t[1];
+            slot->posZ  = (short)ENTITY->scaMatrixData.localMatrix.t[2];
+            slot->angle = (unsigned short)ENTITY->angle;
+            slot->valid = 5;
+        }
+
+        ENTITY++;
+        g_enemy_count--;
+    }
+
+    g_enemy_count = 0;
+    for (int i = 0; i < 30; i++) {
+        g_EnemiesList[i].status_flags = 0;
+    }
+}
+
+// ============================================================================
+// FUN_0048f330 (0x0048f330) - restore_saved_enemy_state
+// Scans the 16 slots of g_savedEnemyStates for an occupied entry matching the
+// current room and the given enemy type. On a hit, copies the saved flags,
+// position and angle into ENTITY, consumes the slot (valid = 0) and returns 1.
+// Returns 0 when nothing matches.
+//
+// SCD opcode 0x1B (cmd_enemy_set) uses the return value to decide whether to skip
+// its own spawn initialisation - a hit means "this enemy already has state, keep
+// it where it was" rather than respawning at the script's coordinates.
+//
+// posY is applied only when the saved behaviorFlags have any of 0x70 set; the
+// original tests ENTITY->behavior_flags, which it has just written from the slot.
+// ============================================================================
+int FUN_0048f330(unsigned char param)
+{
+    g_pSavedEnemyState = g_savedEnemyStates;
+    int i = 0;
+    while (g_pSavedEnemyState->valid == 0 ||
+           g_pSavedEnemyState->roomId != g_roomId ||
+           g_pSavedEnemyState->enemyType != param) {
+        i++;
+        g_pSavedEnemyState++;
+        if (i > 0xF) {
+            return 0;
+        }
+    }
+
+    ENTITY->status_flags   = g_pSavedEnemyState->statusFlags;
+    ENTITY->behavior_flags = g_pSavedEnemyState->behaviorFlags;
+    ENTITY->scaMatrixData.localMatrix.t[0] = (int)g_pSavedEnemyState->posX;
+    if ((ENTITY->behavior_flags & 0x70) != 0) {
+        ENTITY->scaMatrixData.localMatrix.t[1] = (int)g_pSavedEnemyState->posY;
+    }
+    ENTITY->scaMatrixData.localMatrix.t[2] = (int)g_pSavedEnemyState->posZ;
+    *(unsigned short*)&ENTITY->angle = g_pSavedEnemyState->angle;
+    g_pSavedEnemyState->valid = 0;
+    return 1;
+}
+
+// ============================================================================
+// room_transition_load (0x004813c0) — the room/stage transition loader
+//
+// Previously stubbed in EngineStubs.cpp as "restore room state after menu close".
+// That was wrong: it reads g_pendingDoorRecord seven times and is what actually
+// carries the player through a door. door_try_enter stores the destination record
+// and blacks the screen; this loads the room behind it.
+//
+// The branch flags Ghidra reports as `unaff_retaddr & 0x80/0x40` are NOT a
+// parameter. The disassembly at 0x00481430 is:
+//     MOV AL,[EAX] ; AND AL,0xC0 ; MOV byte ptr [ESP+0xb],AL
+// with EAX = &record[0x0B]. So they are the top two bits of the record's own byte
+// +0x0B: 0x80 = do not reload the room (camera-only transition), 0x40 = suppress
+// the door sound. The low six bits are the entry camera.
+//
+// Destination encoding in record+0x0D: values < 0x20 are a room in the current
+// stage; >= 0x20 also changes stage, as (dest >> 5) - 1, with +5 applied once
+// g_PlayerFlags bit 0 is set (the second-visit stage variants).
+// ============================================================================
+void room_transition_load(void)
+{
+    unsigned char* record = (unsigned char*)g_pendingDoorRecord;
+    if (record == nullptr) {
+        dbg_printf("[roomtrans] g_pendingDoorRecord is NULL - nothing to load\n");
+        return;
+    }
+
+    g_roomTransitionBusy   = 1;
+    g_AttractModeIdleTimer = 1;
+
+    object_delete_00442170(0);
+    SetScreenOffset(160, 120);
+
+    // 0x004813ef: latch the record's fields.
+    g_nextRoomDoorType = record[0x08];
+    g_nextRoomSfxId    = record[0x09];
+    g_nextRoom_be05b7  = record[0x0A];
+    g_nextRoomCameraId = (unsigned char)(record[0x0B] & 0x3f);
+    g_nextRoomDest     = record[0x0D];
+    unsigned char flags = (unsigned char)(record[0x0B] & 0xc0);
+
+    // 0x00481438: reset the three positional sound channels to centre/default.
+    for (int i = 0; i < 3; i++) {
+        g_SndPanVol[i].volume = 0x5f;
+        g_SndPanVol[i].pan    = 0x5f;
+    }
+
+    load_room_sfx(g_nextRoomSfxId);
+    door_system_load_data();            // FUN_00412300 - load the .dor + start the texture page
+
+    // The original does:
+    //     Task_execute(1, FUN_00444770);   // spawns the door-animation task
+    //     Task_sleep(1);                   // yields so it can run
+    //
+    // 0x00444770 is `FUN_004443c0(); FUN_00444540(); FUN_00444500(); Task_exit();`
+    // - the 3D door-opening animation (DoorSystem.cpp): it sets g_main_state_flags
+    // bit 0x4000000 on init, animates the door (black rect, camera dolly, door
+    // panels through the TMD queue) while this task loads the destination room,
+    // and clears the bit on teardown. The wait loop below polls that bit.
+    door_system_start_animation();
+    Task_sleep(1);
+
+    // 0x0048148c: place the player at the destination's entry point.
+    //
+    // X and Z are ZERO-extended into the 32-bit matrix translation, Y is SIGN-extended.
+    // That asymmetry is explicit in the original and is not a decompiler artifact:
+    //
+    //   0048148f: XOR EAX,EAX / MOV AX,[rec+0x0E] / MOV [0x00be6318],EAX   <- zero-ext
+    //   004814a8: MOVSX EAX, word ptr [rec+0x10]  / MOV [0x00be631c],EAX   <- sign-ext
+    //   004814b3: XOR EAX,EAX / MOV AX,[rec+0x12] / MOV [0x00be6320],EAX   <- zero-ext
+    //
+    // It makes sense: X/Z are room coordinates that legitimately exceed 0x7FFF, while
+    // Y is a height that goes negative. The port sign-extended all three, so any
+    // entry point with X or Z >= 0x8000 landed ~65536 units away. The position
+    // SVECTOR stores are plain 16-bit copies, so only the matrix writes differ.
+    unsigned short ux = *(unsigned short*)(record + 0x0E);
+    short          sy = *(short*)(record + 0x10);
+    unsigned short uz = *(unsigned short*)(record + 0x12);
+    g_playerEntity.scaMatrixData.localMatrix.t[0] = (int)(unsigned int)ux;
+    g_playerEntity.scaMatrixData.localMatrix.t[1] = (int)sy;
+    g_playerEntity.scaMatrixData.localMatrix.t[2] = (int)(unsigned int)uz;
+    g_playerEntity.directionAngle = *(short*)(record + 0x14);
+    g_playerEntity.unk_8e     = (unsigned short)sy;
+    g_playerEntity.animationId = 0;
+    g_playerEntity.position.x = (short)ux;
+    g_playerEntity.position.y = sy;
+    g_playerEntity.position.z = (short)uz;
+
+    // DIAGNOSTIC - remove once placement is confirmed. Prints the raw entry point the
+    // door record specifies, so "the model is placed further from the door than it
+    // should be" can be attributed to the data or to how we apply it.
+    dbg_printf("[roomtrans] entry point from rec: x=%u y=%d z=%u ang=%d (raw %04X %04X %04X)\n",
+               (unsigned int)ux, (int)sy, (unsigned int)uz,
+               (int)g_playerEntity.directionAngle,
+               (unsigned int)ux, (unsigned int)(unsigned short)sy, (unsigned int)uz);
+
+    // 0x004814f9: load the destination room.
+    //
+    // Bit 0x80 of record+0x0B means "camera-only transition" - stay in this room and
+    // just re-aim the camera, which is why the else branch below is only a
+    // check_camera_switch.
+    //
+    // The order here is load-bearing and was what the old gate lost:
+    //   1. BuildEnemySnap saves the outgoing room's enemy state
+    //   2. g_AttractMode_RoomCameraId remembers which room we came from
+    //   3. the SCA pool rewinds to its base, freeing the outgoing room's hit data
+    //   4. g_roomId becomes the DESTINATION before room_set/init_room reads it
+    //
+    // Destination encoding in record+0x0D: < 0x20 is a room in the current stage;
+    // >= 0x20 also changes stage, as (dest >> 5) - 1, with +5 once g_PlayerFlags
+    // bit 0 is set (the second-visit stage variants). A stage change needs the
+    // heavier init_room, which re-points the stage data and BGM tables first.
+    if ((flags & 0x80) == 0) {
+        BuildEnemySnap();
+        g_AttractMode_RoomCameraId = g_roomId;
+        g_scaPoolPtr = g_scaPoolBase;
+        g_roomId = (unsigned char)(g_nextRoomDest & 0x1f);
+
+        if (g_nextRoomDest < 0x20) {
+            dbg_printf("[roomtrans] loading same-stage room %u (stage %u)\n",
+                       (unsigned int)g_roomId, (unsigned int)g_stageId);
+            room_set();
+        } else {
+            g_stageId = (unsigned char)((g_nextRoomDest >> 5) - 1);
+            if ((Flg_ck((int)&g_PlayerFlags, 0) != 0) && (g_stageId < 2)) {
+                g_stageId = (unsigned char)(g_stageId + 5);
+            }
+            dbg_printf("[roomtrans] loading stage %u room %u (stage change)\n",
+                       (unsigned int)g_stageId, (unsigned int)g_roomId);
+            init_room();
+        }
+    }
+
+    g_AttractModeIdleTimer = 1;
+    // Waits for the door-animation task to clear bit 0x4000000. That task is not
+    // spawned yet, so nothing sets the bit and this falls straight through.
+    while ((g_main_state_flags & 0x4000000) != 0) {
+        Task_sleep(1);
+    }
+
+    // 0x0048156c: put the newly loaded room on screen. The camera-only branch has no
+    // new data to build, so it re-runs the zone test instead.
+    if ((flags & 0x80) == 0) {
+        Room_SetupCamera();
+        load_room_bg_image();
+        Room_ApplySpriteFlags();
+    } else {
+        check_camera_switch(1);
+    }
+
+    // DIAGNOSTIC - remove once the transition is confirmed. Proves which room's data
+    // is actually live after the load, which is the thing the old gate hid.
+    dbg_printf("[roomtrans] loaded: stage=%u room=%u cam=%u rdt=%p entryCam=%u msf=%08X\n",
+               (unsigned int)g_stageId, (unsigned int)g_roomId,
+               (unsigned int)g_roomCameraId, (void*)g_RdtPointer,
+               (unsigned int)g_nextRoomCameraId, (unsigned int)g_main_state_flags);
+
+    update_room_bgm();
+    if ((flags & 0x40) == 0) {
+        play_sfx(0, 1, 0);
+    }
+    SndCompactAsync();
+    FUN_00442180();
+
+    g_AttractModeIdleTimer = 0;
+    g_roomTransitionBusy   = 0;
 }

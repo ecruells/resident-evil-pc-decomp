@@ -210,3 +210,35 @@ DWORD PlayerPad_Update(void)
 
 	return g_button_pressed_id;
 }
+
+// ---------------------------------------------------------------------------
+// ResetGetAsyncKeyStateFlags (0x00497e60)
+//
+// Calls GetAsyncKeyState() for every possible virtual key (0-255) to reset
+// the internal low-bit flag that indicates whether a key was pressed since
+// the last query. This flushes stale/buffered keyboard input when
+// transitioning between game states (menus, gameplay, cutscenes, pause,
+// camera changes), preventing unintended actions from leftover key presses.
+// This does NOT disable input or read gameplay input — it only resets the
+// OS-level key press history so that only new key presses after this call
+// will be detected.
+// Called via ScheduleInputFlush to prevent FMV-skip button from immediately
+// dismissing loading messages.
+// ---------------------------------------------------------------------------
+void ResetGetAsyncKeyStateFlags(void)
+{
+    BYTE vk;
+    GetAsyncKeyState(0);
+    for (vk = 1; vk != 0; vk++) {
+        GetAsyncKeyState(vk);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// ScheduleInputFlush (0x00497e80)
+// Schedules an async call to ResetGetAsyncKeyStateFlags.
+// ---------------------------------------------------------------------------
+void ScheduleInputFlush(void)
+{
+    ExecAsync((void*)ResetGetAsyncKeyStateFlags);
+}

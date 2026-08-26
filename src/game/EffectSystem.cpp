@@ -50,7 +50,7 @@ extern int  is_entity_in_switch_zone(VECTOR* position, void* zoneData); // Room.
 extern unsigned char apply_weapon_damage(unsigned int weapon_id);       // WeaponDamage.cpp 0x0043c020
 extern unsigned char weapon_autoaim_check(void);                        // PlayerAnimations.cpp 0x0045a4b0
 extern void FUN_0047cf80(int param1, unsigned int param2, unsigned int param3,
-                         unsigned int param4, MATRIX* param5);          // GameState.cpp 0x0047cf80
+                          unsigned int param4, MATRIX* param5);          // CmdFunctions.cpp 0x0047cf80
 
 // ============================================================================
 // g_activeEffectIndex (0x00bf0a2e) - the slot being processed. update_2d_effects

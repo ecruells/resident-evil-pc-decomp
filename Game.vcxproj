@@ -121,7 +121,9 @@
     <ClCompile Include="src\game\DoorSystem.cpp" />
     <ClCompile Include="src\game\GameInit.cpp" />
     <ClCompile Include="src\game\MainLoop.cpp" />
-    <ClCompile Include="src\game\GameState.cpp" />
+    <ClCompile Include="src\game\LogosScreen.cpp" />
+    <ClCompile Include="src\game\DebugScreens.cpp" />
+    <ClCompile Include="src\game\GameStart.cpp" />
     <ClCompile Include="src\game\GameLoop.cpp" />
     <ClCompile Include="src\game\MainMenu.cpp" />
     <ClCompile Include="src\game\OptionsMenu.cpp" />

@@ -40,7 +40,7 @@ meaning once relocated or rewritten at load time. Those cases are called out.
 
 Ambient light is fed straight into `setBackColor()`, which scales the 12-bit
 channels by 255/4096. Reading these as bytes instead of shorts under-exposes
-every room 8x (see the comment at `src/game/GameState.cpp:1431`).
+every room 8x (see the comment in `LoadRoomRdt`, `src/game/RoomInit.cpp`).
 
 ### Lights (0x0C - 0x47)
 

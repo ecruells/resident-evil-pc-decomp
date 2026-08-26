@@ -915,7 +915,7 @@ static BYTE g_ItemsImageBuffer[86400];  // 86400 allocated bytes for items image
 
 ### SFX Player Debug State
 
-**File:** `src/game/GameState.cpp`
+**File:** `src/game/DebugScreens.cpp`
 
 The `debug_state` task function provides an interactive sound test menu that launches at startup (chained from `load_global_assets` before `logos_state`). It uses `GetAsyncKeyState` for direct PC keyboard input.
 
@@ -1079,8 +1079,10 @@ src/
 ├── game/
 │   ├── MainLoop.cpp            # main_loop (0x00428eb0): per-frame orchestration
 │   ├── GameLoop.cpp            # entity update dispatch, calc_entity_lighting calls
-│   ├── GameInit.cpp            # init_and_start_game
-│   ├── GameState.cpp           # game states: logos_state, game_start, transitions
+│   ├── GameInit.cpp            # init_and_start_game + load_global_assets
+│   ├── LogosScreen.cpp         # logos_state (0x00442bb0)
+│   ├── DebugScreens.cpp        # debug/test states: input test, texture viewer, SFX player
+│   ├── GameStart.cpp           # game_start + InitializeGame + player/inventory init
 │   ├── TitleScreen.cpp         # title screen state machine
 │   ├── CharacterSelectionScreen.cpp  # Chris/Jill selection (0x00491xxx)
 │   ├── MainMenu.cpp            # inventory/item screen incl. item 3D viewer

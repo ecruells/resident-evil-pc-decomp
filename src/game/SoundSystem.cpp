@@ -1488,3 +1488,67 @@ void Room_LoadEnemySoundBanks(void) {
 // (0x0047f870) - 3-param play_sfx overload (mode parameter)
 void play_sfx(int bank, int soundId, int mode) { play_sfx(bank, soundId); }
 
+// ============================================================================
+// BGM channel helpers (moved here from GameState.cpp)
+// ============================================================================
+
+// ============================================================================
+// FUN_004804a0 (0x004804a0) - Start a volume ramp on one BGM channel
+// param1 is unused by the original. param2 is the channel index and IS bounds
+// checked (`param_2 < 3`, signed) before touching g_SndBank. SCD opcode 0x43.
+// NOTE: the original divides by param4 with no zero check, so a script passing
+// 0 there would fault. Reproduced faithfully.
+// ============================================================================
+void FUN_004804a0(short param1, unsigned int param2, short param3, unsigned int param4)
+{
+    (void)param1;
+    if ((short)param2 < 3 && g_SndBank[param2].handle != 0) {
+        g_SndRampBankIndex   = (short)param2;
+        g_SndRampDirection   = (short)((int)param3 / (int)param4) * 0x4E;
+        g_SndRampFramesLeft  = (int)param4 * 2;
+    }
+}
+
+// ============================================================================
+// FUN_004805d0 (0x004805d0) - snd_set_channel_pan_volume
+// Applies a pan/volume pair to one BGM channel. param1 is unused by the original.
+// param2 is the channel index (indexed as [EAX*0x8 + g_SndBank], i.e. a record
+// index into SndBankSlot[3]). SCD opcode 0x2F.
+// ============================================================================
+void FUN_004805d0(short param1, unsigned int param2, unsigned int param3, unsigned int param4)
+{
+    (void)param1;   // pushed by callers, never read by the original
+    int handle = g_SndBank[param2].handle;
+    if (handle != 0) {
+        set_volume(handle, CalcPanVolume((int)(short)param3, (int)(short)param4));
+    }
+}
+
+// ============================================================================
+// BuildSndFadeTbl (0x0047ff90)
+// For each of the 3 BGM channels, computes how many g_SndDistSteps-sized volume
+// steps it takes to drive that channel from its current volume down to inaudible
+// (-10000), and stores the count in g_SndFadeStepTbl (clamped at 0).
+// Parameter 1 is the distance-step count (scaled by 0x4E), parameter 2 the fade
+// type - the previous stub had these names inverted. SCD opcode 0x27 passes
+// (op >> 8, 0x7F).
+// NOTE: divides by g_SndDistSteps with no zero check, exactly as the original.
+// ============================================================================
+void BuildSndFadeTbl(char distSteps, int fadeType)
+{
+    DAT_00ac98f8   = 0;
+    g_SndDistSteps = distSteps * 0x4E;
+    g_SndFadeType  = (unsigned char)fadeType;
+
+    for (int i = 0; i < 3; i++) {
+        if (g_SndBank[i].handle == 0) {
+            g_SndFadeStepTbl[i] = 0;
+        } else {
+            g_SndFadeStepTbl[i] = (-10000 - getSndVol(g_SndBank[i].handle)) / g_SndDistSteps;
+        }
+        if (g_SndFadeStepTbl[i] < 0) {
+            g_SndFadeStepTbl[i] = 0;
+        }
+    }
+}
+

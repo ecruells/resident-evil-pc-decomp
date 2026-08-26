@@ -2,11 +2,20 @@
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
+#include "../marni/PSXTexture.h"
 #include "FileLoader.h"
+#include "../system/AssetPath.h"
 #include <cstdlib>
 
-// Forward declaration for task function registered from init_and_start_game
+// Forward declarations for task function registered from init_and_start_game
 extern void load_global_assets(void);
+extern void logos_state(void);                     // LogosScreen.cpp
+
+extern void SetupTexturePageHandles(int, int);
+extern void LoadTexturePage(void*, short, short, int, int, short, short, unsigned);
+extern void ProcessTextureImage(void*, short, short, int);
+extern void LoadShadowMaskTexture(void*, int);
+extern void CreateTexturedQuad(int, int, int*);
 
 
 // ---------------------------------------------------------------------------
@@ -136,4 +145,73 @@ void init_and_start_game(void)
     } while (poly < Poly_F4_ARRAY_004ba750 + 2);
 
     Task_execute(0, (void*)load_global_assets);
+}
+
+// ---------------------------------------------------------------------------
+// LoadAllItemsTexture
+// Loads item_all.pix into the items image buffer.
+// ---------------------------------------------------------------------------
+static void LoadAllItemsTexture(void)
+{
+    LoadFile(GAME_DATA_ROOT "data\\item_all.pix", g_ItemsImageBuffer, 0x20);
+}
+
+// ============================================================================
+// load_global_assets (0x00429a40)
+// Task function: loads all global textures/assets needed by the game.
+// After loading, chains to logos_state.
+// ============================================================================
+void load_global_assets(void)
+{
+    LoadAllItemsTexture();
+
+    // Load main Fonts textures
+    LoadFile(GAME_DATA_ROOT "data\\fontus.tim", g_DataBuffer, 0x20);
+    g_TextureBankID = 30;
+    ProcessTextureImage(g_DataBuffer, 30, 0, 0);
+
+    // Load numeric panel and puzzles font textures
+    LoadFile(GAME_DATA_ROOT "data\\Font03t.tim", g_DataBuffer, 0x20);
+    g_TextureBankID = 1;
+    ProcessTextureImage(g_DataBuffer, 1, 0, 2);
+
+    // Load Options menu textures (24bits)
+    LoadFile(GAME_DATA_ROOT "data\\Optkey03.tim", g_DataBuffer, 0x20);
+    g_TextureBankID = 2;
+    LoadTexturePage(g_DataBuffer, 2, 0, 0xB, 0, 0, 0, 0);
+
+    // Load Main menu textures (8bits)
+    LoadFile(GAME_DATA_ROOT "data\\status.tim", g_DataBuffer, 0x20);
+    g_TextureBankID = 0x41C;
+    LoadTexturePage(g_DataBuffer, 0x1C, 4, 0, 0, 0, 0, 1);
+
+    SetupTexturePageHandles(0, 1);
+
+    // Loan Main menu characters faces texture (8bits)
+    LoadFile(GAME_DATA_ROOT "data\\statface.tim", g_DataBuffer, 0x20);
+    LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 9, 0, 0, 0, 0);
+
+    // Load Inventory slot background texture (8bits)
+    LoadFile(GAME_DATA_ROOT "data\\blue.tim", g_DataBuffer, 0x20);
+    LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 10, 0, 0, 0, 0);
+
+    // Load unused weapons texture (Uzi and machinegun) (8bits)
+    LoadFile(GAME_DATA_ROOT "data\\staitem.tim", g_DataBuffer, 0x20);
+    LoadTexturePage(g_DataBuffer, 0, 0, 0x1E, 0, 0, 0, 0);
+
+    // Load character shadow texture (8bits)
+    LoadFile(GAME_DATA_ROOT "data\\kage.tim", g_DataBuffer, 0x20);
+    LoadShadowMaskTexture(g_DataBuffer, 0);
+
+    int rectConfig[24] = {
+        -400,     400,     -400,     400,
+           0,       0,        0,       0,
+         400,     400,     -400,    -400,
+           0,    0x1A,        0,    0x1A,
+           0,       0,     0x1D,    0x1D,
+           0,       1,        0,       0,
+    };
+    CreateTexturedQuad(0, 0x2F, rectConfig);
+
+    Task_chain((void*)logos_state);
 }

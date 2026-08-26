@@ -427,7 +427,7 @@ extern int           g_debugOpenItemboxFlag;
 extern int           g_debugTextureViewerFlag;   // F6: request the overlay (edge)
 extern int           g_debugDumpDrawFlag;        // F7: dump one frame of draw commands
 extern int           g_debugTextureViewerOpen;   // 1 while the overlay is active
-int texture_viewer_overlay(void);                 // GameState.cpp - per-frame overlay; 0 when closed
+int texture_viewer_overlay(void);                 // DebugScreens.cpp - per-frame overlay; 0 when closed
 #endif
 
 // Room interaction state (0x00be9616-0x00be9618, adjacent to g_eventItemUsedFlag)
@@ -646,7 +646,7 @@ extern void*          script_command_funcs_table[256]; // 0x004c1110 - SCD comma
 #define ROOM_CHECK_ACTION_COUNT 20
 extern void*          room_check_actions[ROOM_CHECK_ACTION_COUNT]; // 0x004b9340
 
-// Animation remap pairs for SCD event state-1 opcode 0x89. See GameState.cpp.
+// Animation remap pairs for SCD event state-1 opcode 0x89. See CmdFunctions.cpp.
 extern const unsigned char g_ScdAnimRemap[32];          // 0x004bec80
 
 // SCD flag bank 9 (misc flags)

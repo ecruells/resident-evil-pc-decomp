@@ -26,7 +26,7 @@ extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex);
 extern void run_command_functions(unsigned short* scd_opcodes);
 extern void room_events_check(void);
 extern void room_state_reset(void);
-extern void BuildSndFadeTbl(char distSteps, int fadeType);   // GameState.cpp (0x0047ff90)
+extern void BuildSndFadeTbl(char distSteps, int fadeType);   // SoundSystem.cpp (0x0047ff90)
 
 // Debug: F2 save-screen request state machine (0 = idle, 1 = fade out,
 // 2 = save screen open, 3 = fade back in). Port-added, debug builds only.

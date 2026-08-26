@@ -18,7 +18,7 @@ Both dispatch individual commands through the same 81-entry table
 
 ## 1. Data sources
 
-`room_set` (`0x00477xxx`, [GameState.cpp:1228](../src/game/GameState.cpp#L1228))
+`room_set` (`0x00477xxx`, [RoomInit.cpp:555](../src/game/RoomInit.cpp#L555))
 wires three RDT sections into globals:
 
 ```c
@@ -201,7 +201,7 @@ Operates on `g_pScdEventCurrent->entity`. All return 1.
 
 `g_ScdAnimRemap` (`0x004bec80`, 32 bytes) — `(action_state - 1, animationId)` pairs
 indexed by the incoming `animationId`. Declared in [Globals.h:650](../src/Globals.h#L650),
-defined in [GameState.cpp:2250](../src/game/GameState.cpp#L2250):
+defined in [CmdFunctions.cpp](../src/game/CmdFunctions.cpp):
 
 ```
 anim: 0      1      2      3      4      5      6      7      8      9
@@ -342,7 +342,7 @@ is persisted in the save block at offset `0xA01`.
 
 18 entries, indices `0x00`–`0x11`, followed by two NULL slots. Each takes a
 pointer to a 12-byte `g_RoomItemEventTable` entry. Port names (defined in
-[GameState.cpp:2577](../src/game/GameState.cpp#L2577)):
+[RoomEvents.cpp](../src/game/RoomEvents.cpp)):
 
 ```
 0x00 0041c050 no_room_action          0x01 0041b400 door_try_enter

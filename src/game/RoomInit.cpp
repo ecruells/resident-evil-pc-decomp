@@ -4,6 +4,7 @@
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
+#include "../system/AssetPath.h"
 #include <cstdio>
 
 // Forward declarations for helpers defined in other files
@@ -549,3 +550,122 @@ void room_set(void)
 
     printf("room_set end\n");
 }
+
+// ============================================================================
+// RDT loading and background colour (moved here from GameState.cpp)
+// ============================================================================
+
+extern void SetSpriteBufferFlag(void);
+extern void empty_40ae40(int);
+
+// (0x00477d90) - Load RDT file for current room
+// Loads the Room Definition Table for the current stage/room, resolves internal
+// relative pointers to absolute addresses, and sets up SCD script pointers.
+void LoadRoomRdt(void)
+{
+    static const char hexDigits[] = "0123456789abcdef";
+
+    // 0x00477d97: Set g_RdtPointer to the current load buffer
+    g_RdtPointer = (RDT*)g_loadDataDestPointer;
+
+    // 0x00477d9c: ESI = start of camera data (past RDT header)
+    unsigned char* cameras = (unsigned char*)(g_RdtPointer + 1);
+
+    // 0x00477da4-0x00477e02: Build RDT file path
+    // Format: ./usa/stageX/roomXYYZ.rdt where X=stage, YY=room, Z=flag
+    sprintf(FILE_PATH, GAME_DATA_ROOT "stage%c\\room%c%c%c%c.rdt",
+            hexDigits[g_stageId + 1],
+            hexDigits[g_stageId + 1],
+            hexDigits[g_roomId >> 4],
+            hexDigits[g_roomId & 0xF],
+            hexDigits[(g_main_state_flags & 0x800000) ? 1 : 0]);
+
+    SetSpriteBufferFlag();
+
+    LoadFile(FILE_PATH, g_RdtPointer, 1);
+
+    // 0x00477e2a-0x00477e46: Resolve camera pointers
+    // Each camera has 2 relative pointer fields (mask_pointer, tim_mask_pointer)
+    // that need to be converted to absolute addresses.
+    int cameraCount = g_RdtPointer->cameras_count;
+    for (int i = 0; i < cameraCount; i++) {
+        *(int*)(cameras) += (int)g_RdtPointer;
+        *(int*)(cameras + 4) += (int)g_RdtPointer;
+        cameras += 0x2C; // sizeof(RDT_Camera)
+    }
+
+    // 0x00477e48-0x00477e75: Resolve RDT pointer fields (offset 0x48 to 0x93)
+    // These are relative offsets stored as ints, converted to absolute pointers.
+    int* ptrField = (int*)((unsigned char*)g_RdtPointer + 0x48);
+    int* ptrEnd = (int*)((unsigned char*)g_RdtPointer + 0x94);
+    while (ptrField < ptrEnd) {
+        *ptrField += (int)g_RdtPointer;
+        ptrField++;
+    }
+
+    // 0x00477e7e-0x00477ec0: Resolve item model pointers
+    // Iterates forward through entries, zeros table backward
+    int* itemPtr = (int*)g_RdtPointer->items_models;
+    int itemCount = g_RdtPointer->omodel_slot_count;
+    for (int i = itemCount; i > 0; i--) {
+        // Zero out table entry (reverse order: table[count-1] down to table[0])
+        ((int*)g_omodel_table)[i - 1] = 0;
+        if (itemPtr[0] != 0) itemPtr[0] += (int)g_RdtPointer;
+        if (itemPtr[1] != 0) itemPtr[1] += (int)g_RdtPointer;
+        itemPtr += 2;
+    }
+
+    // 0x00477ec9-0x00477f0b: Resolve obstacle model pointers
+    // Same pattern: forward through entries, backward through table
+    int* obstPtr = (int*)g_RdtPointer->obstacles_models;
+    int obstCount = g_RdtPointer->unknown_03[0];
+    for (int i = obstCount; i > 0; i--) {
+        ((int*)g_interactable_table)[i - 1] = 0;
+        if (obstPtr[0] != 0) obstPtr[0] += (int)g_RdtPointer;
+        if (obstPtr[1] != 0) obstPtr[1] += (int)g_RdtPointer;
+        obstPtr += 2;
+    }
+
+    // 0x00477f12-0x00477f27: Set up SCD script pointers
+    g_RoomInitScd = g_RdtPointer->initialization_scd;
+    g_RoomScdOpcodes = g_RdtPointer->scd_opcodes;
+    g_RoomEventScripts = g_RdtPointer->scd_opcodes2;
+
+    // 0x00477f2d-0x00477f3f: Resolve EVT script relative offsets
+    int* evtPtr = (int*)g_RoomEventScripts;
+    while (*evtPtr != 0) {
+        *evtPtr += (int)g_RoomEventScripts;
+        evtPtr++;
+    }
+
+    // 0x00477f49-0x00477f64: Set back color from ambient light.
+    //
+    // ambient_light is a COLOR of three SHORTS (Ghidra: COLOR at RDT+6, size 6)
+    // and setBackColor takes 12-bit PS1 channels, scaling by 255/4096. Casting to
+    // unsigned char first was an 8x underexposure of the ambient term on every
+    // room: the mansion hall's 1775 became 239, so the GTE background colour came
+    // out 14 instead of 110 and every character model rendered near-black.
+    setBackColor(
+        (unsigned short)g_RdtPointer->ambient_light_r,
+        (unsigned short)g_RdtPointer->ambient_light_g,
+        (unsigned short)g_RdtPointer->ambient_light_b);
+
+    // 0x00477f6e: empty_40ae40(0)
+    empty_40ae40(0);
+}
+
+// (0x0040ada0) - Set background clear color
+void setBackColor(unsigned short r, unsigned short g, unsigned short b) {
+    // 0x0040ada0-0x0040ae36: Clamp PS1 12-bit color (0-4095) and convert to 8-bit (0-255)
+    if (r > 0xFFF) r = 0x1000;
+    g_red_color = (unsigned char)((r * 255) / 4096);
+
+    if (g > 0xFFF) g = 0x1000;
+    g_green_color = (unsigned char)((g * 255) / 4096);
+
+    if (b > 0xFFF) b = 0x1000;
+    g_blue_color = (unsigned char)((b * 255) / 4096);
+}
+
+// (0x0040ae40) - Empty function called by LoadRoomRdt
+void empty_40ae40(int param) { }
