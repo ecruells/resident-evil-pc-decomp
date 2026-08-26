@@ -1656,7 +1656,7 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId);
 void title_exit_loop(void);
 void fade_update(void);
 void init_title_screen(void);
-void title_select_sfx(void);
+void nullsub_0047eb80(void); // empty no-op in original, PS1 leftover
 void set_scene_render_param(int value);
 void update_title_options(void);
 

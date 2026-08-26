@@ -26,7 +26,7 @@ static void DisplayIntroAndStartGame(void)
     sounds_reset();
     g_selectedFmvId = 1;
     g_main_state_flags |= (0x00040000 | 0x00080000);
-    title_select_sfx();
+    nullsub_0047eb80();
     Task_sleep(1);
     Task_chain((void*)game_start);
 }
@@ -701,7 +701,7 @@ case_6:
                 g_main_state_flags |= 0x800000;
             }
             g_bGameActive = 2;
-            title_select_sfx();
+            nullsub_0047eb80();
             cleanup_texture_slot(12);
             cleanup_texture_slot(13);
             cleanup_texture_slot(14);
@@ -712,7 +712,7 @@ case_6:
             // Return to title screen
             if ((g_main_state_flags & 0x20000000) == 0) {
                 g_bGameActive = 2;
-                title_select_sfx();
+                nullsub_0047eb80();
                 cleanup_texture_slot(0x0C);
                 cleanup_texture_slot(0x0D);
                 cleanup_texture_slot(0x0E);

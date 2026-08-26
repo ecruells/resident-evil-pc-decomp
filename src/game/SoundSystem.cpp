@@ -425,9 +425,6 @@ int getSndStat(int bank)
 }
 
 // ============================================================================
-// title_select_sfx (0x0047eb80)
-// Sound effect played on title menu confirmation. Empty in original.
-// ============================================================================
 // load_room_sfx (0x0047eba0)
 // Loads room-specific sound effects for the current stage.
 // Original addresses: 0x0047eba0

@@ -492,14 +492,14 @@ void title_state(void)
 
     switch (g_titleSelectionId) {
     case 0:
-        title_select_sfx();
+        nullsub_0047eb80();
         g_main_state_flags2 |= 0x10000000;
         Task_chain((void*)game_start);
         Task_chain((void*)logos_state);
         return;
 
     case 1:
-        title_select_sfx();
+        nullsub_0047eb80();
         Task_chain((void*)characterSelectionScreen);
 
     case 2:
@@ -509,7 +509,7 @@ void title_state(void)
         g_loadSaveStateFlag = 0;
         Game_timer = g_gameTimerSnapshot;
         g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
-        title_select_sfx();
+        nullsub_0047eb80();
         Task_chain((void*)game_start);
 
     default:
@@ -517,5 +517,6 @@ void title_state(void)
     }
 }
 
-// (0x0045a6d0) - Play title screen selection SFX
-void title_select_sfx(void) { }
+// nullsub_0047eb80 - empty no-op in the original PC build.
+// likely a PS1 version function stripped during the PC port.
+void nullsub_0047eb80(void) { }
