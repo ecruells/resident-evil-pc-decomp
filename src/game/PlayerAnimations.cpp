@@ -1578,15 +1578,174 @@ extern void ClearAnimTiming(void);                                              
 extern void MovePlayerXZ(int angle, SVECTOR* offset, SVECTOR* out);
 extern int is_entity_in_switch_zone(VECTOR* pos, void* zoneData);                 // 0x00462d90
 
-// ----------------------------------------------------------------------------
-// EntityUpdateLookAtAngles (0x00459eb0) — DEFERRED, 1058 bytes.
+// ============================================================================
+// EntityUpdateLookAtAngles (0x00459eb0)
 // Slews the tracking joint's yaw/pitch toward the look-at target, clamped to a
-// +/-0x2C8 yaw and +/-0x138 pitch cone. Cosmetic head tracking, and gated on
-// ENTITY->lookAtFlags & 0x10, which is zero for a freshly initialized player —
-// so a no-op matches the original until an SCD look-at opcode enables it.
-// ----------------------------------------------------------------------------
+// +/-0x2C8 yaw (~62 deg) and +/-0x138 pitch (~27 deg) cone.
+//
+// Gated on lookAtFlags & 0x10 (slew enable). Target position lives in
+// scd_pos_x/y/z (+0xCC/+0xD0/+0xD4); with bit 0x80 it is reloaded every call
+// from *(scd_target_ptr)+0x34/0x38/0x3C (the -0xA28 on Y aims at head height).
+//
+//   yaw   (joint->rotDeltaX) = getAngleTowardsTarget(target.x, target.z)
+//                              - entity facing angle;      enabled by bit 0x01
+//   pitch (joint->rotDeltaY) = GetAngleQuadrantValue((dy << 12)
+//                              / sqrt(dx^2+dz^2)) against the joint's world
+//                              translation;               enabled by bit 0x02
+// With bit 0x20 the target fields ARE the absolute angles (scd_pos_x = yaw,
+// scd_pos_y = pitch), skipping both derivations.
+//
+// Both angles step toward their target by at most lookAtYawStep / 
+// lookAtPitchStep per call and clamp to the cone; out-of-cone results snap to
+// +/-0x2C8 / +/-0x138 (=0xD38). Bit 0x40 marks a one-shot "aim then freeze"
+// mode: once reached it rewrites scd_pos_x/z and clears flag bits so the
+// angles stay parked (see the two mid-function 0x40 blocks).
+//
+// The result is consumed by EntityApplyLookAtRotation (0x0045a2e0), which
+// composes joint->world * RotMatrixYXZ(0, yaw, pitch) after
+// EntityComputeJointWorldMatrices has built the hierarchy.
+// ============================================================================
 void EntityUpdateLookAtAngles(void)
 {
+    Entity* ent = ENTITY;
+    if (ent == NULL) return;
+    JointStruct* joints = ent->jointsStructs;
+    // The original indexes jointsStructs with no checks, relying on every
+    // writer of lookAtJointIdx to keep it valid (same guard as
+    // EntityApplyLookAtRotation - a bad index here corrupts joint data).
+    if (joints == NULL || ent->lookAtJointIdx >= ent->jointCount) return;
+
+    if ((ent->lookAtFlags & 0x10) == 0) return;
+
+    // ---- one-shot aim mode (bit 0x40) bookkeeping on scd_pos_z ----
+    if ((ent->lookAtFlags & 0x40) != 0) {
+        if (((unsigned int)ent->scd_pos_z & 0x10000) == 0) {
+            ent->scd_pos_z = ent->scd_pos_z * 2;
+            ent->scd_pos_z = ent->scd_pos_z | 0x10000;
+            ent->lookAtFlags |= 0x20;          // switch to absolute-angle mode
+        }
+    }
+    if ((ent->lookAtFlags & 0x40) != 0 &&
+        ((unsigned int)ent->scd_pos_z & 0xFFFF) == 0) {
+        ent->lookAtFlags &= 0x1C;              // park: keep only 0x10|0x08|0x04
+    }
+
+    // ---- reload live target from SCD event pointer ----
+    if ((ent->lookAtFlags & 0x80) != 0) {
+        unsigned int tgt = ent->scd_target_ptr;
+        ent->scd_pos_x = *(int*)(tgt + 0x34);
+        ent->scd_pos_y = *(int*)(tgt + 0x38) + -0xA28;   // head-height bias
+        ent->scd_pos_z = *(int*)(tgt + 0x3C);
+    }
+
+    unsigned char yawStep   = ent->lookAtYawStep;     // +0xD9
+    unsigned char pitchStep = ent->lookAtPitchStep;   // +0xDA
+    JointStruct* joint = joints + ent->lookAtJointIdx;
+
+    // ========================================================================
+    // Yaw -> rotDeltaX (joint+0x76)
+    // ========================================================================
+    int targetYaw;
+    if ((ent->lookAtFlags & 0x20) == 0) {
+        short toTarget = getAngleTowardsTarget(ent->scd_pos_x, ent->scd_pos_z);
+        targetYaw = (toTarget - ent->angle) & 0xFFF;  // relative to own facing
+    } else {
+        targetYaw = (unsigned short)(unsigned int)ent->scd_pos_x; // absolute
+    }
+    if ((ent->lookAtFlags & 0x01) == 0) targetYaw = 0;
+
+    unsigned short curYaw = (unsigned short)joint->rotDeltaX;
+    unsigned int yawDiff = ((unsigned int)yawStep
+                            - (unsigned int)(int)(short)curYaw
+                            + (unsigned int)targetYaw) & 0xFFF;
+
+    if (yawDiff < (unsigned int)yawStep * 2) {
+        // Within one step of the target: snap...
+        joint->rotDeltaX = (short)targetYaw;
+        // ...but reject if the snapped value falls outside the +/-0x2C8 cone
+        if ((((unsigned int)targetYaw + 0x2C8) & 0xFFF) > 0x590) {
+            joint->rotDeltaX = curYaw;
+        }
+        // One-shot mode, yaw enabled: rewrite target for the frozen pose
+        if ((ent->lookAtFlags & 0x40) != 0 && (ent->lookAtFlags & 0x01) != 0) {
+            ent->scd_pos_x = 0x1000 - ent->scd_pos_x;
+            ent->scd_pos_z = ent->scd_pos_z - 1;
+        }
+    } else if (targetYaw == 0) {
+        // Already aimed: decay toward zero from whichever side we are on
+        unsigned short v;
+        if ((curYaw & 0xFFF) < 0x801) v = (curYaw - yawStep) & 0xFFF;
+        else                          v = (curYaw + yawStep) & 0xFFF;
+        joint->rotDeltaX = v;
+    } else if ((((unsigned int)targetYaw - (unsigned int)curYaw) & 0xFFF) < 0x800) {
+        // Target less than half a turn clockwise: increase, clamped to +0x2C8
+        unsigned short v = (curYaw + yawStep) & 0xFFF;
+        joint->rotDeltaX = v;
+        if ((((int)(short)v - 0x2C8) & 0xFFF) < 0xA70) {
+            joint->rotDeltaX = 0x2C8;
+        }
+    } else {
+        // Decrease, clamped to -0x2C8 (=0xD38)
+        unsigned short v = (curYaw - yawStep) & 0xFFF;
+        joint->rotDeltaX = v;
+        if ((((int)(short)v + 0x2C8) & 0xFFF) > 0x590) {
+            joint->rotDeltaX = 0xD38;
+        }
+    }
+
+    // ========================================================================
+    // Pitch -> rotDeltaY (joint+0x78). Mirrors the yaw slew with a +/-0x138
+    // window; direction sense is inverted relative to yaw because the pitch
+    // axis points the opposite way.
+    // ========================================================================
+    int targetPitch;
+    if ((ent->lookAtFlags & 0x20) == 0) {
+        int dx = ent->scd_pos_x - joint->world.t[0];
+        int dz = ent->scd_pos_z - joint->world.t[2];
+        int dist = SquareRoot0(dx * dx + dz * dz);
+        short dy = (short)ent->scd_pos_y - (short)joint->world.t[1];
+        unsigned char pitchEn = (ent->lookAtFlags & 0x02) >> 1;
+        if (dist != 0) {
+            targetPitch = GetAngleQuadrantValue((dy << 12) / dist) * pitchEn;
+        } else {
+            targetPitch = ((0 < dy ? 0x800 : 0) + 0x400) * pitchEn;
+        }
+    } else {
+        targetPitch = ((ent->lookAtFlags & 0x02) >> 1) * (short)ent->scd_pos_y;
+    }
+
+    short curPitch = joint->rotDeltaY;
+    unsigned int pitchDiff = ((unsigned int)pitchStep
+                              - (unsigned int)(int)curPitch
+                              + (unsigned int)targetPitch) & 0xFFF;
+
+    if (pitchDiff < (unsigned int)pitchStep * 2) {
+        joint->rotDeltaY = (short)targetPitch;
+        // Reject snaps outside the +/-0x138 cone
+        if ((((unsigned int)targetPitch + 0x138) & 0xFFF) > 0x270) {
+            joint->rotDeltaY = curPitch;
+        }
+        // One-shot mode, yaw disabled: clear pitch-enable and freeze
+        unsigned char f = ent->lookAtFlags;
+        if ((f & 0x40) != 0 && (f & 0x01) == 0) {
+            ent->lookAtFlags = f ^ 0x02;
+            ent->scd_pos_z = ent->scd_pos_z - 1;
+            return;
+        }
+    } else if ((((unsigned int)(int)curPitch - (unsigned int)targetPitch) & 0xFFF) < 0x801) {
+        unsigned short v = ((unsigned short)curPitch - pitchStep) & 0xFFF;
+        joint->rotDeltaY = v;
+        if ((((int)(short)v + 0x138) & 0xFFF) > 0x938) {
+            joint->rotDeltaY = (unsigned short)(v + pitchStep);
+        }
+    } else {
+        unsigned short v = ((unsigned short)curPitch + pitchStep) & 0xFFF;
+        joint->rotDeltaY = v;
+        if ((((int)(short)v - 0x138) & 0xFFF) < 0x6C8) {
+            joint->rotDeltaY = v - pitchStep;
+            return;
+        }
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -5158,7 +5317,7 @@ static void player_behavior_13_knife_hold(void)
         return;
     }
     if ((g_PlayerPadHeld & 4) != 0 && player_find_aim_target() != 0) {
-        g_playerEntity.action_behavior = 0x16;   // 0x004599f0 - not yet transcribed
+        g_playerEntity.action_behavior = 0x16;   // knife auto-aim turn
         g_playerEntity.action_state = 0;
         return;
     }
@@ -5280,6 +5439,70 @@ static void player_behavior_15_knife_holster(void)
         g_playerEntity.animFrameId = 0;
     }
     EntityUpdateWeaponJoint(0);
+}
+
+// ============================================================================
+// player_behavior_16_knife_turn @ 0x004599f0 - knife action_behavior 0x16
+// Knife auto-aim turn, the knife counterpart of gun behavior 0x14. While the
+// aim button is held the locked target is re-acquired every frame; the hold
+// motions +9/+10 blend toward it (state 1/2 ping-pong on unk_8c), then the
+// shared tail steers the body with the fast/slow turn pair until aligned and
+// hands control back to the knife hold (0x13).
+// ============================================================================
+static void player_behavior_16_knife_turn(void)
+{
+    if (g_playerEntity.action_state != 0 && (g_PlayerPadHeld & 4) != 0) {
+        player_find_aim_target();
+    }
+
+    if (g_playerEntity.action_state == 0) {
+        // 0x00459a11: enter the turn with hold motion +9
+        g_playerEntity.action_state       = 1;
+        g_playerEntity.animation_frame_id = 0;      // unk_be
+        g_playerEntity.unk_bf             = 0;
+        g_playerEntity.unk_8c             = 0xf;
+        g_playerEntity.move_speed_current = 1;      // unk_c2
+        g_playerEntity.attackAnim         = (unsigned char)
+            (((g_playerEntity.flags & 0xbf) >> 6) + ((g_playerEntity.flags & 0x20) >> 3) + 9);
+    }
+
+    if (g_playerEntity.action_state <= 1) {
+        // LAB_00459a69 - shared by entry and state 1
+        if (g_playerEntity.unk_8c == 0) {
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.unk_bf             = 0;
+            g_playerEntity.action_state       = 2;
+            g_playerEntity.unk_8c             = 0xf;
+            g_playerEntity.attackAnim         = (unsigned char)
+                (((g_playerEntity.flags & 0xbf) >> 6) + ((g_playerEntity.flags & 0x20) >> 3) + 10);
+            if ((g_main_state_flags2 & 1) != 0) {
+                PlayEntitySnd(0);
+            }
+        }
+    } else if (g_playerEntity.action_state == 2) {
+        // 0x00459ac0 - loop back to motion +9 when the blend timer expires
+        if (g_playerEntity.unk_8c == 0) {
+            g_playerEntity.animation_frame_id = 0;
+            g_playerEntity.unk_bf             = 0;
+            g_playerEntity.action_state       = 1;
+            g_playerEntity.unk_8c             = 0xf;
+            g_playerEntity.attackAnim         = (unsigned char)
+                (((g_playerEntity.flags & 0xbf) >> 6) + ((g_playerEntity.flags & 0x20) >> 3) + 9);
+        }
+    }
+    Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x100);
+
+    // LAB_00459afa: steer toward the target until aligned
+    g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+    if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
+        g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+    }
+    entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
+                                (unsigned short)g_animFrameIdSave);
+    if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x20) == 0) {
+        g_playerEntity.action_behavior = 0x13;
+        g_playerEntity.action_state    = 0;
+    }
 }
 
 // ============================================================================
@@ -5445,7 +5668,7 @@ static void player_ctrl_frame4(void)
         player_behavior_15_knife_holster();
         return;
     case 0x16:
-        player_state_report_missing("knife action_behavior 0x16 (0x004599f0)");
+        player_behavior_16_knife_turn();
         return;
     default:
         player_state_report_missing("action_behavior under animFrameId 4");

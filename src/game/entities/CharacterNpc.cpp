@@ -1482,8 +1482,8 @@ static void npc_state8_action_update(void)
 //   +0x174 splatter_flag         the character's RDT zone index
 //   +0x175 bob_speed             the path result / target zone
 //   +0x176 reaction_timer        the walk heading (target yaw)
-// The look-at writes feed EntityUpdateLookAtAngles, still a no-op in this
-// port - the head-track state is kept faithfully regardless.
+// The look-at writes feed EntityUpdateLookAtAngles (0x00459eb0), which slews
+// the tracking joint toward the target every NPC update.
 // ============================================================================
 
 // ----------------------------------------------------------------------------
@@ -1676,7 +1676,7 @@ static void npc_walk_advance_xz(short distance)
 // ----------------------------------------------------------------------------
 // Look-at state helpers. The original reseeds a random countdown and repaints
 // the look-at fields on every call; EntityUpdateLookAtAngles consumes them
-// (still a no-op in this port), so the state is kept faithfully regardless.
+// on the next update, so the state is kept faithfully regardless.
 // ----------------------------------------------------------------------------
 
 // 0x004722b0 - look at nothing (idle): mode 0x10, all angles zero.
