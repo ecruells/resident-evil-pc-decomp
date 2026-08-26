@@ -49,10 +49,13 @@ Build:
 ```
 build.bat
 ```
-This invokes MSBuild on `Game.sln` (Debug / Win32) and produces
-`bin\Debug\residentevil.exe`. Adjust the MSBuild path inside `build.bat` if
-your Visual Studio installation differs. For the retail-layout build, also
-build the **Release** configuration (`/p:Configuration=Release`).
+This invokes MSBuild on `Game.sln` (Release / Win32) and produces
+`bin\Release\residentevil.exe`. For a Debug build use:
+```
+build_debug.bat
+```
+This produces `bin\Debug\residentevil.exe`. Adjust the MSBuild path inside the
+scripts if your Visual Studio installation differs.
 
 > **Note:** Release intentionally builds with `WholeProgramOptimization`
 > disabled — `/GL`+`/LTCG` miscompiles the task scheduler's naked-assembly
@@ -61,7 +64,7 @@ build the **Release** configuration (`/p:Configuration=Release`).
 
 To build from a developer command prompt instead:
 ```
-msbuild Game.sln /p:Configuration=Debug /p:Platform=Win32 /t:Build
+msbuild Game.sln /p:Configuration=Release /p:Platform=Win32 /t:Build
 ```
 
 ### Running the game
