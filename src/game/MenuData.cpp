@@ -299,10 +299,7 @@ static constexpr auto s_itemFax             = STR("FAX\x07");                // 
 static constexpr auto s_itemScrapbook       = STR("SCRAPBOOK\x07");          // +0x338
 static constexpr auto s_itemSecuritySystem  = STR("SECURITY SYSTEM\x07");    // +0x342
 static constexpr auto s_itemResearchersLtr  = STR("RESEARCHER'S LETTER\x07");// +0x352
-// The opening quote is glyph index 0x9C (fontus region 2, row 6 col 12 is a
-// solid block despite the 0x78 index the original's bytes use - user-verified
-// the true double-quote glyph sits two rows lower).
-static constexpr auto s_itemVJoltReport     = STR("\x9CV-JOLT\" REPORT\x07");// +0x366
+static constexpr auto s_itemVJoltReport     = STR("\\oV-JOLT\" REPORT\x07");// +0x366
 static constexpr auto s_itemBarrysPicture   = STR("BARRY'S PICTURE\x07");    // +0x376
 static constexpr auto s_itemPassCode01      = STR("PASS CODE01\x07");        // +0x386
 static constexpr auto s_itemPassCode02      = STR("PASS CODE02\x07");        // +0x392
