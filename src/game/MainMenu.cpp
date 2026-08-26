@@ -943,7 +943,14 @@ LAB_004642e7:
                 }
                 bVar6 = bVar6 & 0x7f;
                 do {
-                    display_texture(&g_TextureDesc, (unsigned short)bVar6 + (unsigned short)g_invDepthLayer, 0, 1);
+                    // 0x0046448e: unlike the frame-segment loop above (which
+                    // draws each tile at count+depth, 0x004643c8), the panel
+                    // border tiles draw at the plain 0x14 depth. Adding the
+                    // tile counter sank multi-tile runs (the top border row)
+                    // behind the frames2 submenu bottom border strip at depth
+                    // 21, which then overdraws them - Jill's inventory top
+                    // border looked merged with/hidden by the submenu border.
+                    display_texture(&g_TextureDesc, (unsigned short)g_invDepthLayer, 0, 1);
                     g_TextureDesc.screenX = g_TextureDesc.screenX + uVar9;
                     g_TextureDesc.screenY = g_TextureDesc.screenY + uVar8;
                     bVar6 = bVar6 - 1;
