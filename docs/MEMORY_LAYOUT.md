@@ -16,7 +16,7 @@ table before writing the definition:
 | Original address range | Placement | Mechanism |
 |---|---|---|
 | `[0x00be41e0, 0x00be9620)` | game-init wipe block | `.gwipe$<tag>` ordered section (see below) |
-| `[0x00be9620, 0x00be9a3c)` | bio card / save block | field of `BioCardLayout` + macro alias in `src/game/Items.h` |
+| `[0x00be9620, 0x00be9a3c)` | bio card / save block | field of `BioCardLayout` + macro alias in `src/game/BioCard.h` |
 | Task scheduler cluster (`0x00d91a68..0x00d91a90`, `g_TasksTable` 0x00d1fde4, `g_StackPointer` 0x007e0cc8) | `.sched` section | `__declspec(allocate(".sched"))` in `src/Globals.cpp` |
 | Anything a range operation must **never** touch but the linker keeps placing at risk (historically `g_pMarniDirect3D`, `g_pMasterInputState`) | `.sched` section | same |
 | Everything else | normal global | plain definition + original-address comment |
@@ -141,7 +141,7 @@ operated range.
 The save-game block `0x00be9620..0x00be9a3c` (0x41C bytes) is accessed both as
 a unit (`memcpy(&g_BioCardData[0], ..., 1052)` when loading `bio_card.dat` /
 save files) and as ~60 individual variables. It is modeled as one packed struct
-`BioCardLayout g_BioCard` (`src/game/Items.h`, `static_assert`ed to 0x41C) with
+`BioCardLayout g_BioCard` (`src/game/BioCard.h`, `static_assert`ed to 0x41C) with
 `#define` aliases for every original symbol name (`g_stageId`, `g_RandSeed`,
 `g_fading_state`, ...). Field order/offsets inside the struct are load-bearing —
 never reorder; add new aliases at their correct offset.

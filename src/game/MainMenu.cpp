@@ -4111,7 +4111,7 @@ static int menu_update_status_screen(void)
         ((unsigned char*)g_interactable_table[record[10]])[0] = 0;
         *evt = 0;
         FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
-        DAT_00be9833 = record[8];
+        g_pickedItemId = record[8];
         state[8] = 0;
         return 0xffffffff;
     }

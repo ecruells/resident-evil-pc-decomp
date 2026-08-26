@@ -34,7 +34,7 @@
 // generic Entity fields would be actively misleading.
 #include "EntityCommon.h"
 #include "../../Globals.h"
-#include "../Items.h"
+#include "../BioCard.h"
 #include <cstring>
 #include <cstdlib>
 #include <cmath>

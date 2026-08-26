@@ -307,12 +307,12 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 | `0x36` | `cmd_obj_field_test` | `00431c90` | 4 | **Cond.** `[op, objIdx][mode, cmpVal]`. Compares the `u16` at `itembox[objIdx] + 0x86` (the billboard effect handle). |
 | `0x37` | `cmd_room_bgm_state_set` | `00460a30` | 4 | `[op, stage][roomIdx, value]`. `g_roomBgmState[stage*32 + roomIdx] = value`. |
 | `0x38` | `cmd_dpad_test` | `00431dc0` | 4 | **Cond.** `[op, invert][mask:u16]`. Tests `g_PlayerDpadHeld & mask`; `invert != 0` negates. |
-| `0x39` | `cmd_enemy_flags_get` | `00431e10` | 2 | `[op, enemyIdx]`. `DAT_00be982a = g_EnemiesList[enemyIdx].behavior_flags`. |
+| `0x39` | `cmd_enemy_flags_get` | `00431e10` | 2 | `[op, enemyIdx]`. `g_scdLastEnemyFlags = g_EnemiesList[enemyIdx].behavior_flags`. |
 | `0x3A` | `cmd_cut_zone_set` | `00431e50` | 4 | `[op, zoneIdx][toCam, fromCam]`. Rewrites `cam_switch_zones[zoneIdx]` fields at `+2` and `+0`. |
 | `0x3B` | `cmd_obj_rotation_set` | `00431ea0` | 6 | `[op, sel][a:u16][b:u16]`. `sel < 0x8000` → desk `(sel >> 6) & 0x3F`, else itembox `(sel & 0x7F00) >> 8`. Writes `+0x72` and `+0x76` only when the object is active. |
 | `0x3C` | `cmd_player_dist_test` | `00431f20` | 6 | **Cond.** `[op, pad][targetSpec:u16][maxDist:u16]`. `targetSpec & 0xFF`: 0 = enemy `spec >> 8`, 1 = itembox, 2 = desk. Returns `SquareRoot0(dx²+dz²) <= maxDist` against the player. |
-| `0x3D` | `cmd_bullet_effect_spawn` | `00431770` | 12 | Same layout as `0x2A`. Additionally stashes the type in `DAT_00be982b` and the matrix in `DAT_00bf0a34` for `0x3E`. |
-| `0x3E` | `cmd_bullet_effect_clear` | `00431840` | 2 | `FUN_0047cf80(9, DAT_00be982b, 0, 0, DAT_00bf0a34)` — frees every effect-pool slot whose type **and** sprite matrix match the values stashed by `cmd_bullet_effect_spawn` (`FUN_0047cf80` is a criteria-masked slot remover, not a spawner). Pairs with `0x3D`: spawn impact billboards now, sweep them later. |
+| `0x3D` | `cmd_bullet_effect_spawn` | `00431770` | 12 | Same layout as `0x2A`. Additionally stashes the type in `g_bulletEffectId` and the matrix in `DAT_00bf0a34` for `0x3E`. |
+| `0x3E` | `cmd_bullet_effect_clear` | `00431840` | 2 | `FUN_0047cf80(9, g_bulletEffectId, 0, 0, DAT_00bf0a34)` — frees every effect-pool slot whose type **and** sprite matrix match the values stashed by `cmd_bullet_effect_spawn` (`FUN_0047cf80` is a criteria-masked slot remover, not a spawner). Pairs with `0x3D`: spawn impact billboards now, sweep them later. |
 | `0x3F` | `cmd_player_dir_test` | `00431fd0` | 6 | **Cond.** `[op,pad][minAngle:u16][maxAngle:u16]`. Wrap-aware range test on `directionAngle`. |
 | `0x40` | `cmd_light_param_set` | `00432010` | 16 | `[op, lightIdx]` + seven `s16`. Writes light fields `[0..5]` and `[8]` at `&g_RdtPointer[1].lights + lightIdx*0x2C - 4`. |
 | `0x41` | `cmd_entity_unk8e_set` | `00432090` | 4 | `[op, entIdx][value:u16]`. `entIdx == 0` → `g_playerEntity.unk_8e`, else entity `entIdx` at `+0x82`. |

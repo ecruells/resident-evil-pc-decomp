@@ -73,7 +73,7 @@
 // ============================================================================
 #include "EntityCommon.h"
 #include "../../Globals.h"
-#include "../Items.h"
+#include "../BioCard.h"
 #include <cstdlib>
 #include <cstring>
 

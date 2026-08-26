@@ -1127,7 +1127,7 @@ src/
 │   ├── SFXIds.h                # named SFX IDs per bank
 │   ├── TaskScheduler.cpp       # task coroutine scheduler
 │   ├── Types.h                 # shared types (incl. D3DRendererInfo)
-│   └── Items.h                 # item enums/tables
+│   └── BioCard.h                 # Biocard struct
 │
 ├── system/
 │   ├── AssetPath.h             # path remapping (.\\usa\\ -> .\\assets\\USA\\)

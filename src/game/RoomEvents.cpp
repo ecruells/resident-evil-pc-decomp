@@ -1038,7 +1038,7 @@ void room_event_item_pickup(void)
     }
     FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
 
-    DAT_00be9833 = record[8];
+    g_pickedItemId = record[8];
     unsigned char itemId = record[8];
     unsigned char quantity = record[9];
     if (itemId == 0x2f) {                         // '/': ammo pickup always yields 3

@@ -2328,13 +2328,13 @@ int check_action_object(void)
                     if ((flags & 0x40) == 0) {
                         if (is_point_in_action_zone((VECTOR*)&g_playerPosScratch,
                                                     *(unsigned short**)(entry + 8)) != 0) {
-                            DAT_00be9830 = (unsigned char)(index + 1);
+                            g_fwdPosActionId = (unsigned char)(index + 1);
                             return ((int(*)(unsigned char*))room_check_actions[*entry])(entry);
                         }
                     } else {
                         if (is_point_in_action_zone((VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t,
                                                     *(unsigned short**)(entry + 8)) != 0) {
-                            DAT_00be9831 = (unsigned char)(index + 1);
+                            g_entPosActionId = (unsigned char)(index + 1);
                             return ((int(*)(unsigned char*))room_check_actions[*entry])(entry);
                         }
                     }
@@ -7011,7 +7011,7 @@ static void set_room_item_seen_flag(int itemIdMinus4e)
 // Direct key pickup: deactivates the entry, clears the desk-opened flag on the
 // desk model byte 0, clears the roomItems flag at record+0x14, marks the item
 // "seen" in RoomFlags (bit 0x7c + itemId - 0x4e) and records the item id in
-// DAT_00be9833 for the message system.
+// g_pickedItemId for the message system.
 // ============================================================================
 int pickup_key_event(unsigned char* entry)
 {
@@ -7019,7 +7019,7 @@ int pickup_key_event(unsigned char* entry)
     ((unsigned char*)g_interactable_table[*(unsigned short*)(entry + 4)])[0] = 0;
     FUN_00473f10((int*)&g_roomItemsFlags, *(unsigned char*)(*(unsigned char**)(entry + 8) + 0x14));
     set_room_item_seen_flag(*(unsigned char*)(*(unsigned char**)(entry + 8) + 8) - 0x4e);
-    DAT_00be9833 = *(unsigned char*)(*(unsigned char**)(entry + 8) + 8);
+    g_pickedItemId = *(unsigned char*)(*(unsigned char**)(entry + 8) + 8);
     return 0;
 }
 
@@ -7128,13 +7128,13 @@ void update_player_position(PlayerEntity* ent, int mask)
             if ((flags & 0x40) == 0) {
                 if (is_point_in_action_zone((VECTOR*)&g_playerPosScratch,
                                             *(unsigned short**)(entry + 8)) != 0) {
-                    DAT_00be9830 = (unsigned char)(index + 1);
+                    g_fwdPosActionId = (unsigned char)(index + 1);
                     hit = true;
                 }
             } else {
                 if (is_point_in_action_zone((VECTOR*)ent->scaMatrixData.localMatrix.t,
                                             *(unsigned short**)(entry + 8)) != 0) {
-                    DAT_00be9831 = (unsigned char)(index + 1);
+                    g_entPosActionId = (unsigned char)(index + 1);
                     hit = true;
                 }
             }

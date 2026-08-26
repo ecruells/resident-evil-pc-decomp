@@ -78,7 +78,7 @@
 //   0x185  byte          bite cooldown, decremented by yawn_update
 #include "EntityCommon.h"
 #include "../../Globals.h"
-#include "../Items.h"
+#include "../BioCard.h"
 #include "../../DebugPrint.h"
 #include <cstring>
 #include <cstdlib>

@@ -31,7 +31,7 @@
 // never hits it. Reproduced rather than guarded, to keep the layout honest.
 // ============================================================================
 #include "../../Globals.h"
-#include "../Items.h"
+#include "../BioCard.h"
 #include "EntityCommon.h"
 #include "../FileLoader.h"
 #include <cstdio>

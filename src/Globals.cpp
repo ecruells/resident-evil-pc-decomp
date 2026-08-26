@@ -392,7 +392,7 @@ const WORD* g_padRemapTable[4] = {
 WORD g_PlayerDpadHeldPrev = 0;
 // 0x00bf0a0e - placeholder for high WORD of g_button_pressed_id (use (WORD)(g_button_pressed_id >> 16))
 // 0x00bf0a12 - placeholder for high WORD of g_PlayerPadHeld (== g_RawPadState)
-// 0x00be9842 - g_PlayerDpadPressed is now a macro to g_BioCard.playerDpadPressed (see Items.h)
+// 0x00be9842 - g_PlayerDpadPressed is now a macro to g_BioCard.playerDpadPressed (see BioCard.h)
 // 0x00d21d10 - Attract demo input data. The whole-file pdemoN.dat load covers
 // this block up to the file tail at 0x00d22674: (0x994 - 0x30) / 2 = 1202
 // words, enough for the longest reel (1046 words). Do not shrink to 512 - the
@@ -410,7 +410,7 @@ WORD g_AttractMode_ControllerConfig = 0;
 short g_AttractMode_PlayerHealth = 0;
 
 // --- Menu / dialog flags ---
-// 0x00be9825 - g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see Items.h)
+// 0x00be9825 - g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see BioCard.h)
 // 0x004D4668
 BOOL g_displayExitGameScreen_flag = FALSE;
 // 0x004d466c
@@ -1197,10 +1197,10 @@ DWORD         g_scaPoolBase = 0;
 // Each byte is a BGM state descriptor: bits 0-2 = track index, bits 3-5 = secondary slot enables,
 // bits 6-7 = transition mode (0=normal, 1=always reload, 2=force restart), 0xFF = no BGM.
 // Modified at runtime by SCD opcode cmd_room_bgm_state_set and preserved in save files.
-// 0x00be995c to 0x00be9a3c - g_roomBgmState is a macro to g_BioCard.roomBgmState (see Items.h)
+// 0x00be995c to 0x00be9a3c - g_roomBgmState is a macro to g_BioCard.roomBgmState (see BioCard.h)
 
 // 0x00be98d0 - Room flags bitfield (set by Flg_on via room_set_visited_flag)
-// g_RoomFlags is now a macro to g_BioCard.roomFlags (see Items.h)
+// g_RoomFlags is now a macro to g_BioCard.roomFlags (see BioCard.h)
 
 // 0x004d31e0 - Stage room-flag base offset table (indexed by stageId % 5)
 // 6th entry (0) covers the map display's lab group (group 5, used when the
@@ -1210,7 +1210,7 @@ const unsigned char g_StageRoomFlagOffset[6] = { 0, 32, 63, 82, 100, 0 };
 // 0x00be41c8 - SCD flag bank 4: system flags used by room scripts (case 4 in cmd_bit_test/cmd_bit_op)
 // DWORD array, index 0 = flags 0-31, index 1 = flags 32-63. Cleared on room change.
 DWORD         g_SysFlags[2] = {};
-// DAT_00be9830 is now a macro to g_BioCard.dat_0x210 (see Items.h)
+// DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
 
 // 0x00d91aa0 - Room item event table (24 entries x 12 bytes = 288 bytes)
 // Used by item_set, door_set, item_model_set commands and player position updates
@@ -1843,7 +1843,7 @@ char           g_pakStringBuf[512] = {};
 
 // 0x00be987c - SCD flag bank 3: room event flags (case 3 in cmd_bit_test/cmd_bit_op)
 // Used by SCD scripts to track triggered events, doors, cutscenes, enemy deaths.
-// g_RoomEventFlags is now a macro to g_BioCard.roomEventFlags (see Items.h)
+// g_RoomEventFlags is now a macro to g_BioCard.roomEventFlags (see BioCard.h)
 
 // 0x00d226b0 - Room-object (omodel) record table. Each slot points at one
 // 0xA4-byte record carved from the RDT VB region by room_set (count = RDT

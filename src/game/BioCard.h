@@ -9,6 +9,12 @@
 // ============================================================================
 #pragma pack(push, 1)
 struct BioCardLayout {
+    // 0x000: save-card header (0x00be9620-0x00be9820).
+    // Initialized EXE .data swept into the card dump; byte-identical between
+    // bio_card.dat and every shipped save. Layout: "SC" magic + 13 01 at +0,
+    // a 26-byte constant table ending in 00 80 at +0x64, then three identical
+    // 128-byte tiles of ee-filled graphics data at +0x80. No code references
+    // it by field - only the block base is touched by the load/save memcpys.
     BYTE          prefix[0x200];             // 0x000 - raw bio_card prefix data
     unsigned char stageId;                   // 0x200
     unsigned char roomId;                    // 0x201
@@ -20,14 +26,14 @@ struct BioCardLayout {
     unsigned char totalHeldItems;            // 0x207
     unsigned char specialRoomLightR;         // 0x208 (1 byte, NOT short)
     unsigned char characterModelId;          // 0x209
-    unsigned char dat_0x2a;                  // 0x20A
-    unsigned char dat_0x2b;                  // 0x20B
-    unsigned char dat_0x2c;                  // 0x20C
-    unsigned char dat_0x2d;                  // 0x20D
-    unsigned char dat_0x2e;                  // 0x20E 
-    unsigned char dat_0x20f;                 // 0x20F
-    unsigned char dat_0x210;                 // 0x210 (DAT_00be9830, room state byte)
-    unsigned char dat_0x211;                 // 0x211 (DAT_00be9831, room state byte)
+    unsigned char scdLastEnemyFlags;         // 0x20A (DAT_00be982a, enemy behavior_flags fetched by SCD cmd_enemy_flags_get)
+    unsigned char bulletEffectId;            // 0x20B (DAT_00be982b, type of the last billboard effect spawned by cmd_bullet_effect_spawn)
+    unsigned char initUnusedA;               // 0x20C (DAT_00be982c, write-only, set to 7 by SetInitialItems)
+    unsigned char initUnusedB;               // 0x20D (DAT_00be982d, write-only, set to 0xF0 by SetInitialItems)
+    unsigned char initUnusedC;               // 0x20E (DAT_00be982e, write-only, set to 0xF0 by SetInitialItems)
+    unsigned char pad_0x20f;                 // 0x20F (no references in the binary)
+    unsigned char fwdPosActionId;            // 0x210 (DAT_00be9830, index+1 of the action-zone entry hit by the forward probed player pos)
+    unsigned char entPosActionId;            // 0x211 (DAT_00be9831, same but probed against the player entity matrix pos)
     unsigned char usedItemId;                // 0x212
     unsigned char pickedItemId;              // 0x213 (g_pickedItemId, item id last picked up; read by SCD cmd_picked_item_test)
     short         fadingState;               // 0x214
@@ -84,17 +90,15 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define g_TotalHeldItems          (g_BioCard.totalHeldItems)                    // BYTE 0x00be9827
 #define g_SpecialRoomLightR       (g_BioCard.specialRoomLightR)                 // BYTE 0x00be9828
 #define g_CharacterModelId        (g_BioCard.characterModelId)                  // BYTE 0x00be9829
-#define DAT_00be982a              (g_BioCard.dat_0x2a)                          // BYTE 0x00be982a
-#define DAT_00be982b              (g_BioCard.dat_0x2b)                          // BYTE 0x00be982b
-#define DAT_00be982c              (g_BioCard.dat_0x2c)                          // BYTE 0x00be982c
-#define DAT_00be982d              (g_BioCard.dat_0x2d)                          // BYTE 0x00be982d
-#define DAT_00be982e              (g_BioCard.dat_0x2e)                          // BYTE 0x00be982e
-#define DAT_00be982f              (g_BioCard.dat_0x20f)                         // BYTE 0x00be982f
-#define DAT_00be9830              (g_BioCard.dat_0x210)                         // BYTE 0x00be9830
-#define DAT_00be9831              (g_BioCard.dat_0x211)                         // BYTE 0x00be9831
+#define g_scdLastEnemyFlags       (g_BioCard.scdLastEnemyFlags)                 // BYTE 0x00be982a - enemy behavior_flags copied by cmd_enemy_flags_get
+#define g_bulletEffectId          (g_BioCard.bulletEffectId)                    // BYTE 0x00be982b - last billboard effect spawned by cmd_bullet_effect_spawn
+#define g_initUnusedA             (g_BioCard.initUnusedA)                       // BYTE 0x00be982c
+#define g_initUnusedB             (g_BioCard.initUnusedB)                       // BYTE 0x00be982d
+#define g_initUnusedC             (g_BioCard.initUnusedC)                       // BYTE 0x00be982e
+#define g_fwdPosActionId          (g_BioCard.fwdPosActionId)                    // BYTE 0x00be9830 - action-zone entry hit at the forward probed player pos; cleared by room_state_reset
+#define g_entPosActionId          (g_BioCard.entPosActionId)                    // BYTE 0x00be9831 - action-zone entry hit at the player entity pos
 #define g_usedItemId              (g_BioCard.usedItemId)                        // BYTE 0x00be9832
-#define g_pickedItemId            (g_BioCard.pickedItemId)                      // BYTE 0x00be9833 - item id last picked up (was DAT_00be9833)
-#define DAT_00be9833              (g_BioCard.pickedItemId)                      // BYTE 0x00be9833
+#define g_pickedItemId            (g_BioCard.pickedItemId)                      // BYTE 0x00be9833 - item id last picked up, read by SCD cmd_picked_item_test; cleared by room_state_reset
 #define g_fading_state            (g_BioCard.fadingState)                       // SHORT 0x00be9834
 #define g_SpecialRoomLightState   (g_BioCard.specialRoomLightState)             // SHORT 0x00be9836
 #define g_SpecialRoomLightDelta   (g_BioCard.specialRoomLightDelta)             // SHORT 0x00be9838

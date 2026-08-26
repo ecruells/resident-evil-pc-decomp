@@ -2,7 +2,7 @@
 // Decompiled from Ghidra. The panel is used by the interactive-screen path in
 // room4080 and is shared by the Jill/Rebecca room variants.
 #include "../Globals.h"
-#include "Items.h"
+#include "BioCard.h"
 #include "PrintText.h"
 #include <cstdio>
 

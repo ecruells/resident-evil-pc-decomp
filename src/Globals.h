@@ -11,7 +11,7 @@
 // Core types and structures
 #include "game/Types.h"
 #include "game/Entities.h"
-#include "game/Items.h"
+#include "game/BioCard.h"
 
 // ============================================================================
 // Globals.h — all shared globals and cross-module function declarations
@@ -42,7 +42,7 @@
 //  - BEFORE defining a new global in a .cpp file, check its original address
 //    against the placement table in docs/MEMORY_LAYOUT.md. Globals in
 //    [0x00be41e0, 0x00be9620) must go into the .gwipe ordered section;
-//    [0x00be9620, 0x00be9a3c) belongs to BioCardLayout (Items.h).
+//    [0x00be9620, 0x00be9a3c) belongs to BioCardLayout (BioCard.h).
 // ============================================================================
 
 // ============================================================================
@@ -208,7 +208,7 @@ extern DWORD         g_ObjectWorkBuffer[64];
 // ----------------------------------------------------------------------------
 // Pipeline: GetAsyncKeyState(keyMap) → g_pMasterInputState.keyboardPrev →
 // ReadPadBoth/JoyToPSX → g_RawPadHeld → PlayerPad_Update edge detect →
-// g_PlayerPadHeld (raw PSX word) / g_PlayerDpadHeld (remapped, see Items.h).
+// g_PlayerPadHeld (raw PSX word) / g_PlayerDpadHeld (remapped, see BioCard.h).
 // ============================================================================
 
 // 0x00ac4030 - MasterInputState (keyboard + joystick states)
@@ -243,7 +243,7 @@ extern BOOL  g_DisablePad;                             // 0x004bcb3c
 extern const WORD* g_padRemapTable[4];                 // 0x004bf300 - pointers to remap sub-tables
 extern WORD g_padRemapSubTable3[16];                   // 0x00be9a3c - runtime configurable remap table
 extern WORD g_PlayerDpadHeldPrev;                      // 0x00bf0a14 - previous dpad held state
-// g_PlayerDpadHeld / g_PlayerDpadPressed are macros to g_BioCard fields (see Items.h)
+// g_PlayerDpadHeld / g_PlayerDpadPressed are macros to g_BioCard fields (see BioCard.h)
 extern WORD g_demoPadData[1202];                        // 0x00d21d10 - attract demo input data
                                                         // (0x00d21d10..0x00d22674, filled by the
                                                         // whole-file pdemoN.dat load; a reel is up
@@ -363,7 +363,7 @@ extern int            g_MessageLineCounter;            // 0x008e1c64 - line coun
 // Fading
 extern short         g_fading_counter;                 // 0x00bebcca
 extern unsigned char g_fade_type_id;                   // 0x00bf0a2f
-// g_fading_state is a macro to g_BioCard.fadingState (see Items.h)
+// g_fading_state is a macro to g_BioCard.fadingState (see BioCard.h)
 extern BYTE          g_bGameActive;                    // 0x00be41dc
 
 // Sprite animation/screen tint state (0x00be41d0-0x00be41d4)
@@ -571,7 +571,7 @@ extern int           g_SpecialB1;                      // 0x00be961f [.gwipe]
 // SECTION 9: Bio card & items
 // ----------------------------------------------------------------------------
 // The bio card block (0x00be9620..0x00be9a3c, 0x41C bytes) is one packed
-// struct; individual original globals are macros in game/Items.h.
+// struct; individual original globals are macros in game/BioCard.h.
 // ============================================================================
 
 extern BioCardLayout g_BioCard;                        // 0x00be9620 [.gwipe end marker]
@@ -600,7 +600,7 @@ extern char          FILE_PATH[260];
 
 // Room state (reset by room_state_reset / room_set)
 extern DWORD         g_SysFlags[2];                    // 0x00be41c8 - SCD flag bank 4 (system flags, case 4 in cmd_bit_test)
-// DAT_00be9830 is now a macro to g_BioCard.dat_0x210 (see Items.h)
+// DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
 
 // Room item event table (24 entries x 12 bytes, used by item/door commands)
 extern unsigned char g_RoomItemEventTable[288];        // 0x00d91aa0

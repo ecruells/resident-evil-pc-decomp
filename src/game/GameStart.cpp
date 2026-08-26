@@ -73,10 +73,9 @@ void SetInitialItems(void)
         memcpy(g_roomItemsFlags, roomItemsFlagsInit, 32);
     }
 
-    // Set display values
-    DAT_00be982c = 7;
-    DAT_00be982d = 0xf0;
-    DAT_00be982e = 0xf0;
+    g_initUnusedA = 7;
+    g_initUnusedB = 0xf0;
+    g_initUnusedC = 0xf0;
 
     if ((g_playerEntity.id & 3) == CHAR_CHRIS) {
         // Chris: 6 slots, Rebecca gets Baretta with 15 bullets
@@ -331,7 +330,7 @@ void InitializeGame(void)
     // 0x004809c5: g_ItemSlotsPointer = g_ItemsSlots
     g_ItemSlotsPointer = g_ItemsSlots;
     g_usedItemId = 0;
-    DAT_00be9833 = 0;
+    g_pickedItemId = 0;
     DAT_00be41e1 = 0;
     g_defaultItemSlot = 0;
     DAT_00be9614 = 0;

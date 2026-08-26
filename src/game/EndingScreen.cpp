@@ -26,7 +26,7 @@
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
-#include "Items.h"
+#include "BioCard.h"
 #include "PrintText.h"
 #include "../system/AssetPath.h"
 #include <cstdio>

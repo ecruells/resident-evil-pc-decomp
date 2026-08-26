@@ -76,7 +76,7 @@
 // behaviour it interrupted.
 #include "EntityCommon.h"
 #include "../../Globals.h"
-#include "../Items.h"
+#include "../BioCard.h"
 #include <cstdlib>
 
 extern void ResetJointTransforms(void);                                   // 0x0048bad0

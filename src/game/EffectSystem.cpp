@@ -22,7 +22,7 @@
 #include "../Globals.h"
 #include "SpriteRenderer.h"
 #include "Entities.h"
-#include "Items.h"          // g_RandSeed, g_PlayerFlags macros
+#include "BioCard.h"
 #include "../DebugPrint.h"
 #include <cstring>
 #include <cstdlib>

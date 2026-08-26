@@ -14,7 +14,7 @@
 // The slide-change step FUN_0046336f (stop both sound slots, reset scroll to
 // (-96,-66), refresh texture page 0x2e) is inlined in the port's update path.
 #include "../Globals.h"
-#include "Items.h"
+#include "BioCard.h"
 #include "SpriteRenderer.h"
 #include "FileLoader.h"
 #include "../system/AssetPath.h"

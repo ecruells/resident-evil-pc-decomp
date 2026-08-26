@@ -53,8 +53,8 @@ extern void ScdEventEntry_Create(unsigned int slot, int scriptIndex);  // RoomEv
 extern void*          g_RoomInitScd;
 // g_message_flags already declared in Globals.h
 extern DWORD          g_main_state_flags;
-// g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see Items.h)
-// DAT_00be9830 is now a macro to g_BioCard.dat_0x210 (see Items.h)
+// g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see BioCard.h)
+// DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
 extern unsigned int   DAT_00d213a0[2];
 
 // Item event table pointer (used for bounds checking)
@@ -414,7 +414,7 @@ int cmd_used_item_test(void)
 // 0x11 - cmd_picked_item_test (0x00460f10)
 // Test if the last picked-up item id matches a value. The id is recorded by
 // room_event_item_pickup / pickup_key_event into g_pickedItemId
-// (DAT_00be9833, BioCardLayout.pickedItemId at 0x00be9833).
+// (BioCardLayout.pickedItemId at 0x00be9833).
 // ============================================================================
 int cmd_picked_item_test(void)
 {
@@ -1824,13 +1824,13 @@ int cmd_dpad_test(void)
 
 // ============================================================================
 // 0x39 - cmd_enemy_flags_get (0x00431e10)
-// Read enemy behavior_flags into DAT_00be982a.
+// Read enemy behavior_flags into g_scdLastEnemyFlags (DAT_00be982a).
 // ============================================================================
 int cmd_enemy_flags_get(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
-    DAT_00be982a = g_EnemiesList[op1 >> 8].behavior_flags;
+    g_scdLastEnemyFlags = g_EnemiesList[op1 >> 8].behavior_flags;
     return 1;
 }
 
@@ -1950,7 +1950,7 @@ int cmd_bullet_effect_spawn(void)
 
     unsigned char effectType = (unsigned char)(typeParam >> 8);
     Effect_CreateBillboard(effectType, (unsigned char)parentParam, effectFlags, spriteInfo, &spawnPos, 0);
-    DAT_00be982b = effectType;
+    g_bulletEffectId = effectType;
     DAT_00bf0a34 = (int)spriteInfo;
     return 1;
 }
@@ -1961,7 +1961,7 @@ int cmd_bullet_effect_spawn(void)
 // ============================================================================
 int cmd_bullet_effect_clear(void)
 {
-    FUN_0047cf80(9, DAT_00be982b, 0, 0, (MATRIX*)DAT_00bf0a34);
+    FUN_0047cf80(9, g_bulletEffectId, 0, 0, (MATRIX*)DAT_00bf0a34);
     g_ScdOpcodes += 2;
     return 1;
 }
