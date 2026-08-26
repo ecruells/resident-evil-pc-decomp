@@ -1104,7 +1104,7 @@ void InitializeGame(void)
 
     // 0x00412380: empty in the original - call dropped
 
-    // memclr(&g_defaultItemSlot, g_BioCardData);
+    memclr(&g_defaultItemSlot, g_BioCardData);
 
     g_loadDataDestPointer = g_DataBuffer;
     g_SpecialRoomLightDelta = 0;
