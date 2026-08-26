@@ -554,7 +554,14 @@ LAB_00463a53:
                 g_playerEntity.animFrameId = 0;
                 g_playerEntity.action_behavior = 0;
                 g_playerEntity.action_state = 0;
-                // Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
+                // 0x00463c10/c16 set slot 0 (+0xBD) / ctrl id 1 (+0x84), then
+                // 0x00463c21 runs ONE Joint_move over animBase before control
+                // returns to gameplay. This pre-applies the first idle pose and
+                // its frame timing while the menu-close fade still covers the
+                // screen; leaving it out left the last BENT reach pose frozen
+                // into the first visible post-close frames (the pickup "no
+                // stand-up" look).
+                Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
             } else {
                 g_playerEntity.animationId = 8;
                 g_playerEntity.animFrameId = 0;
@@ -569,7 +576,9 @@ LAB_00463a53:
                 // FC/FD wait) test before the FMV. Without it the wait never
                 // resolves and the player is stuck in the crank pose forever.
                 g_playerEntity.scd_anim_param = 0x20;
-                // Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
+                // 0x00463bd8/bde/decompile: the crank branch feeds the SAME shared
+                // 0x00463c21 Joint_move from jointMoveData2/jointMoveData3.
+                Joint_move(0, g_playerEntity.jointMoveData2, g_playerEntity.jointMoveData3, 0x400);
             }
 
             // 0x00463c35: Handle weapon equip/unequip.
