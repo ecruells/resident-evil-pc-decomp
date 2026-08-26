@@ -200,10 +200,10 @@ int cmd_bit_op(void)
 }
 
 // ============================================================================
-// 0x06 - cmd_obj06_test (0x00460760)
+// 0x06 - cmd_room_state_test (0x00460760)
 // Compare a byte value from the game state against a constant.
 // ============================================================================
-int cmd_obj06_test(void)
+int cmd_room_state_test(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short op2 = scd_read_u16(2);
@@ -225,10 +225,10 @@ int cmd_obj06_test(void)
 }
 
 // ============================================================================
-// 0x07 - cmd_obj07_test (0x00460800)
+// 0x07 - cmd_fade_state_test (0x00460800)
 // Compare a fading state value against a constant.
 // ============================================================================
-int cmd_obj07_test(void)
+int cmd_fade_state_test(void)
 {
     unsigned int op1 = *(unsigned int*)g_ScdOpcodes;
     g_ScdOpcodes += 6;
@@ -251,10 +251,10 @@ int cmd_obj07_test(void)
 }
 
 // ============================================================================
-// 0x08 - cmd_room_cam_set (0x004608a0)
+// 0x08 - cmd_room_state_set (0x004608a0)
 // Set a byte in the g_stageId/g_roomId byte array.
 // ============================================================================
-int cmd_room_cam_set(void)
+int cmd_room_state_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short op2 = scd_read_u16(2);
@@ -380,10 +380,10 @@ int cmd_skip_2bytes_opcode(void)
 }
 
 // ============================================================================
-// 0x0F - cmd_entities_0x0f (0x004610b0)
+// 0x0F - cmd_mirror_set (0x004610b0)
 // Set up player entity state and joint animation.
 // ============================================================================
-int cmd_entities_0x0f(void)
+int cmd_mirror_set(void)
 {
     Entity* entityBkp = ENTITY;
     g_main_state_flags = (g_main_state_flags & ~3u) | g_ScdOpcodes[1];
@@ -400,10 +400,10 @@ int cmd_entities_0x0f(void)
 }
 
 // ============================================================================
-// 0x10 - cmd_obj10_test (0x00460f30)
+// 0x10 - cmd_used_item_test (0x00460f30)
 // Test if the used item ID matches a value.
 // ============================================================================
-int cmd_obj10_test(void)
+int cmd_used_item_test(void)
 {
     unsigned char testVal = g_ScdOpcodes[1];
     g_ScdOpcodes += 2;
@@ -411,21 +411,23 @@ int cmd_obj10_test(void)
 }
 
 // ============================================================================
-// 0x11 - cmd_obj11_test (0x00460f10)
-// Test if DAT_00be9833 matches a value.
+// 0x11 - cmd_picked_item_test (0x00460f10)
+// Test if the last picked-up item id matches a value. The id is recorded by
+// room_event_item_pickup / pickup_key_event into g_pickedItemId
+// (DAT_00be9833, BioCardLayout.pickedItemId at 0x00be9833).
 // ============================================================================
-int cmd_obj11_test(void)
+int cmd_picked_item_test(void)
 {
     unsigned char testVal = g_ScdOpcodes[1];
     g_ScdOpcodes += 2;
-    return testVal == DAT_00be9833;
+    return testVal == g_pickedItemId;
 }
 
 // ============================================================================
-// 0x12 - cmd_item_flag_0x12 (0x00460fc0)
+// 0x12 - cmd_item_record_set (0x00460fc0)
 // Update item event table entry flags.
 // ============================================================================
-int cmd_item_flag_0x12(void)
+int cmd_item_record_set(void)
 {
     int base = (unsigned int)g_ScdOpcodes[1] * 0xc;
     g_ScdOpcodes += 10;
@@ -467,10 +469,10 @@ int cmd_scd_event_create(void)
 }
 
 // ============================================================================
-// 0x15 - cmd_bgm_0x15 (0x00460a80)
+// 0x15 - cmd_bgm_play (0x00460a80)
 // Start a BGM sound track.
 // ============================================================================
-int cmd_bgm_0x15(void)
+int cmd_bgm_play(void)
 {
     // Original: EAX = (val & 0xffffff1f) >> 5, i.e. (val >> 8) * 8 - a BYTE offset
     // into the 8-byte g_SndBank records, so the channel index is just val >> 8.
@@ -487,10 +489,10 @@ int cmd_bgm_0x15(void)
 }
 
 // ============================================================================
-// 0x16 - cmd_volume_set (0x00460c70)
+// 0x16 - cmd_bgm_stop (0x00460c70)
 // Stop and reset volume for a sound bank.
 // ============================================================================
-int cmd_volume_set(void)
+int cmd_bgm_stop(void)
 {
     // Same (val >> 8) channel index as opcode 0x15; see the note there.
     unsigned short val = scd_read_u16(0);
@@ -508,10 +510,10 @@ int cmd_volume_set(void)
 }
 
 // ============================================================================
-// 0x17 - cmd_player_pos_0x17 (0x00460d80)
+// 0x17 - cmd_sfx_3d_play (0x00460d80)
 // Play a 3D sound effect at various positions.
 // ============================================================================
-int cmd_player_pos_0x17(void)
+int cmd_sfx_3d_play(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short op2 = scd_read_u16(2);
@@ -736,10 +738,10 @@ int cmd_item_model_set(void)
 }
 
 // ============================================================================
-// 0x19 - cmd_obj19_set (0x00460f50)
+// 0x19 - cmd_desk_flag_set (0x00460f50)
 // Set a byte on a desk/obstacle pointer.
 // ============================================================================
-int cmd_obj19_set(void)
+int cmd_desk_flag_set(void)
 {
     unsigned char deskIdx = g_ScdOpcodes[1];
     unsigned char value = g_ScdOpcodes[2];
@@ -767,10 +769,10 @@ int cmd_item_search(void)
 }
 
 // ============================================================================
-// 0x1B - cmd_em_set (0x004617d0)
+// 0x1B - cmd_enemy_set (0x004617d0)
 // Set up an enemy entity in the room.
 // ============================================================================
-int cmd_em_set(void)
+int cmd_enemy_set(void)
 {
     dbg_printf("ENEMY SET START %s\n", "enemy_set");
 
@@ -875,10 +877,10 @@ int cmd_room_light_fade_set(void)
 }
 
 // ============================================================================
-// 0x1D - cmd_weapon_set (0x00460ee0)
+// 0x1D - cmd_equipped_weapon_test (0x00460ee0)
 // Test if the equipped weapon matches a value.
 // ============================================================================
-int cmd_weapon_set(void)
+int cmd_equipped_weapon_test(void)
 {
     unsigned char testVal = g_ScdOpcodes[1];
     g_ScdOpcodes += 2;
@@ -1250,10 +1252,10 @@ int cmd_item_count_test(void)
 }
 
 // ============================================================================
-// 0x23 - cmd_cut_toogle (0x00431280)
+// 0x23 - cmd_cut_lock_toggle (0x00431280)
 // Toggle camera change enable/disable.
 // ============================================================================
-int cmd_cut_toogle(void)
+int cmd_cut_lock_toggle(void)
 {
     if ((char)g_ScdOpcodes[1] == 0) {
         g_main_state_flags &= ~0x100000;
@@ -1288,11 +1290,11 @@ int cmd_room_action(void)
 }
 
 // ============================================================================
-// 0x25 - cmd_rdt_0x25 (0x004621d0)
+// 0x25 - cmd_room_sprite_set (0x004621d0)
 // Enable or disable a room sprite by ID (SCD room object visibility command).
 // If high byte of opcode word is 0, enables the sprite; otherwise disables it.
 // ============================================================================
-int cmd_rdt_0x25(void)
+int cmd_room_sprite_set(void)
 {
     g_ScdOpcodes += 2;
     // The original reads a WORD here and tests its high byte. On a byte pointer
@@ -1308,7 +1310,7 @@ int cmd_rdt_0x25(void)
 }
 
 // ============================================================================
-// 0x26 - cmd_nop_0x26 (0x00460ce0)
+// 0x26 - cmd_dead_slot_hang_26 (0x00460ce0)
 // DEAD TABLE SLOT - hangs the interpreter, faithfully.
 //
 // The original is a bare RET that never touches EAX. The dispatcher leaves the
@@ -1320,7 +1322,7 @@ int cmd_rdt_0x25(void)
 // Returning the opcode byte reproduces that exactly. Do NOT "fix" this to return
 // 0: that would silently diverge from the original by ending the block instead.
 // ============================================================================
-int cmd_nop_0x26(void)
+int cmd_dead_slot_hang_26(void)
 {
     return *g_ScdOpcodes;
 }
@@ -1337,10 +1339,10 @@ int cmd_snd_fade_set(void)
 }
 
 // ============================================================================
-// 0x28 - cmd_enemy_0x28 (0x004312f0)
+// 0x28 - cmd_enemy_prop_set (0x004312f0)
 // Modify enemy entity properties (behavior, state, flags, etc.).
 // ============================================================================
-int cmd_enemy_0x28(void)
+int cmd_enemy_prop_set(void)
 {
     unsigned short op1 = scd_read_u16(2);
     unsigned int enemyIdx = op1 & 0xff;
@@ -1484,10 +1486,10 @@ int cmd_effect_spawn(void)
 }
 
 // ============================================================================
-// 0x2B - cmd_player_anim_0x2b (0x00431990)
+// 0x2B - cmd_attack_anim_set (0x00431990)
 // Set player animation state for scripted actions.
 // ============================================================================
-int cmd_player_anim_0x2b(void)
+int cmd_attack_anim_set(void)
 {
     short val = scd_read_s16(0);
     unsigned short animParam = scd_read_u16(2);
@@ -1534,10 +1536,10 @@ int cmd_got_item(void)
 }
 
 // ============================================================================
-// 0x2E - cmd_nop_0x2e (0x00460a70)
-// DEAD TABLE SLOT - bare RET, same as cmd_nop_0x26 (0x26). See the note there.
+// 0x2E - cmd_dead_slot_hang_2e (0x00460a70)
+// DEAD TABLE SLOT - bare RET, same as cmd_dead_slot_hang_26 (0x26). See the note there.
 // ============================================================================
-int cmd_nop_0x2e(void)
+int cmd_dead_slot_hang_2e(void)
 {
     return *g_ScdOpcodes;
 }
@@ -1564,10 +1566,10 @@ int cmd_snd_pan_vol_set(void)
 }
 
 // ============================================================================
-// 0x30 - cmd_boundaries_0x30 (0x00431a40)
+// 0x30 - cmd_boundary_set (0x00431a40)
 // Modify collision boundary data.
 // ============================================================================
-int cmd_boundaries_0x30(void)
+int cmd_boundary_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1906,10 +1908,10 @@ int cmd_player_dist_test(void)
 }
 
 // ============================================================================
-// 0x3D - cmd_bullet_0x3d (0x00431770)
+// 0x3D - cmd_bullet_effect_spawn (0x00431770)
 // Spawn a bullet/hit effect.
 // ============================================================================
-int cmd_bullet_0x3d(void)
+int cmd_bullet_effect_spawn(void)
 {
     unsigned short typeParam = scd_read_u16(0);
     unsigned short parentParam = scd_read_u16(2);
@@ -1965,10 +1967,10 @@ int cmd_bullet_effect_clear(void)
 }
 
 // ============================================================================
-// 0x3F - cmd_player_dir_set (0x00431fd0)
-// Test if player direction is within a range.
+// 0x3F - cmd_player_dir_test (0x00431fd0)
+// Condition: test if player direction is within a wrap-aware angle range.
 // ============================================================================
-int cmd_player_dir_set(void)
+int cmd_player_dir_test(void)
 {
     unsigned short minAngle = scd_read_u16(2);
     unsigned short maxAngle = scd_read_u16(4);
@@ -1978,10 +1980,10 @@ int cmd_player_dir_set(void)
 }
 
 // ============================================================================
-// 0x40 - cmd_lights_0x41 (0x00432010)
+// 0x40 - cmd_light_param_set (0x00432010)
 // Modify a light source in the RDT.
 // ============================================================================
-int cmd_lights_0x41(void)
+int cmd_light_param_set(void)
 {
     short* params = (short*)g_ScdOpcodes;
     g_ScdOpcodes += 16;
@@ -2069,10 +2071,10 @@ int cmd_entity_unk8e_add(void)
 }
 
 // ============================================================================
-// 0x46 - cmd_light_set_0x47 (0x00432110)
+// 0x46 - cmd_room_lights_set (0x00432110)
 // Set all room lights from SCD data.
 // ============================================================================
-int cmd_light_set_0x47(void)
+int cmd_room_lights_set(void)
 {
     // 44-byte instruction: 2 header + 3 lights x 12 + 3 words x 2.
     // The original advances 2 here, not 4.
@@ -2164,10 +2166,10 @@ int cmd_room_bitmask_set(void)
 }
 
 // ============================================================================
-// 0x4A - cmd_snd_set0x4b (0x00460ae0)
+// 0x4A - cmd_bgm_restore (0x00460ae0)
 // Restore and play sound slots.
 // ============================================================================
-int cmd_snd_set0x4b(void)
+int cmd_bgm_restore(void)
 {
     // Original advances 2 (ADD dword ptr [g_ScdOpcodes],0x2), not 4, and the
     // guard is CMP byte ptr [g_targetBgmState],0xff - it reads the same byte
@@ -2313,12 +2315,12 @@ int cmd_script_flag_set(void)
 // 0x50 - cmd_script_flag_test (0x004622e0)
 // Return the flag byte that opcode 0x4F (cmd_script_flag_set) wrote, so a
 // script can set a condition and branch on it later. The original consumes the
-// 2-byte instruction and returns DAT_004d6444 directly - there is no callee.
+// 2-byte instruction and returns g_bCostumeVariant directly - there is no callee.
 // ============================================================================
 int cmd_script_flag_test(void)
 {
     g_ScdOpcodes += 2;
-    return (int)DAT_004d6444;
+    return (int)g_bCostumeVariant;
 }
 
 // ============================================================================
@@ -2328,87 +2330,87 @@ int cmd_script_flag_test(void)
 typedef int (*ScdCmdFunc)(void);
 
 void* script_command_funcs_table[256] = {
-    /* 0x00 */ (void*)cmd_nop,               // 0x004604d0
-    /* 0x01 */ (void*)cmd_if,                // 0x004604e0
-    /* 0x02 */ (void*)cmd_else,              // 0x00460520
-    /* 0x03 */ (void*)cmd_end_if,            // 0x00460550
-    /* 0x04 */ (void*)cmd_bit_test,          // 0x00460570
-    /* 0x05 */ (void*)cmd_bit_op,            // 0x00460650
-    /* 0x06 */ (void*)cmd_obj06_test,        // 0x00460760
-    /* 0x07 */ (void*)cmd_obj07_test,        // 0x00460800
-    /* 0x08 */ (void*)cmd_room_cam_set,      // 0x004608a0
-    /* 0x09 */ (void*)cmd_cut_lock_set,      // 0x00460920
-    /* 0x0A */ (void*)cmd_current_cut_set,   // 0x00460990
-    /* 0x0B */ (void*)cmd_message_set,       // 0x004609f0
-    /* 0x0C */ (void*)cmd_door_set,          // 0x004611b0
-    /* 0x0D */ (void*)cmd_item_set,          // 0x00461130
-    /* 0x0E */ (void*)cmd_skip_2bytes_opcode,// 0x00460900
-    /* 0x0F */ (void*)cmd_entities_0x0f,     // 0x004610b0
-    /* 0x10 */ (void*)cmd_obj10_test,        // 0x00460f30
-    /* 0x11 */ (void*)cmd_obj11_test,        // 0x00460f10
-    /* 0x12 */ (void*)cmd_item_flag_0x12,    // 0x00460fc0
-    /* 0x13 */ (void*)cmd_item_event_set,              // 0x00461010
-    /* 0x14 */ (void*)cmd_scd_event_create,              // 0x00461040
-    /* 0x15 */ (void*)cmd_bgm_0x15,          // 0x00460a80
-    /* 0x16 */ (void*)cmd_volume_set,        // 0x00460c70
-    /* 0x17 */ (void*)cmd_player_pos_0x17,   // 0x00460d80
-    /* 0x18 */ (void*)cmd_item_model_set,    // 0x00461220
-    /* 0x19 */ (void*)cmd_obj19_set,         // 0x00460f50
-    /* 0x1A */ (void*)cmd_item_search,       // 0x00460f80
-    /* 0x1B */ (void*)cmd_em_set,            // 0x004617d0
-    /* 0x1C */ (void*)cmd_room_light_fade_set,              // 0x00462210
-    /* 0x1D */ (void*)cmd_weapon_set,        // 0x00460ee0
-    /* 0x1E */ (void*)cmd_sfx_set,           // 0x00461a80
-    /* 0x1F */ (void*)cmd_omodel_set,        // 0x00461ac0
-    /* 0x20 */ (void*)cmd_player_pos_set,    // 0x00430f60
-    /* 0x21 */ (void*)cmd_enemy_pos_set,     // 0x00430fe0
-    /* 0x22 */ (void*)cmd_item_count_test,     // 0x00431100
-    /* 0x23 */ (void*)cmd_cut_toogle,        // 0x00431280
-    /* 0x24 */ (void*)cmd_room_action,       // 0x004312b0
-    /* 0x25 */ (void*)cmd_rdt_0x25,          // 0x004621d0
-    /* 0x26 */ (void*)cmd_nop_0x26,          // 0x00460ce0
-    /* 0x27 */ (void*)cmd_snd_fade_set,      // 0x00460cf0
-    /* 0x28 */ (void*)cmd_enemy_0x28,        // 0x004312f0
-    /* 0x29 */ (void*)cmd_fmv_set,           // 0x00461a40
-    /* 0x2A */ (void*)cmd_effect_spawn,      // 0x004316c0
-    /* 0x2B */ (void*)cmd_player_anim_0x2b,  // 0x00431990
-    /* 0x2C */ (void*)cmd_item_remove,       // 0x004319e0
-    /* 0x2D */ (void*)cmd_got_item,          // 0x00431a20
-    /* 0x2E */ (void*)cmd_nop_0x2e,          // 0x00460a70
-    /* 0x2F */ (void*)cmd_snd_pan_vol_set,              // 0x00460c00
-    /* 0x30 */ (void*)cmd_boundaries_0x30,   // 0x00431a40
-    /* 0x31 */ (void*)cmd_fade_state_set,              // 0x004608d0
-    /* 0x32 */ (void*)cmd_skip_4bytes,       // 0x00431b00
-    /* 0x33 */ (void*)cmd_damage_set,        // 0x004314b0
-    /* 0x34 */ (void*)cmd_model_tint_set,              // 0x00431b10
-    /* 0x35 */ (void*)cmd_obj_flag_set,              // 0x00431bf0
-    /* 0x36 */ (void*)cmd_obj_field_test,              // 0x00431c90
-    /* 0x37 */ (void*)cmd_room_bgm_state_set,              // 0x00460a30
+    /* 0x00 */ (void*)cmd_nop,                    // 0x004604d0
+    /* 0x01 */ (void*)cmd_if,                     // 0x004604e0
+    /* 0x02 */ (void*)cmd_else,                   // 0x00460520
+    /* 0x03 */ (void*)cmd_end_if,                 // 0x00460550
+    /* 0x04 */ (void*)cmd_bit_test,               // 0x00460570
+    /* 0x05 */ (void*)cmd_bit_op,                 // 0x00460650
+    /* 0x06 */ (void*)cmd_room_state_test,        // 0x00460760
+    /* 0x07 */ (void*)cmd_fade_state_test,        // 0x00460800
+    /* 0x08 */ (void*)cmd_room_state_set,         // 0x004608a0
+    /* 0x09 */ (void*)cmd_cut_lock_set,           // 0x00460920
+    /* 0x0A */ (void*)cmd_current_cut_set,        // 0x00460990
+    /* 0x0B */ (void*)cmd_message_set,            // 0x004609f0
+    /* 0x0C */ (void*)cmd_door_set,               // 0x004611b0
+    /* 0x0D */ (void*)cmd_item_set,               // 0x00461130
+    /* 0x0E */ (void*)cmd_skip_2bytes_opcode,     // 0x00460900
+    /* 0x0F */ (void*)cmd_mirror_set,             // 0x004610b0
+    /* 0x10 */ (void*)cmd_used_item_test,         // 0x00460f30
+    /* 0x11 */ (void*)cmd_picked_item_test,       // 0x00460f10
+    /* 0x12 */ (void*)cmd_item_record_set,        // 0x00460fc0
+    /* 0x13 */ (void*)cmd_item_event_set,         // 0x00461010
+    /* 0x14 */ (void*)cmd_scd_event_create,       // 0x00461040
+    /* 0x15 */ (void*)cmd_bgm_play,               // 0x00460a80
+    /* 0x16 */ (void*)cmd_bgm_stop,               // 0x00460c70
+    /* 0x17 */ (void*)cmd_sfx_3d_play,            // 0x00460d80
+    /* 0x18 */ (void*)cmd_item_model_set,         // 0x00461220
+    /* 0x19 */ (void*)cmd_desk_flag_set,          // 0x00460f50
+    /* 0x1A */ (void*)cmd_item_search,            // 0x00460f80
+    /* 0x1B */ (void*)cmd_enemy_set,              // 0x004617d0
+    /* 0x1C */ (void*)cmd_room_light_fade_set,    // 0x00462210
+    /* 0x1D */ (void*)cmd_equipped_weapon_test,   // 0x00460ee0
+    /* 0x1E */ (void*)cmd_sfx_set,                // 0x00461a80
+    /* 0x1F */ (void*)cmd_omodel_set,             // 0x00461ac0
+    /* 0x20 */ (void*)cmd_player_pos_set,         // 0x00430f60
+    /* 0x21 */ (void*)cmd_enemy_pos_set,          // 0x00430fe0
+    /* 0x22 */ (void*)cmd_item_count_test,        // 0x00431100
+    /* 0x23 */ (void*)cmd_cut_lock_toggle,        // 0x00431280
+    /* 0x24 */ (void*)cmd_room_action,            // 0x004312b0
+    /* 0x25 */ (void*)cmd_room_sprite_set,        // 0x004621d0
+    /* 0x26 */ (void*)cmd_dead_slot_hang_26,      // 0x00460ce0 - dead slot, hangs (faithful)
+    /* 0x27 */ (void*)cmd_snd_fade_set,           // 0x00460cf0
+    /* 0x28 */ (void*)cmd_enemy_prop_set,         // 0x004312f0
+    /* 0x29 */ (void*)cmd_fmv_set,                // 0x00461a40
+    /* 0x2A */ (void*)cmd_effect_spawn,           // 0x004316c0
+    /* 0x2B */ (void*)cmd_attack_anim_set,        // 0x00431990
+    /* 0x2C */ (void*)cmd_item_remove,            // 0x004319e0
+    /* 0x2D */ (void*)cmd_got_item,               // 0x00431a20
+    /* 0x2E */ (void*)cmd_dead_slot_hang_2e,      // 0x00460a70 - dead slot, hangs (faithful)
+    /* 0x2F */ (void*)cmd_snd_pan_vol_set,        // 0x00460c00
+    /* 0x30 */ (void*)cmd_boundary_set,           // 0x00431a40
+    /* 0x31 */ (void*)cmd_fade_state_set,         // 0x004608d0
+    /* 0x32 */ (void*)cmd_skip_4bytes,            // 0x00431b00
+    /* 0x33 */ (void*)cmd_damage_set,             // 0x004314b0
+    /* 0x34 */ (void*)cmd_model_tint_set,         // 0x00431b10
+    /* 0x35 */ (void*)cmd_obj_flag_set,           // 0x00431bf0
+    /* 0x36 */ (void*)cmd_obj_field_test,         // 0x00431c90
+    /* 0x37 */ (void*)cmd_room_bgm_state_set,     // 0x00460a30
     /* 0x38 */ (void*)cmd_dpad_test,              // 0x00431dc0
-    /* 0x39 */ (void*)cmd_enemy_flags_get,              // 0x00431e10
-    /* 0x3A */ (void*)cmd_cut_zone_set,          // 0x00431e50
-    /* 0x3B */ (void*)cmd_obj_rotation_set,              // 0x00431ea0
-    /* 0x3C */ (void*)cmd_player_dist_test,              // 0x00431f20
-    /* 0x3D */ (void*)cmd_bullet_0x3d,       // 0x00431770
-    /* 0x3E */ (void*)cmd_bullet_effect_clear,              // 0x00431840
-    /* 0x3F */ (void*)cmd_player_dir_set,    // 0x00431fd0
-    /* 0x40 */ (void*)cmd_lights_0x41,       // 0x00432010
-    /* 0x41 */ (void*)cmd_entity_unk8e_set,              // 0x00432090
-    /* 0x42 */ (void*)cmd_effect_clear_typed,              // 0x00431870
-    /* 0x43 */ (void*)cmd_bgm_volume_ramp,              // 0x00460d20
-    /* 0x44 */ (void*)cmd_scd_event_kill,              // 0x00461080
-    /* 0x45 */ (void*)cmd_entity_unk8e_add,              // 0x004320f0
-    /* 0x46 */ (void*)cmd_light_set_0x47,    // 0x00432110
-    /* 0x47 */ (void*)cmd_obj_transform_set,              // 0x00431080
-    /* 0x48 */ (void*)cmd_effect_pool_clear,              // 0x004318a0
-    /* 0x49 */ (void*)cmd_room_bitmask_set,              // 0x00432290
-    /* 0x4A */ (void*)cmd_snd_set0x4b,       // 0x00460ae0
-    /* 0x4B */ (void*)cmd_bgm_stop_all,              // 0x00460b80
-    /* 0x4C */ (void*)cmd_item_record_transfer,              // 0x004322d0
-    /* 0x4D */ (void*)cmd_player_joint_tint,              // 0x004323a0
-    /* 0x4E */ (void*)cmd_effect_flags_modify,              // 0x00431910
-    /* 0x4F */ (void*)cmd_script_flag_set,              // 0x004622b0
-    /* 0x50 */ (void*)cmd_script_flag_test,              // 0x004622e0
+    /* 0x39 */ (void*)cmd_enemy_flags_get,        // 0x00431e10
+    /* 0x3A */ (void*)cmd_cut_zone_set,           // 0x00431e50
+    /* 0x3B */ (void*)cmd_obj_rotation_set,       // 0x00431ea0
+    /* 0x3C */ (void*)cmd_player_dist_test,       // 0x00431f20
+    /* 0x3D */ (void*)cmd_bullet_effect_spawn,    // 0x00431770
+    /* 0x3E */ (void*)cmd_bullet_effect_clear,    // 0x00431840
+    /* 0x3F */ (void*)cmd_player_dir_test,        // 0x00431fd0
+    /* 0x40 */ (void*)cmd_light_param_set,        // 0x00432010
+    /* 0x41 */ (void*)cmd_entity_unk8e_set,       // 0x00432090
+    /* 0x42 */ (void*)cmd_effect_clear_typed,     // 0x00431870
+    /* 0x43 */ (void*)cmd_bgm_volume_ramp,        // 0x00460d20
+    /* 0x44 */ (void*)cmd_scd_event_kill,         // 0x00461080
+    /* 0x45 */ (void*)cmd_entity_unk8e_add,       // 0x004320f0
+    /* 0x46 */ (void*)cmd_room_lights_set,        // 0x00432110
+    /* 0x47 */ (void*)cmd_obj_transform_set,      // 0x00431080
+    /* 0x48 */ (void*)cmd_effect_pool_clear,      // 0x004318a0
+    /* 0x49 */ (void*)cmd_room_bitmask_set,       // 0x00432290
+    /* 0x4A */ (void*)cmd_bgm_restore,            // 0x00460ae0
+    /* 0x4B */ (void*)cmd_bgm_stop_all,           // 0x00460b80
+    /* 0x4C */ (void*)cmd_item_record_transfer,   // 0x004322d0
+    /* 0x4D */ (void*)cmd_player_joint_tint,      // 0x004323a0
+    /* 0x4E */ (void*)cmd_effect_flags_modify,    // 0x00431910
+    /* 0x4F */ (void*)cmd_script_flag_set,        // 0x004622b0
+    /* 0x50 */ (void*)cmd_script_flag_test,       // 0x004622e0
     // Opcodes 0x51-0xFF: fill with cmd_nop as safe default
     // (entries 0x51-0xF5 may be accessed; 0xF6-0xFF are handled by room_events_check)
 };

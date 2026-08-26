@@ -28,7 +28,7 @@
 
 // ============================================================================
 // Entity type IDs used by enemies_update_functions_tbl.
-// These are the entity->id values set by cmd_omodel_set / cmd_em_set in SCD
+// These are the entity->id values set by cmd_omodel_set / cmd_enemy_set in SCD
 // scripts. Ids 0-21 are the monsters; 22-47 are all handled by the shared
 // human-character driver in CharacterNpc.cpp.
 // ============================================================================

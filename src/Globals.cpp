@@ -754,7 +754,7 @@ DWORD  DAT_00ae9efc = 0;                // 0x00ae9efc
 BYTE   g_textureQueueData[40] = {};     // 0x00d22740
 
 // Additional globals
-DWORD  DAT_004d6444 = 0;                // 0x004d6444
+DWORD  g_bCostumeVariant = 0;           // 0x004d6444 (DAT_004d6444) - costume variant selector
 
 // Key binding vectors
 BYTE  g_KeyBindingVectors[32] = {};
@@ -1919,8 +1919,6 @@ unsigned char  DAT_008e1c78 = 0;                        // 0x008e1c78
 unsigned char  DAT_008e1c70 = 0;                        // 0x008e1c70
 unsigned char  DAT_008e1c7c = 0;                        // 0x008e1c7c
 unsigned char  DAT_008e1c74 = 0;                        // 0x008e1c74
-// Note: DAT_004d2bdc and DAT_004d2be0 are already defined above
-// Note: DAT_004d6444 is already defined at line 445
 
 // Bullet effect parent sprite info pointer
 int            DAT_00bf0a34 = 0;                        // 0x00bf0a34

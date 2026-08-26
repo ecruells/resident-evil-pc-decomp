@@ -290,7 +290,7 @@ const SCD_CMDS = {
   0x10:['obj10_test',1], 0x11:['obj11_test',1], 0x12:['item_flag_0x12',9], 0x13:['cmd_0x13',3],
   0x14:['cmd_0x14',3], 0x15:['bgm_0x15',1], 0x16:['volume_set',1], 0x17:['player_pos_0x17',9],
   0x18:['item_model_set',25], 0x19:['obj19_set',3], 0x1a:['item_search',1],
-  // em_set is 22 bytes TOTAL: cmd_em_set (0x004617d0) ends with g_ScdOpcodes += 0x16
+  // em_set is 22 bytes TOTAL: cmd_enemy_set (0x004617d0) ends with g_ScdOpcodes += 0x16
   // and reads operands as far out as [0x15]. At the old width of 3 the stream
   // desynced 19 bytes into the record and every following opcode was noise, so
   // any room that spawns enemies decoded into garbage.
@@ -415,7 +415,7 @@ function bitDesc(args, op) {
          ' ' + tail;
 }
 
-// cmd_entities_0x0f (0x004610b0) - the room mirror (planar reflection) setup.
+// cmd_mirror_set (0x004610b0) - the room mirror (planar reflection) setup.
 // Writes g_main_state_flags bits 0-1 from args[0] (bit 0 = enable the mirror
 // pass, bit 1 = plane axis), then three u16: the mirror's extent along the axis
 // ACROSS the plane, and the plane coordinate itself.

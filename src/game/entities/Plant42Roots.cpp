@@ -19,14 +19,14 @@
 //
 // Spawn site
 // ----------
-// Only rooms 40F0 (Chris) and 40F1 (Jill) ever run cmd_em_set with type 14 -
+// Only rooms 40F0 (Chris) and 40F1 (Jill) ever run cmd_enemy_set with type 14 -
 // three mutually exclusive branches of the init script's nested if/else chain,
 // all writing enemy SLOT 0 at (0x1A27, -5500, 0x0B50), yaw 0x0C00, two SCA
 // records, death flag 0xFF. The branches differ only in the behavior_flags
 // byte (Entity+2):
 //   0x80  dormant  - state 1 skips both sub-behaviours, just runs Joint_move
 //   0x01  retracted - behaviour B fires once on the first frame
-// Nothing in the game rewrites behavior_flags afterwards (only cmd_em_set and
+// Nothing in the game rewrites behavior_flags afterwards (only cmd_enemy_set and
 // the computer-lab arms ever write that field), so which branch fired at room
 // load is what the entity does for its whole life. Behaviour A (the full
 // rise/writhe/sink cycle below) is reachable only if something had set the

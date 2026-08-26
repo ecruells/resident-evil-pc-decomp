@@ -21,7 +21,7 @@ extern DWORD DAT_00ae9f04;                     // 0x00ae9f04
 extern BYTE  g_textureQueueData[40];           // 0x00d22740
 extern DWORD g_animSlotIndex;                  // 0x008f8c78
 extern DWORD g_textureBankRedirect[23];        // 0x00aae2b0
-extern DWORD DAT_004d6444;                     // 0x004d6444
+extern DWORD g_bCostumeVariant;                     // 0x004d6444
 
 // Player/weapon angle globals
 extern int g_weaponAngle_Special;              // 0x004c2028
@@ -453,7 +453,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     unsigned char bVar6 = g_TextureDepthByte;
 
     if ((g_main_state_flags2 & 0x4000000) != 0 && entity_id < 2) {
-        entity_id = (unsigned char)DAT_004d6444 + 0x33;
+        entity_id = (unsigned char)g_bCostumeVariant + 0x33;
     }
 
     sprintf(FILE_PATH, "%s%s",
@@ -464,7 +464,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     unsigned int fileSize = LoadFile(FILE_PATH, g_loadDataDestPointer, 32);
     int data_pointer = (int)g_loadDataDestPointer;
 
-    if ((g_main_state_flags2 & 0x4000000) != 0 && (unsigned int)DAT_004d6444 - entity_id == -51) {
+    if ((g_main_state_flags2 & 0x4000000) != 0 && (unsigned int)g_bCostumeVariant - entity_id == -51) {
         entity_id = g_playerEntity.id & 1;
     }
 

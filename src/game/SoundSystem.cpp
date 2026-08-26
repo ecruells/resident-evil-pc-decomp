@@ -1389,7 +1389,7 @@ void Snd_em(unsigned char em_snd_id) // 0x0047fca0
     if (em_snd_id >= 10) return;
 
     // `MOV AL, byte ptr [EAX + 0x161]` at 0x0047fcb2 - the sound-bank GROUP is
-    // in the high nibble of entity+0x161, which cmd_em_set fills from the SCD
+    // in the high nibble of entity+0x161, which cmd_enemy_set fills from the SCD
     // enemy record's byte 0x15 (`OR byte ptr [EAX+0x161],CL` after `SHL CL,4`).
     // The old code read entity+0x10, part of the model/SCA header: whatever bits
     // happened to sit in 0x70 there scaled the id by 10 and pushed it past the

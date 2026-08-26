@@ -1516,7 +1516,7 @@ void set_next_entity_data_buffer(int count)
 // The mirror (planar reflection) pass - entity_build_mirror_joints and
 // entity_draw_mirror_reflection.
 //
-// A room configures the mirror through SCD opcode 0x0F (cmd_entities_0x0f,
+// A room configures the mirror through SCD opcode 0x0F (cmd_mirror_set,
 // CmdFunctions.cpp), which writes four values:
 //
 //   g_main_state_flags bits 0-1 - bit 0 = mirror active, bit 1 = plane axis

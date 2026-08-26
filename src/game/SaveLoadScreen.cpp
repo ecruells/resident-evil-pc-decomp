@@ -66,7 +66,7 @@ typedef enum {
 #define OFFSET_JOY_BACKUP    0x8A0   // 128 bytes (g_joyRemapBackupJoy)
 #define OFFSET_ROOM_BGM      0x920   // 224 bytes (g_roomBgmState)
 #define OFFSET_SIDEWINDER    0xA00   // 1 byte
-#define OFFSET_LANG_BYTE     0xA01   // 1 byte  (DAT_004d6444)
+#define OFFSET_COSTUME_VARIANT 0xA01   // 1 byte  (g_bCostumeVariant)
 #define OFFSET_KEY_BACKUP    0xA02   // 128 bytes (g_joyRemapBackupKey)
 
 // ============================================================================
@@ -642,9 +642,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
                         memcpy(g_roomBgmState, fileBuffer + OFFSET_ROOM_BGM, 0xE0);
                         if (fileSize > 0xA00) {
                             // file[0xA00] holds the saved sidewinder flag; the
-                            // original loads it into a dead stack local — the
-                            // language selection below re-checks the live flag.
-                            memcpy(&DAT_004d6444, fileBuffer + OFFSET_LANG_BYTE, 1);
+                            // original loads it into a dead stack local.
+                            memcpy(&g_bCostumeVariant, fileBuffer + OFFSET_COSTUME_VARIANT, 1);
                             if (fileSize > 0xA02) {
                                 memcpy(g_joyRemapBackupKey, fileBuffer + OFFSET_KEY_BACKUP, 0x80);
                                 memcpy(g_joyRemapBackupJoy, fileBuffer + OFFSET_JOY_BACKUP, 0x80);
@@ -767,7 +766,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             memcpy(fileBuffer + OFFSET_JOY_REMAP, g_JoyRemapTbl, 0x100);
             memcpy(fileBuffer + OFFSET_ROOM_BGM, g_roomBgmState, 0xE0);
             fileBuffer[OFFSET_SIDEWINDER] = (char)g_isSideWinderConnected;
-            fileBuffer[OFFSET_LANG_BYTE]   = (char)DAT_004d6444;
+            fileBuffer[OFFSET_COSTUME_VARIANT]   = (char)g_bCostumeVariant;
             memcpy(fileBuffer + OFFSET_JOY_BACKUP, g_joyRemapBackupJoy, 0x80);
             memcpy(fileBuffer + OFFSET_KEY_BACKUP, g_joyRemapBackupKey, 0x80);
             FileWrite(g_saveFileName, fileBuffer, SAVE_FILE_SIZE);

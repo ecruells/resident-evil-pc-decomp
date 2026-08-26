@@ -607,7 +607,7 @@ next enemy type will fail the same ways.
 | One handgun shot kills, corpse freezes mid-air | `short_push_back` / `push_and_stagger` wrote `state = 3` instead of the dword `0x00030101` (see above) | `Zombie.cpp` |
 | Waypoint refreshes on the wrong frames | `entity_pathfind_update` rebuilt its state byte as `counter + 1`; the original is `INC byte`, which preserves the accumulated bit 5 (LOS-blocked) across frames 0–2 so it can be tested once on frame 3 | `EntityCommon.cpp` |
 | Head-explosion FX wrong; sound from the player's position | `enemy_hit_reaction_zombie` must swap `ENTITY` to the hit enemy for `Flg_on` / `joint_setup_attack_effect` / `Snd_em` and restore it before the billboards (`0x0043d0c5`–`0x0043d10c`). `joint_setup_attack_effect` reads `ENTITY->id` for the effect size and `weaponJointsPtr - jointsStructs` to reach the weapon joint, so on the player it wrote outside the zombie entirely | `WeaponDamage.cpp` |
-| No enemy SFX at all, though banks load | `Snd_em` read the bank-group nibble from **`entity+0x10`** — which `EntityModelLoader` fills with the low byte of `&ENTITY->scaMatrixData` — instead of `entity+0x161`, whose high nibble `cmd_em_set` fills from the SCD enemy record's byte `0x15`. `id + group*10` then ran past the 48-record table and `Snd_em` returned before touching it | `SoundSystem.cpp` |
+| No enemy SFX at all, though banks load | `Snd_em` read the bank-group nibble from **`entity+0x10`** — which `EntityModelLoader` fills with the low byte of `&ENTITY->scaMatrixData` — instead of `entity+0x161`, whose high nibble `cmd_enemy_set` fills from the SCD enemy record's byte `0x15`. `id + group*10` then ran past the 48-record table and `Snd_em` returned before touching it | `SoundSystem.cpp` |
 | Blown-off arm hangs in mid-air | `FUN_004896c0` (`0x004896c0`) was an empty stub. It is the severed-limb ballistic step and the **only** thing that integrates a detached joint's world translation — `rotate_entity` stops recomputing the matrix once `0x8`/`0x2` clear. See below | `GteMatrix.cpp` |
 | Fallen limb never gets its ground shadow | `blood_splatter_physics` wrote its resting height as −99; the original writes **−100**, and `zombie_update`'s limb-shadow test is `world.t[1] == -100` exactly | `EntityCommon.cpp` |
 | Knife crash (`/GS`: stack around `knifePos` corrupted) | `weapon_hit_detect_knife` handed an 8-byte `SVECTOR` to `ApplyLVAndMul0Matrix`, which writes a whole 32-byte `MATRIX`. The original reserves exactly `0x20` and reuses its offsets scratch as the output; distances come from that output's `t[0]`/`t[2]` | `WeaponDamage.cpp` |
@@ -697,7 +697,7 @@ corrupts memory rather than merely misbehaving.
 
 ## SCD integration
 
-Zombies are spawned by `cmd_omodel_set`; cutscene actors by `cmd_em_set`. The
+Zombies are spawned by `cmd_omodel_set`; cutscene actors by `cmd_enemy_set`. The
 entity's `id` selects `enemies_update_functions_tbl[id]` (**48** entries — ids
 0–21 monsters, 22–47 the shared human driver in `CharacterNpc.cpp`).
 `death_event_id` at `+0x163` is the `g_RoomEventFlags` bit raised on death.
@@ -706,7 +706,7 @@ Script-driven zombies set `behavior_flags & 0x40` and run through state 8.
 
 ### `entity+0x161` — the sound-bank group
 
-`cmd_em_set` (`0x004617d0`) packs three things into `entity+0x161`:
+`cmd_enemy_set` (`0x004617d0`) packs three things into `entity+0x161`:
 
 ```
 entity[0x161]  = scd[0x12] & 0x0F        ; the enemy slot index

@@ -42,7 +42,7 @@ CMDS = {
     0x18: ('item_model_set', 25, ""),
     0x19: ('obj19_set', 3, ""),
     0x1a: ('item_search', 1, ""),
-    0x1b: ('em_set', 21, "22 bytes total - cmd_em_set adds 0x16"),
+    0x1b: ('enemy_set', 21, "22 bytes total - cmd_enemy_set adds 0x16"),
     0x1c: ('cmd_0x1c', 5, ""),
     0x1d: ('weapon_set', 1, ""),
     0x1e: ('sfx_set', 3, ""),
@@ -163,7 +163,7 @@ def decode(data, off, length, label):
             # below used to overrun on short bodies)
             detail = f"jump+{body[0]:#x}" if body else "jump?"
         elif op == 0x0F:
-            # cmd_entities_0x0f (0x004610b0) - arms the room mirror.
+            # cmd_mirror_set (0x004610b0) - arms the room mirror.
             # body[0] -> g_main_state_flags bits 0-1, then three u16 params.
             # body[0] goes into g_main_state_flags bits 0-1: bit 0 enables the
             # pass, bit 1 picks the plane axis. A plane-X room writes 0x02 here

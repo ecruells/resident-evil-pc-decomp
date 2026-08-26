@@ -4,7 +4,7 @@
 // Every entity id from 22 up dispatches to character_npc_update (0x0046acf0)
 // through enemies_update_functions_tbl - it is the shared "human character"
 // driver, as opposed to the per-monster update functions for ids 0-21. The SCD
-// script spawns these with cmd_em_set (opcode 0x1B) and then drives them from
+// script spawns these with cmd_enemy_set (opcode 0x1B) and then drives them from
 // the room event VM, which writes state 8 plus an animation id straight into the
 // entity. Before this file existed the port's dispatch table stopped at 32
 // entries, so id 33 (Jill) read one entry past the end - straight into
@@ -384,7 +384,7 @@ static void npc_idle_play_anim(void)
 
 // ----------------------------------------------------------------------------
 // NPC state 9 (0x00471950) is the pathfind layer - the follow-the-player mode
-// that cmd_em_set sub-command 8 selects. Transcribed below, after the SCD
+// that cmd_enemy_set sub-command 8 selects. Transcribed below, after the SCD
 // behaviours: npc_state9_pathfind plus the four walk behaviours and their
 // helpers.
 // ----------------------------------------------------------------------------
@@ -1438,7 +1438,7 @@ static void npc_state8_action_update(void)
 // ============================================================================
 // NPC state 9 - the pathfind layer (0x00471950) and its follow behaviours.
 //
-// cmd_em_set sub-command 8 (`ent->state = 9`) selects this mode: the
+// cmd_enemy_set sub-command 8 (`ent->state = 9`) selects this mode: the
 // "character joins the party and follows the player" driver - Barry after the
 // dining-room cutscene, Rebecca and the others later. Before this section was
 // transcribed the state logged "unimplemented state 9" every frame and the
@@ -2127,7 +2127,7 @@ static void npc_idle_walk_00(void);   // indexes the table below - see its body
 
 // 45 entries, not 42: the idle view runs to index 18 in the original (array
 // slots 48-66 are all real handlers, and 67 onward are NULL). Scripts do set
-// action_behavior as high as 0x17 via cmd_enemy_0x28 sub-command 2, which would
+// action_behavior as high as 0x17 via cmd_enemy_prop_set sub-command 2, which would
 // be a NULL call in the original too - npc_state1_idle reports those rather than
 // jumping to address 0.
 static void* const g_npcDispatch[45] = {
@@ -2248,7 +2248,7 @@ static void npc_idle_walk_00(void)
 // npc_state0_init (0x0046ad80) - NPC state 0
 // One-shot spawn init. The first store is a dword at +0x84, which sets state to
 // 1 and clears ignore_player_flag, action_behavior and action_state in one go -
-// so a character drops straight into state 1 on the frame after cmd_em_set.
+// so a character drops straight into state 1 on the frame after cmd_enemy_set.
 // ============================================================================
 static void npc_state0_init(void)
 {
@@ -2261,7 +2261,7 @@ static void npc_state0_init(void)
     // 0x0046ad96 / 0x0046ad9f: MOV word ptr [EAX+0x72],0 and [EAX+0x76],0.
     // These are the X and Z components of the rotation SVECTOR that RotMatrix
     // reads from entity+0x72 - they must NOT touch +0x74, which is the yaw
-    // cmd_em_set just wrote from the script. Writing them via the nearest struct
+    // cmd_enemy_set just wrote from the script. Writing them via the nearest struct
     // field names hit +0x6C (position.x) and +0x74 (angle) instead, which zeroed
     // every actor's facing one frame after it spawned. Addressed by offset here
     // because no single named field lands on either address.

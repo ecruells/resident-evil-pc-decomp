@@ -321,7 +321,7 @@ extern int           init_game_flag;                   // 0x004ba7b0
 //  17   0x00020000    SFX playback active / music wait done (sfx_set, SoundSystem)
 //  18   0x00040000    FMV playback active (logos_state, cmd_fmv_set, main_loop)
 //  19   0x00080000    Screen panning reset / ending state (ResetScreenPanning, ending_state)
-//  20   0x00100000    Camera changes disabled during cutscene (cut_set, cmd_cut_toogle)
+//  20   0x00100000    Camera changes disabled during cutscene (cut_set, cmd_cut_lock_toggle)
 //  23   0x00800000    Room RDT variant: 0=Chris, 1=Jill/Rebecca (LoadRoomRdt, char select)
 //  25   0x02000000    Game loop active flag (game_loop)
 //  26   0x04000000    Game initialized / loading complete (InitializeGame, room_set)
@@ -332,7 +332,7 @@ extern int           init_game_flag;                   // 0x004ba7b0
 //  31   0x80000000    Save/load screen active / title screen overlay (title, save/load)
 //
 // The lower 2 bits (0-1) are also used as a 2-bit SCD script parameter
-// (cmd_entities_0x0f writes g_ScdOpcodes[1] into bits 0-1).
+// (cmd_mirror_set writes g_ScdOpcodes[1] into bits 0-1).
 //
 // The lower nibble is cleared by room_set: g_main_state_flags &= 0xfffffff0.
 //
@@ -559,7 +559,7 @@ extern int           DAT_00be0e00;                     // 0x00be0e00
 extern unsigned int  STAGE_ID_00ac9cf0;                // 0x00ac9cf0
 extern unsigned int  ROOM_ID_00ac9cf4;                 // 0x00ac9cf4
 
-// Bullet effect parent sprite info pointer (set by cmd_bullet_0x3d)
+// Bullet effect parent sprite info pointer (set by cmd_bullet_effect_spawn)
 extern int           DAT_00bf0a34;                     // 0x00bf0a34
 
 // Special room lighting globals (accessed by cmd_room_light_fade_set and main_loop)
@@ -653,7 +653,7 @@ extern const unsigned char g_ScdAnimRemap[32];          // 0x004bec80
 extern unsigned int  DAT_00d213a0[2];                  // 0x00d213a0
 
 // Mirror (planar reflection) parameters, all written only by SCD opcode 0x0F
-// (cmd_entities_0x0f). The plane axis is g_main_state_flags bit 1; bit 0 arms
+// (cmd_mirror_set). The plane axis is g_main_state_flags bit 1; bit 0 arms
 // the whole subsystem. See entity_draw_mirror_reflection in EntityCommon.cpp.
 // (Ghidra names these g_wMirrorExtentMin / g_wMirrorExtentMax / g_wMirrorPlaneCoord,
 // its global naming policy demands a Hungarian prefix this codebase does not use.)
@@ -1146,7 +1146,12 @@ extern DWORD         DAT_00ae9f04;
 extern DWORD         DAT_00ae9f06;
 extern DWORD         DAT_00ae9f00;
 extern DWORD         DAT_00ae9efc;
-extern DWORD         DAT_004d6444;
+// 0x004d6444 (DAT_004d6444) - costume variant selector. SCD opcode 0x4F
+// (cmd_script_flag_set -> FUN_0040c560) writes param & 1 here. LoadEntityEMD
+// adds it to 0x33 to pick the alternate-outfit EMD (em1030/em1032) when the
+// costume-swap flag (g_main_state_flags2 bit 0x4000000) is active, and the
+// value is persisted in the save block at offset 0xA01.
+extern DWORD         g_bCostumeVariant;
 
 // TMD async creation params
 extern DWORD         g_asyncTmdDepth;                   // 0x008fc42c

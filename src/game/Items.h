@@ -29,7 +29,7 @@ struct BioCardLayout {
     unsigned char dat_0x210;                 // 0x210 (DAT_00be9830, room state byte)
     unsigned char dat_0x211;                 // 0x211 (DAT_00be9831, room state byte)
     unsigned char usedItemId;                // 0x212
-    unsigned char dat_0x33;                  // 0x213
+    unsigned char pickedItemId;              // 0x213 (g_pickedItemId, item id last picked up; read by SCD cmd_picked_item_test)
     short         fadingState;               // 0x214
     short         specialRoomLightState;     // 0x216
     short         specialRoomLightDelta;     // 0x218
@@ -93,7 +93,8 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define DAT_00be9830              (g_BioCard.dat_0x210)                         // BYTE 0x00be9830
 #define DAT_00be9831              (g_BioCard.dat_0x211)                         // BYTE 0x00be9831
 #define g_usedItemId              (g_BioCard.usedItemId)                        // BYTE 0x00be9832
-#define DAT_00be9833              (g_BioCard.dat_0x33)                          // BYTE 0x00be9833
+#define g_pickedItemId            (g_BioCard.pickedItemId)                      // BYTE 0x00be9833 - item id last picked up (was DAT_00be9833)
+#define DAT_00be9833              (g_BioCard.pickedItemId)                      // BYTE 0x00be9833
 #define g_fading_state            (g_BioCard.fadingState)                       // SHORT 0x00be9834
 #define g_SpecialRoomLightState   (g_BioCard.specialRoomLightState)             // SHORT 0x00be9836
 #define g_SpecialRoomLightDelta   (g_BioCard.specialRoomLightDelta)             // SHORT 0x00be9838

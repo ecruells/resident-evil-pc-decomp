@@ -518,7 +518,7 @@ static_assert(sizeof(TextureDesc) == 0x20, "TextureDesc size mismatch");
 // RoomSprEntry (0x24 bytes) - Room sprite/object entry
 // Each room has an array of these, populated from RDT data by FUN_004757c0.
 // The 'active' flag controls visibility; 'id' is the sprite type identifier
-// used by SCD commands (cmd_rdt_0x25) to show/hide objects.
+// used by SCD commands (cmd_room_sprite_set) to show/hide objects.
 // Base address: 0x00d213d0 (g_RoomSprEntries)
 // ============================================================================
 #pragma pack(push, 1)
@@ -640,7 +640,7 @@ static_assert(sizeof(SndPanVol) == 0x08, "SndPanVol size mismatch");
 // instead of respawning it at the script's coordinates. Searched by
 // restore_saved_enemy_state (0x0048f330) on (roomId, enemyType) among slots whose
 // `valid` byte is non-zero; a match is consumed (valid cleared) and copied into
-// the current ENTITY. Called from SCD opcode 0x1B (cmd_em_set): a hit makes the
+// the current ENTITY. Called from SCD opcode 0x1B (cmd_enemy_set): a hit makes the
 // command skip its own initialisation.
 // ============================================================================
 #pragma pack(push, 1)

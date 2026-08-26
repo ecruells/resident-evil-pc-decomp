@@ -2139,7 +2139,7 @@ void FUN_0048c020(int param)
 // position and angle into ENTITY, consumes the slot (valid = 0) and returns 1.
 // Returns 0 when nothing matches.
 //
-// SCD opcode 0x1B (cmd_em_set) uses the return value to decide whether to skip
+// SCD opcode 0x1B (cmd_enemy_set) uses the return value to decide whether to skip
 // its own spawn initialisation - a hit means "this enemy already has state, keep
 // it where it was" rather than respawning at the script's coordinates.
 //
@@ -2226,13 +2226,13 @@ void BuildSndFadeTbl(char distSteps, int fadeType)
 }
 
 // ============================================================================
-// FUN_0040c560 (0x0040c560) - Store the low bit of the parameter into DAT_004d6444
+// FUN_0040c560 (0x0040c560) - Store the low bit of the parameter into g_bCostumeVariant
 // SCD opcode 0x4F writes this flag; opcode 0x50 (cmd_script_flag_test) returns it as its
 // condition result, so a script can set a flag with 0x4F and branch on it later.
 // ============================================================================
 void FUN_0040c560(int param)
 {
-    DAT_004d6444 = (unsigned char)param & 1;
+    g_bCostumeVariant = (unsigned char)param & 1;
 }
 
 // ============================================================================
@@ -2312,7 +2312,7 @@ static void FUN_00442180(void) { }
 // as a missing player model, cameras cycling, and entities reporting positions
 // outside every room zone.
 //
-// FUN_0048f330 (the restore side, called from cmd_em_set) was already ported,
+// FUN_0048f330 (the restore side, called from cmd_enemy_set) was already ported,
 // so until now it scanned a table nothing ever filled.
 //
 // `valid` is a TTL, not a boolean: set to 5 here, aged by one on each room
@@ -2363,7 +2363,7 @@ static void BuildEnemySnap(void)
             store = true;
         }
 
-        // Bit 7 of +0x161 marks an entity cmd_em_set spawned unconditionally;
+        // Bit 7 of +0x161 marks an entity cmd_enemy_set spawned unconditionally;
         // those are never snapshotted.
         if (store && (char)ENTITY->pad_160[1] >= 0) {
             slot->behaviorFlags = ENTITY->behavior_flags;
