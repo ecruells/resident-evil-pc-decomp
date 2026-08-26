@@ -24,7 +24,11 @@
 //   hunter_intro_jump_kind      0x004b49f0  int, stage-selected (behavior 11)
 //   hunter_scream_latch         0x00d91bc4  byte, scream one-shot latch
 //   hunter_scd_target           0x004d3d50  Entity*, set by the SCD dispatcher
-//   hunter_scd_table            0x004d3d58  FOUR live entries (state 8)
+//   hunter_scd_table            0x004d3d58  THIRTY-NINE entries (state 8);
+//                                           slots 10-13 are wrappers that
+//                                           re-enter the SAME table at bases
+//                                           [24]/[28]/[36]/[32] indexed by
+//                                           action_state (+0x87)
 //
 // ---------------------------------------------------------------------------
 // Shape of the AI - three stacked dispatch layers
@@ -287,7 +291,18 @@ static void hunter_scd_state_dispatch(void);    // 0x0048f410
 static void hunter_scd_idle(void);              // 0x0048f450
 static void hunter_scd_walk(void);              // 0x0048f4d0
 static void hunter_scd_run(void);               // 0x0048f680
+static void hunter_scd_dodge_run(void);         // 0x0048f820 - wrapper -> [24+]
+static void hunter_scd_anim_release(void);      // 0x0048f840
+static void hunter_scd_pounce_run(void);        // 0x0048f8a0 - wrapper -> [28+]
+static void hunter_scd_flag_release(void);      // 0x0048f930
+static void hunter_scd_swipe_run(void);         // 0x0048f960 - wrapper -> [32+]
+static void hunter_scd_tint_release(void);      // 0x0048f980
+static void hunter_scd_attack_run(void);        // 0x0048f9e0 - wrapper -> [36+]
+static void hunter_scd_lunge_start(void);       // 0x0048fa70
+static void hunter_scd_bite_driver(void);       // 0x0048fae0
 static void hunter_scd_death(void);             // 0x0048fc80
+static void hunter_scd_bite_end(void);          // 0x0048fc10
+static void hunter_scd_stalk_player(void);      // 0x0048fef0
 static void hunter_scd_track_joint(int unused); // 0x0048fd80
 static void hunter_roll_leap(void);             // tail of 0x00416840
 static void hunter_roll_leap_fixed(void);       // tail of 0x00416ca0
@@ -304,7 +319,7 @@ extern void (*const hunter_attack_sub_table[6])(void);
 extern void (*const hunter_pounce_sub_table[6])(void);
 extern void (*const hunter_dodge_sub_table[6])(void);
 extern void (*const hunter_idle_variant_table[8])(void);
-extern void (*const hunter_scd_table[8])(void);
+extern void (*const hunter_scd_table[39])(void);
 
 // hunter_dodge_swipe's reach-test records @ 0x004b49a0, stride 10 bytes:
 // {start_frame, frame_window, joint_idx, billboard_x, reach_radius}. The
@@ -2367,18 +2382,53 @@ static void hunter_scd_state_dispatch(void) // 0x0048f410
 }
 
 // ============================================================================
-// hunter_scd_table @ 0x004d3d58 - the script behaviour slots. Sparse on
-// purpose: the scripts only ever request 0, 1, 2 and 7.
+// hunter_scd_table @ 0x004d3d58 - THIRTY-NINE entries, ending where the
+// "it failed to the Lock" string data begins at 0x004d3df4. The scripts only
+// ever request a subset directly (0-3, 7, 14-23); slots 10-13 are composite
+// wrappers that re-enter THIS table at bases [24] (dodge), [28] (pounce),
+// [32] (swipe) and [36] (bite) indexed by action_state (+0x87), which is why
+// the sub-range handlers share the array with everything else.
 // ============================================================================
-void (*const hunter_scd_table[8])(void) = {
-    hunter_scd_idle,   // [0]
-    hunter_scd_walk,   // [1]
-    hunter_scd_run,    // [2]
-    NULL,              // [3]
-    NULL,              // [4]
-    NULL,              // [5]
-    NULL,              // [6]
-    hunter_scd_death   // [7]
+void (*const hunter_scd_table[39])(void) = {
+    hunter_scd_idle,           // [0]  0x0048f450
+    NULL,                      // [1]
+    hunter_scd_walk,           // [2]  0x0048f4d0
+    hunter_scd_run,            // [3]  0x0048f680
+    NULL,                      // [4]
+    NULL,                      // [5]
+    NULL,                      // [6]
+    hunter_scd_death,          // [7]  0x0048fc80
+    NULL,                      // [8]
+    NULL,                      // [9]
+    hunter_scd_dodge_run,      // [10] 0x0048f820 -> [24 + action_state]
+    hunter_scd_pounce_run,     // [11] 0x0048f8a0 -> [28 + action_state]
+    hunter_scd_attack_run,     // [12] 0x0048f9e0 -> [36 + action_state]
+    hunter_scd_swipe_run,      // [13] 0x0048f960 -> [32 + action_state]
+    hunter_act_swipe,          // [14] 0x004187b0
+    hunter_act_leapattack,     // [15] 0x00418a50
+    hunter_act_pounce,         // [16] 0x00418ef0
+    hunter_act_flurry,         // [17] 0x00419100
+    hunter_behavior_scream,    // [18] 0x00418400
+    hunter_death_fall,         // [19] 0x004165e0
+    hunter_death_collapse,     // [20] 0x00416710
+    hunter_death_thrash,       // [21] 0x00416680
+    hunter_scd_stalk_player,   // [22] 0x0048fef0
+    hunter_behavior_ledgejump, // [23] 0x00418220
+    hunter_dodge_start,        // [24] 0x00417aa0  dodge sub-range base
+    hunter_dodge_hop,          // [25] 0x00417b40
+    hunter_dodge_swipe,        // [26] 0x00417ba0
+    hunter_scd_anim_release,   // [27] 0x0048f840
+    hunter_pounce_start,       // [28] 0x00417800  pounce sub-range base
+    hunter_pounce_bite,        // [29] 0x00417870
+    hunter_scd_flag_release,   // [30] 0x0048f930
+    NULL,                      // [31]
+    hunter_atk_start,          // [32] 0x00417430  swipe sub-range base
+    hunter_atk_swing,          // [33] 0x00417480
+    hunter_scd_tint_release,   // [34] 0x0048f980
+    NULL,                      // [35]
+    hunter_scd_lunge_start,    // [36] 0x0048fa70  bite sub-range base
+    hunter_scd_bite_driver,    // [37] 0x0048fae0
+    hunter_scd_bite_end        // [38] 0x0048fc10
 };
 
 // ============================================================================
@@ -2400,7 +2450,7 @@ static void hunter_scd_idle(void) // 0x0048f450
 }
 
 // ============================================================================
-// hunter_scd_walk @ 0x0048f4d0 - script slot 1. Walks toward the SCD waypoint
+// hunter_scd_walk @ 0x0048f4d0 - script slot 2. Walks toward the SCD waypoint
 // pair (+0xC6/+0xC8), footstep sounds, and hands back to the script (or loops
 // while the script's wait latch at +0xDC bit 7 is set) on arrival.
 // ============================================================================
@@ -2447,7 +2497,7 @@ static void hunter_scd_walk(void) // 0x0048f4d0
 }
 
 // ============================================================================
-// hunter_scd_run @ 0x0048f680 - script slot 2. Same skeleton as the walk with
+// hunter_scd_run @ 0x0048f680 - script slot 3. Same skeleton as the walk with
 // animation 2, speed 200 and a faster turn step.
 // ============================================================================
 static void hunter_scd_run(void) // 0x0048f680
@@ -2559,4 +2609,213 @@ static void hunter_scd_track_joint(int unused) // 0x0048fd80
     ApplyMatrixSV(&g_matrixScratch, &g_svecScratch, &g_svecScratch);
     *(int*)((char*)tj + 0xD4) += g_svecScratch.x;
     *(int*)((char*)tj + 0xDC) += g_svecScratch.z;
+}
+
+// ============================================================================
+// hunter_scd_dodge_run @ 0x0048f820 - script slot 10. Re-enters
+// hunter_scd_table at the dodge sub-range base ([24]) with action_state,
+// then applies the current movement speed.
+// ============================================================================
+static void hunter_scd_dodge_run(void) // 0x0048f820
+{
+    hunter_scd_table[24 + ENTITY->action_state]();
+    Add_speedXZ(0);
+}
+
+// ============================================================================
+// hunter_scd_anim_release @ 0x0048f840 - script slot 27. Holds the animation
+// blend to completion (blend step 0x400), then raises the script flag and
+// hands control back (behaviour+action word cleared).
+// ============================================================================
+static void hunter_scd_anim_release(void) // 0x0048f840
+{
+    if ((char)Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400) != 0) {
+        Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        H_BEH_WORD = 0;
+    }
+}
+
+// ============================================================================
+// hunter_scd_pounce_run @ 0x0048f8a0 - script slot 11. Re-enters the table at
+// the pounce sub-range base ([28]); while animation_frame_id < 0x17 it homes
+// on the waypoint pair (+0x178/+0x17A) with a slow turn (step 0x18), then
+// charges (speed 0x32, angle offset 0x800) until frame 0x1F.
+// ============================================================================
+static void hunter_scd_pounce_run(void) // 0x0048f8a0
+{
+    hunter_scd_table[28 + ENTITY->action_state]();
+    if (ENTITY->animation_frame_id < 0x17) {
+        g_playerPosScratch.x = H_TARGET_X;
+        g_playerPosScratch.z = H_TARGET_Z;
+        g_playerPosScratch.y = 0;
+        ENTITY->angle = (short)(ENTITY->angle +
+                                (short)turn_toward_target(&g_playerPosScratch, 0x18));
+        Add_speedXZ(0);
+        return;
+    }
+    if (ENTITY->animation_frame_id < 0x1F) {
+        H_SPEED_W = 0x32;
+        Add_speedXZ(0x800);
+    }
+}
+
+// ============================================================================
+// hunter_scd_flag_release @ 0x0048f930 - script slot 30 (pounce tail). Pure
+// completion: raise the script flag and hand back.
+// ============================================================================
+static void hunter_scd_flag_release(void) // 0x0048f930
+{
+    Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+    H_BEH_WORD = 0;
+}
+
+// ============================================================================
+// hunter_scd_swipe_run @ 0x0048f960 - script slot 13. Re-enters the table at
+// the swipe sub-range base ([32]), then recomposes the death joint chain
+// around joint 15 so the swipe pivots around the hitting claw.
+// ============================================================================
+static void hunter_scd_swipe_run(void) // 0x0048f960
+{
+    hunter_scd_table[32 + ENTITY->action_state]();
+    hunter_recenter_on_joint(1);
+}
+
+// ============================================================================
+// hunter_scd_tint_release @ 0x0048f980 - script slot 34 (swipe tail). Tints
+// the claw joint (+0x45C into the joint block) before the standard completion.
+// ============================================================================
+static void hunter_scd_tint_release(void) // 0x0048f980
+{
+    JointApplyColorTint((JointStruct*)((char*)H_JOINTS + 0x45C), 0x30, 0x80820,
+                        (void*)0x606060);
+    Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+    H_BEH_WORD = 0;
+}
+
+// ============================================================================
+// hunter_scd_attack_run @ 0x0048f9e0 - script slot 12. Same skeleton as the
+// pounce driver but over the bite sub-range base ([36]).
+// ============================================================================
+static void hunter_scd_attack_run(void) // 0x0048f9e0
+{
+    hunter_scd_table[36 + ENTITY->action_state]();
+    if (ENTITY->animation_frame_id < 0x17) {
+        g_playerPosScratch.x = H_TARGET_X;
+        g_playerPosScratch.z = H_TARGET_Z;
+        g_playerPosScratch.y = 0;
+        ENTITY->angle = (short)(ENTITY->angle +
+                                (short)turn_toward_target(&g_playerPosScratch, 0x18));
+        Add_speedXZ(0);
+        return;
+    }
+    if (ENTITY->animation_frame_id < 0x1F) {
+        H_SPEED_W = 0x32;
+        Add_speedXZ(0x800);
+    }
+}
+
+// ============================================================================
+// hunter_scd_lunge_start @ 0x0048fa70 - script slot 36. One-shot lunge setup:
+// action_state 1, blend counter 7, run speed 300, animation 0xC, growl SFX.
+// The original computes 0x12 - joint_sel byte into animationId and then
+// immediately overwrites it with 0xC; kept for fidelity.
+// ============================================================================
+static void hunter_scd_lunge_start(void) // 0x0048fa70
+{
+    ENTITY->action_state = 1;
+    ENTITY->animation_frame_id = 0;
+    ENTITY->timing_control = 0;
+    ENTITY->blend_counter = 7;
+    H_SPEED_W = 300;
+    ENTITY->animationId = (unsigned char)(0x12 - (unsigned char)H_JOINT_SEL);
+    ENTITY->animationId = 0xC;
+    Snd_em(2);
+}
+
+// ============================================================================
+// hunter_scd_bite_driver @ 0x0048fae0 - script slot 37. Plays the lunge-in
+// (blend 0x200); during frames 7-14, once the SCD TARGET's bite-joint flag
+// bit 6 clears, the grab lands: the target is knocked into its own state 1 /
+// behaviour 2, this hunter parks in action_state 2 for four ticks, a blood
+// billboard spawns off the mouth matrix (+0x32C) seeded with x=200 from the
+// dead-move block (+0x18/+0x1C/+0x20), the neck joint (+0x2E8) tints and the
+// bite SFX plays.
+// ============================================================================
+static void hunter_scd_bite_driver(void) // 0x0048fae0
+{
+    if ((unsigned char)(ENTITY->animation_frame_id - 7) < 8 &&
+        (hunter_scd_target->jointsStructs[1].flags & 0x40) == 0) {
+        hunter_scd_target->hit_state = 1;
+        *(unsigned int*)((char*)hunter_scd_target + 0x84) = 0x20001;
+        ENTITY->action_state = 2;
+        H_TICKS = 4;
+        JointStruct* joints = H_JOINTS;
+        g_playerPosScratch.y = *(const int*)(H_DMV + 0x18);
+        g_playerPosScratch.z = *(const int*)(H_DMV + 0x1C);
+        g_playerPosScratch.pad = *(const int*)(H_DMV + 0x20);
+        g_playerPosScratch.x = 200;
+        Effect_CreateBillboard(0, 0, 0, (void*)((char*)joints + 0x32C),
+                               &g_playerPosScratch, 0);
+        JointApplyColorTint((JointStruct*)((char*)joints + 0x2E8), 0x30, 0x80820,
+                            (void*)0x606060);
+        Snd_em(5);
+        return;
+    }
+    char moved = (char)Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x200);
+    ENTITY->action_state = (unsigned char)(ENTITY->action_state + moved);
+}
+
+// ============================================================================
+// hunter_scd_bite_end @ 0x0048fc10 - script slot 38. Finishes the bite
+// animation, raises the script flag and hands back through behaviour 7 (the
+// scripted death); clears the SCD TARGET's bite-joint latch (joint 1 bit 0)
+// and runs the head-joint tracking pass against joint 6.
+// ============================================================================
+static void hunter_scd_bite_end(void) // 0x0048fc10
+{
+    if ((char)Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x200) != 0) {
+        Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+        H_BEH_WORD = 7;
+    }
+    hunter_scd_target->jointsStructs[1].flags &= (unsigned char)~0x01;
+    hunter_scd_track_joint(6);
+}
+
+// ============================================================================
+// hunter_scd_stalk_player @ 0x0048fef0 - script slot 22. Face-and-follow:
+// one-shot init picks animation 0x10 when a turn is needed and rolls a stalk
+// timer of (rand & 0x3F) + 0x1E ticks; while it lasts the hunter shuffles
+// toward the player (blend 0x80, turn step 100); on expiry it raises the
+// flag, hands back (behaviour word 0) and stores the player position into
+// the waypoint pair (+0x166/+0x168).
+// ============================================================================
+static void hunter_scd_stalk_player(void) // 0x0048fef0
+{
+    if (ENTITY->action_state == 0) {
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control = 0;
+        ENTITY->blend_counter = 0x1F;
+        ENTITY->hit_state = 0;
+        if ((short)turn_toward_target(
+                (VECTOR*)g_playerEntityPointer.scaMatrixData.localMatrix.t,
+                0x400) != 0) {
+            ENTITY->animationId = 0x10;
+        }
+        ENTITY->action_state = 1;
+        H_TICKS = (unsigned short)((rand() & 0x3F) + 0x1E);
+    }
+    short delta = (short)turn_toward_target(
+        (VECTOR*)g_playerEntityPointer.scaMatrixData.localMatrix.t, 100);
+    g_animFrameIdSave = (unsigned int)(unsigned short)delta;
+    short ticks = (short)H_TICKS;
+    H_TICKS = (unsigned short)(ticks - 1);
+    if (ticks != 0 && (short)g_animFrameIdSave != 0) {
+        Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x80);
+        ENTITY->angle = (short)(ENTITY->angle + (short)g_animFrameIdSave);
+        return;
+    }
+    Flg_on((int)g_SysFlags, ENTITY->scd_anim_param);
+    H_BEH_WORD = 0;
+    ENTITY->player_pos_x = (short)PLAYER_T_INT[0];
+    ENTITY->player_pos_z = (short)PLAYER_T_INT[2];
 }
