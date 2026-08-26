@@ -77,9 +77,9 @@ each configuration expects a different directory layout next to the exe:
 | Debug | `.\assets\USA\` | `.\assets\save\` |
 | Release | `.\usa\` | `.\SAVE\` |
 
-For a retail-like Release setup, place the exe in the game directory so that
-`usa\Data`, `usa\Effspr`, … , `usa\Voice` and an empty `SAVE\` folder sit
-beside it (the original 1997 layout). Windows path case does not matter.
+Copy the USA assets directory to the release build path or copy the build exe to an
+existing RE1 PC directory, no external DLLs required. In case of running VS debugger, 
+copy the USA assets in the ./assets directory.
 
 Diagnostics: with no debugger attached, trace output is suppressed (see
 below); set the environment variable `RE1_DEBUGLOG=1` to append every trace
@@ -101,8 +101,7 @@ append a symbolized stack trace to `crash.log`.
 - `src\video\` — native MCI-based FMV playback.
 - `docs\` — architecture notes: task scheduler, memory layout, classes and
   vtable conventions, implementation plan.
-- `tools\progress_report.py` — completion tracker described above.
-- `memory\` — session notes and findings accumulated during the decomp.
+- `tools\` — tools used to help decompilation
 
 Every rewritten function carries its original address as a comment, and every
 named global documents its original variable address, so any line in `src\`
