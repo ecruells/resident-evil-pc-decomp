@@ -59,18 +59,34 @@
 //     bytes and 0x004ba2c8 shorts, 30 entries each, indexed by the 0x16D step
 //     phase) are therefore dead data and are not reproduced.  The 0x16D counter
 //     itself still ticks, because the behaviours read it.
-//   * FUN_0048aec0 / FUN_0048aef0 (0x0048aec0 / 0x0048aef0) are the claw-swipe
-//     motion-blur RIBBON: a CMarniViewport2 quad strip built straight on the
-//     D3D device through FUN_00486280 / FUN_004865a0 / RotAverage4, none of
-//     which exist in the port yet.  The allocation half of FUN_0048aec0 IS
-//     reproduced (it advances g_loadDataDestPointer by 9 * 0x100 bytes, and
-//     skipping that would make every later room allocation overlap); the draw
-//     half is a no-op.  All of the ribbon's STATE - DAT_004ba264's countdown and
-//     its 0x8000 "arm" bit, DAT_004ba268, the 0x004ba27a sweep - is kept exact,
-//     so behaviour timing is unaffected.
+//   * FUN_0048aec0 / FUN_0048aef0 (0x0048aec0 / 0x0048aef0) ARE ported now -
+//     FUN_0048aef0's whole history/draw state machine lives in tyrant_trail_push
+//     below, with these documented substitutions:
+//       - The original created per-slot CMarniViewport2 draw works
+//         (FUN_00486280) and registered them against the D3D device per segment
+//         (FUN_004865a0).  That D3D ExecuteBuffer strip path has no DX11
+//         consumer, so each segment's two quads are submitted through the
+//         sprite ordering table as type-12 perspective-correct commands - the
+//         same mechanism the ground shadows ride - with near-plane clipping.
+//       - The ribbon sampled a texture page nothing ever registered, so its
+//         colour came purely from the 0x70 tint; the port substitutes one lazy
+//         2x2 white SRV.  Colour and alpha follow FUN_004865a0's material:
+//         rgb = tint/128, alpha = a FIXED 0.5 (its 0x3f000000 store) - so a
+//         single layer reads semi-transparent red and overlapping layers
+//         stack toward solid, which is the original's sometimes-solid look.
+//     What is exact: the 9 x 0x100-byte history layout inside g_tyTrailBlock,
+//     the store branch (matrices A/B + midpoint matrix + near/far per slot),
+//     the scroll order, the +-50/+100 Y wobble around each midline sample, both
+//     RotAverage4 quads per segment, and all of the ribbon's STATE -
+//     DAT_004ba264's countdown and its 0x8000 "arm" bit, DAT_004ba268, the
+//     0x004ba27a sweep.  Only the final rasterisation differs.
 //   The two CLAW GHOST copies (FUN_00421790) and the exposed HEART
-//   (FUN_00425840) are fully ported - they go through FUN_00483250, which the
-//   port has.
+//   (FUN_00425840) are fully ported - they render through the 0x00483080 sprite
+//   helper (FUN_00483250 directly for the ghosts; FUN_00483230, its identical
+//   thin wrapper, for the heart), which the port has.  The ghost copies are
+//   OPAQUE: they are the claw's red-and-black colouring, not a translucent
+//   afterimage - see the long note beside their JointApplyColorTint calls in
+//   tyrant_init.
 //
 // Field offsets are raw on purpose.  The Tyrant reuses the generic movement
 // bytes at different widths and meanings (0x170 is a POINTER, 0x174 is a
@@ -81,6 +97,8 @@
 #include "../../Globals.h"
 #include "../BioCard.h"
 #include "../../DebugPrint.h"
+#include "../SpriteRenderer.h"           // TextureDraw queue + SPRITE_CLASS_*
+#include "../../marni/MarniSystem.h"     // MarniCreateTexture
 #include <cstring>
 #include <cstdlib>
 
@@ -168,44 +186,400 @@ const signed char s_tyrantHeartBeat[22] = {
 // "growth" counters that behaviours 0x0D and 0x0C push around.
 // ===========================================================================
 static void*        g_tyClawGhostBlock = nullptr;   // 0x004ba250 - 2 x 0x7C joint copies
-static int          g_tyClawScaleA     = 3000;      // 0x004ba254
-static int          g_tyClawScaleB     = 300;       // 0x004ba258
-static int          g_tyClawScaleStep  = 200;       // 0x004ba25c
+// WIDTHS MATTER HERE - every access in the exe is 16- or 8-bit:
+//   0x004ba254 / 0x004ba258 are WORDs  (`ADD word ptr [..],AX`, `MOVSX ECX,
+//     word ptr [..]`, `CMP word ptr [..],0x1770`) and
+//   0x004ba25c is a signed BYTE (`MOVSX AX,byte ptr [..]`, `MOV AL,[..]` /
+//     `NEG AL` / `MOV [..],AL` - three independent byte accesses).
+// The bytes at 0x004ba25c are `c8 00 00 00`, so read as a DWORD the step looks
+// like +200; read as the signed byte the code actually uses it is 0xC8 = -56.
+// That is a 3.6x difference in pulse rate AND it flips the opening direction:
+// the original steps DOWN first, so B lands on 244 (y-scale 0.06 - the shell is
+// paper-thin and invisible) and needs ~55 frames to swell, whereas +200 reaches
+// y-scale 0.85 / xz-scale 1.5 in 17 frames and cycles every ~1.1s.  That is the
+// fat pulsing red claw at spawn.
+static short        g_tyClawScaleA     = 3000;      // 0x004ba254 - WORD
+static short        g_tyClawScaleB     = 300;       // 0x004ba258 - WORD
+static signed char  g_tyClawScaleStep  = -56;       // 0x004ba25c - signed BYTE (0xC8)
 static void*        g_tyTrailBlock     = nullptr;   // 0x004ba260 - ribbon buffer
 static unsigned short g_tyTrailTimer   = 0;         // 0x004ba264 - 0x8000 = arm, low bits = frames
 static int          g_tyTrailSegments  = 8;         // 0x004ba268
 static SVECTOR      g_tyTrailNear      = { 0, (short)-300, 0, 0 };  // 0x004ba270
-static SVECTOR      g_tyTrailFar       = { 1500, 0, 0, 0 };         // 0x004ba278
+// 0x004ba278 reads `00 00 dc 05` in the exe: x = 0, y = 1500.  It is y, not x -
+// the arm sweep in tyrant_update pushes _DAT_004ba27a (= this vector's y) by
+// +-100 / -800 / +-1000, which only makes sense against a 1500 base.
+static SVECTOR      g_tyTrailFar       = { 0, 1500, 0, 0 };         // 0x004ba278
 
 namespace {
 
 // ---------------------------------------------------------------------------
-// 0x0048aec0 - reserve the ribbon's vertex pool and build its D3D works.
+// 0x0048aec0 - reserve the ribbon's vertex pool.
 //
-// The allocation must happen even though the draw is stubbed: the original
-// hands out 9 * 0x100 bytes of the room data buffer here and every later
-// CreateAnimObject call starts from the advanced pointer.  Only the
-// FUN_00486280 device work is skipped.
+// The allocation must happen: the original hands out 9 * 0x100 bytes of the
+// room data buffer here and every later CreateAnimObject call starts from the
+// advanced pointer.  The FUN_00486280 work-creation half has no DX11 consumer
+// (see the file header); the tint it would have baked into those works is kept
+// in s_tyTrailTint and drives the submitted quads' colour instead.
 // ---------------------------------------------------------------------------
-void tyrant_trail_alloc(unsigned char count, void* /*base*/, unsigned int /*tint*/)
+static unsigned char s_tyTrailTint = 0x70;      // DAT_008fc41c - bytes fed to
+                                                //   FUN_00486280's vertex tints
+
+void tyrant_trail_alloc(unsigned char count, void* /*base*/, unsigned int tint)
 {
     g_playerDisplacement = (int)count;
     g_loadDataDestPointer = (char*)g_loadDataDestPointer + (unsigned int)count * 0x100;
-    // FUN_00486280(count * 2, tint) - CMarniViewport2 work creation, unported.
+    s_tyTrailTint = (unsigned char)tint;        // 0x70 -> the red-grey blur
 }
 
 // ---------------------------------------------------------------------------
-// 0x0048aef0 - push one matrix pair into the ribbon history (param_7 == 0) or
-// scroll the history and draw it (param_7 != 0).
-//
-// Only the state half is meaningful without the renderer, and the state half is
-// what the Tyrant's own code reads back, so both entry shapes are kept as
-// no-ops here rather than half-implemented against a buffer nothing draws.
+// 0x0048aef0 rendering support.  Everything below substitutes for the D3D side
+// of FUN_004865a0 only; the history maths inside tyrant_trail_push follows the
+// decompile step by step.
 // ---------------------------------------------------------------------------
-void tyrant_trail_push(void* /*buf*/, MATRIX* /*a*/, MATRIX* /*b*/,
-                       SVECTOR* /*near*/, SVECTOR* /*far*/,
-                       unsigned char /*slot*/, unsigned char /*count*/)
+
+#define TY_TRAIL_TEX_SLOT   249     // above the slide projector's 240..247
+#define TY_TRAIL_NEAR_Z     128     // FadeSprite.cpp's FADE_NEAR
+#define TY_TRAIL_ALPHA      128     // FUN_004865a0's fixed 0.5 material alpha
+                                    //   (its 0x3f000000 store per work)
+
+// Lazy 2x2 pure-white page standing in for the unregistered ribbon texture.
+static bool tyrant_trail_tex_ready(void)
 {
+    static bool s_ready = false;
+    if (s_ready) return true;
+
+    static const DWORD kWhite[4] = {
+        0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu, 0xFFFFFFFFu
+    };
+    MarniHandle srv = MARNI_NULL_HANDLE;
+    if (!MarniCreateTexture(2, 2, 32, kWhite, &srv) || srv == MARNI_NULL_HANDLE)
+        return false;
+
+    g_TexturePageSRV[TY_TRAIL_TEX_SLOT]    = srv;
+    g_TexturePageWidth[TY_TRAIL_TEX_SLOT]  = 2;
+    g_TexturePageHeight[TY_TRAIL_TEX_SLOT] = 2;
+    g_TexturePageBpp[TY_TRAIL_TEX_SLOT]    = 32;
+    s_ready = true;
+    return true;
+}
+
+// Slot field accessors.  Stride 0x100, exact offsets from FUN_0048aef0:
+//   +0x90 matA (32 bytes)  +0xb0 matB  +0xd0 midpoint matrix
+//   +0xf0 near SVECTOR     +0xf8 far SVECTOR
+inline BYTE*         rib_slot  (BYTE* base, int i) { return base + i * 0x100; }
+inline MATRIX&       rib_matA  (BYTE* s) { return *reinterpret_cast<MATRIX*>(s + 0x90); }
+inline MATRIX&       rib_matB  (BYTE* s) { return *reinterpret_cast<MATRIX*>(s + 0xb0); }
+inline MATRIX&       rib_mid   (BYTE* s) { return *reinterpret_cast<MATRIX*>(s + 0xd0); }
+inline SVECTOR&      rib_near  (BYTE* s) { return *reinterpret_cast<SVECTOR*>(s + 0xf0); }
+inline SVECTOR&      rib_far   (BYTE* s) { return *reinterpret_cast<SVECTOR*>(s + 0xf8); }
+
+// The midpoint matrix written at +0xd0: rotation shorts are pairwise midpoints,
+// translation ints likewise - exactly the two unrolled loops in the decompile.
+static void tyrant_trail_mid(MATRIX* a, MATRIX* b, MATRIX* out)
+{
+    for (int r = 0; r < 3; r++) {
+        for (int c = 0; c < 3; c++) {
+            int sa = a->m[r][c], sb = b->m[r][c];
+            out->m[r][c] = (short)(((sb - sa) / 2) + sa);
+        }
+    }
+    out->_pad = 0;                     // untouched by the original; keep it clean
+    for (int i = 0; i < 3; i++)
+        out->t[i] = ((b->t[i] - a->t[i]) / 2) + a->t[i];
+}
+
+// ApplyMatrixSV(m, v) + m->t.  The original added the translation through
+// `(short)*(int*)` reads and let the GTE truncate the sum to 16 bits; with
+// entity positions near +-32767 the SUM overflows a short by a few thousand
+// units and the corner jumps 65536 units across the world, so this port keeps
+// the full int sum instead.  (ProjectEffectSprite's SVECTOR truncation had the
+// same hazard; see tyrant_trail_project_corner.)
+static void tyrant_trail_xform(const MATRIX& m, const SVECTOR& v, VECTOR* out)
+{
+    SVECTOR src = v, dst;
+    ApplyMatrixSV(const_cast<MATRIX*>(&m), &src, &dst);
+    out->x   = (int)dst.x + m.t[0];
+    out->y   = (int)dst.y + m.t[1];
+    out->z   = (int)dst.z + m.t[2];
+    out->pad = 0;
+}
+
+// Put the room camera into the fixed-point pipe before each RotAverage4 so
+// world-space corners project directly.  The original is ASYMMETRIC: the band
+// quad gets all three calls (0x0048b443 / 0x0048b452 / 0x0048b461), the flare
+// quad only the first two (0x0048b582 / 0x0048b591 - no 0x00482df0).
+static void tyrant_trail_camera_setup(bool withRotAndTrans)
+{
+    SetGlobalScaledRotationMatrix(reinterpret_cast<MATRIX*>(g_RoomCameraDataCopy));
+    GetMatrixTranslation(reinterpret_cast<MATRIX*>(g_RoomCameraDataCopy));
+    if (withRotAndTrans)
+        SetRotAndTransMatrix(reinterpret_cast<MATRIX*>(g_RoomCameraDataCopy));
+}
+
+// One projected corner.  nx/ny are pre-divide screen numerators in exactly
+// ProjectEffectSprite's terms (screen_x = nx*f/nz + 160, screen_y = ny*f/nz +
+// 120), so lerping them along a clipped edge stays affine-correct.
+struct TyTrailView { int nx, ny, nz; };
+
+static void tyrant_trail_project_corner(const VECTOR& p, TyTrailView* out)
+{
+    // ProjectEffectSprite's operand order, replicated verbatim off
+    // MulMatrixVec3 - the pipe holds the matrix shifted left by 2.  The
+    // original read these as SVECTORs (16-bit); with world points reaching
+    // +-36000 after the claw offset that truncation wrapped the corner across
+    // the origin and threw quads across the screen, so full ints go in here.
+    const int v[3] = { p.x, -p.y, p.z };
+    int o[3], acc;
+
+    acc = v[0] * g_fixedPointPipe_matrix_m00 + g_fixedPointPipe_matrix_m02 * v[2]
+        + g_fixedPointPipe_matrix_m01 * v[1];
+    o[0] = (int)(acc + (acc >> 31 & 0x3FFFu)) >> 14;
+    acc = g_fixedPointPipe_matrix_m11 * v[1] + g_fixedPointPipe_matrix_m10 * v[0]
+        + g_fixedPointPipe_matrix_m12 * v[2];
+    o[1] = (int)(acc + (acc >> 31 & 0x3FFFu)) >> 14;
+    acc = g_fixedPointPipe_matrix_m22 * v[2] + g_fixedPointPipe_matrix_m21 * v[1]
+        + g_fixedPointPipe_matrix_m20 * v[0];
+    o[2] = (int)(acc + (acc >> 31 & 0x3FFFu)) >> 14;
+
+    out->nx = o[0] + matrix_t0;
+    out->ny = matrix_t1 - o[1];
+    out->nz = o[2] + matrix_t2;
+    if (out->nz == 0) out->nz = 1;    // the original guards the divide this way
+}
+
+// Submit one ribbon quad into the sprite OT as a type-12 perspective-correct
+// command, clipped against the near plane like DrawFadeSpr does for shadows.
+// pts are four corners in CYCLIC ring order (near_d -> far_d -> far_d+1 ->
+// near_d+1 or the flare variant).
+static void tyrant_trail_submit(const VECTOR pts[4], unsigned char alphaByte)
+{
+    if (!tyrant_trail_tex_ready()) return;
+
+    TyTrailView src[4];
+    long long zSum = 0;
+    for (int i = 0; i < 4; i++) {
+        tyrant_trail_project_corner(pts[i], &src[i]);
+        zSum += src[i].nz;
+    }
+    // Clamp SIGNED: a partially-clipped quad averages to a negative view Z, and
+    // casting that to unsigned first would sail past the test as ~4e9 and sort
+    // the segment behind the whole room.
+    long long keySigned = zSum / 4;
+    if (keySigned < TY_TRAIL_NEAR_Z) keySigned = TY_TRAIL_NEAR_Z;   // never sort in front
+    unsigned int key = (unsigned int)keySigned;
+
+    const int suv[4][2] = { { 0, 0 }, { 0xF00, 0 }, { 0xF00, 0x300 }, { 0, 0x300 } };
+
+    int vx[8], vy[8], vz[8], vu[8], vv[8];
+    int n = 0;
+    for (int e = 0; e < 4; e++) {
+        const TyTrailView& Aa = src[e];
+        const TyTrailView& Bb = src[(e + 1) & 3];
+        bool ain = Aa.nz >= TY_TRAIL_NEAR_Z;
+        bool bin = Bb.nz >= TY_TRAIL_NEAR_Z;
+        if (ain) {
+            vx[n] = Aa.nx; vy[n] = Aa.ny; vz[n] = Aa.nz;
+            vu[n] = suv[e][0]; vv[n] = suv[e][1]; n++;
+        }
+        if (ain != bin) {
+            int t = ((TY_TRAIL_NEAR_Z - Aa.nz) << 12) / (Bb.nz - Aa.nz);
+            vx[n] = Aa.nx + (((Bb.nx - Aa.nx) * t) >> 12);
+            vy[n] = Aa.ny + (((Bb.ny - Aa.ny) * t) >> 12);
+            vz[n] = TY_TRAIL_NEAR_Z;
+            vu[n] = suv[e][0] + (((suv[(e + 1) & 3][0] - suv[e][0]) * t) >> 12);
+            vv[n] = suv[e][1] + (((suv[(e + 1) & 3][1] - suv[e][1]) * t) >> 12);
+            n++;
+        }
+    }
+    if (n < 3) return;                 // whole quad behind the camera
+
+    const float f = (float)g_sceneRenderParam;
+    int px[8], py[8];
+    for (int c = 0; c < n; c++) {
+        px[c] = (int)((float)vx[c] * f / (float)vz[c]) + 160;
+        py[c] = (int)((float)vy[c] * f / (float)vz[c]) + 120;
+        // TextureDraw's corner fields are shorts; a near-plane corner
+        // legitimately projects to hundreds of thousands of pixels and the
+        // cast would wrap it back across the screen.  Clamp far outside the
+        // viewport (50 screen-widths at 320px) - the GPU clips the triangle,
+        // and the visible-edge skew from clamping is far below one pixel.
+        if (px[c] >  16000) px[c] =  16000;
+        if (px[c] < -16000) px[c] = -16000;
+        if (py[c] >  16000) py[c] =  16000;
+        if (py[c] < -16000) py[c] = -16000;
+    }
+
+    // FUN_004865a0's material colour: tint bytes scaled by 1/128 (the same
+    // 0.0078125 constant its work templates use), alpha fixed at 0.5 - see
+    // TY_TRAIL_ALPHA.  Overlapping quads stack toward solid, matching the
+    // original's sometimes-solid / sometimes-translucent look.
+    float cr = (float)s_tyTrailTint * (1.0f / 128.0f);
+    if (cr > 1.0f) cr = 1.0f;
+
+    static const int kFan[2][4] = { { 0, 1, 2, 3 }, { 0, 3, 4, 4 } };
+    int cmds = (n > 4) ? 2 : 1;
+    for (int q = 0; q < cmds; q++) {
+        if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return;
+        int k0 = kFan[q][0], k1 = kFan[q][1];
+        int k2 = kFan[q][2] > n - 1 ? n - 1 : kFan[q][2];
+        int k3 = kFan[q][3] > n - 1 ? n - 1 : kFan[q][3];
+
+        TextureDraw* cmd = &g_SpriteCommandBuffer[g_SpriteQueueCount++];
+        cmd->type = 12;
+        cmd->sortClass = SPRITE_CLASS_EFFECT;   // interleaves with the TMD pass
+        cmd->renderFlags = 0;
+        cmd->spriteFlags = 0;
+        cmd->variantAlpha = 0.0f;
+        cmd->alpha = (float)alphaByte * (1.0f / 255.0f);
+        cmd->r = cr; cmd->g = 0.0f; cmd->b = 0.0f;   // DAT_008fc41c = 0x70 red
+        cmd->extraFlags = TY_TRAIL_TEX_SLOT;
+        cmd->depthSort = key;
+
+        cmd->x0 = (short)px[k0]; cmd->y0 = (short)py[k0];
+        cmd->x1 = (short)px[k1]; cmd->y1 = (short)py[k1];
+        cmd->x2 = (short)px[k2]; cmd->y2 = (short)py[k2];
+        cmd->x3 = (short)px[k3]; cmd->y3 = (short)py[k3];
+        cmd->u0 = (short)vu[k0]; cmd->v0 = (short)vv[k0];
+        cmd->u1 = (short)vu[k1]; cmd->v1 = (short)vv[k1];
+        cmd->u2 = (short)vu[k2]; cmd->v2 = (short)vv[k2];
+        cmd->u3 = (short)vu[k3]; cmd->v3 = (short)vv[k3];
+        cmd->wz0 = (short)(vz[k0] > 30000 ? 30000 : vz[k0]);
+        cmd->wz1 = (short)(vz[k1] > 30000 ? 30000 : vz[k1]);
+        cmd->wz2 = (short)(vz[k2] > 30000 ? 30000 : vz[k2]);
+        cmd->wz3 = (short)(vz[k3] > 30000 ? 30000 : vz[k3]);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// 0x0048aef0 - push one matrix pair into the ribbon history (param_7/count==0)
+// or scroll the history and draw the tail (param_7/count != 0).
+//
+// Store branch: matrices a/b land at slot+0x90/+0xb0, their per-element
+// midpoint matrix at slot+0xd0, and the near/far blade endpoints at
+// slot+0xf0/+0xf8.  The arm sweep in tyrant_update calls it with slots counting
+// down 7..0 and then ONCE MORE with slot 8, passing g_tyTrailNear as BOTH
+// endpoints - slot 8 is the ribbon's degenerate terminator, which is what makes
+// the tail taper to a point.  slotIdx is NOT masked: the pool is 9 slots.
+//
+// Draw branch: shift every slot up one, 0..count-1 -> 1..count (only the three
+// matrix blocks move - near/far do NOT scroll, matching the original), write
+// the fresh pair into slot 0, then walk segments newest-first painting two
+// quads per segment:
+// band  = between segment d's midpoint line and the blade held in hi*, which is
+//         seeded before the loop from slot COUNT (the terminator: the original
+//         reads slot[count-1] + 0x1b0 / +0x1f0 / +0x1f8 at 0x0048b2bd, and
+//         0x1b0 == 0x100 + 0xb0, i.e. one slot further on) and thereafter is
+//         the previous iteration's flare blade,
+// flare = between segment d's midpoint line and its own B-matrix blade,
+// both with the +-50/+100 Y wobble applied to THIS segment's stored near/far
+// while the midpoint samples are taken (and removed afterwards).
+// ---------------------------------------------------------------------------
+void tyrant_trail_push(void* buf, MATRIX* a, MATRIX* b,
+                       SVECTOR* near_, SVECTOR* far_,
+                       unsigned char slotIdx, unsigned char count)
+{
+    BYTE* base = (BYTE*)buf;
+
+    if (count == 0) {                              // store one history entry
+        if (slotIdx > 8) return;                   // port guard: pool has 9 slots
+        BYTE* dst = rib_slot(base, slotIdx);       // NO mask - slot 8 is real
+        std::memcpy(dst + 0x90, a, sizeof(MATRIX));
+        std::memcpy(dst + 0xb0, b, sizeof(MATRIX));
+        tyrant_trail_mid(&rib_matA(dst), &rib_matB(dst), &rib_mid(dst));
+        rib_near(dst) = *near_;
+        rib_far(dst)  = *far_;
+        return;
+    }
+
+    if (count - 1 > 7) count = 8;                  // port guard: pool has 9 slots
+
+    // Save the GTE pipe the camera setups below will overwrite.  The original
+    // left it dirty because everything downstream reloaded it anyway; the port
+    // restores it so nothing later in this task tick observes our state.
+    MATRIX savedGte = g_gteRotTransMatrix;
+    const int savM[9] = {
+        g_fixedPointPipe_matrix_m00, g_fixedPointPipe_matrix_m01,
+        g_fixedPointPipe_matrix_m02, g_fixedPointPipe_matrix_m10,
+        g_fixedPointPipe_matrix_m11, g_fixedPointPipe_matrix_m12,
+        g_fixedPointPipe_matrix_m20, g_fixedPointPipe_matrix_m21,
+        g_fixedPointPipe_matrix_m22
+    };
+    const int savT[3] = { matrix_t0, matrix_t1, matrix_t2 };
+
+    int disp = count - 1;                          // local_c in the decompile
+    g_playerDisplacement = disp;
+
+    // The original's do-while tests the PRE-decrement counter (0x0048b130:
+    // MOV EAX,[gpd] / DEC [gpd] / TEST EAX,EAX / JNZ), so the d == 0 pass IS
+    // executed and slot 0 does reach slot 1.
+    for (; disp >= 0; disp--) {                    // scroll d -> d+1
+        BYTE* s = rib_slot(base, disp);
+        BYTE* dn = rib_slot(base, disp + 1);
+        std::memcpy(dn + 0x90, s + 0x90, sizeof(MATRIX));   // A
+        std::memcpy(dn + 0xb0, s + 0xb0, sizeof(MATRIX));   // B
+        std::memcpy(dn + 0xd0, s + 0xd0, sizeof(MATRIX));   // mid
+        // near/far deliberately NOT copied
+    }
+
+    {                                              // fresh slot 0
+        BYTE* s0 = rib_slot(base, 0);
+        std::memcpy(s0 + 0x90, a, sizeof(MATRIX));
+        std::memcpy(s0 + 0xb0, b, sizeof(MATRIX));
+        tyrant_trail_mid(&rib_matA(s0), &rib_matB(s0), &rib_mid(s0));
+        // no near/far rewrite here - matches the original
+    }
+
+    // The tail blade is sampled ONCE before the loop, from slot COUNT - the
+    // terminator the arm sweep seeds with near == far.  Thereafter each
+    // iteration's flare blade sample (matB(d), taken after the flare submit)
+    // becomes iteration d-1's band partner.
+    BYTE* sh = rib_slot(base, count);
+    VECTOR hiNear, hiFar;
+    tyrant_trail_xform(rib_matB(sh), rib_near(sh), &hiNear);
+    tyrant_trail_xform(rib_matB(sh), rib_far(sh),  &hiFar);
+
+    for (disp = count - 1; disp >= 0; disp--) {
+        BYTE* sd = rib_slot(base, disp);
+
+        VECTOR loNear, loFar;                      // segment d's midpoint line,
+        SVECTOR jn = rib_near(sd);                 // sampled with the wobble ON
+        SVECTOR jf = rib_far(sd);
+        jn.y = (short)(jn.y + 0x32);               // +50 on near.y ...
+        jf.y = (short)(jf.y + 100);                // ... +100 on far.y
+        tyrant_trail_xform(rib_mid(sd), jn, &loNear);
+        tyrant_trail_xform(rib_mid(sd), jf, &loFar);
+
+        // No per-segment alpha ramp: FUN_004865a0 gave EVERY work the same
+        // fixed 0.5 material alpha.  Depth fades through the geometry only.
+        const VECTOR qBand[4] = { loNear, loFar, hiFar, hiNear };
+
+        tyrant_trail_camera_setup(true);           // before RotAverage4 #1
+        tyrant_trail_submit(qBand, TY_TRAIL_ALPHA);
+
+        VECTOR curNear, curFar;                    // segment d's own B blade,
+        tyrant_trail_xform(rib_matB(sd), rib_near(sd), &curNear);   // unwobbled
+        tyrant_trail_xform(rib_matB(sd), rib_far(sd),  &curFar);
+
+        const VECTOR qFlare[4] = { loNear, loFar, curFar, curNear };
+
+        tyrant_trail_camera_setup(false);          // before RotAverage4 #2
+        tyrant_trail_submit(qFlare, TY_TRAIL_ALPHA);
+
+        hiNear = curNear;                          // the flare's blade pair is
+        hiFar = curFar;                            // iteration d-1's band partner
+
+        g_playerDisplacement = disp;
+    }
+    g_playerDisplacement = -1;                     // the original's counter
+                                                   // falls out at -1
+
+    g_gteRotTransMatrix = savedGte;
+    g_fixedPointPipe_matrix_m00 = savM[0]; g_fixedPointPipe_matrix_m01 = savM[1];
+    g_fixedPointPipe_matrix_m02 = savM[2]; g_fixedPointPipe_matrix_m10 = savM[3];
+    g_fixedPointPipe_matrix_m11 = savM[4]; g_fixedPointPipe_matrix_m12 = savM[5];
+    g_fixedPointPipe_matrix_m20 = savM[6]; g_fixedPointPipe_matrix_m21 = savM[7];
+    g_fixedPointPipe_matrix_m22 = savM[8];
+    matrix_t0 = savT[0]; matrix_t1 = savT[1]; matrix_t2 = savT[2];
 }
 
 // ---------------------------------------------------------------------------
@@ -374,9 +748,9 @@ void tyrant_root_motion(unsigned char set, char apply)
 }
 
 // ---------------------------------------------------------------------------
-// FUN_004216a0 (0x004216a0) - advance the claw ribbon one frame.
-// The push itself is stubbed (see the file header); the countdown is not,
-// because DAT_004ba264 gates the whole ribbon block in tyrant_update.
+// FUN_004216a0 (0x004216a0) - advance the claw ribbon one frame: one push
+// through the DRAW branch (count = g_tyTrailSegments), then the countdown that
+// DAT_004ba264 gates the whole ribbon block in tyrant_update with.
 // ---------------------------------------------------------------------------
 void tyrant_trail_update(void)
 {
@@ -436,14 +810,17 @@ void tyrant_draw_claw_ghosts(void)
     if ((g_message_flags & 4) != 0) {
         std::memcpy(block + 0xc0, &g_matrixScratch, 32);      // copy 1: unscaled
 
-        g_tyClawScaleA += g_tyClawScaleStep;
-        g_playerPosScratch.x = g_tyClawScaleA;
-        g_tyClawScaleB += g_tyClawScaleStep;
-        g_playerPosScratch.y = g_tyClawScaleB;
+        // `ADD word ptr [..],AX` with AX = MOVSX(signed byte step); the scratch
+        // stores are MOVSX word -> dword, so both truncate to 16 bits and
+        // sign-extend on the way out.
+        g_tyClawScaleA = (short)(g_tyClawScaleA + g_tyClawScaleStep);
+        g_playerPosScratch.x = (int)g_tyClawScaleA;
+        g_tyClawScaleB = (short)(g_tyClawScaleB + g_tyClawScaleStep);
+        g_playerPosScratch.y = (int)g_tyClawScaleB;
         g_playerPosScratch.z = g_playerPosScratch.x;
         ScaleMatrixCols(&g_matrixScratch, &g_playerPosScratch);
         if (g_tyClawScaleA > 6000 || g_tyClawScaleA < 3000)
-            g_tyClawScaleStep = -g_tyClawScaleStep;
+            g_tyClawScaleStep = (signed char)(-g_tyClawScaleStep);
 
         std::memcpy(block + 0x44, &g_matrixScratch, 32);      // copy 0: scaled
     }
@@ -1338,7 +1715,8 @@ void tyrant_behavior_rush(void)
             }
         }
 
-        if (g_tyClawScaleB > 5000 && phase > 9) g_tyClawScaleB -= 800;
+        if (g_tyClawScaleB > 5000 && phase > 9)          // SUB word ptr [..],0x320
+            g_tyClawScaleB = (short)(g_tyClawScaleB - 800);
 
         if (phase == 8 && (ty_hitMask() & 2) != 0) {
             tyrant_damage_player(0x14, 0x1e);
@@ -1398,7 +1776,8 @@ void tyrant_behavior_rise(void)
 
     unsigned char frame = ty_frame();
     if (frame > 0x28) {
-        if (g_tyClawScaleB < 9000) g_tyClawScaleB += 1000;
+        if (g_tyClawScaleB < 9000)                   // ADD word ptr [..],0x3e8
+            g_tyClawScaleB = (short)(g_tyClawScaleB + 1000);
         frame = ty_frame();
     }
     if (frame == 0x28) Snd_em(1);
@@ -1612,6 +1991,26 @@ static void tyrant_init(void)
         g_loadDataDestPointer = CreateAnimObject((int)(dst + 0x0c),
                                                  (unsigned int*)g_loadDataDestPointer);
     }
+    // The two afterimage shells are OPAQUE, and that is deliberate.  Both go
+    // through JointSetColorTint (0x00485ac0), whose only live argument is the
+    // second one - verified in disassembly: it takes the object from [ESP+0x20]
+    // (= arg1 after its 0x1c of prologue) and the colour from [ESP+8] (= arg2),
+    // and never touches arg3/arg4.  It splits that colour LOW byte first and
+    // scales each by the double at 0x004af2e0, which is 2^-7 = 1/128:
+    //     copy 0 (0x0000ff) -> objData +0x5c/60/64 = (1.99, 0, 0)  bright RED
+    //     copy 1 (0x030000) -> (0, 0, 0.023)                       near BLACK
+    // and sets the unlit bit (+0x80 |= 2) on every record.  Copy 1 rides the
+    // claw matrix unscaled, so it sits exactly on the real claw; copy 0 rides
+    // the ScaleMatrixCols pulse, flattened in Y.  Drawn opaque and coincident
+    // the three layers COMPOSITE into the claw's red-and-black look - they are
+    // not a separate visible ghost.
+    //
+    // Do NOT stamp a blend alpha into +0x68 here.  The only 0x3f000000 store to
+    // a +0x68 anywhere in the exe is 0x0044723d, inside the renderer's own
+    // per-vertex path - nothing writes these records, so CMarniDirect3DTMD::
+    // Create's zero stands and TmdRenderer's triAlpha stays 1.0.  Stamping 0.5f
+    // made both shells translucent, which let the background through and turned
+    // copy 0's size pulse into the free-floating red ghost over the real claw.
     JointApplyColorTint(reinterpret_cast<JointStruct*>(block), 0xff, 0xff, (void*)0xff);
     JointApplyColorTint(reinterpret_cast<JointStruct*>(block + 0x7c),
                         0x30000, 0x300000, (void*)0x300000);
@@ -2603,9 +3002,14 @@ void tyrant_update(void)
 
         // The 0x8000 bit arms the ribbon: seed the whole history from the
         // current claw pose, sweeping the far point through 0x004ba27a.
-        if ((g_tyTrailTimer & 0x8000) != 0) {
-            MATRIX* claw = ENTITY->jointsStructs
-                         ? ty_clawWorld() : nullptr;
+        //
+        // The original reads ENTITY+0x98 unchecked.  Port-side the null test
+        // leaves the arm bit SET rather than seeding the pool from a null claw:
+        // tyrant_trail_update() also returns early on null joints, so nothing
+        // draws an unseeded ribbon and the sweep retries on the first frame the
+        // joints exist.
+        if ((g_tyTrailTimer & 0x8000) != 0 && ENTITY->jointsStructs != nullptr) {
+            MATRIX* claw = ty_clawWorld();
             g_tyTrailSegments = 8;
             g_entity_bkp = 7;
             if (g_tyClawScaleB > 8000) g_tyTrailFar.y = (short)(g_tyTrailFar.y + 1000);
