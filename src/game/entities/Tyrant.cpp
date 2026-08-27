@@ -213,7 +213,7 @@ static SVECTOR      g_tyTrailFar       = { 0, 1500, 0, 0 };         // 0x004ba27
 namespace {
 
 // ---------------------------------------------------------------------------
-// 0x0048aec0 - reserve the ribbon's vertex pool.
+// 0x0048aec0 - reserve the slash ribbon's vertex pool.
 //
 // The allocation must happen: the original hands out 9 * 0x100 bytes of the
 // room data buffer here and every later CreateAnimObject call starts from the
@@ -1991,26 +1991,6 @@ static void tyrant_init(void)
         g_loadDataDestPointer = CreateAnimObject((int)(dst + 0x0c),
                                                  (unsigned int*)g_loadDataDestPointer);
     }
-    // The two afterimage shells are OPAQUE, and that is deliberate.  Both go
-    // through JointSetColorTint (0x00485ac0), whose only live argument is the
-    // second one - verified in disassembly: it takes the object from [ESP+0x20]
-    // (= arg1 after its 0x1c of prologue) and the colour from [ESP+8] (= arg2),
-    // and never touches arg3/arg4.  It splits that colour LOW byte first and
-    // scales each by the double at 0x004af2e0, which is 2^-7 = 1/128:
-    //     copy 0 (0x0000ff) -> objData +0x5c/60/64 = (1.99, 0, 0)  bright RED
-    //     copy 1 (0x030000) -> (0, 0, 0.023)                       near BLACK
-    // and sets the unlit bit (+0x80 |= 2) on every record.  Copy 1 rides the
-    // claw matrix unscaled, so it sits exactly on the real claw; copy 0 rides
-    // the ScaleMatrixCols pulse, flattened in Y.  Drawn opaque and coincident
-    // the three layers COMPOSITE into the claw's red-and-black look - they are
-    // not a separate visible ghost.
-    //
-    // Do NOT stamp a blend alpha into +0x68 here.  The only 0x3f000000 store to
-    // a +0x68 anywhere in the exe is 0x0044723d, inside the renderer's own
-    // per-vertex path - nothing writes these records, so CMarniDirect3DTMD::
-    // Create's zero stands and TmdRenderer's triAlpha stays 1.0.  Stamping 0.5f
-    // made both shells translucent, which let the background through and turned
-    // copy 0's size pulse into the free-floating red ghost over the real claw.
     JointApplyColorTint(reinterpret_cast<JointStruct*>(block), 0xff, 0xff, (void*)0xff);
     JointApplyColorTint(reinterpret_cast<JointStruct*>(block + 0x7c),
                         0x30000, 0x300000, (void*)0x300000);
