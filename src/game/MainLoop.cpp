@@ -21,8 +21,8 @@ static int g_fading_007d9048;       // 0x007d9048
 static int g_fading_007d904c;       // 0x007d904c
 int g_MaxHealthDisplayFlag;  // 0x00d227c0 (also written by the effect system)
 RectDrawDesc g_FadingRect = { 0x60000000, -160, -120, 320, 240, 0, 0, 0 };  // 0x004ba720
-static RectDrawDesc g_ColorRect  = { 0x60000000, -164, -130, 328,  38, 0, 0, 0 };  // 0x004ba730
-static RectDrawDesc g_ColorRect2 = { 0x60000000, -164,   92, 328,  38, 0, 0, 0 };  // 0x004ba740
+static RectDrawDesc g_LetterboxBarTop    = { 0x60000000, -164, -130, 328,  38, 0, 0, 0 };  // 0x004ba730
+static RectDrawDesc g_LetterboxBarBottom = { 0x60000000, -164,   92, 328,  38, 0, 0, 0 };  // 0x004ba740
 
 // ============================================================================
 // main_loop - Main game update/rendering (0x00428eb0)
@@ -276,18 +276,18 @@ _fade_done:
     }
 
     BYTE intensity = (BYTE)g_spriteAnimIntensity;
-    g_ColorRect.r = intensity;
-    g_ColorRect.g = intensity;
-    g_ColorRect.b = intensity;
-    g_ColorRect2.r = intensity;
-    g_ColorRect2.g = intensity;
-    g_ColorRect2.b = intensity;
+    g_LetterboxBarTop.r = intensity;
+    g_LetterboxBarTop.g = intensity;
+    g_LetterboxBarTop.b = intensity;
+    g_LetterboxBarBottom.r = intensity;
+    g_LetterboxBarBottom.g = intensity;
+    g_LetterboxBarBottom.b = intensity;
 
     // Original PS1 GPU POLY_F4 screen-tint primitives (dead code in D3D11 port).
     // In the original binary these wrote to the PS1 ordering table for screen
-    // color tinting. The modern port uses draw_rect() with g_ColorRect instead.
-    // Preserved here for reference; writing to the array crashes on modern
-    // Windows due to linker section placement.
+    // color tinting. The modern port uses draw_rect() with the letterbox bars
+    // instead. Preserved here for reference; writing to the array crashes on
+    // modern Windows due to linker section placement.
     // Poly_F4_ARRAY_004ba750[g_spriteAnimActive].r0 = intensity;
     // Poly_F4_ARRAY_004ba750[g_spriteAnimActive].g0 = intensity;
     // Poly_F4_ARRAY_004ba750[g_spriteAnimActive].b0 = intensity;
@@ -296,22 +296,22 @@ _fade_done:
     // Poly_F4_ARRAY_004ba750[g_spriteAnimActive + 2].b0 = intensity;
 
     if (g_spriteAnimIntensity == 0xF0) {
-        g_ColorRect.r = 0xFF;
-        g_ColorRect.g = 0xFF;
-        g_ColorRect.b = 0xFF;
-        g_ColorRect2.r = 0xFF;
-        g_ColorRect2.g = 0xFF;
-        g_ColorRect2.b = 0xFF;
+        g_LetterboxBarTop.r = 0xFF;
+        g_LetterboxBarTop.g = 0xFF;
+        g_LetterboxBarTop.b = 0xFF;
+        g_LetterboxBarBottom.r = 0xFF;
+        g_LetterboxBarBottom.g = 0xFF;
+        g_LetterboxBarBottom.b = 0xFF;
     }
 
     if ((g_main_state_flags & 0x4008000) == 0) {
         if (g_spriteAnimIntensity != 0) {
             if ((g_stageId == 4) && (g_roomId == 0x13) && (g_roomCameraId == 5)) {
-                draw_rect(&g_ColorRect, 0, 0);
-                draw_rect(&g_ColorRect2, 0, 0);
+                draw_rect(&g_LetterboxBarTop, 0, 0);
+                draw_rect(&g_LetterboxBarBottom, 0, 0);
             } else {
-                draw_rect(&g_ColorRect, 0x28, 0);
-                draw_rect(&g_ColorRect2, 0x28, 0);
+                draw_rect(&g_LetterboxBarTop, 0x28, 0);
+                draw_rect(&g_LetterboxBarBottom, 0x28, 0);
             }
         }
 
