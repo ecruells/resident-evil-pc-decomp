@@ -1108,7 +1108,7 @@ void room_event_take_item(void)
 {
     unsigned char* record = *(unsigned char**)((char*)g_room_event_index + 8);
     if ((char)record[8] == 'M') {          // 0x4D = ITEM_COMM_RADIO
-        Flg_on((int)g_PlayerFlags, 0x7f);
+        Flg_on((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_RADIO);
         return;
     }
     room_event_item_pickup();
@@ -1190,7 +1190,7 @@ extern unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
 void check_desk_state(void)
 {
     if ((g_stageId == 3) && (g_roomId == 0xa) && ((g_playerEntity.id & 3) == 1) &&
-        (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)) {
+        (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)) {
         g_desk_check_state = 0;
     }
 
@@ -1202,8 +1202,8 @@ void check_desk_state(void)
         // The original stores get_item_slot's result in a write-only scratch
         // global (has_desk_key @ 0x004d6eb4); the call itself is kept for its
         // g_pCurrentItemSlot side effect.
-        (void)get_item_slot(0x3d);
-        g_selectedItemId = Flg_ck((int)g_PlayerFlags, 0x7c) ? 0x31 : 0x3d;
+        (void)get_item_slot(ITEM_DESK_KEY);
+        g_selectedItemId = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) ? ITEM_LOCK_PICK : ITEM_DESK_KEY;
         set_message_display(0xd9, 0xff);
         g_desk_check_state = 3;
         return;
@@ -1213,7 +1213,7 @@ void check_desk_state(void)
                 // "Yes": unlock and show the key-turned message.
                 Flg_on((int)g_LocksFlags, *(unsigned short*)((char*)g_room_event_index + 2));
                 play_sfx(2, 0x26, 0);
-                g_selectedItemId = Flg_ck((int)g_PlayerFlags, 0x7c) ? 0x31 : 0x3d;
+                g_selectedItemId = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) ? ITEM_LOCK_PICK : ITEM_DESK_KEY;
                 set_message_display(0xc3, 0xff);
             }
             g_desk_check_state = 0;
@@ -1260,7 +1260,7 @@ void check_typewriter_state(void)
     case 1:
         g_typewriter_id = *(unsigned short*)((char*)g_room_event_index + 2);
         if (((g_playerEntity.id == 1) || (g_playerEntity.id == 5)) &&
-            (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)) {
+            (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)) {
             set_message_display(224, 0xff);   // "Will you save your progress?"
         } else {
             set_message_display(223, 0xff);   // "Will you use the INK RIBBON?"

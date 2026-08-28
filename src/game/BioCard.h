@@ -56,12 +56,12 @@ struct BioCardLayout {
     unsigned char pad_0x233;                 // 0x233
 
     // flags
-    unsigned char playerFlags3[32];          // 0x234
+    unsigned char scenarioFlags2[32];        // 0x234
     unsigned char locksFlags[8];             // 0x254
     unsigned char roomEventFlags[32];        // 0x25C
     unsigned char roomItemsFlags[32];        // 0x27C
     unsigned char gameFlags_bc[4];           // 0x29C
-    unsigned char playerFlags[16];           // 0x2A0
+    unsigned char scenarioFlags[16];         // 0x2A0
     unsigned char roomFlags[20];             // 0x2B0
 
     // items slots area
@@ -121,12 +121,12 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define g_PlayerDirAngleCopy      (g_BioCard.playerDirAngleCopy)                // SHORT 0x00be9850
 #define g_PlayerHealthStatusCopy  (g_BioCard.playerHealthStatusCopy)            // BYTE 0x00be9852
 
-#define g_PlayerFlags3            (g_BioCard.playerFlags3)                      // BYTE[32] 0x00be9854
+#define g_ScenarioFlags2         (g_BioCard.scenarioFlags2)                    // BYTE[32] 0x00be9854 (orig. playerFlags3)
 #define g_LocksFlags              (g_BioCard.locksFlags)                        // BYTE[8] 0x00be9874
 #define g_RoomEventFlags          (g_BioCard.roomEventFlags)                    // BYTE[32] 0x00be987c
-#define g_roomItemsFlags          (g_BioCard.roomItemsFlags)                    // BYTE[32] 0x00be989c
+#define g_roomItemsFlags          (g_BioCard.roomItemsFlags)                    // BYTE[32] 0x00be989c (orig. playerFlags2, SCD bank 7)
 #define g_gameFlags_bc            (g_BioCard.gameFlags_bc)                      // BYTE[4] 0x00be98bc
-#define g_PlayerFlags             (g_BioCard.playerFlags)                       // BYTE[16] 0x00be98c0
+#define g_ScenarioFlags           (g_BioCard.scenarioFlags)                     // BYTE[16] 0x00be98c0 (orig. playerFlags)
 #define g_RoomFlags               (g_BioCard.roomFlags)                         // BYTE[20] 0x00be98d0
 
 #define g_itemboxSlots            (g_BioCard.itemboxSlots)                      // ItemSlot[48] 0x00be98e4
@@ -134,5 +134,48 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define g_RebeccaItemSlots        (g_BioCard.rebeccaItemsSlots)                 // ItemSlot[6] 0x00be9950
 
 #define g_roomBgmState            (g_BioCard.roomBgmState)                      // BYTE[224] 0x00be995c
+
+// ============================================================================
+// Scenario flag bit constants (banks 0 and 1).
+// Meanings verified from ported code; full tables with set-by/read-by:
+// docs/SCENARIO_FLAGS.md. Bits used only by room SCD scripts (RDT data) have
+// no constant yet - add one here (and a row in the doc) when a bit is traced.
+// ============================================================================
+// --- g_ScenarioFlags (bank 0, 0x00be98c0) ---
+#define SCENARIO_FLAG_STAGE_VARIANT        0x00  // character room variant flag (0: chris, 1: jill)
+#define SCENARIO_FLAG_YAWN_BITE            0x10  // Yawn bite event (set by the Yawn attack entry)
+#define SCENARIO_FLAG_ITEM13_USE_LOCK      0x13  // item 0x13 use rejected while set (progression gate)
+#define SCENARIO_FLAG_CHEMICAL_COMBINE     0x16  // chemical combine performed (combine effect 4)
+#define SCENARIO_FLAG_PANEL_VARIANT_A      0x1E  // passcode-panel initial-state variant selector
+#define SCENARIO_FLAG_PANEL_VARIANT_B      0x1F  // passcode-panel initial-state variant selector
+#define SCENARIO_FLAG_INTERACTIVE_SCREEN   0x20  // interactive screen active gate
+#define SCENARIO_FLAG_PANEL_SOLVED         0x21  // lab passcode panel solved
+#define SCENARIO_FLAG_PLANT42_DEAD         0x29  // Plant 42 defeated
+#define SCENARIO_FLAG_ALTERNATE_OUTFIT     0x2A  // alternate outfit (model id + 8)
+#define SCENARIO_FLAG_WESKER_VARIANT       0x37  // Wesker later-animation variant
+#define SCENARIO_FLAG_YAWN_SERUM           0x47  // Yawn serum marker - first Yawn poisons only while clear
+#define SCENARIO_FLAG_PROGRESS_48          0x48  // map variant gate + stage 2 room 7 BGM condition
+#define SCENARIO_FLAG_PROGRESS_49          0x49  // map display variant gate
+#define SCENARIO_FLAG_PROGRESS_4A          0x4A  // map display variant gate
+#define SCENARIO_FLAG_PROGRESS_55          0x55  // stage 2 room 7 keeps 2 BGM channels when set
+#define SCENARIO_FLAG_MONSTER_PLANT_PROG   0x5B  // monster plant combat progression (3+ hits)
+#define SCENARIO_FLAG_PROGRESS_5C          0x5C  // stage 2 room 7 third BGM channel condition (Jill)
+#define SCENARIO_FLAG_SECOND_PLAYTHROUGH   0x7B  // second playthrough ("hard mode") - set after clearing
+#define SCENARIO_FLAG_HAS_LOCKPICK         0x7C  // has the lockpick (Jill)
+#define SCENARIO_FLAG_MENU_FADE_LATCH      0x7D  // fade-in latch, cleared when the menu closes
+#define SCENARIO_FLAG_INF_R_LAUNCHER       0x7E  // infinite rocket launcher flag
+#define SCENARIO_FLAG_HAS_RADIO            0x7F  // has the radio (item 0x4D)
+
+// --- g_ScenarioFlags2 (bank 1, 0x00be9854) ---
+#define SCENARIO2_FLAG_JILL_FIRST_RUN      0x0B  // Jill first-playthrough marker (with roomItemsFlags 0x34)
+#define SCENARIO2_FLAG_PROGRESS_22         0x22  // radio-tab availability gate (character id & 3 == 3)
+#define SCENARIO2_FLAG_PROGRESS_23         0x23  // map display variant gate
+#define SCENARIO2_FLAG_PROGRESS_2D         0x2D  // map display variant gate
+#define SCENARIO2_FLAG_PROGRESS_2E         0x2E  // map display variant gate
+#define SCENARIO2_FLAG_PROGRESS_38         0x38  // map variant gate + radio-tab availability gate
+#define SCENARIO2_FLAG_YAWN_POISONED       0x43  // poisoned by Yawn (cleared by the serum)
+#define SCENARIO2_FLAG_SECOND_SURVIVOR     0x4B  // ending "second survivor" bit
+#define SCENARIO2_FLAG_PARTNER_ALIVE       0xC0  // ending "partner survived" bit
+
 
 

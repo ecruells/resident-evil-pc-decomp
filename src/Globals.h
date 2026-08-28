@@ -649,8 +649,16 @@ extern void*          room_check_actions[ROOM_CHECK_ACTION_COUNT]; // 0x004b9340
 // Animation remap pairs for SCD event state-1 opcode 0x89. See CmdFunctions.cpp.
 extern const unsigned char g_ScdAnimRemap[32];          // 0x004bec80
 
-// SCD flag bank 9 (misc flags)
-extern unsigned int  DAT_00d213a0[2];                  // 0x00d213a0
+// Per-frame item-use flag bank (SCD flag bank 9), 64 bits. Cleared every
+// frame by game_loop and re-armed by room logic in the same frame:
+//  - bits 0x00..0x3E indexed as (itemId - 0x1B): "item X is usable right now"
+//    (chemicals / special items / keys / desk key use categories)
+//  - bit 0x3F: the radio (item 0x4D) has an active transmission
+// Consumed by the inventory "use" command (menu_item_use_if_flag,
+// menu_item_use_red_book), the item-menu radio tab (menu_tab_radio), and
+// cmd_bit_test with flag bank 9. See room action flag_bank_set (bank 9) and
+// cmd_bit_op (bank 9) for how room scripts arm the bits.
+extern unsigned int  g_itemUseFlags[2];               // 0x00d213a0
 
 // Mirror (planar reflection) parameters, all written only by SCD opcode 0x0F
 // (cmd_mirror_set). The plane axis is g_main_state_flags bit 1; bit 0 arms

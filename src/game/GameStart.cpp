@@ -312,7 +312,7 @@ void InitializeGame(void)
         g_CharacterModelId = g_SelectedCharactedId;
 
         /*  check alternative outfit flag */
-        has_alternate_outfit = Flg_ck((int)g_PlayerFlags, 0x2a);
+        has_alternate_outfit = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_ALTERNATE_OUTFIT);
         if (has_alternate_outfit != 0) {
             g_CharacterModelId = g_CharacterModelId + 8;
         }
@@ -375,10 +375,12 @@ void InitializeGame(void)
     update_room_bgm();
 
     if ((g_playerEntity.id & 3) == CHAR_JILL) {
-        has_alternate_outfit = Flg_ck((int)g_PlayerFlags, 0x7b);
-        if (has_alternate_outfit == 0) {
+        // Second playthrough marker (0x7B, set by EndingScreen after clearing).
+        // On a FIRST Jill playthrough, arm the first-run-only room item flag
+        int is_second_playthrough = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH);
+        if (is_second_playthrough == 0) {
             Flg_on((int)g_roomItemsFlags, 0x34);
-            Flg_on((int)g_PlayerFlags3, 0x0b);
+            Flg_on((int)g_ScenarioFlags2, SCENARIO2_FLAG_JILL_FIRST_RUN);
         }
     }
 

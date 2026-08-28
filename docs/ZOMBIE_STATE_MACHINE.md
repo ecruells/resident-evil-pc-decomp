@@ -281,7 +281,7 @@ So a zombie spawns with **17–99 HP**, not the 180–240 an earlier pass invent
    placeholder global feeds the quad a garbage RGB
 4. `health` from the table above
 5. `hit_threshold` from a 64-byte **stack** table, half selected by
-   `Flg_ck(g_PlayerFlags, 0x7b)` (difficulty)
+   `Flg_ck(g_ScenarioFlags, 0x7b)` (difficulty)
 6. `stagger_timer = zombie_stagger_tbl[g_RandSeed & 0x1F]`
 7. `move_speed = 45`, `turn_speed = 24`
 8. `animationId = zombie_anim_id_tbl[behavior_flags & 0xF]`

@@ -243,7 +243,7 @@ static void char_init_rebecca(void)
     FUN_004565f0(&g_svecScratch, (SVECTOR*)&ENTITY->pushVelocity, 0x200, 0x280);
     ENTITY->blend_counter = 0;
 
-    if (Flg_ck((int)g_PlayerFlags3, 0xc0) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PARTNER_ALIVE) != 0) {
         JointStruct* joints = ENTITY->jointsStructs;
         ENTITY->timing_control     = 0;
         ENTITY->animationId        = 0x33;
@@ -273,7 +273,7 @@ static void char_init_wesker(void)
     FUN_004565f0(&g_svecScratch, (SVECTOR*)&ENTITY->pushVelocity, 0x200, 0x280);
     ENTITY->blend_counter = 0;
 
-    if (Flg_ck((int)g_PlayerFlags, 0x37) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_WESKER_VARIANT) != 0) {
         ENTITY->animationId        = 0x30;
         ENTITY->animation_frame_id = 0x6d;
         BillboardSetColor(&ENTITY->pushVelocity, 1, 2, 0x00ffff70);

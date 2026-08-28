@@ -685,10 +685,12 @@ void tyrant_latch_player_attacker(short yawBias)
     ew(ENTITY, 0x74) = (short)(ew(ENTITY, 0x74) - yawBias);
 }
 
-// Damage with the "defense item equipped" (g_PlayerFlags bit 0x7B) variant.
+// Damage with the second-playthrough variant (g_ScenarioFlags bit SCENARIO_FLAG_SECOND_PLAYTHROUGH, set
+// by EndingScreen after clearing the game - the "hard mode" behaviour switch
+// every enemy AI reads, NOT a defense-item check).
 void tyrant_damage_player(int base, int withFlag)
 {
-    if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
         g_playerEntity.health = (short)(g_playerEntity.health - base);
     else
         g_playerEntity.health = (short)(g_playerEntity.health - withFlag);
@@ -1176,7 +1178,7 @@ void tyrant_behavior_claw_slash(void)
 
             // The 0xFC00 knock-back bias, and NO +1 on the dx == 0 path - both
             // verified against 0x00422b04 / 0x00422b21.
-            if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+            if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                 if (ENTITY->id == 0x10 && g_playerEntity.health > 0x0c) {
                     tyrant_set_player_knockback((short)0xfc00, 0);
                     eub(ENTITY, 0x181) = 0xd2;
@@ -1254,7 +1256,7 @@ void tyrant_behavior_claw_thrust(void)
             tyrant_flash_claw_and_stagger(1);
 
             int hp = (int)g_playerEntity.health;
-            if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+            if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                 if (hp > 0x10) tyrant_set_player_knockback(0x400, 1);
             } else {
                 if (hp > 0x14) tyrant_set_player_knockback(0x400, 1);
@@ -1703,7 +1705,7 @@ void tyrant_behavior_rush(void)
                 tyrant_flash_claw_and_stagger(1);
 
                 int hp = (int)g_playerEntity.health;
-                if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+                if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                     if (hp > 0x0c) tyrant_set_player_knockback(0x400, 1);
                 } else {
                     if (hp > 0x12) tyrant_set_player_knockback(0x400, 1);

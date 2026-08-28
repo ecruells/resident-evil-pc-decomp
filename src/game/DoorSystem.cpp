@@ -1417,7 +1417,7 @@ int FUN_0048f330(unsigned char param)
 //
 // Destination encoding in record+0x0D: values < 0x20 are a room in the current
 // stage; >= 0x20 also changes stage, as (dest >> 5) - 1, with +5 applied once
-// g_PlayerFlags bit 0 is set (the second-visit stage variants).
+// g_ScenarioFlags bit 0 is set (the second-visit stage variants).
 // ============================================================================
 void room_transition_load(void)
 {
@@ -1482,7 +1482,7 @@ void room_transition_load(void)
     g_playerEntity.scaMatrixData.localMatrix.t[1] = (int)sy;
     g_playerEntity.scaMatrixData.localMatrix.t[2] = (int)(unsigned int)uz;
     g_playerEntity.directionAngle = *(short*)(record + 0x14);
-    g_playerEntity.unk_8e     = (unsigned short)sy;
+    g_playerEntity.posY       = (unsigned short)sy;
     g_playerEntity.animationId = 0;
     g_playerEntity.position.x = (short)ux;
     g_playerEntity.position.y = sy;
@@ -1509,9 +1509,11 @@ void room_transition_load(void)
     //   4. g_roomId becomes the DESTINATION before room_set/init_room reads it
     //
     // Destination encoding in record+0x0D: < 0x20 is a room in the current stage;
-    // >= 0x20 also changes stage, as (dest >> 5) - 1, with +5 once g_PlayerFlags
-    // bit 0 is set (the second-visit stage variants). A stage change needs the
-    // heavier init_room, which re-points the stage data and BGM tables first.
+    // >= 0x20 also changes stage, as (dest >> 5) - 1, with +5 once g_ScenarioFlags
+    // bit 0 is set (the scenario stage-variant bit: stages 0/1 remap to their
+    // +5 variants; armed by room scripts / save data, never by ported code). A
+    // stage change needs the heavier init_room, which re-points the stage data
+    // and BGM tables first.
     if ((flags & 0x80) == 0) {
         BuildEnemySnap();
         g_AttractMode_RoomCameraId = g_roomId;
@@ -1524,7 +1526,7 @@ void room_transition_load(void)
             room_set();
         } else {
             g_stageId = (unsigned char)((g_nextRoomDest >> 5) - 1);
-            if ((Flg_ck((int)&g_PlayerFlags, 0) != 0) && (g_stageId < 2)) {
+            if ((Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_STAGE_VARIANT) != 0) && (g_stageId < 2)) {
                 g_stageId = (unsigned char)(g_stageId + 5);
             }
             dbg_printf("[roomtrans] loading stage %u room %u (stage change)\n",

@@ -965,7 +965,7 @@ void yawn_action_bite(void)
             if (player_distance_z != 0 && g_playerEntity.isBeingAttackedFlag == 0) {
                 g_animFrameIdSave = is_facing_toward_entity(&g_playerEntity) & 0xff;
 
-                if (Flg_ck((int)&g_PlayerFlags, 0x7b) == 0) {
+                if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                     g_playerEntity.health = (short)(g_playerEntity.health - 10);
                 } else {
                     g_playerEntity.health = (short)(g_playerEntity.health - 0x1c);
@@ -990,8 +990,8 @@ void yawn_action_bite(void)
 
                 // Only the FIRST Yawn (entity id 13) poisons, and only if the
                 // serum has not already been taken.
-                if (ENTITY->id == 0x0d && Flg_ck((int)&g_PlayerFlags, 0x47) == 0) {
-                    Flg_on((int)&g_PlayerFlags3, 0x43);
+                if (ENTITY->id == 0x0d && Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_YAWN_SERUM) == 0) {
+                    Flg_on((int)&g_ScenarioFlags2, SCENARIO2_FLAG_YAWN_POISONED);
                     g_playerEntity.healthStatusFlags |= 0x20;
                 }
 
@@ -1399,7 +1399,7 @@ void yawn_action_entry(void)
         euw(ENTITY, 0xc4) = 2;
         eub(ENTITY, 0x8a) = 1;
         if (eb(ENTITY, 1) == 0x0d) {
-            Flg_on((int)&g_PlayerFlags, 0x10);
+            Flg_on((int)&g_ScenarioFlags, SCENARIO_FLAG_YAWN_BITE);
         }
     }
 
@@ -2164,7 +2164,7 @@ void yawn_init(void)
 
     ew(ENTITY, 0x88) = 0x0bea;
     if (eub(ENTITY, 1) == 0x12) {
-        if (Flg_ck((int)&g_PlayerFlags, 0x7b) == 0) {
+        if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
             ew(ENTITY, 0x88) = 0x012c;
         } else {
             ew(ENTITY, 0x88) = 0x0190;
@@ -2275,7 +2275,7 @@ void yawn_init(void)
         // Already in the room, grown, and the fight flag is up.
         eub(ENTITY, 0x16e) = 1;
         if (eub(ENTITY, 1) == 0x0d) {
-            Flg_on((int)&g_PlayerFlags, 0x10);
+            Flg_on((int)&g_ScenarioFlags, SCENARIO_FLAG_YAWN_BITE);
         }
         if ((ENTITY->behavior_flags & 0x80) != 0) {
             eub(ENTITY, 0x84) = 4;
@@ -2458,7 +2458,7 @@ void yawn_update(void)
             }
             if ((eub(ENTITY, 0x8a) & 7) == 0) {
                 // Serum taken -> the snake only takes 5 per tick instead of 15.
-                if (Flg_ck((int)&g_PlayerFlags, 0x7b) == 0) {
+                if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                     g_EnemiesList[0].health = (short)(g_EnemiesList[0].health - 0xf);
                 } else {
                     g_EnemiesList[0].health = (short)(g_EnemiesList[0].health - 5);
@@ -2466,7 +2466,7 @@ void yawn_update(void)
                 // A hit on joints 0-9 (the front half) with the serum taken
                 // does another 15.
                 JointStruct* hit = (JointStruct*)(uintptr_t)ENTITY->scd_target_ptr;
-                if (hit->index < 10 && Flg_ck((int)&g_PlayerFlags, 0x7b) != 0) {
+                if (hit->index < 10 && Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) != 0) {
                     g_EnemiesList[0].health = (short)(g_EnemiesList[0].health - 0xf);
                 }
                 g_EnemiesList[0].angle = (short)(g_EnemiesList[0].angle

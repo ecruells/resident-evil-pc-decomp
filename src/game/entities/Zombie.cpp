@@ -381,7 +381,7 @@ void zombie_init(void)
     // 0x00433700-0x0043374f: Set behavior type based on difficulty
     {
         unsigned char behVal;
-        if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+        if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
             behVal = local_40[(g_RandSeed & 0x1F) + 32];
         } else {
             behVal = local_40[g_RandSeed & 0x1F];
@@ -1041,7 +1041,7 @@ void zombie_damaged(void)
                 if ((ENTITY->behavior_flags & ZOMBIE_FLAG_LAYING_DOWN) == 0) {
                     // hit threshold exceeded → trigger falldown
                     ENTITY->action_speed = 0x80;
-                    if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
+                    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
                         ENTITY->hit_threshold = local_40[(g_RandSeed & 0x1F) + 32];
                     else
                         ENTITY->hit_threshold = local_40[g_RandSeed & 0x1F];
@@ -1561,7 +1561,7 @@ void zombie_attack(void)
             ENTITY->action_ticks_counter = (unsigned short)(tick + 1);
             if (tick % 19 == 0) {
                 unsigned char damage;
-                if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
+                if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
                     damage = zombie_damage_easy_tbl[ENTITY->behavior_flags & 0x0F];
                 else
                     damage = zombie_damage_normal_tbl[ENTITY->behavior_flags & 0x0F];

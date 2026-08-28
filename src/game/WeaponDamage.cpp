@@ -60,18 +60,20 @@ extern void* PTR_weapons_hit_detection_functions[10];
 extern void* PTR_post_hit_callbacks[10];
 extern unsigned int weapons_ranges[20];
 
-// 0x004bb698 - easy difficulty hit records, 12 bytes each, indexed
-// (weaponAdj + enemyType * 10) * 12. The knockback vector (kx/ky/kz) is used
-// for BOTH difficulties; damage/hit-state come from these or the normal table
-// below depending on Flg_ck(g_PlayerFlags, 0x7b).
+// 0x004bb698 - first-playthrough hit records, 12 bytes each,
+// indexed (weaponAdj + enemyType * 10) * 12. The knockback vector (kx/ky/kz)
+// is used for BOTH difficulties; damage/hit-state come from these on the
+// first playthrough, or from the second-playthrough table below when
+// Flg_ck(g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) is set
+// (bit 0x7B = second playthrough, set by EndingScreen after clearing).
 typedef struct {
     short         kx;      // +0x00
     short         ky;      // +0x02
     short         kz;      // +0x04
-    short         dmg;     // +0x06: easy damage
+    short         dmg;     // +0x06: first-playthrough damage
     unsigned char type;    // +0x08: hit type for the post-hit billboard
     unsigned char data;    // +0x09: hit data for the post-hit billboard
-    unsigned char hit;     // +0x0A: easy hit state
+    unsigned char hit;     // +0x0A: first-playthrough hit state
     unsigned char pad;     // +0x0B
 } WeaponHitRecord;
 
@@ -371,12 +373,12 @@ unsigned char apply_weapon_damage(unsigned int weapon_id)
 
     unsigned char hitState;
     short damage;
-    if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
-        hitState = rec->hit;                                // easy hit-state @ +10
-        damage = rec->dmg;                                  // easy damage @ +6
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
+        hitState = rec->hit;                                // first-playthrough hit-state @ +10
+        damage = rec->dmg;                                  // first-playthrough damage @ +6
     } else {
-        hitState = g_weaponHitRecordsNormal[tableIdx].hit;  // normal hit-state @ +4
-        damage = g_weaponHitRecordsNormal[tableIdx].dmg;    // normal damage @ +0
+        hitState = g_weaponHitRecordsNormal[tableIdx].hit;  // second-playthrough hit-state @ +4
+        damage = g_weaponHitRecordsNormal[tableIdx].dmg;    // second-playthrough damage @ +0
     }
 
     enemy->health -= damage;

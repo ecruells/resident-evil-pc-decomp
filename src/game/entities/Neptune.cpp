@@ -94,7 +94,7 @@
 //   player health >  25  and distance < 3000  ->  behaviour 5, BITE
 //
 // Behaviour 5 is the ordinary attack: it chews for a while, costs 7 health (30
-// if g_PlayerFlags bit 0x7b is set), floors the result at 1 so it can never
+// if g_ScenarioFlags bit SCENARIO_FLAG_SECOND_PLAYTHROUGH is set), floors the result at 1 so it can never
 // kill, and lets go. Behaviour 4 is the swallow: neptune_devour_swallow sets
 // `player health = -1` outright and hides the player's joints a few at a time
 // as the shark works them down. So the instant-kill is gated on already being
@@ -693,7 +693,7 @@ static void neptune_behavior_swim(void)
 // ---- neptune_swim_actions ------------------------------------------------
 
 // 0x0043dfb0 - pick the swim animation and the cruise speed. The poison flag
-// (g_PlayerFlags bit 0x7b) makes the shark noticeably slower, which is what
+// (g_ScenarioFlags bit SCENARIO_FLAG_SECOND_PLAYTHROUGH) makes the shark noticeably slower, which is what
 // gives the poisoned player a chance to reach the drain valve.
 static void neptune_swim_begin(void)
 {
@@ -702,7 +702,7 @@ static void neptune_swim_begin(void)
     ENTITY->timing_control = 0;
     ENTITY->blend_counter = 0x3F;
     ENTITY->action_state++;
-    ENTITY->move_speed_current = (Flg_ck((int)g_PlayerFlags, 0x7B) == 0) ? 0x78 : 100;
+    ENTITY->move_speed_current = (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) ? 0x78 : 100;
     NE_SWIM_CUE = 3;
 }
 
@@ -1234,7 +1234,7 @@ static void neptune_bite_shake(void)
     NE_STRUGGLE = (short)(NE_STRUGGLE - ((GetPlayerInputMasked() != 0) ? 8 : 1));
 
     if (Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x80) != 0) {
-        if (Flg_ck((int)g_PlayerFlags, 0x7B) == 0) {
+        if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
             g_playerEntityPointer.health = (short)(g_playerEntityPointer.health - 7);
         } else {
             g_playerEntityPointer.health = (short)(g_playerEntityPointer.health - 0x1E);

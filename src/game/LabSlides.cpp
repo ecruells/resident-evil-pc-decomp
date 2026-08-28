@@ -32,7 +32,6 @@ void lab_slides_set_snd_params(int channel, int pan, int volume);     // 0x0047f
 
 // The projector clears the same interactive-screen gate the numeric panel
 // does (passcode_panel_finish) to hand control back to the room.
-#define PLAYER_FLAG_INTERACTIVE_SCREEN 0x20
 
 // 0x004c2150..0x004c2170 - Projector frame masks, walked BACKWARDS by the
 // original draw loop. Game space is x=-160..160 / y=-120..120; the four rects
@@ -198,7 +197,7 @@ void lab_slides_finish(void)
     g_roomCameraId = g_cutId;
     display_room_camera_bg();
     // Clears the player-flag gate, exactly like passcode_panel_finish.
-    FUN_00473f10((int*)g_PlayerFlags, PLAYER_FLAG_INTERACTIVE_SCREEN);
+    FUN_00473f10((int*)g_ScenarioFlags, SCENARIO_FLAG_INTERACTIVE_SCREEN);
     lab_slides_stop_snd(1);
     lab_slides_stop_snd(2);
     lab_slides_set_snd_slot(0);

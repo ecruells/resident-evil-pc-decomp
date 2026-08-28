@@ -58,7 +58,7 @@ static unsigned char  DAT_00ae9f19;       // 0x00ae9f19
 unsigned char  g_totalInventorySlots;       // 0x00ae9f1a
 
 // Selected item ID for 3D model display
-unsigned char  DAT_00ae9f1b;       // 0x00ae9f1b
+unsigned char  g_bItemMenuSelectedItemId;       // 0x00ae9f1b
 
 // Item model load direction (-1 or 1)
 static char           DAT_00ae9f1c;       // 0x00ae9f1c
@@ -124,7 +124,7 @@ static char*          DAT_00ae9f44;       // 0x00ae9f44
 // Health bar face animation index (bits 0-1 = face, bits 2-3 = health status)
 static unsigned char  DAT_00ae9f48;       // 0x00ae9f48
 unsigned char  DAT_00ae9f49;       // 0x00ae9f49
-unsigned char  DAT_00ae9f4a;       // 0x00ae9f4a
+unsigned char  g_bItemViewerActionIndex;       // 0x00ae9f4a
 
 // Item box submenu scroll position (0-15)
 static unsigned char  SUBMENU_STATE_ID;   // 0x00ae9f1d
@@ -222,7 +222,7 @@ static void menu_item_combine_refresh(unsigned char slot1, unsigned char slot2,
 static int  menu_item_use_heal(unsigned char slot); // 0x00401260
 static int  menu_item_use_item_none(unsigned char slot);   // 0x00401180/0x00401190
 static int  menu_item_use_if_flag(unsigned char slot);     // 0x004011a0/0x004011e0
-static int  menu_item_use_desk_key(unsigned char slot);    // 0x00401220
+static int  menu_item_use_red_book(unsigned char slot);    // 0x00401220
 static int  menu_item_use_always(unsigned char slot);      // 0x00401380
 static int  menu_item_use_none_return0(unsigned char slot);// 0x00401390
 static void menu_use_ammo_combine_a(unsigned char slotA, unsigned char slotB); // 0x00401bf0
@@ -265,7 +265,7 @@ static int (*const g_ItemUseFunctions[12])(unsigned char) = {
     menu_item_use_if_flag,       // 3: chemicals (use if flag set)
     menu_item_use_if_flag,       // 4: special items (use if flag set)
     menu_item_use_if_flag,       // 5: keys (use if flag set)
-    menu_item_use_desk_key,      // 6: desk key
+    menu_item_use_red_book,      // 6: books 0x3E-0x40 (handler only accepts the red book)
     menu_item_use_heal,          // 7: healables (spray, herbs)
     menu_item_use_always,        // 8: always usable (consumed)
     menu_item_use_none_return0   // 9: unusable
@@ -328,7 +328,7 @@ void main_menu(void)
     DAT_00ae9f23 = 8;
     g_MainMenuState = 0;
     DAT_00ae9f49 = 0;
-    DAT_00ae9f4a = 0;
+    g_bItemViewerActionIndex = 0;
     SUBMENU_STATE_ID = 0;
     DAT_00ae9f1e = 0;
 
@@ -338,7 +338,7 @@ void main_menu(void)
         // Use item mode: check if it's a map item
         if (0x32 < g_selectedItemId) {
             DAT_00ae9f10 = 6;
-            DAT_00ae9f1b = g_selectedItemId;
+            g_bItemMenuSelectedItemId = g_selectedItemId;
             goto LAB_0046381c;
         }
         break;
@@ -349,7 +349,7 @@ void main_menu(void)
     case 3:
     case 4:
         // Desk mode: get item from room event
-        DAT_00ae9f1b = *(unsigned char*)(*(int*)((int)g_room_event_index + 8) + 8);
+        g_bItemMenuSelectedItemId = *(unsigned char*)(*(int*)((int)g_room_event_index + 8) + 8);
 LAB_0046381c:
         menu_load_item_model();
     }
@@ -362,15 +362,15 @@ LAB_0046381c:
     // 0x00463880-0x004638e3: Check if map is available
     if ((g_playerEntity.id & 3) == 3) {
         DAT_00ae9f1f = 0;
-        int hasFlag = Flg_ck((int)g_PlayerFlags, 0x7f);
+        int hasFlag = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_RADIO);
         if ((hasFlag == 0) &&
-            (hasFlag = Flg_ck((int)g_PlayerFlags3, 0x38), hasFlag != 0) &&
-            (hasFlag = Flg_ck((int)g_PlayerFlags3, 0x22), hasFlag == 0))
+            (hasFlag = Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_38), hasFlag != 0) &&
+            (hasFlag = Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_22), hasFlag == 0))
         {
             DAT_00ae9f1f = 1;
         }
     } else {
-        DAT_00ae9f1f = Flg_ck((int)g_PlayerFlags, 0x7f);
+        DAT_00ae9f1f = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_RADIO);
     }
 
     // 0x004638e3-0x00463966: Set up camera and lighting for menu
@@ -474,7 +474,7 @@ LAB_00463a53:
                 // usually the user pressing Z rather than a cancel key
                 // (V / Left Ctrl / Esc).
                 bool cond1 = (((g_PlayerDpadPressed >> 8) & 0x80) == 0) || (DAT_00ae9f20 != 1);
-                bool cond2 = (((g_PlayerPadHeld >> 8) & 8) == 0) || (DAT_00ae9f4a != 0) || (DAT_00ae9f12 != 0);
+                bool cond2 = (((g_PlayerPadHeld >> 8) & 8) == 0) || (g_bItemViewerActionIndex != 0) || (DAT_00ae9f12 != 0);
                 if (cond1 && cond2) {
                     menu_handle_input();
                     if ((DAT_00ae9f13 & 0x41) == 0) {
@@ -995,22 +995,22 @@ static void display_item_qty(unsigned char itemId, unsigned char qty, int depth)
 {
     // Only draw for quantifiable items:
     //   Weapons and ammo (2-18, excluding knife), ink ribbon (0x2F),
-    //   or high-numbered special items (> ITEM_ID_MAX).
+    //   or infinite weapons (> ITEM_NON_INFINITE_MAX).
     if (!(((itemId < ITEM_EMPTY_BOTTLE && itemId != ITEM_KNIFE) ||
            itemId == ITEM_INK_RIBBONS) ||
-           itemId > ITEM_ID_MAX))
+           itemId > ITEM_NON_INFINITE_MAX))
         return;
 
     g_TextureDesc.printClutTint = 0x1E4;
     g_TextureDesc.screenY = g_TextureDesc.screenY + 0x14;
     g_TextureDesc.height = 8;
 
-    int hasFlag = Flg_ck((int)g_PlayerFlags, 0x7e);
+    int hasInfRLauncher = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_INF_R_LAUNCHER);
 
     // Normal numeric quantity display
     // (flag 0x7E grants infinite quantity for certain items like the rocket launcher)
-    if (((hasFlag == 0 && itemId <= ITEM_ID_MAX) ||
-         (itemId != ITEM_ROCKET_LAUNCHER && itemId <= ITEM_ID_MAX)))
+    if (((hasInfRLauncher == 0 && itemId <= ITEM_NON_INFINITE_MAX) ||
+         (itemId != ITEM_ROCKET_LAUNCHER && itemId <= ITEM_NON_INFINITE_MAX)))
     {
         // Clip quantity display for certain weapon types
         if (itemId != ITEM_FLAMETHROWER && itemId < ITEM_CLIP)
@@ -1034,14 +1034,14 @@ static void display_item_qty(unsigned char itemId, unsigned char qty, int depth)
         case ITEM_BAZOOKA_ACID:
         case ITEM_DUM_DUM_ROUNDS:
         case ITEM_ACID_ROUNDS:
-            g_TextureDesc.texU = 0x88;
+            g_TextureDesc.texU = 0x88; // orange digits
             break;
         case ITEM_BAZOOKA_FLAME:
         case ITEM_FLAME_ROUNDS:
-            g_TextureDesc.texU = 0xC0;
+            g_TextureDesc.texU = 0xC0; // red digits
             break;
         default:
-            g_TextureDesc.texU = 0x80;
+            g_TextureDesc.texU = 0x80; // green digits
             break;
         }
 
@@ -1161,10 +1161,10 @@ static void menu_update_selected_item(void)
 {
     unsigned char bVar1 = (DAT_00ae9f23 >> 1) - 4;
     if (bVar1 < g_TotalHeldItems) {
-        DAT_00ae9f1b = *(unsigned char*)(ITEM_SLOTS + (unsigned int)bVar1 * 2);
+        g_bItemMenuSelectedItemId = *(unsigned char*)(ITEM_SLOTS + (unsigned int)bVar1 * 2);
         return;
     }
-    DAT_00ae9f1b = 0;
+    g_bItemMenuSelectedItemId = 0;
 }
 
 // (0x00401050) - Equip / unequip the item under the cursor
@@ -1186,24 +1186,25 @@ static void menu_item_combine_noop(unsigned char a, unsigned char b) { }
 // (0x00401380) - Item always usable (consumed)
 static int menu_item_use_always(unsigned char slot) { return 1; }
 
-// (0x004011a0 / 0x004011e0) - Use item if its flag in DAT_00d213a0 is set
+// (0x004011a0 / 0x004011e0) - Use item if its flag in g_itemUseFlags is set
 static int menu_item_use_if_flag(unsigned char slot)
 {
-    if (Flg_ck((int)DAT_00d213a0, (unsigned int)(DAT_00ae9f1b - 0x1b)) != 0) {
+    if (Flg_ck((int)g_itemUseFlags, (unsigned int)(g_bItemMenuSelectedItemId - 0x1b)) != 0) {
         DAT_00ae9f13 = DAT_00ae9f13 | 0x80;
-        g_usedItemId = DAT_00ae9f1b;
+        g_usedItemId = g_bItemMenuSelectedItemId;
         return 1;
     }
     return 0;
 }
 
-// (0x00401220) - Desk key use check
-static int menu_item_use_desk_key(unsigned char slot)
+// (0x00401220) - Red book use check. Dispatch slot 6 covers books 0x3E-0x40
+// (red book / Doom Book 1+2), but only the red book passes the ID check.
+static int menu_item_use_red_book(unsigned char slot)
 {
-    if (DAT_00ae9f1b == 0x3e) {
-        if (Flg_ck((int)DAT_00d213a0, 0x23) != 0) {
+    if (g_bItemMenuSelectedItemId == ITEM_RED_BOOK) {
+        if (Flg_ck((int)g_itemUseFlags, 0x23) != 0) {
             DAT_00ae9f13 = DAT_00ae9f13 | 0x80;
-            g_usedItemId = DAT_00ae9f1b;
+            g_usedItemId = g_bItemMenuSelectedItemId;
             return 1;
         }
     }
@@ -1217,7 +1218,7 @@ static int menu_item_use_heal(unsigned char slot)
     unsigned short uVar2;
     int used = 0;
 
-    bVar1 = g_ItemHealTable[DAT_00ae9f1b];
+    bVar1 = g_ItemHealTable[g_bItemMenuSelectedItemId];
     if (bVar1 != 0) {
         used = 0;
         if ((bVar1 & 0xf) != 0) {
@@ -1247,7 +1248,7 @@ static int menu_item_use_heal(unsigned char slot)
         if (((bVar1 & 0xf0) != 0) && ((g_playerEntity.healthStatusFlags & 0x22) != 0)) {
             if ((bVar1 & 0xf0) == 0x10) {
                 if ((g_playerEntity.healthStatusFlags & 0x20) != 0) {
-                    FUN_00473f10((int*)g_PlayerFlags3, 0x43);
+                    FUN_00473f10((int*)g_ScenarioFlags2, SCENARIO2_FLAG_YAWN_POISONED);
                     g_playerEntity.healthStatusFlags = g_playerEntity.healthStatusFlags & 0xdf;
                 }
             } else {
@@ -1324,7 +1325,7 @@ static void menu_use_qty_merge(unsigned char slotA, unsigned char slotB)
 static void menu_use_set_flag(unsigned char slotA, unsigned char slotB)
 {
     DAT_00ae9f12 = 2;
-    Flg_on((int)g_PlayerFlags, 0x16);
+    Flg_on((int)g_ScenarioFlags, SCENARIO_FLAG_CHEMICAL_COMBINE);
 }
 
 // (0x00401d40) - Combine effect 5: set mode
@@ -1405,7 +1406,7 @@ static int menu_item_check_combine(void)
     unsigned char* pbVar5 = (unsigned char*)(ITEM_SLOTS + (unsigned int)bVar4 * 2);
     unsigned char bVar2 = *pbVar5;
 
-    const unsigned char* pTable = g_ItemCombinePtrs[(char)g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4 + 1]];
+    const unsigned char* pTable = g_ItemCombinePtrs[(char)g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4 + 1]];
     const unsigned char* pRec = pTable + 1;
     unsigned char cVar6 = *pTable;
     for (; cVar6 != 0; cVar6--) {
@@ -1468,7 +1469,7 @@ static void menu_item_apply_combine(void)
         bVar4 = (DAT_00ae9f25 >> 1) - 4;
         cVar2 = *(unsigned char*)(ITEM_SLOTS + (unsigned int)bVar4 * 2);
 
-        pRec = g_ItemCombinePtrs[(char)g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4 + 1]] + 1;
+        pRec = g_ItemCombinePtrs[(char)g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4 + 1]] + 1;
         unsigned char cVar3 = *pRec;
         while (cVar3 != cVar2) {
             pRec += 4;
@@ -1501,7 +1502,7 @@ static int menu_item_use_item(void)
     bVar5 = 9;
     bVar6 = (DAT_00ae9f23 >> 1) - 4;
     bVar2 = g_ItemImageLookupTable[0x144];
-    while (DAT_00ae9f1b < bVar2) {
+    while (g_bItemMenuSelectedItemId < bVar2) {
         bVar5 = bVar5 - 1;
         bVar2 = g_ItemImageLookupTable[bVar5 + 0x13b];
     }
@@ -1523,7 +1524,7 @@ static int menu_item_use_item(void)
         }
     }
     DAT_00ae9f13 = DAT_00ae9f13 | 2;
-    FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     return 0;
 }
 
@@ -1546,7 +1547,7 @@ static int menu_item_view_model(void)
     }
     DAT_00ae9f28 = DAT_00ae9f28 + 1;
     if ((DAT_00ae9f28 & 8) == 0) {
-        FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
         return 0;
     }
     DAT_00ae9f22 = 2;
@@ -1559,7 +1560,7 @@ view_case3:
         if (DAT_00ae9f28 == 0) {
             DAT_00ae9f13 = DAT_00ae9f13 | 4;
         }
-        FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     }
     return 0;
 }
@@ -1626,7 +1627,7 @@ move_case2:
                 play_sfx(3, 4, 0);
             }
         } else if (((DAT_00ae9f23 != DAT_00ae9f25) && (bVar2 < g_TotalHeldItems)) &&
-                   (-1 < (char)g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4 + 1])) {
+                   (-1 < (char)g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4 + 1])) {
             unsigned char uVar1 = (unsigned char)menu_item_check_combine();
             switch (uVar1) {
             case 1:
@@ -1696,7 +1697,7 @@ move_case3:
     }
 
     if (DAT_00ae9f12 == 0) {
-        bVar3 = DAT_00ae9f1b;
+        bVar3 = g_bItemMenuSelectedItemId;
         if (DAT_00ae9f22 != 3) {
             if (g_TotalHeldItems <= bVar2) goto move_skip_name;
             bVar3 = *(unsigned char*)(ITEM_SLOTS + (unsigned int)bVar2 * 2);
@@ -1868,10 +1869,10 @@ static void menu_item_submenu(void)
 
     case 2:
         if ((dpad_pressed_byte1() & 0x80) == 0) {
-            FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+            FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
             if ((dpad_pressed_byte1() & 0x40) != 0) {
                 if (DAT_00ae9f24 == 0) {
-                    if ((DAT_00ae9f1b < 0xb) || (0x6e < DAT_00ae9f1b)) {
+                    if ((g_bItemMenuSelectedItemId < ITEM_CLIP) || (ITEM_NON_INFINITE_MAX < g_bItemMenuSelectedItemId)) {
                         menu_item_toggle_equip();
                         DAT_00ae9f21 = 3;
                         DAT_00ae9f27 = DAT_00ae9f27 & 0x7f;
@@ -1937,7 +1938,7 @@ static void menu_item_submenu(void)
         goto submenu_default;
     }
 
-    FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
 submenu_default:
     // Draw the item action submenu box with the selected option highlighted
     if ((DAT_00ae9f27 != 0) && ((DAT_00ae9f28 & 8) == 0)) {
@@ -2051,15 +2052,15 @@ static void menu_handle_input(void)
             if (DAT_00ae9f23 == 4) {
                 // Radio tab pre-check: without the radio item, show it as a model
                 if (DAT_00ae9f1f == 0) goto input_blink;
-                if (Flg_ck((int)DAT_00d213a0, 0x3f) == 0) {
+                if (Flg_ck((int)g_itemUseFlags, 0x3f) == 0) {
                     DAT_00ae9f49 = 0;
-                    DAT_00ae9f1b = 0x4d;
+                    g_bItemMenuSelectedItemId = ITEM_COMM_RADIO;
                     menu_load_item_model();
                 }
             }
         } else {
-            if (DAT_00ae9f1b == 0) goto input_blink;
-            if ((DAT_00ae9f1b < 0xb) || (0x6e < DAT_00ae9f1b)) {
+            if (g_bItemMenuSelectedItemId == 0) goto input_blink;
+            if ((g_bItemMenuSelectedItemId < ITEM_CLIP) || (ITEM_NON_INFINITE_MAX < g_bItemMenuSelectedItemId)) {
                 DAT_00ae9f1c = 1;
             } else {
                 DAT_00ae9f1c = 0;
@@ -2073,7 +2074,7 @@ static void menu_handle_input(void)
     }
 input_draw:
     menu_draw_cursor();
-    FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     return;
 
 input_blink:
@@ -2214,7 +2215,7 @@ static void menu_tab_file(void)
 // (0x00421010) - Top tab: Radio
 static void menu_tab_radio(void)
 {
-    if (Flg_ck((int)DAT_00d213a0, 0x3f) != 0) {
+    if (Flg_ck((int)g_itemUseFlags, 0x3f) != 0) {
         DAT_00ae9f20 = 1;
         g_usedItemId = 0x4d;
         DAT_00ae9f13 = DAT_00ae9f13 | 0x81;
@@ -2223,7 +2224,7 @@ static void menu_tab_radio(void)
     }
     if (FUN_0044e1b0() != 0) {
         DAT_00ae9f20 = 1;
-        DAT_00ae9f1b = 0;
+        g_bItemMenuSelectedItemId = 0;
     }
 }
 
@@ -2245,15 +2246,15 @@ static void menu_load_item_model(void)
     char* pcVar7;
     char* pcVar8;
 
-    if (DAT_00ae9f1b == SUBMENU_STATE_ID) {
+    if (g_bItemMenuSelectedItemId == SUBMENU_STATE_ID) {
         return;
     }
-    SUBMENU_STATE_ID = DAT_00ae9f1b;
-    if (DAT_00ae9f1b < 0x6f) {
-        bVar2 = g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4];
+    SUBMENU_STATE_ID = g_bItemMenuSelectedItemId;
+    if (g_bItemMenuSelectedItemId < ITEM_INGRAM) {
+        bVar2 = g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4];
         if (((short)(char)DAT_00ae9f1e & 0xff7f) ==
-            (unsigned short)(unsigned char)g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4]) {
-            SUBMENU_STATE_ID = DAT_00ae9f1b;
+            (unsigned short)(unsigned char)g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4]) {
+            SUBMENU_STATE_ID = g_bItemMenuSelectedItemId;
             return;
         }
     } else {
@@ -2267,9 +2268,9 @@ static void menu_load_item_model(void)
     // directory, which in this port expands to GAME_DATA_ROOT).
     strcpy(DAT_008e1cb0, GAME_DATA_ROOT);
     strcat(DAT_008e1cb0, "item_m2/");
-    if (DAT_00ae9f1b == 0x6f) {
+    if (g_bItemMenuSelectedItemId == ITEM_INGRAM) {
         pcVar6 = (char*)g_ItemModelFileNameING;
-    } else if (DAT_00ae9f1b == 0x70) {
+    } else if (g_bItemMenuSelectedItemId == ITEM_MINIMI) {
         pcVar6 = (char*)g_ItemModelFileNameMINI;
     } else {
         pcVar6 = (char*)g_ItemModelFileNames + (char)DAT_00ae9f1e * 8;
@@ -3387,19 +3388,19 @@ static void map_build_area_mask(unsigned char* state)
 static void map_update_variant(void)
 {
     if ((g_main_state_flags & 0x00800000) != 0) {
-        if (Flg_ck((int)g_PlayerFlags3, 0x23) != 0) {
-            if (Flg_ck((int)g_PlayerFlags, 0x49) == 0) { MAP_MODE = 1; return; }
+        if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_23) != 0) {
+            if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_49) == 0) { MAP_MODE = 1; return; }
         }
         MAP_MODE = 0;
         return;
     }
-    if (Flg_ck((int)g_PlayerFlags3, 0x2d) != 0) {
-        if (Flg_ck((int)g_PlayerFlags, 0x49) == 0) { MAP_MODE = 1; return; }
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_2D) != 0) {
+        if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_49) == 0) { MAP_MODE = 1; return; }
     }
-    if (Flg_ck((int)g_PlayerFlags3, 0x2e) != 0) {
-        if (Flg_ck((int)g_PlayerFlags, 0x4a) == 0) {
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_2E) != 0) {
+        if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_4A) == 0) {
             if ((g_stageId != 0) && (g_stageId != 1)) {
-                if (Flg_ck((int)g_PlayerFlags3, 0x38) != 0) { MAP_MODE = 1; return; }
+                if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_38) != 0) { MAP_MODE = 1; return; }
                 MAP_MODE = 0;
                 return;
             }
@@ -3407,8 +3408,8 @@ static void map_update_variant(void)
             return;
         }
     }
-    if (Flg_ck((int)g_PlayerFlags3, 0x38) != 0) {
-        if (Flg_ck((int)g_PlayerFlags, 0x48) == 0) { MAP_MODE = 3; return; }
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_38) != 0) {
+        if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_48) == 0) { MAP_MODE = 3; return; }
     }
     MAP_MODE = 0;
 }
@@ -4699,10 +4700,10 @@ static void itembox_refresh_item(void)
 {
     unsigned char slot = (DAT_00ae9f23 >> 1) - 4;
     if (slot < g_TotalHeldItems) {
-        DAT_00ae9f1b = *((unsigned char*)g_ItemSlotsPointer + (unsigned int)slot * 2);
+        g_bItemMenuSelectedItemId = *((unsigned char*)g_ItemSlotsPointer + (unsigned int)slot * 2);
         return;
     }
-    DAT_00ae9f1b = 0;
+    g_bItemMenuSelectedItemId = 0;
 }
 
 // 0x00420a70 - draw the menu cursor frame at the current cursor position
@@ -4821,7 +4822,7 @@ static int menu_itembox_interaction(void)
             break;
         }
         if ((dpad_pressed_byte1() & 0x40) != 0) {
-            if (g_itemboxSlots[DAT_00ae9f24].Id != 0 || DAT_00ae9f1b != 0) {
+            if (g_itemboxSlots[DAT_00ae9f24].Id != 0 || g_bItemMenuSelectedItemId != 0) {
                 DAT_00ae9f20 = 1;
                 play_sfx(3, 6, 0);
                 unsigned char slot = (DAT_00ae9f23 >> 1) - 4;
@@ -4942,7 +4943,7 @@ static int menu_itembox_interaction(void)
         break;
     }
     itembox_draw_cursor();
-    FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     return 0;
 }
 
@@ -5365,7 +5366,7 @@ static int   g_viewerScaMatrices[3 * 0x50 / 4]; // Sca[0] 0x9f94, Sca[1] 0x9fe4,
 #define DAT_00aea050 (VIEWER_ROOT_SCA->localMatrix.t[1])
 #define DAT_00aea054 (VIEWER_ROOT_SCA->localMatrix.t[2])
 
-static int   DAT_00aea084;             // 0x00aea084 - animation counter
+static int   g_bItemViewerZoomTimer;             // 0x00aea084 - animation counter
 static int   g_viewerPadWord;          // DAT_00be05b0 - pad read
 static MATRIX g_viewerMatrixBe0f60;    // 0x00be0f60
 static MATRIX g_viewerMatrixBe0f80;    // 0x00be0f80
@@ -5434,14 +5435,14 @@ static int FUN_0044ef60(short angle, int axisMask)
 // examined yet.
 static int FUN_0044ed40(void)
 {
-    unsigned char flagIndex = g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4 + 2];
+    unsigned char flagIndex = g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4 + 2];
     if ((flagIndex & 0x80) == 0) {
-        if (0x6e < DAT_00ae9f1b) {
+        if (ITEM_NON_INFINITE_MAX < g_bItemMenuSelectedItemId) {
             return 0;
         }
         unsigned char exType = g_ItemExamineTypes[flagIndex];
         if ((exType & 0xf0) == 0) {
-            DAT_00ae9f4a = 2;
+            g_bItemViewerActionIndex = 2;
             Flg_on((int)g_gameFlags_bc, (unsigned int)flagIndex);
             set_message_display(g_ItemHealTable[(unsigned int)flagIndex + 0x51], 0);
             return 1;
@@ -5457,39 +5458,40 @@ static int FUN_0044ed40(void)
             if (tries == 0) break;
         } while (bVar3 != 7);
         if (bVar3 == 7) {
-            if (DAT_00ae9f1b == 0x3e) {
+            if (g_bItemMenuSelectedItemId == ITEM_RED_BOOK) {
                 if (DAT_00ae9f5e == 0) {
-                    DAT_00ae9f4a = 1;
-                    DAT_00aea084 = 0;
+                    g_bItemViewerActionIndex = 1;
+                    g_bItemViewerZoomTimer = 0;
                     return 1;
                 }
-            } else if ((0x3e < DAT_00ae9f1b) && (DAT_00ae9f1b < 0x41)) {
-                DAT_00ae9f4a = 1;
-                DAT_00aea084 = 0;
+            } else if ((ITEM_RED_BOOK < g_bItemMenuSelectedItemId) && (g_bItemMenuSelectedItemId < ITEM_FIRST_AID_SPRAY)) {
+                g_bItemViewerActionIndex = 1;
+                g_bItemViewerZoomTimer = 0;
                 return 1;
             }
-            DAT_00ae9f4a = 2;
+            g_bItemViewerActionIndex = 2;
             Flg_on((int)g_gameFlags_bc, (unsigned int)flagIndex);
             set_message_display(g_ItemHealTable[(unsigned int)flagIndex + 0x51], 0);
             return 1;
         }
     } else {
-        switch (DAT_00ae9f1b) {
-        case 4:
-        case 5:
-        case 7:
-        case 8:
-        case 9:
+        switch (g_bItemMenuSelectedItemId) {
+        case ITEM_COLT_PYTHON_DUM:
+        case ITEM_COLT_PYTHON_MAG:
+        case ITEM_BAZOOKA_EXPLOSIVE:
+        case ITEM_BAZOOKA_ACID:
+        case ITEM_BAZOOKA_FLAME:
             if (*(char*)((unsigned int)g_ItemSlotsPointer + 1 + (unsigned int)((DAT_00ae9f23 >> 1) - 4) * 2) != 0) {
-                g_selectedItemId = DAT_00ae9f1b + 9;
-                DAT_00ae9f4a = 2;
+                g_selectedItemId = g_bItemMenuSelectedItemId + 9;
+                g_bItemViewerActionIndex = 2;
                 set_message_display(0xf0, 0);
                 return 1;
             }
             break;
         case 0x13:
-            if ((Flg_ck((int)g_PlayerFlags, 0x13) != 0) || (Flg_ck((int)g_PlayerFlags, 0) != 0)) {
-                DAT_00ae9f4a = 2;
+            if ((Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_ITEM13_USE_LOCK) != 0) ||
+                (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_STAGE_VARIANT) != 0)) {
+                g_bItemViewerActionIndex = 2;
                 set_message_display(0xf1, 0);
                 return 1;
             }
@@ -5590,23 +5592,23 @@ static void FUN_0044e660(void)
 {
     if ((g_PlayerDpadPressed >> 8) & 0x40) {
         if (FUN_0044ed40()) {
-            if (DAT_00ae9f4a != 1) {
+            if (g_bItemViewerActionIndex != 1) {
                 return;
             }
-            FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+            FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
             return;
         }
-        DAT_00ae9f4a = 2;
+        g_bItemViewerActionIndex = 2;
         // 0x0044e6ce/db/e6 - the examine text comes from the item description
         // table (0x004c6160) through its own setter, NOT from set_message_display:
         // the index here is a raw table index, so feeding it to the room/global
         // message picker showed an unrelated RDT message instead.
-        if (DAT_00ae9f1b != 0x6f) {
-            if (DAT_00ae9f1b == 0x70) {
+        if (g_bItemMenuSelectedItemId != ITEM_INGRAM) {
+            if (g_bItemMenuSelectedItemId == ITEM_MINIMI) {
                 set_item_description_message(0x4e, 0);
                 return;
             }
-            set_item_description_message(DAT_00ae9f1b - 1, 0);
+            set_item_description_message(g_bItemMenuSelectedItemId - 1, 0);
             return;
         }
         set_item_description_message(0x4d, 0);
@@ -5614,7 +5616,7 @@ static void FUN_0044e660(void)
     }
     if ((g_PlayerDpadPressed >> 8) & 0x80) {
         DAT_00ae9f49 = 5;
-        DAT_00aea084 = 0x40;
+        g_bItemViewerZoomTimer = 0x40;
         DAT_00ae9f4c = 0;
         DAT_00ae9f4e = 0;
         DAT_00ae9f50 = 0;
@@ -5694,41 +5696,41 @@ viewer_spin_input:
 // (0x0044e820) - Viewer action 1: examine spin-in animation
 static void FUN_0044e820(void)
 {
-    DAT_00aea084 = DAT_00aea084 + 1;
-    unsigned char step = DAT_00aea084 * 4;
+    g_bItemViewerZoomTimer = g_bItemViewerZoomTimer + 1;
+    unsigned char step = g_bItemViewerZoomTimer * 4;
     if (0x20 < step) {
         step = 0x20;
     }
     DAT_00ae9f5e = (DAT_00ae9f5e + step) & 0xfff;
     DAT_00ae9f56 = (DAT_00ae9f56 + (short)step * -2) & 0xfff;
     if (0x300 < DAT_00ae9f5e) {
-        DAT_00ae9f4a = 2;
-        set_message_display(g_ItemHealTable[(unsigned int)g_ItemImageLookupTable[(unsigned int)DAT_00ae9f1b * 4 + 2] + 0x51], 0);
+        g_bItemViewerActionIndex = 2;
+        set_message_display(g_ItemHealTable[(unsigned int)g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4 + 2] + 0x51], 0);
         return;
     }
-    FUN_00454fd0(0xf00 | DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(0xf00 | g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
 }
 
 // (0x0044e8c0) - Viewer action 2: examine message wait
 static void FUN_0044e8c0(void)
 {
     if ((g_menu_choice_id & 0x80) == 0) {
-        if (DAT_00ae9f1b == 0x3e) {
+        if (g_bItemMenuSelectedItemId == ITEM_RED_BOOK) {
             if (DAT_00ae9f5e != 0) {
                 Flg_on((int)g_gameFlags_bc, 0xd);
             }
-        } else if (((0x3e < DAT_00ae9f1b) && (DAT_00ae9f1b < 0x41)) && (DAT_00ae9f5e != 0)) {
-            DAT_00ae9f4a = 3;
-            DAT_00aea084 = 0x40;
+        } else if (((ITEM_RED_BOOK < g_bItemMenuSelectedItemId) && (g_bItemMenuSelectedItemId < ITEM_FIRST_AID_SPRAY)) && (DAT_00ae9f5e != 0)) {
+            g_bItemViewerActionIndex = 3;
+            g_bItemViewerZoomTimer = 0x40;
             return;
         }
-        DAT_00ae9f4a = 0;
+        g_bItemViewerActionIndex = 0;
     }
 }
 
 // (0x0044e920) - Viewer action 3: the doom book -> medal transformation.
 //
-// FUN_0044e8c0 hands control here (DAT_00ae9f4a = 3, DAT_00aea084 = 0x40) once
+// FUN_0044e8c0 hands control here (g_bItemViewerActionIndex = 3, g_bItemViewerZoomTimer = 0x40) once
 // the examine spin has opened one of the two doom books. The first 0x40 frames
 // are the viewer's normal fade-out - the same zoom/yaw/roll steps and light
 // ramp as state 5 of FUN_0044e1b0 - and the last frame does the swap:
@@ -5746,21 +5748,21 @@ static void FUN_0044e920(void)
     DAT_00aea04c = DAT_00aea04c - 0x322;
     DAT_00ae9f66 = DAT_00ae9f66 - 0xc0;
     DAT_00ae9f68 = DAT_00ae9f68 - 0x80;
-    DAT_00aea084 = DAT_00aea084 - 1;
-    g_spriteAnimB = DAT_00aea084 >> 1;
-    // 0x0044e953: the light colour ramp is a BYTE (DAT_00aea084 << 2) - 1
-    viewer_setup_lights((DAT_00aea084 << 2) - 1);
-    if (DAT_00aea084 != 0) {
+    g_bItemViewerZoomTimer = g_bItemViewerZoomTimer - 1;
+    g_spriteAnimB = g_bItemViewerZoomTimer >> 1;
+    // 0x0044e953: the light colour ramp is a BYTE (g_bItemViewerZoomTimer << 2) - 1
+    viewer_setup_lights((g_bItemViewerZoomTimer << 2) - 1);
+    if (g_bItemViewerZoomTimer != 0) {
         return;
     }
 
-    // 0x0044e9c0 - the cursor slot, read before DAT_00ae9f1b is rewritten
+    // 0x0044e9c0 - the cursor slot, read before g_bItemMenuSelectedItemId is rewritten
     unsigned char slot = (unsigned char)((unsigned char)(DAT_00ae9f23 >> 1) - 4);
-    DAT_00ae9f1b = DAT_00ae9f1b - 0x3f;     // 0 = wolf, 1 = eagle
+    g_bItemMenuSelectedItemId = g_bItemMenuSelectedItemId - 0x3f;     // 0 = wolf, 1 = eagle
     LoadFile((char*)g_MedalPixPath, g_TimImageBuffer__bitmap, 0x20);
-    LoadItemImage((int)DAT_00ae9f1b, (int)g_ItemSlotIndices[slot], (int)g_TimImageBuffer__bitmap);
-    DAT_00ae9f1b = DAT_00ae9f1b + 0x24;     // ITEM_WOLF_MEDAL / ITEM_EAGLE_MEDAL
-    ITEM_SLOTS[(unsigned int)slot * 2] = DAT_00ae9f1b;
+    LoadItemImage((int)g_bItemMenuSelectedItemId, (int)g_ItemSlotIndices[slot], (int)g_TimImageBuffer__bitmap);
+    g_bItemMenuSelectedItemId = g_bItemMenuSelectedItemId + 0x24;     // ITEM_WOLF_MEDAL / ITEM_EAGLE_MEDAL
+    ITEM_SLOTS[(unsigned int)slot * 2] = g_bItemMenuSelectedItemId;
     ITEM_SLOTS[(unsigned int)slot * 2 + 1] = 1;
     menu_load_item_model();
     DAT_00ae9f49 = 0;
@@ -5833,7 +5835,7 @@ int FUN_0044e1b0(void)
         DAT_00ae9f4e = 0;
         DAT_00ae9f50 = 0;
         RotMatrix((SVECTOR*)&DAT_00ae9f64, (MATRIX*)VIEWER_BASE_MATRIX);
-        DAT_00aea084 = 0x40;
+        g_bItemViewerZoomTimer = 0x40;
         // fall through
     case 1:
         // Intro animation (0x0044e2ff-0x0044e31b): close in while spinning.
@@ -5843,25 +5845,25 @@ int FUN_0044e1b0(void)
         DAT_00aea04c = DAT_00aea04c + 0x322;
         DAT_00ae9f66 = DAT_00ae9f66 + 0xc0;
         DAT_00ae9f68 = DAT_00ae9f68 + 0x80;
-        DAT_00aea084 = DAT_00aea084 - 1;
-        if (DAT_00aea084 != 0) goto viewer_draw;
+        g_bItemViewerZoomTimer = g_bItemViewerZoomTimer - 1;
+        if (g_bItemViewerZoomTimer != 0) goto viewer_draw;
         switch (DAT_00ae9f10) {
         case 0:
             DAT_00ae9f49 = 2;
-            DAT_00ae9f4a = 0;
+            g_bItemViewerActionIndex = 0;
             goto viewer_draw;   // no message for the plain status-screen viewer
         case 3:
-            g_selectedItemId = DAT_00ae9f1b;
+            g_selectedItemId = g_bItemMenuSelectedItemId;
             DAT_00ae9f49 = 3;
             if (g_TotalHeldItems < g_totalInventorySlots) {
                 uVar7 = 0xc0;
             } else {
-                if (((10 < DAT_00ae9f1b) && (DAT_00ae9f1b < 0x13)) || (DAT_00ae9f1b == 0x2f)) {
+                if (((ITEM_EXPLOSIVE_ROUNDS < g_bItemMenuSelectedItemId) && (g_bItemMenuSelectedItemId < ITEM_EMPTY_BOTTLE)) || (g_bItemMenuSelectedItemId == ITEM_INK_RIBBONS)) {
                     bVar5 = 0;
                     bVar4 = g_totalInventorySlots;
                     do {
                         unsigned char* pbVar2 = (unsigned char*)((unsigned int)bVar5 * 2 + (unsigned int)g_ItemSlotsPointer);
-                        if ((*pbVar2 == DAT_00ae9f1b) &&
+                        if ((*pbVar2 == g_bItemMenuSelectedItemId) &&
                             ((unsigned short)((unsigned short)pbVar2[1] +
                              (unsigned short)*(unsigned char*)(*(int*)((int)g_room_event_index + 8) + 9)) < 0xfb)) {
                             set_message_display(0xc0, 0);
@@ -5876,7 +5878,7 @@ int FUN_0044e1b0(void)
             break;
         case 4:
             uVar7 = 0xc1;
-            g_selectedItemId = DAT_00ae9f1b;
+            g_selectedItemId = g_bItemMenuSelectedItemId;
             DAT_00ae9f49 = 3;
             break;
         case 6:
@@ -5888,14 +5890,14 @@ int FUN_0044e1b0(void)
         }
         set_message_display(uVar7, 0);
 viewer_draw:
-        g_spriteAnimB = 0x20 - (DAT_00aea084 >> 1);
-        // 0x0044e538: intro colour fades in as 0xFF - (DAT_00aea084 << 2)
-        viewer_setup_lights(0xff - (DAT_00aea084 << 2));
+        g_spriteAnimB = 0x20 - (g_bItemViewerZoomTimer >> 1);
+        // 0x0044e538: intro colour fades in as 0xFF - (g_bItemViewerZoomTimer << 2)
+        viewer_setup_lights(0xff - (g_bItemViewerZoomTimer << 2));
         break;
 
     case 2:
         // Display mode: rotation input + examine confirm (action table)
-        g_viewerActions[DAT_00ae9f4a]();
+        g_viewerActions[g_bItemViewerActionIndex]();
         break;
 
     case 3:
@@ -5905,7 +5907,7 @@ viewer_draw:
 viewer_state3:
         if ((g_menu_choice_id & 0x80) == 0) {
             DAT_00ae9f49 = 5;
-            DAT_00aea084 = 0x40;
+            g_bItemViewerZoomTimer = 0x40;
             if (DAT_00ae9f10 != 4) {
                 if ((g_menu_choice_id & 1) == 0) {
                     uVar7 = 6;
@@ -5930,24 +5932,24 @@ viewer_state3:
 
     case 5:
         // Exit animation (0x0044e397-0x0044e3ba): mirrors the intro
-        DAT_00aea084 = DAT_00aea084 - 1;
-        if (DAT_00aea084 == 0) {
+        g_bItemViewerZoomTimer = g_bItemViewerZoomTimer - 1;
+        if (g_bItemViewerZoomTimer == 0) {
             return 1;
         }
         DAT_00aea04c = DAT_00aea04c - 0x322;
         DAT_00ae9f66 = DAT_00ae9f66 - 0xc0;
         DAT_00ae9f68 = DAT_00ae9f68 - 0x80;
-        g_spriteAnimB = DAT_00aea084 >> 1;
-        // 0x0044e3d0: exit colour fades out as (DAT_00aea084 << 2) - 1
-        viewer_setup_lights((DAT_00aea084 << 2) - 1);
+        g_spriteAnimB = g_bItemViewerZoomTimer >> 1;
+        // 0x0044e3d0: exit colour fades out as (g_bItemViewerZoomTimer << 2) - 1
+        viewer_setup_lights((g_bItemViewerZoomTimer << 2) - 1);
         break;
     }
 
     if (DAT_00ae9f49 != 0) {
         FUN_0044ea50();
     }
-    if ((DAT_00ae9f10 == 0) && (DAT_00ae9f4a == 0)) {
-        FUN_00454fd0(DAT_00ae9f1b, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    if ((DAT_00ae9f10 == 0) && (g_bItemViewerActionIndex == 0)) {
+        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     }
     return 0;
 }

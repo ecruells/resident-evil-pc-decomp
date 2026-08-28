@@ -217,8 +217,12 @@ static_assert(sizeof(ScaMatrixData) == 0x50, "ScaMatrixData size mismatch");
 #define ITEM_BOTTLE_WATER2      0x4E
 #define ITEM_EAGLE_WOLF_BOOK    0x4F
 
-// Highest item ID used by the game (special items with quantity)
-#define ITEM_ID_MAX             0x6E
+// Highest non infinite item id
+#define ITEM_NON_INFINITE_MAX   0x6E
+
+// PC exclusive weapons (rewards for finishing the game under 4 hours)
+#define ITEM_INGRAM             0x6F    // Jill's exclusive sub machinegun
+#define ITEM_MINIMI             0x70    // Chris' exclusive machinegun
 
 // ============================================================================
 // RDT Light structure (0x14 / 20 bytes each)

@@ -2827,7 +2827,7 @@ static void player_door_open_sequence(void)      // 0x00457390
         g_playerEntity.pushVelocity.x =
             (short)((short)joints->world.t[0] -
                     (short)g_playerEntity.scaMatrixData.localMatrix.t[0]);
-        g_playerEntity.unk_8e = (unsigned short)(g_playerEntity.unk_8e + g_svecScratch.y);
+        g_playerEntity.posY = (unsigned short)(g_playerEntity.posY + g_svecScratch.y);
         g_playerEntity.pushVelocity.z =
             (short)((short)joints->world.t[2] -
                     (short)g_playerEntity.scaMatrixData.localMatrix.t[2]);
@@ -2914,7 +2914,7 @@ static void player_door_open_sequence(void)      // 0x00457390
         ((unsigned char*)&g_message_flags)[0] |= 0x40;
 
         g_playerEntity.pushVelocity.x = 0;
-        g_playerEntity.unk_8e =
+        g_playerEntity.posY =
             (unsigned short)(short)g_playerEntity.scaMatrixData.localMatrix.t[1];
         g_main_state_flags2 &= 0xffbfffff;   // consume check_door's 0x400000
         g_playerEntity.pushVelocity.z = 0;
@@ -3549,7 +3549,7 @@ static void player_behavior_0b_ladder(void)
                 if ((g_playerEntity.animation_frame_id == 0x0f) &&
                     ((g_playerEntity.unk_03 & 0x10) != 0)) {
                     g_playerDisplacement = 0xfffff8f8;
-                    g_playerEntity.unk_8e = 0xa8c;
+                    g_playerEntity.posY = 0xa8c;
                     if (0x800 < g_playerEntity.directionAngle) {
                         g_playerDisplacement = 0x708;
                     }
@@ -3593,7 +3593,7 @@ ladder_step_done:
         g_playerEntity.position.z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
         set_screen_effect_struct((int)DAT_00be63c8, 500, 500, 700, 700);
         g_playerEntity.pushVelocity.x = 0;
-        g_playerEntity.unk_8e = (unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+        g_playerEntity.posY = (unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[1];
         g_playerEntity.pushVelocity.z = 0;
         if ((g_playerEntity.unk_03 & 0x10) != 0) {
             g_playerEntity.action_state = 8;
@@ -3820,15 +3820,15 @@ unsigned char weapon_autoaim_check(void)
     unsigned char itemId = slot[0];
     unsigned char qty = slot[1];
 
-    if (itemId == 1) return 0;            // knife: no auto-aim
-    if (itemId == 6) return qty;
-    if ((qty & 0x7f) != 0) return qty & 0x7f;
+    if (itemId == ITEM_KNIFE) return 0; // knife has no ammo
+    if (itemId == ITEM_FLAMETHROWER) return qty; // flamethrower can have 255 ammo
+    if ((qty & 0x7f) != 0) return qty & 0x7f; // limit ammo to 127
 
-    if (Flg_ck((int)g_PlayerFlags, 0x7e) != 0 && itemId == 10) {
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_INF_R_LAUNCHER) != 0 && itemId == 10) {
         slot[1] = 4;
         return 4;
     }
-    if (itemId < 0x6f) return 0;
+    if (itemId < ITEM_INGRAM) return 0;
     slot[1] = 4;
     return 4;
 }
@@ -6466,7 +6466,7 @@ void update_player_anim(void)
         ((g_stageId == 3) && (g_roomId == 0xd))) {
         player_update_shadow_sprite((int)g_playerEntity.scaMatrixData.localMatrix.t,
                                     (int)&g_playerEntity.pushVelocity,
-                                    (int)g_playerEntity.unk_8e,
+                                    (int)g_playerEntity.posY,
                                     (int)g_playerEntity.directionAngle);
     }
 
@@ -6627,8 +6627,8 @@ int door_try_enter(unsigned char* entry)
 
     if (need == 0x33 && (g_playerEntity.id & 3) == 1) {
         // 0x0041b474: Jill substitutes the lockpick for this key, but only once
-        // she has it (g_PlayerFlags bit 0x7c).
-        if (Flg_ck((int)&g_PlayerFlags, 0x7c) == 0) {
+        // she has it (g_ScenarioFlags bit SCENARIO_FLAG_HAS_LOCKPICK).
+        if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) == 0) {
             door_locked_message(0xd);
             return 0;
         }
@@ -6846,18 +6846,18 @@ int check_door_side(unsigned char* entry)
 // flag_bank_set (0x0041b850) — room_check_actions[7]
 // Sets or clears one bit of a selected flag bank. Entry +2 selects the bank
 // (0=Player, 1=Player3, 2=Locks, 3=RoomEvent, 4=Sys, 5=main_state_flags,
-// 6=message_flags, 7=roomItems, 8=Room, 9=DAT_00d213a0), +4 the bit index
+// 6=message_flags, 7=roomItems, 8=Room, 9=g_itemUseFlags), +4 the bit index
 // (MSB-first: bit 0 is 0x80000000), +6 nonzero = set, zero = clear.
 // ============================================================================
 int flag_bank_set(unsigned char* entry)
 {
     unsigned int* pFlags;
     switch (*(unsigned short*)(entry + 2)) {
-    case 0:  pFlags = (unsigned int*)&g_PlayerFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
-    case 1:  pFlags = (unsigned int*)&g_PlayerFlags3[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 0:  pFlags = (unsigned int*)&g_ScenarioFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
+    case 1:  pFlags = (unsigned int*)&g_ScenarioFlags2[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 2:  pFlags = (unsigned int*)&g_LocksFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 3:  pFlags = (unsigned int*)&g_RoomEventFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
-    // Banks 4 and 9 are DWORD arrays (g_SysFlags[2], DAT_00d213a0[2]), so
+    // Banks 4 and 9 are DWORD arrays (g_SysFlags[2], g_itemUseFlags[2]), so
     // `&g_SysFlags[(bit>>3) & ~3]` is ELEMENT indexing = byte offset * 4 and
     // lands past the array for every bit >= 32 (the original does byte
     // arithmetic: (uint*)((int)g_SysFlags + ((bit>>3) & 0xfffffffc))). Bit
@@ -6870,7 +6870,7 @@ int flag_bank_set(unsigned char* entry)
     case 6:  pFlags = (unsigned int*)&g_message_flags; break;
     case 7:  pFlags = (unsigned int*)&g_roomItemsFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 8:  pFlags = (unsigned int*)&g_RoomFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
-    default: pFlags = (unsigned int*)((char*)DAT_00d213a0 + ((*(unsigned short*)(entry + 4) >> 3) & ~3u)); break;
+    default: pFlags = (unsigned int*)((char*)g_itemUseFlags + ((*(unsigned short*)(entry + 4) >> 3) & ~3u)); break;
     }
 
     unsigned char bit = (unsigned char)*(unsigned short*)(entry + 4);
@@ -7017,7 +7017,7 @@ int check_desk(unsigned char* deskId)
                 return 0;
             }
             if (Flg_ck((int)g_LocksFlags, *(unsigned short*)(deskId + 2)) == 0) {
-                if ((get_item_slot(0x3d) < 0) && (Flg_ck((int)g_PlayerFlags, 0x7c) == 0)) {
+                if ((get_item_slot(ITEM_DESK_KEY) < 0) && (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) == 0)) {
                     set_message_display(0xd8, 0xff);
                     return 0;
                 }
@@ -7085,7 +7085,7 @@ int check_typewriter(unsigned char* entry)
     if ((g_typewriter_state == 0) &&
         (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
         ((unsigned short)g_message_flags & 0x40) != 0) {
-        int ribbonSlot = get_item_slot(0x2f);
+        int ribbonSlot = get_item_slot(ITEM_INK_RIBBONS);
         if (ribbonSlot >= 0) {
             g_room_event_index = entry;
             *(unsigned short*)(entry + 2) = (unsigned short)ribbonSlot;
@@ -7094,7 +7094,7 @@ int check_typewriter(unsigned char* entry)
             return 0;
         }
         if ((g_playerEntity.id == 1) || (g_playerEntity.id == 5)) {
-            if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+            if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                 g_room_event_index = entry;
                 *(unsigned short*)(entry + 2) = (unsigned short)ribbonSlot;
                 g_typewriter_state = 1;
@@ -7111,7 +7111,7 @@ int check_typewriter(unsigned char* entry)
 // ============================================================================
 // stairs_height_update (0x0041bf90) — room_check_actions[0x11]
 // Sets the player's height on stairs. Entry +2 selects which edge of the zone
-// (+4 length, +6 step) the height ramps from; the player's Y and unk_8e are
+// (+4 length, +6 step) the height ramps from; the player's Y and posY are
 // set to (distance/stepCount + 1) * step so walking the zone climbs smoothly.
 // ============================================================================
 int stairs_height_update(unsigned char* entry)
@@ -7127,7 +7127,7 @@ int stairs_height_update(unsigned char* entry)
     int step = ((short)(local4 / (int)(unsigned int)*(unsigned short*)(entry + 4)) + 1) *
                (int)*(short*)(entry + 6);
     g_playerEntity.scaMatrixData.localMatrix.t[1] = step;
-    g_playerEntity.unk_8e = (unsigned short)step;
+    g_playerEntity.posY = (unsigned short)step;
     return 0;
 }
 

@@ -9,11 +9,9 @@
 extern void Flg_on(int baseAddr, unsigned int bitIndex);              // 0x00473ef0
 extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex);       // 0x00473f10 - Flg_off
 
-// The panel lives on its own room camera. Bit 0x20 of g_PlayerFlags (0x00be98c0)
+// The panel lives on its own room camera. Bit SCENARIO_FLAG_INTERACTIVE_SCREEN of g_ScenarioFlags (0x00be98c0)
 // is the "an interactive screen is up" gate that check_and_display_interactive_screen
 // polls; the panel is responsible for clearing it when it is dismissed.
-#define PLAYER_FLAG_INTERACTIVE_SCREEN 0x20
-#define PLAYER_FLAG_PANEL_SOLVED       0x21
 
 // 0x004ba960..0x004ba998 - Initial lit-state tables selected by the room's
 // interactive-screen mode and player character. Each table has nine entries,
@@ -70,16 +68,16 @@ static void passcode_panel_init(void)
     g_labSlidesScrollX = 0;
     g_labSlidesScrollY = 0;
 
-    // 0x0042a137/0x0042a17c: these two checks read g_PlayerFlags (0x00be98c0),
+    // 0x0042a137/0x0042a17c: these two checks read g_ScenarioFlags (0x00be98c0),
     // NOT the g_SysFlags bank (0x00be41c8) that check_and_display_interactive_screen
     // uses to pick the screen type. The bit numbers collide, the banks do not.
     const unsigned char* initialStates = s_passcodePanelInitialStates[0];
-    if (Flg_ck((int)g_PlayerFlags, 0x1e) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PANEL_VARIANT_A) != 0) {
         // 0x0042a17c..0x0042a1a2: the alternate interactive screen mode.
         initialStates = (g_playerEntity.id == 1)
             ? s_passcodePanelInitialStates[2]
             : s_passcodePanelInitialStates[0];
-    } else if (Flg_ck((int)g_PlayerFlags, 0x1f) != 0) {
+    } else if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PANEL_VARIANT_B) != 0) {
         initialStates = (g_playerEntity.id == 1)
             ? s_passcodePanelInitialStates[3]
             : s_passcodePanelInitialStates[1];
@@ -103,7 +101,7 @@ static void passcode_panel_finish(void)
     // CLEARS the interactive-screen gate to hand control back to the room. Setting
     // it instead left check_and_display_interactive_screen re-entering this
     // function every frame, so the panel never closed.
-    FUN_00473f10((int*)g_PlayerFlags, PLAYER_FLAG_INTERACTIVE_SCREEN);
+    FUN_00473f10((int*)g_ScenarioFlags, SCENARIO_FLAG_INTERACTIVE_SCREEN);
 }
 
 // 0x0042a230 - Navigate the 3x3 panel and dispatch confirm/cancel input.
@@ -212,9 +210,9 @@ static void passcode_panel_animation_finish(void)
     if (g_passcodePanelTimer == 0) {
         ++g_labSlidesFuncIndex;
         play_sfx(2, 0x18, 0);
-        // 0x0042a477 pushes 0x00be98c0 - g_PlayerFlags, not g_SysFlags. This is
+        // 0x0042a477 pushes 0x00be98c0 - This is
         // the bit the room script waits on to unlock the door.
-        Flg_on((int)g_PlayerFlags, PLAYER_FLAG_PANEL_SOLVED);
+        Flg_on((int)g_ScenarioFlags, SCENARIO_FLAG_PANEL_SOLVED);
     }
 }
 
@@ -333,7 +331,7 @@ static void display_passcode_panel(void)
 void check_and_display_interactive_screen(void)
 {
     const unsigned int interactive =
-        Flg_ck((int)g_PlayerFlags, PLAYER_FLAG_INTERACTIVE_SCREEN);
+        Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_INTERACTIVE_SCREEN);
     if (interactive != 0) {
         if (g_labSlidesState == 0) {
             // The original clears the first four bytes of the shared state
@@ -360,5 +358,5 @@ void check_and_display_interactive_screen(void)
     // 0x0042a0ad: the flag is re-read AFTER the dispatch, not reused from the
     // entry test. The cancel path clears it inside passcode_panel_finish, and
     // the original records that cleared value here.
-    g_labSlidesState = (int)Flg_ck((int)g_PlayerFlags, PLAYER_FLAG_INTERACTIVE_SCREEN);
+    g_labSlidesState = (int)Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_INTERACTIVE_SCREEN);
 }

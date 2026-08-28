@@ -199,20 +199,20 @@ static int      s_effectPos[3];             // 0x004d6d40 - the bonus billboard 
 // ============================================================================
 // ending_select_id (0x00411190)
 // The ending id is (Barry/Rebecca alive) x (the partner rescued) x character.
-// Flag 0xC0 of g_PlayerFlags3 is the "partner survived" bit, 0x4B the
+// Flag SCENARIO2_FLAG_PARTNER_ALIVE of g_ScenarioFlags2 is the "partner survived" bit, SCENARIO2_FLAG_SECOND_SURVIVOR the
 // "second survivor" bit.
 // ============================================================================
 static void ending_select_id(void)
 {
-    if (Flg_ck((int)g_PlayerFlags3, 0xC0) == 0) {
-        if (Flg_ck((int)g_PlayerFlags3, 0x4B) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PARTNER_ALIVE) == 0) {
+        if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_SECOND_SURVIVOR) != 0) {
             s_endingId = ((g_playerEntity.id & 3) == CHAR_CHRIS) ? 6 : 7;
             return;
         }
         s_endingId = ((g_playerEntity.id & 3) == CHAR_CHRIS) ? 4 : 5;
         return;
     }
-    if (Flg_ck((int)g_PlayerFlags3, 0x4B) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_SECOND_SURVIVOR) != 0) {
         s_endingId = 3;
         return;
     }
@@ -823,7 +823,7 @@ void ending_state(void)
     // The backdrop is the character's "escaped" still. Flag 0x7B is the
     // already-cleared-once bit, which swaps in the alternate stills.
     const char* bgPath;
-    if (Flg_ck((int)g_PlayerFlags, 0x7B) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) != 0) {
         bgPath = ((g_playerEntity.id & 3) == CHAR_CHRIS)
                      ? GAME_DATA_ROOT "data\\clis01.pix"
                      : GAME_DATA_ROOT "data\\jill01.pix";
@@ -876,8 +876,8 @@ void ending_state(void)
     s_stepDone = (unsigned char)(s_endingTable[s_endingId].plate ^ 1);
 
     // The congratulations movie: 24/25/26 per character when the plate group
-    // is 1, else 27. Flag 0x7E is "already has the rocket launcher".
-    if (Flg_ck((int)g_PlayerFlags, 0x7E) != 0) {
+    // is 1, else 27. Flag 0x7E is "has infinite rocket launcher".
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_INF_R_LAUNCHER) != 0) {
         s_fmvCharId = 2;
     } else {
         s_fmvCharId = (unsigned char)(g_playerEntity.id & 3);
@@ -892,7 +892,7 @@ void ending_state(void)
     } else {
         g_selectedFmvId = 27;
     }
-    if (Flg_ck((int)g_PlayerFlags, 0x7B) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) != 0) {
         g_selectedFmvId = 26;
     }
 
@@ -939,14 +939,14 @@ void ending_state(void)
     s_hasSpecialKey = 0;
     if (g_TotalHeldItems != 0) {
         for (unsigned short i = 0; i < g_TotalHeldItems; i++) {
-            if (g_ItemsSlots[i].Id == 0x38) {
+            if (g_ItemsSlots[i].Id == ITEM_SPECIAL_KEY) {
                 s_hasSpecialKey = 1;
                 break;
             }
         }
     }
     for (unsigned short i = 0; i < 48; i++) {
-        if (g_itemboxSlots[i].Id == 0x38) {
+        if (g_itemboxSlots[i].Id == ITEM_SPECIAL_KEY) {
             s_hasSpecialKey++;
             break;
         }
@@ -973,7 +973,7 @@ void ending_state(void)
     s_underTimeLimit = (g_gameTimerSnapshot < 0x69780) ? 1 : 0;
 
     s_grantRocket = 0;
-    if (Flg_ck((int)g_PlayerFlags, 0x7E) != 0) s_grantRocket = 1;
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_INF_R_LAUNCHER) != 0) s_grantRocket = 1;
     if (g_SavesCounter == 1) s_grantRocket = 1;
 
     LoadFile(GAME_DATA_ROOT "data\\bio_card.dat", g_BioCardData, 0x20);
@@ -983,7 +983,7 @@ void ending_state(void)
     g_SavesCounter = 0;
     g_stageId = 0;
     g_playerEntity.healthStatusFlags = 0;
-    g_playerEntity.health = (short)((g_playerEntity.id & 1) * -0x2C + 0x8C);
+    g_playerEntity.health = (short)((g_playerEntity.id & 1) * -44 + 140);
     g_PlayerHealthCopy = g_playerEntity.health;
 
     SetInitialItems();
@@ -991,27 +991,27 @@ void ending_state(void)
     unsigned char slot = g_TotalHeldItems;
     if ((s_effectsEnabled != 0) || (s_grantRocket != 0)) {
         // The no-save run and the carried-over unlock both hand out the
-        // rocket launcher (item 0x0a) and raise its permanent flag.
-        Flg_on((int)g_PlayerFlags, 0x7E);
-        g_ItemsSlots[slot].Id = 0x0A;
+        // inf. rocket launcher (item 0x0a) and raise its permanent flag.
+        Flg_on((int)g_ScenarioFlags, SCENARIO_FLAG_INF_R_LAUNCHER);
+        g_ItemsSlots[slot].Id = ITEM_ROCKET_LAUNCHER;
         g_ItemsSlots[slot].qty = 1;
         g_TotalHeldItems++;
         slot++;
     }
     if (s_hasSpecialKey != 0) {
-        g_ItemsSlots[slot].Id = 0x38;
+        g_ItemsSlots[slot].Id = ITEM_SPECIAL_KEY;
         g_ItemsSlots[slot].qty = 1;
         g_TotalHeldItems++;
         slot++;
     }
     if (s_underTimeLimit != 0) {
         g_ItemsSlots[slot].Id =
-            ((g_playerEntity.id & 3) != CHAR_CHRIS) ? 0x6F : 0x70;
+            ((g_playerEntity.id & 3) != CHAR_CHRIS) ? ITEM_INGRAM : ITEM_MINIMI;
         g_ItemsSlots[slot].qty = 1;
         g_TotalHeldItems++;
     }
 
-    Flg_on((int)g_PlayerFlags, 0x7B);
+    Flg_on((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH);
 
     setSomeColor(128, 128, 128);
     g_SpecialRoomLightState = (short)0xFFFF;

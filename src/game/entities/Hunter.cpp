@@ -1179,7 +1179,7 @@ static void hunter_atk_swing(void) // 0x00417480
                 g_playerEntity.isBeingAttackedFlag = 1;
                 *(unsigned int*)&g_playerEntity.animationId = 0x00640002;
                 ENTITY->action_state = 2;
-                if (Flg_ck((int)g_PlayerFlags, 0x7B) != 0) {
+                if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) != 0) {
                     g_playerEntity.health = (short)(g_playerEntity.health - 13);
                     return;
                 }
@@ -1427,7 +1427,7 @@ static void hunter_dodge_swipe(void) // 0x00417ba0
                                                        rec->joint_idx * 0x7C),
                                         0x30, 0x80820, (void*)0x606060);
                     Snd_em(3);
-                    if (Flg_ck((int)g_PlayerFlags, 0x7B) != 0) {
+                    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) != 0) {
                         g_playerEntity.health = (short)(g_playerEntity.health - 0x14);
                         return;
                     }

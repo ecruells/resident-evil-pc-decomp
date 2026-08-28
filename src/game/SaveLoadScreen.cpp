@@ -732,8 +732,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             // Chris always spends one when the typewriter offers it.
             if ((useInkRibbon != 0) &&
                 (((g_playerEntityPointer.id & 3) != 1) ||
-                 (Flg_ck((int)g_PlayerFlags, 0x7b) != 0))) {
-                g_selectedItemId = 0x2F;   // ink ribbon
+                 (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) != 0))) {
+                g_selectedItemId = ITEM_INK_RIBBONS;
                 use_room_action_item();
             }
 

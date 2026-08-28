@@ -675,7 +675,7 @@ void wasp_behavior_sting(void)
         g_playerEntity.isBeingAttackedFlag = 1;
         g_playerEntity.action_behavior     = 100;
 
-        short dmg = (Flg_ck((int)g_PlayerFlags, 0x7B) == 0)
+        short dmg = (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
                     ? (short)((-1 - (unsigned short)WA_BIG) * 4)
                     : (short)((-1 - (unsigned short)WA_BIG) * 10);
         g_playerEntity.health = (short)(g_playerEntity.health + dmg);
@@ -814,7 +814,7 @@ void wasp_behavior_grab(void)
             g_playerEntity.pad_174 = 0x96;                               // 150-frame timer
         }
 
-        if (Flg_ck((int)g_PlayerFlags, 0x7B) == 0) {
+        if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
             g_playerEntity.health = (short)(g_playerEntity.health - 8);
         } else {
             g_playerEntity.health = (short)(g_playerEntity.health - 15);

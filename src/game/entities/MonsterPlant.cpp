@@ -421,7 +421,7 @@ void mp_damaged(void)
 {
     MP_HITS = (short)(MP_HITS + 1);
     if ((unsigned short)MP_HITS > 3) {
-        Flg_on((int)(void*)g_PlayerFlags, 0x5B);
+        Flg_on((int)(void*)g_ScenarioFlags, SCENARIO_FLAG_MONSTER_PLANT_PROG);
     }
 
     MP_STATE32 = MP_STATE_BK;

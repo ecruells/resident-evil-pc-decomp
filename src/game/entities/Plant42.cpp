@@ -449,7 +449,7 @@ static void plant42_sweep_hit(void)
     }
 
     Play3DSnd(2, soundId, 0, soundPos);
-    if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
         g_playerEntity.health -= 0x10;
     else
         g_playerEntity.health -= 0x19;
@@ -657,10 +657,10 @@ static void plant42_behavior_spit(void)
             g_playerEntity.isBeingAttackedFlag = 1;
             *(unsigned int*)&g_playerEntity.animationId = 0x00640002;
             p42_step() -= 8;
-            if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
+            if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
                 g_playerEntity.health -= 8;
             else
-                g_playerEntity.health -= 0xf;
+                g_playerEntity.health -= 15;
             if (g_playerEntity.health < 0) g_playerEntity.health = 1;
             Play3DSnd(2, 2, 0, joint_sound_pos(14));
             return;
@@ -913,7 +913,7 @@ static void plant42_behavior_hold(void)
         g_playerEntity.animFrameId = 8;
         g_playerEntity.action_behavior = 2;
         g_playerEntity.action_state = 0;
-        if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0)
+        if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
             g_playerEntity.health -= 0x14;
         else
             g_playerEntity.health -= 0x28;
@@ -1657,7 +1657,7 @@ static void plant42_ambient_effects(void)
 // The "last vine down" payoff, shared by 0x00465310 and plant42_die.
 static void plant42_award_kill(void)
 {
-    Flg_on((int)g_PlayerFlags, 0x29);
+    Flg_on((int)g_ScenarioFlags, SCENARIO_FLAG_PLANT42_DEAD);
     if ((g_playerEntity.id & 1) != 0)
         g_message_flags |= 0x100;
     for (int i = 5; ; --i) {

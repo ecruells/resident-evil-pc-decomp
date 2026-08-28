@@ -72,7 +72,6 @@ extern void play_sound_and_voice_effect(int type, int id);        // SoundSystem
 extern int SubmitEffectSprite_Ex(TextureDesc* texture, unsigned short fade,
                                  int slot, int pageCount, int depthKey);
 
-#define PLAYER_FLAG_INTERACTIVE_SCREEN 0x20
 
 // ============================================================================
 // The shared interactive-screen state block (0x00d22790)
@@ -2863,7 +2862,7 @@ static void computer_lab_finish(void)
     cl_free_textures();
     g_roomCameraId = g_interactiveScreenSavedCameraId;
     check_camera_switch(1);
-    FUN_00473f10((int*)g_PlayerFlags, PLAYER_FLAG_INTERACTIVE_SCREEN);
+    FUN_00473f10((int*)g_ScenarioFlags, SCENARIO_FLAG_INTERACTIVE_SCREEN);
     g_playerEntity.scaMatrixData.localMatrix.t[1] = g_labSlidesSavedPlayerY;
 }
 

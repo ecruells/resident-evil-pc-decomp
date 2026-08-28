@@ -1887,8 +1887,8 @@ unsigned char  g_ScriptContinueFlag = 0;                // 0x00bf07fa
 unsigned char* g_RoomEventScripts = NULL;                     // 0x00d213b4
 unsigned char* g_RoomScdOpcodes = NULL;                  // 0x00d213b8
 
-// SCD flag bank 9
-unsigned int   DAT_00d213a0[2] = {};                    // 0x00d213a0
+// Per-frame item-use flag bank (SCD flag bank 9) - see Globals.h
+unsigned int   g_itemUseFlags[2] = {};                // 0x00d213a0
 
 // Mirror (planar reflection) parameters - set by SCD opcode 0x0F
 unsigned short g_mirrorExtentMin = 0;                   // 0x00d211c4

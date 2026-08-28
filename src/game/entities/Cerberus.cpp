@@ -907,7 +907,7 @@ void cerberus_beh_patrol(void)
 //     strafe, so the dog lines up a killing lunge;
 //   * otherwise behaviour_flags 5, the running leap.
 // The health thresholds are difficulty-dependent: 13 normally, 17 on the easy
-// flag (g_PlayerFlags bit 0x7B).
+// flag (g_ScenarioFlags bit SCENARIO_FLAG_SECOND_PLAYTHROUGH).
 //
 // Not facing yet: wind the swerve counter up, and once the dog is roughly
 // aligned (turn step 0x400 returns 0) latch CB_AI_LOCKED_ON.
@@ -922,7 +922,7 @@ void cerberus_consider_attack(void)
     if ((short)turn_toward_target(
             (VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t, 0x100) == 0) {
         unsigned char poisoned = g_playerEntity.healthStatusFlags & 8;
-        int easy = Flg_ck((int)g_PlayerFlags, 0x7B);
+        int easy = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH);
         // `(-(poisoned == 0) & 0x1a) + 100` - 126 when healthy, 100 when poisoned.
         short chance = (short)((poisoned == 0 ? 0x1A : 0) + 100);
         short threshold = easy == 0 ? (short)0x0D : (short)0x11;
@@ -1156,7 +1156,7 @@ unsigned char cerberus_bite_player(void)
 {
     ENTITY->hit_state = 0;
 
-    int  easy = Flg_ck((int)g_PlayerFlags, 0x7B);
+    int  easy = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH);
     short threshold = easy == 0 ? (short)0x0D : (short)0x11;
 
     if (g_playerEntity.health < threshold
@@ -1245,7 +1245,7 @@ void cerberus_leap_airborne(void)
     g_playerPosScratch.pad = seed[3];
 
     short reach;
-    if (Flg_ck((int)g_PlayerFlags, 0x7B) == 0) {
+    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
         reach = g_playerEntity.health > 0x0C ? (short)1000 : (short)800;
     } else {
         reach = g_playerEntity.health > 0x10 ? (short)1000 : (short)800;

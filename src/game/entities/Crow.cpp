@@ -366,7 +366,7 @@ static void crow_anim_grab(void)
         // reads; the crow pecks for 4 instead of 3 when it is set.
         g_playerEntity.health =
             (short)(g_playerEntity.health -
-                    ((Flg_ck((int)g_PlayerFlags, 0x7b) == 0) ? 3 : 4));
+                    ((Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) ? 3 : 4));
         Snd_em(3);
     }
 }
@@ -740,7 +740,7 @@ static void crow_beh_peck(void)
                 if (g_playerEntity.isBeingAttackedFlag == 0) {
                     g_playerEntity.health =
                         (short)(g_playerEntity.health -
-                                ((Flg_ck((int)g_PlayerFlags, 0x7b) == 0) ? 6 : 0x10));
+                                ((Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) ? 6 : 16));
                     g_playerEntity.isBeingAttackedFlag = 1;
                     g_playerEntity.animationId     = 6;
                     g_playerEntity.animFrameId     = 5;

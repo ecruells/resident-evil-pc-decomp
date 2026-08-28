@@ -55,7 +55,7 @@ extern void*          g_RoomInitScd;
 extern DWORD          g_main_state_flags;
 // g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see BioCard.h)
 // DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
-extern unsigned int   DAT_00d213a0[2];
+extern unsigned int   g_itemUseFlags[2];
 
 // Item event table pointer (used for bounds checking)
 extern void*          g_RoomItemEventHead;         // 0x00d91bc0
@@ -121,9 +121,18 @@ int cmd_end_if(void)
 // ============================================================================
 // 0x04 - cmd_bit_test (0x00460570)
 // Test a bit in a flag bank. Returns 1 if condition matches, 0 otherwise.
-// Flag banks: 0=PlayerFlags, 1=PlayerFlags3, 2=locksFlags (g_LocksFlags),
-//             3=RoomEventFlags, 4=SysFlags, 5=main_state_flags,
-//             6=message_flags, 7=PlayerFlags2, 8=RoomFlags, 9=DAT_00d213a0
+// Flag banks: 
+//		0=g_ScenarioFlags, 
+//		1=g_ScenarioFlags2, 
+//		2=g_LocksFlags,
+//		3=g_RoomEventFlags, 
+//		4=g_SysFlags, 
+//		5=g_main_state_flags,      
+//		6=g_message_flags, 
+//		7=g_roomItemsFlags, 
+//		8=g_RoomFlags, 
+//		9=g_itemUseFlags
+//
 // ============================================================================
 int cmd_bit_test(void)
 {
@@ -132,8 +141,8 @@ int cmd_bit_test(void)
     g_ScdOpcodes += 2;
 
     switch (op1 >> 8) {
-    case 0: flagBank = (unsigned int*)&g_PlayerFlags; break;
-    case 1: flagBank = (unsigned int*)&g_PlayerFlags3; break;
+    case 0: flagBank = (unsigned int*)&g_ScenarioFlags; break;
+    case 1: flagBank = (unsigned int*)&g_ScenarioFlags2; break;
     case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
     case 3: flagBank = (unsigned int*)g_RoomEventFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
@@ -141,7 +150,7 @@ int cmd_bit_test(void)
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
     case 7: flagBank = (unsigned int*)&g_roomItemsFlags; break;
     case 8: flagBank = (unsigned int*)&g_RoomFlags; break;
-    case 9: flagBank = (unsigned int*)&DAT_00d213a0; break;
+    case 9: flagBank = (unsigned int*)g_itemUseFlags; break;
     default: return 0;
     }
 
@@ -167,8 +176,8 @@ int cmd_bit_op(void)
     g_ScdOpcodes += 4;
 
     switch (op1 >> 8) {
-    case 0: flagBank = (unsigned int*)&g_PlayerFlags; break;
-    case 1: flagBank = (unsigned int*)&g_PlayerFlags3; break;
+    case 0: flagBank = (unsigned int*)&g_ScenarioFlags; break;
+    case 1: flagBank = (unsigned int*)&g_ScenarioFlags2; break;
     case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
     case 3: flagBank = (unsigned int*)g_RoomEventFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
@@ -176,7 +185,7 @@ int cmd_bit_op(void)
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
     case 7: flagBank = (unsigned int*)&g_roomItemsFlags; break;
     case 8: flagBank = (unsigned int*)&g_RoomFlags; break;
-    case 9: flagBank = (unsigned int*)&DAT_00d213a0; break; // TODO: investigate what flags are these
+    case 9: flagBank = (unsigned int*)g_itemUseFlags; break; // per-frame item-use flags (bit itemId-0x1B usable, 0x3F radio transmission)
     default: return 0;
     }
 
@@ -566,7 +575,7 @@ int cmd_item_model_set(void)
 
     // Check for '/' character special case with Jill
     if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
-        if (Flg_ck((int)&g_PlayerFlags, 0x7b) == 0) {
+        if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
             FUN_00473f10((int*)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
             g_ScdOpcodes += 0x1a;
             return 1;
@@ -705,7 +714,7 @@ int cmd_item_model_set(void)
     deskPtr[0] = (char)(1 - (flagResult == 0));
 
     if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
-        if (Flg_ck((int)&g_PlayerFlags, 0x7b) == 0) {
+        if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
             deskPtr[0] = 0;
         }
     }
@@ -2000,17 +2009,17 @@ int cmd_light_param_set(void)
 }
 
 // ============================================================================
-// 0x41 - cmd_entity_unk8e_set (0x00432090)
-// Set an entity unk_8e field.
+// 0x41 - cmd_entity_posy_set (0x00432090)
+// Set an entity posY field.
 // ============================================================================
-int cmd_entity_unk8e_set(void)
+int cmd_entity_posy_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
     unsigned short value = scd_read_u16(0);
     g_ScdOpcodes += 2;
     if ((op1 & 0xff00) == 0) {
-        *(unsigned short*)&g_playerEntity.unk_8e = value;
+        *(unsigned short*)&g_playerEntity.posY = value;
     } else {
         *(unsigned short*)((char*)&g_playerEntity + (unsigned int)(op1 >> 8) * 0x18c + 0x82) = value;
     }
@@ -2059,14 +2068,14 @@ int cmd_scd_event_kill(void)
 }
 
 // ============================================================================
-// 0x45 - cmd_entity_unk8e_add (0x004320f0)
-// Add to player unk_8e field.
+// 0x45 - cmd_entity_posy_add (0x004320f0)
+// Add to player posY field.
 // ============================================================================
-int cmd_entity_unk8e_add(void)
+int cmd_entity_posy_add(void)
 {
     unsigned short val = scd_read_u16(0);
     g_ScdOpcodes += 2;
-    *(short*)&g_playerEntity.unk_8e += (char)(val >> 8);
+    *(short*)&g_playerEntity.posY += (char)(val >> 8);
     return 1;
 }
 
@@ -2395,11 +2404,11 @@ void* script_command_funcs_table[256] = {
     /* 0x3E */ (void*)cmd_bullet_effect_clear,    // 0x00431840
     /* 0x3F */ (void*)cmd_player_dir_test,        // 0x00431fd0
     /* 0x40 */ (void*)cmd_light_param_set,        // 0x00432010
-    /* 0x41 */ (void*)cmd_entity_unk8e_set,       // 0x00432090
+    /* 0x41 */ (void*)cmd_entity_posy_set,       // 0x00432090
     /* 0x42 */ (void*)cmd_effect_clear_typed,     // 0x00431870
     /* 0x43 */ (void*)cmd_bgm_volume_ramp,        // 0x00460d20
     /* 0x44 */ (void*)cmd_scd_event_kill,         // 0x00461080
-    /* 0x45 */ (void*)cmd_entity_unk8e_add,       // 0x004320f0
+    /* 0x45 */ (void*)cmd_entity_posy_add,       // 0x004320f0
     /* 0x46 */ (void*)cmd_room_lights_set,        // 0x00432110
     /* 0x47 */ (void*)cmd_obj_transform_set,      // 0x00431080
     /* 0x48 */ (void*)cmd_effect_pool_clear,      // 0x004318a0

@@ -69,7 +69,7 @@ int game_loop(void)
         g_fade_type_id = 2;
         g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
 
-        int hasFlag = Flg_ck((int)g_PlayerFlags, 0x7d);
+        int hasFlag = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_MENU_FADE_LATCH);
         g_fading_counter = 0xFF5D;
         if (hasFlag == 0) {
             g_fading_counter = 0xE800;
@@ -98,8 +98,9 @@ LAB_00480c33:
         do {
             // 0x00480c33-0x00480c4a: Per-frame random seed and reset
             g_RandSeed = (short)rand();
-            DAT_00d213a0[0] = 0;
-            DAT_00d213a0[1] = 0;
+            // Per-frame item-use flag bank: room logic re-arms it this frame
+            g_itemUseFlags[0] = 0;
+            g_itemUseFlags[1] = 0;
             g_PlayerHealthCopy = g_playerEntity.health;
 
             // 0x00480c56-0x00480c65: Check interactive object states
@@ -435,7 +436,7 @@ switchD_00480ff4_caseD_2:
                     // State 3 -> 0: menu closing, restore flags
                     g_message_flags = g_short_message_flags | 0x200;
                     g_openMenuFlag = 0;
-                    FUN_00473f10((int*)g_PlayerFlags, 0x7d);
+                    FUN_00473f10((int*)g_ScenarioFlags, SCENARIO_FLAG_MENU_FADE_LATCH);
                 }
                 goto LAB_00480c33;
             }

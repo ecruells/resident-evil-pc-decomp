@@ -921,7 +921,7 @@ void ws_behaviour_lunge(void)
             unsigned int facing = is_facing_toward_entity(&g_playerEntity) & 0xFF;
             eub(ENTITY, 0x87) = 6;
             Snd_em(4);
-            if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+            if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                 g_playerEntity.health = (short)(g_playerEntity.health - 10);
             } else {
                 g_playerEntity.health = (short)(g_playerEntity.health - 0x12);
@@ -1435,7 +1435,7 @@ void ws_update_webs(char count)
                     Effect_CreateBillboard(0, 0, 0, (void*)((char*)ENTITY + 0x20),
                                            &g_playerPosScratch, 0);
                     ew(ENTITY, 0xc2) = (short)(ew(ENTITY, 0xc2) - 0x3c);
-                    if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+                    if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                         g_playerEntity.health = (short)(g_playerEntity.health - 2);
                     } else {
                         g_playerEntity.health = (short)(g_playerEntity.health - 3);
