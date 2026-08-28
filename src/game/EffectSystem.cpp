@@ -728,7 +728,7 @@ static int effect_projectile_hit_check(int range, short x, short z)
                 }
                 short* health = &pPVar->health;
                 short base = *health;
-                if (Flg_ck((int)g_PlayerFlags, 0x7b) == 0) {
+                if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
                     *health = (short)(base - 5);
                     if (g_EnemiesList[0].id == 3) *health = (short)(base - 10);
                     if (g_EnemiesList[0].id == 4) *health = *health - 7;
@@ -971,7 +971,7 @@ static void effect_behavior_gravity_impact(void)
 
 // ============================================================================
 // Behavior 9 (0x0040d9e0) - gravity rise: pull the effect toward the player's
-// height (unk_8e); when it arrives, mark it ground-facing, switch to the inert
+// height (posY); when it arrives, mark it ground-facing, switch to the inert
 // behavior and freeze the vertical motion.
 // ============================================================================
 static void effect_behavior_gravity_rise(void)
@@ -981,11 +981,11 @@ static void effect_behavior_gravity_rise(void)
     eff->animHeader[10] = 3;
     eff->animHeader[11] = 0x40;
 
-    if ((int)g_playerEntity.unk_8e < (int)eff->posY + (int)AH_SHORT(eff, 0xe)) {
+    if ((int)g_playerEntity.posY < (int)eff->posY + (int)AH_SHORT(eff, 0xe)) {
         AH_USHORT(eff, 10) |= 0x400b;
         eff->animId = 0x2f;
         eff->updateId = 0;
-        eff->rotSpeedY = (short)((g_playerEntity.unk_8e - eff->spriteOffsetY) - eff->localOffsetY);
+        eff->rotSpeedY = (short)((g_playerEntity.posY - eff->spriteOffsetY) - eff->localOffsetY);
     }
 }
 
@@ -1002,7 +1002,7 @@ static void effect_behavior_projectile(void)
     Effect* eff = &g_effectPool[g_activeEffectIndex];
 
     if ((g_main_state_flags2 & 1) == 0) {
-        if ((int)g_playerEntity.unk_8e < (int)eff->posY + (int)AH_SHORT(eff, 0xe)) {
+        if ((int)g_playerEntity.posY < (int)eff->posY + (int)AH_SHORT(eff, 0xe)) {
             AH_USHORT(eff, 10) |= 0x400b;
             eff->animDataFrame += 0x18;
             eff->animDataFrame += ((unsigned int)g_RandSeed % (unsigned int)eff->animHeader[1]) * 0x18;
@@ -1012,7 +1012,7 @@ static void effect_behavior_projectile(void)
             AH_SHORT(eff, 0x10) = (short)(((unsigned int)g_RandSeed % (unsigned int)eff->animHeader[1]) * 10
                                           + *(short*)(eff->animDataFrame + 0x14));
             eff->yaw += *(short*)(eff->animDataFrame + 0x16);
-            eff->rotSpeedY = (short)((g_playerEntity.unk_8e - eff->spriteOffsetY) - eff->localOffsetY);
+            eff->rotSpeedY = (short)((g_playerEntity.posY - eff->spriteOffsetY) - eff->localOffsetY);
             if (eff->animHeader[2] != 0) {
                 AH_SHORT(eff, 0xc) = (short)-AH_SHORT(eff, 0xc);
             }
@@ -1028,7 +1028,7 @@ static void effect_behavior_projectile(void)
             AH_USHORT(eff, 10) |= 0x400b;
             eff->animId = 0x2f;
             eff->updateId = 0;
-            eff->rotSpeedY = (short)((g_playerEntity.unk_8e - eff->spriteOffsetY) - eff->localOffsetY);
+            eff->rotSpeedY = (short)((g_playerEntity.posY - eff->spriteOffsetY) - eff->localOffsetY);
             g_playerPosScratch.x = (int)eff->posX;
             g_playerPosScratch.y = (int)eff->posY;
             g_playerPosScratch.z = (int)eff->posZ;
@@ -1879,7 +1879,7 @@ static void effect_behavior_bullet(void)
     g_playerPosScratch.y = (int)eff->posY;
     g_playerPosScratch.z = (int)eff->posZ;
 
-    int playerY = (int)g_playerEntity.unk_8e;
+    int playerY = (int)g_playerEntity.posY;
     if (playerY < (int)AH_SHORT(eff, 0xe) + (int)g_playerPosScratch.y) {
         effect_shot_impact(1);
         return;
@@ -2797,7 +2797,7 @@ void EffectActor_UpdateAndRender(void)
         g_svecScratch.z = (short)((short)eff->spriteOffsetZ + (short)g_playerPosScratch.z);
 
         if ((eff->animHeader[10] & 4) != 0) g_svecScratch.y = 0;
-        if ((eff->animHeader[10] & 8) != 0) g_svecScratch.y = (short)g_playerEntity.unk_8e;
+        if ((eff->animHeader[10] & 8) != 0) g_svecScratch.y = (short)g_playerEntity.posY;
 
         eff->posX = g_svecScratch.x;
         eff->posY = g_svecScratch.y;

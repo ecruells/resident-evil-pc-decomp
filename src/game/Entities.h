@@ -79,7 +79,7 @@ struct PlayerEntity {
     unsigned char  unk_8b;              // 0x8B
     unsigned char  unk_8c;              // 0x8C
     unsigned char  jointCount;          // 0x8D
-    unsigned short unk_8e;              // 0x8E
+    unsigned short posY;                // 0x8E - player Y height, kept in sync with position.y / localMatrix.t[1]; floor reference for effects
 
     // ---- Model/animation pointers (0x90 - 0xA3) ----
     unsigned int   animHeader;          // 0x90

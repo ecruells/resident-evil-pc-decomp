@@ -739,9 +739,9 @@ static void bgm_load_and_start(unsigned char bgmState)
     // transcription had the condition inverted and never reached it for Chris.
     if (g_stageId == 2 && g_roomId == 7 &&
         !((g_playerEntity.id & 3) == 1 &&
-          Flg_ck((int)&g_PlayerFlags, 0x5c) &&
-          Flg_ck((int)&g_PlayerFlags, 0x48) &&
-          !Flg_ck((int)&g_PlayerFlags, 0x55))) {
+          Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_5C) &&
+          Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_48) &&
+          !Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_55))) {
         slotCount = 2;
         if (g_SndBank[2].handle != 0) {
             destroySndBank(g_SndBank[2].handle);
@@ -1344,7 +1344,7 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
     if (soundType >= 3) return;
 
     if ((((unsigned char)g_main_state_flags & 0x80) == 0) ||
-        (g_playerEntity.unk_8e != (unsigned short)0xF8F8)) {
+        (g_playerEntity.posY != (unsigned short)0xF8F8)) {
         // Normal path: look up zone-based sound offset
         unsigned short zoneData = LookupFootstepZone(
             (short)ENTITY->scaMatrixData.localMatrix.t[0], (short)ENTITY->scaMatrixData.localMatrix.t[2]);

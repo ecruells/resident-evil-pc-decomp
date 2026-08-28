@@ -642,7 +642,7 @@ void SetupCharacterData(void)
     // overwrites the position set by the save load with (0,0).
     g_playerEntity.scaMatrixData.localMatrix.t[0] = (long)g_playerEntity.position.x;
     g_playerEntity.scaMatrixData.localMatrix.t[2] = (long)g_playerEntity.position.z;
-    g_playerEntity.unk_8e = 0;
+    g_playerEntity.posY = 0;
     g_playerEntity.scaMatrixData.localMatrix.t[1] = 0;
     g_playerEntity.jointsStructs[1].rotDeltaX = 0;
     g_playerEntity.jointsStructs[1].rotDeltaY = 0;
