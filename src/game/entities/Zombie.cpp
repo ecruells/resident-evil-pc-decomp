@@ -983,28 +983,27 @@ static void* const zombie_damage_behavior_tbl[12] = {
 // increments hit counter, triggers falldown when threshold exceeded, or
 // when stagger_timer expires during sustained damage.
 // ============================================================================
+// 0x00433db0 builds a 64-byte hit-threshold table on the stack from
+// immediates, then indexes it with `g_RandSeed & 0x1F`: the second half
+// (offsets 0x20-0x3f, lower thresholds) while SCENARIO_FLAG 0x7B is clear
+// (first playthrough), the first half (offsets 0x00-0x1f, higher thresholds)
+// when it is set (second playthrough).
+static const unsigned char zombie_hit_threshold_normal_tbl[32] = {
+    1, 2, 3, 2, 3, 3, 2, 3,
+    3, 2, 2, 3, 2, 3, 2, 3,
+    2, 3, 2, 4, 2, 2, 2, 2,
+    3, 2, 2, 3, 2, 2, 2, 3
+};
+
+static const unsigned char zombie_hit_threshold_hard_tbl[32] = {
+    3, 2, 3, 3, 2, 3, 4, 3,
+    2, 3, 3, 4, 3, 2, 3, 3,
+    3, 2, 3, 3, 3, 3, 2, 3,
+    3, 2, 3, 4, 3, 4, 3, 2
+};
+
 void zombie_damaged(void)
 {
-    // 0x00433db0: Damage threshold lookup table (difficulty-dependent)
-    unsigned char local_40[64];
-    local_40[0x21] = 2; local_40[0x22] = 3; local_40[0x23] = 2; local_40[0x24] = 3;
-    local_40[0x25] = 3; local_40[0x26] = 2; local_40[0x27] = 3; local_40[0x28] = 3;
-    local_40[0x29] = 2; local_40[0x2a] = 2; local_40[0x2b] = 3; local_40[0x2c] = 2;
-    local_40[0x2d] = 3; local_40[0x2e] = 2; local_40[0x2f] = 3; local_40[0x30] = 2;
-    local_40[0x31] = 3; local_40[0x32] = 2; local_40[0x33] = 4; local_40[0x34] = 2;
-    local_40[0x35] = 2; local_40[0x36] = 2; local_40[0x37] = 2; local_40[0x38] = 3;
-    local_40[0x39] = 2; local_40[0x3a] = 2; local_40[0x3b] = 3; local_40[0x3c] = 2;
-    local_40[0x3d] = 2; local_40[0x3e] = 2; local_40[0x3f] = 3;
-    local_40[0]  = 3; local_40[1]  = 2; local_40[2]  = 3; local_40[3]  = 3;
-    local_40[4]  = 2; local_40[5]  = 3; local_40[6]  = 4; local_40[7]  = 3;
-    local_40[8]  = 2; local_40[9]  = 3; local_40[10] = 3; local_40[0xb]= 4;
-    local_40[0xc]= 3; local_40[0xd]= 2; local_40[0xe]= 3; local_40[0xf]= 3;
-    local_40[0x10]=3; local_40[0x11]=2; local_40[0x12]=3; local_40[0x13]=3;
-    local_40[0x14]=3; local_40[0x20]=1; local_40[0x15]=3; local_40[0x16]=2;
-    local_40[0x17]=3; local_40[0x18]=3; local_40[0x19]=2; local_40[0x1a]=3;
-    local_40[0x1b]=4; local_40[0x1c]=3; local_40[0x1f]=2; local_40[0x1d]=4;
-    local_40[0x1e]=3;
-
     if (ENTITY->ignore_player_flag == 0) {
         unsigned char behType = ENTITY->behavior_flags & 0x0F;
 
@@ -1042,9 +1041,9 @@ void zombie_damaged(void)
                     // hit threshold exceeded → trigger falldown
                     ENTITY->action_speed = 0x80;
                     if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
-                        ENTITY->hit_threshold = local_40[(g_RandSeed & 0x1F) + 32];
+                        ENTITY->hit_threshold = zombie_hit_threshold_normal_tbl[g_RandSeed & 0x1F];
                     else
-                        ENTITY->hit_threshold = local_40[g_RandSeed & 0x1F];
+                        ENTITY->hit_threshold = zombie_hit_threshold_hard_tbl[g_RandSeed & 0x1F];
                 }
             }
         }
@@ -1333,15 +1332,15 @@ static const unsigned char* const zombie_attack_keyframe_tbl   = &zombie_attack_
 // player's facing" sentinel; the original reads these as shorts.
 static const short attack_dir_offset_tbl[4] = { 0x7FFF, 0x0000, 0x7FFF, 0x0000 };
 
-// 0x004bb3c8 / 0x004bb3d8 - per-tick bite damage, indexed by behavior & 0xF,
-// applied every 19 frames of the damage loop (case 3). Behaviours 2/3 (laying)
+// 0x004bb3c8 - first-playthrough ("normal") damage. Behaviours 2/3 (laying)
 // bite for less; behaviours 9+ never attack, so their rows are zero.
-static const unsigned char zombie_damage_easy_tbl[16] = {
+static const unsigned char zombie_damage_normal_tbl[16] = {
     10, 10, 6, 6, 10, 10, 10, 10,
     10, 0, 0, 0, 0, 0, 0, 0
 };
 
-static const unsigned char zombie_damage_normal_tbl[16] = {
+// 0x004bb3d8 - second-playthrough ("hard") damage.
+static const unsigned char zombie_damage_hard_tbl[16] = {
     12, 12, 9, 9, 12, 12, 12, 12,
     12, 0, 0, 0, 0, 0, 0, 0
 };
@@ -1562,9 +1561,9 @@ void zombie_attack(void)
             if (tick % 19 == 0) {
                 unsigned char damage;
                 if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
-                    damage = zombie_damage_easy_tbl[ENTITY->behavior_flags & 0x0F];
-                else
                     damage = zombie_damage_normal_tbl[ENTITY->behavior_flags & 0x0F];
+                else
+                    damage = zombie_damage_hard_tbl[ENTITY->behavior_flags & 0x0F];
                 g_playerEntity.health -= damage;
                 Snd_em(3);
 
