@@ -6625,14 +6625,14 @@ int door_try_enter(unsigned char* entry)
     // Locked: work out whether the player can open it.
     unsigned int need = record[0x16];
 
-    if (need == 0x33 && (g_playerEntity.id & 3) == 1) {
+    if (need == ITEM_SWORD_KEY && (g_playerEntity.id & 3) == 1) {
         // 0x0041b474: Jill substitutes the lockpick for this key, but only once
         // she has it (g_ScenarioFlags bit SCENARIO_FLAG_HAS_LOCKPICK).
         if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) == 0) {
             door_locked_message(0xd);
             return 0;
         }
-        g_selectedItemId = 0x31;
+        g_selectedItemId = ITEM_LOCK_PICK;
     } else if (need == 0xfe) {
         // 0x0041b4a5: opens only from the other side.
         set_message_display(0xd4, 0xff);
@@ -6645,7 +6645,7 @@ int door_try_enter(unsigned char* entry)
     } else {
         // 0x0041b4d7: needs a specific item.
         if (get_item_slot(need) < 0) {
-            unsigned int m = need - 0x33;
+            unsigned int m = need - ITEM_SWORD_KEY; // diff keys to get index
             if (m > 9) {
                 m = 10;
             }
