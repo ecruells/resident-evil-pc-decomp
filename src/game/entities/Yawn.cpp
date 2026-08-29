@@ -1170,7 +1170,7 @@ void yawn_action_swallow(void)
         ew(ENTITY, 0x170) = 0x1388;
         // fall through
     case 3:
-        g_playerEntity.unk_03 |= 0x80;
+        g_playerEntity.zoneFlags |= 0x80;
         ApplyLVAndMul0Matrix(&ENTITY->jointsStructs[0].world, &g_yawnCaptureMatrix,
                              &g_playerEntity.scaMatrixData.localMatrix);
         eub(ENTITY, 0x87) = (unsigned char)(eub(ENTITY, 0x87) + yawn_anim_advance(0, 0x200));

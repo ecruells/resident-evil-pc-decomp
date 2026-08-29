@@ -263,7 +263,7 @@ LAB_00480e89:
                 // 0x00480e89-0x00480ebd: Update entities and player
                 update_entities();
 
-                if (((g_playerEntity.unk_03 & 0x20) != 0) ||
+                if (((g_playerEntity.zoneFlags & 0x20) != 0) ||
                     ((g_message_flags & 0x100) == 0))
                 {
                     g_PlayerDpadHeld &= 0xC000;

@@ -212,7 +212,7 @@ void InitPlayerEntity(void)
     g_playerEntity.unk_c0 = 0;
     g_playerEntity.flags = 1;
     g_playerEntity.move_speed_current = 0;
-    g_playerEntity.unk_03 = 1;
+    g_playerEntity.zoneFlags = 1;
     g_playerEntity.speed.y = 0;
     g_playerEntity.animationId = 0;
     g_playerEntity.animFrameId = 0;

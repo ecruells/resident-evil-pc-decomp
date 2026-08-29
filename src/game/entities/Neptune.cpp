@@ -967,7 +967,7 @@ static void neptune_devour_bite(void)
                           PLAYER_MATRIX, &neptune_capture_matrix);
 
     JointStruct* pj = g_playerEntityPointer.jointsStructs;
-    g_playerEntityPointer.unk_03 |= 0x40;
+    g_playerEntityPointer.zoneFlags |= 0x40;
     g_playerEntityPointer.action_state++;
 
     // Written in exactly this order in the original.

@@ -1,4 +1,4 @@
-﻿// DeathScreen.cpp - Player death sequence / game-over screen
+// DeathScreen.cpp - Player death sequence / game-over screen
 //
 // Functions ported from ResidentEvil.exe:
 //   set_fading            (0x0047b980) - start a screen fade transition
@@ -394,7 +394,7 @@ void display_die_screen(void)
 
         // Tyrant (enemy id 8) impale pose: hide joints 0/2, keep the middle.
         if ((g_EnemiesList[0].id == 8) && (g_deathAnimationFlag != 0)) {
-            g_playerEntity.unk_03 &= 0x7F;
+            g_playerEntity.zoneFlags &= 0x7F;
             g_playerEntity.jointsStructs[0].flags = 0x83;
             g_playerEntity.jointsStructs[2].flags = 0x83;
             g_playerEntity.position.pad = 0;

@@ -345,7 +345,7 @@ static void plant42_hold_player(int jointIdx)
     // model is gone must not run it: it would drive the player to a new garbage
     // position every frame.
     if (ENTITY->jointsStructs == NULL) return;
-    g_playerEntity.unk_03 |= 0x80;
+    g_playerEntity.zoneFlags |= 0x80;
     ApplyLVAndMul0Matrix(jw(jointIdx), &g_plant42CaptureMatrix,
                          &g_playerEntity.scaMatrixData.localMatrix);
 }
@@ -903,7 +903,7 @@ static void plant42_behavior_hold(void)
     case 8:
         ENTITY->action_state = 9;
         g_playerEntity.scaMatrixData.localMatrix.t[1] = 0;
-        g_playerEntity.unk_03 &= 0x7f;
+        g_playerEntity.zoneFlags &= 0x7f;
         g_playerEntity.flags &= 0xfd;
         ENTITY->animationId = 3;
         ENTITY->animation_frame_id = 0;
@@ -1113,7 +1113,7 @@ static void plant42_behavior_release(void)
     case 6:
         ENTITY->action_state = 7;
         g_playerEntity.scaMatrixData.localMatrix.t[1] = 0;
-        g_playerEntity.unk_03 &= 0x7f;
+        g_playerEntity.zoneFlags &= 0x7f;
         g_playerEntity.flags &= 0xfd;
         ENTITY->animationId = 3;
         ENTITY->animation_frame_id = 0;

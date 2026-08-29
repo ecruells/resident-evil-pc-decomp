@@ -968,13 +968,13 @@ void options_menu_render(void)
 
     // Render player model animation.
     //
-    // Not in the original: unk_03 (entity+3) is the "inside camera switch zone"
+    // Not in the original: zoneFlags (entity+3) is the "inside camera switch zone"
     // flag maintained by the room code, and options_render_entity only takes the
     // unconditional render path while its low 7 bits are set. The original menu
     // inherits a non-zero value from gameplay; our room code does not always
     // maintain it, and with it clear every joint gets filtered out (the options
     // menu has no RDT zone data to fall back on), so force it here.
-    g_playerEntity.unk_03 = 1;
+    g_playerEntity.zoneFlags = 1;
     ENTITY = (Entity*)&g_playerEntity;
     g_playerEntity.attackAnim = 1; // 0xbd
     Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);

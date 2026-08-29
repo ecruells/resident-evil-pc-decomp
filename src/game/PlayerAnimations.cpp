@@ -912,7 +912,7 @@ void player_anim_death_billboard(void) {
             g_playerEntity.animation_frame_id = 13;
         }
     } else if (g_playerEntity.action_state == 2) {
-        g_playerEntity.unk_03 |= 0x80;
+        g_playerEntity.zoneFlags |= 0x80;
         // TODO: Apply RotMatrix / ApplyLVAndMul0Matrix transforms using g_EnemiesList[0] joint matrices
     }
 }
@@ -1773,7 +1773,7 @@ static void player_update_detached_joint(void)
 {
     JointStruct* joints = g_playerEntity.jointsStructs;
     if (joints == NULL) return;
-    if (((g_playerEntity.unk_03 & 0x7f) != 0) && (joints[0xf].velZ != 0)) {
+    if (((g_playerEntity.zoneFlags & 0x7f) != 0) && (joints[0xf].velZ != 0)) {
         static bool reported = false;
         if (!reported) {
             reported = true;
@@ -1826,7 +1826,7 @@ static void player_state_init(void) // 0x00494eb0
     g_playerEntity.position.x = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
     g_playerEntity.position.z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
 
-    g_playerEntity.unk_03 = 0;
+    g_playerEntity.zoneFlags = 0;
     g_playerEntity.healthStatusFlags |= 0x10;
     g_playerEntity.attackTimer = 0;
     g_playerEntity.isBeingAttackedFlag = 0;
@@ -2135,7 +2135,7 @@ static void player_state_01_control(void)
         return;
     }
 
-    // 0x004951e6: poison / crimson-head style status drain. The timer byte at
+    // 0x004951e6: poison style status drain. The timer byte at
     // entity+0x174 is read BEFORE it is decremented, so the tick fires on the frame
     // the old value was already 0 (the decrement having wrapped it to 0xFF).
     if ((g_playerEntity.healthStatusFlags & 0x62) != 0) {
@@ -2172,14 +2172,6 @@ static void player_state_01_control(void)
 // any of these addresses yet. Named for what selects them rather than for the
 // animationId they were previously mislabelled with.
 // ----------------------------------------------------------------------------
-// ----------------------------------------------------------------------------
-// Helpers the control state reaches for.
-//
-// CORRECTION: 0x00474930 is NOT a door check, despite feeding action_behavior 10.
-// It walks g_omodel_table through ChkPlReachEntity and an angle window,
-// so behaviour 10 is "climb over / push object". Doors do not come through here at
-// all - check_door sets unk_03 |= 0x20 and the branch on that bit in
-// player_input_to_behavior selects action_behavior 0x11 instead.
 // ----------------------------------------------------------------------------
 
 // ============================================================================
@@ -2246,7 +2238,7 @@ static int is_point_in_action_zone(VECTOR* pos, unsigned short* zone); // 0x0041
 //
 // With msf bit 7 (0x80) already raised (mid-climb), it instead verifies the
 // player still faces the remembered object - drifting away cancels, staying
-// clears the bit and raises unk_03 bit 0x10. The tail picks attackDirection
+// clears the bit and raises zoneFlags bit 0x10. The tail picks attackDirection
 // (side) from the facing, which player_input_to_behavior turns into
 // action_behavior 10.
 // ============================================================================
@@ -2273,7 +2265,7 @@ int check_climb_object(void)
             if (299 < diff && diff < 0xed5) continue;
 
             g_main_state_flags |= 0x80;
-            g_playerEntity.unk_03 &= 0xef;
+            g_playerEntity.zoneFlags &= 0xef;
             DAT_00ae9ef0 = (unsigned int)obj;
             break;
         } while (true);
@@ -2286,7 +2278,7 @@ int check_climb_object(void)
             return 0;
         }
         g_main_state_flags &= ~0x80;
-        g_playerEntity.unk_03 |= 0x10;
+        g_playerEntity.zoneFlags |= 0x10;
     }
 
     if ((((unsigned int)g_playerEntity.directionAngle + 0x200U) & 0x800) == 0) {
@@ -2644,7 +2636,7 @@ static void player_ctrl_behavior_run(void)
 // player_door_open_sequence (0x00457390)
 // action_behavior 10 / 0x11 - open a door and carry the player through it. This
 // is the last link in the door chain: cmd_door_set registers the zone,
-// update_player_position fires check_door, check_door raises unk_03 bit 0x20,
+// update_player_position fires check_door, check_door raises zoneFlags bit 0x20,
 // player_input_to_behavior turns that into action_behavior 0x11, and this runs
 // the animation and the warp. While it was a stub the player reached the door and
 // simply stood in the zone forever.
@@ -2676,7 +2668,7 @@ static void player_ctrl_behavior_run(void)
 //  - `g_main_state_flags & 0x80` distinguishes the climb/vault entry (behaviour 10,
 //    set by player_input_to_behavior) from a plain door (0x11); it selects SFX
 //    0x23 over 0x2d and a different, negated displacement.
-//  - unk_03 bit 0x10 is check_door's "door swings the other way" flag: it picks
+//  - zoneFlags bit 0x10 is check_door's "door swings the other way" flag: it picks
 //    animation 0x35 over 0x33 and mirrors every Z displacement.
 //  - g_message_flags |= 0x40 is a byte OR in the original.
 //  - Case 3's reset is one dword store to 0x00be6368, covering animationId /
@@ -2700,7 +2692,7 @@ static void player_door_open_sequence(void)      // 0x00457390
             lastState = (int)g_playerEntity.action_state;
             dbg_printf("[dooranim] st=%d beh=%u unk03=%02X angle=%04X msf=%08X msf2=%08X\n",
                        lastState, (unsigned int)g_playerEntity.action_behavior,
-                       (unsigned int)g_playerEntity.unk_03,
+                       (unsigned int)g_playerEntity.zoneFlags,
                        (unsigned int)(unsigned short)g_playerEntity.directionAngle,
                        (unsigned int)g_main_state_flags,
                        (unsigned int)g_main_state_flags2);
@@ -2729,14 +2721,14 @@ static void player_door_open_sequence(void)      // 0x00457390
         }
 
         // 0x0045742f: check_door set 0x400000; consume it to pick the turn
-        // direction. Bit 0x40 of unk_03 and bit 0x400 of the angle together decide
+        // direction. Bit 0x40 of zoneFlags and bit 0x400 of the angle together decide
         // whether to add or subtract - the two branches are exact mirrors.
         if ((g_main_state_flags2 & 0x400000) != 0) {
             short*         pAngle = (short*)((unsigned char*)ENTITY + 0x74);
             unsigned short a      = (unsigned short)*pAngle;
             unsigned short step   = (unsigned short)((a & 0x3fc) >> 2);
             bool turnUp;
-            if ((g_playerEntity.unk_03 & 0x40) != 0) {
+            if ((g_playerEntity.zoneFlags & 0x40) != 0) {
                 turnUp = ((a & 0x400) == 0);
             } else {
                 turnUp = ((a & 0x400) != 0);
@@ -2757,7 +2749,7 @@ static void player_door_open_sequence(void)      // 0x00457390
         g_playerEntity.attackAnim         = 0x33;
         g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf             = 0;
-        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+        if ((g_playerEntity.zoneFlags & 0x10) != 0) {
             g_playerEntity.attackAnim = 0x35;
         }
         g_playerEntity.action_state       = 2;
@@ -2790,7 +2782,7 @@ static void player_door_open_sequence(void)      // 0x00457390
                 (g_playerEntity.animation_frame_id == 0x35)) {
                 Play3DSnd(2, 0x23, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
             }
-            if (((g_playerEntity.unk_03 & 0x10) != 0) &&
+            if (((g_playerEntity.zoneFlags & 0x10) != 0) &&
                 (g_playerEntity.move_speed_current == 2)) {
                 g_playerEntity.move_speed_current = 5;
             }
@@ -2810,12 +2802,12 @@ static void player_door_open_sequence(void)      // 0x00457390
         g_svecScratch.x = 0;
         g_svecScratch.y = -0x29;
         g_svecScratch.z = 0;
-        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+        if ((g_playerEntity.zoneFlags & 0x10) != 0) {
             g_svecScratch.y = 0x29;
         }
         if ((g_roomId == 0xe) || (g_roomId == 5)) {
             g_svecScratch.y = -0x24;
-            if ((g_playerEntity.unk_03 & 0x10) != 0) {
+            if ((g_playerEntity.zoneFlags & 0x10) != 0) {
                 g_svecScratch.y = 0x24;
             }
         }
@@ -2853,7 +2845,7 @@ static void player_door_open_sequence(void)      // 0x00457390
         // check_door stored the approach side here as +1 / -1 (signed 16-bit).
         int            dir      = (int)(short)g_playerEntity.attackDirection;
         unsigned short sideways = (unsigned short)(g_playerEntity.directionAngle & 0x400);
-        unsigned char  otherWay = (unsigned char)(g_playerEntity.unk_03 & 0x10);
+        unsigned char  otherWay = (unsigned char)(g_playerEntity.zoneFlags & 0x10);
 
         // Angle bit 0x400 means the doorway runs along Z rather than X, so the
         // displacement swaps axes.
@@ -2974,7 +2966,7 @@ static void player_input_to_behavior(void)
         }
 
         // 0x00495727: standing in a stairs/ladder zone
-        if ((g_playerEntity.unk_03 & 0x20) != 0) {
+        if ((g_playerEntity.zoneFlags & 0x20) != 0) {
             g_playerEntity.isBeingAttackedFlag = 0x80;
             g_playerEntity.animFrameId = 1;
             g_message_flags &= 0xffbf;
@@ -3005,7 +2997,7 @@ static void player_input_to_behavior(void)
         return;
     }
 
-    if ((g_playerEntity.unk_03 & 0x20) != 0) {
+    if ((g_playerEntity.zoneFlags & 0x20) != 0) {
         g_playerEntity.isBeingAttackedFlag = 0x80;
         g_playerEntity.animFrameId = 1;
         g_message_flags &= 0xffbf;
@@ -3199,7 +3191,7 @@ static void player_behavior_0d_run(void)
             g_playerEntity.action_state    = 0;
             return;
         }
-        if ((g_playerEntity.unk_03 & 0x20) != 0) {
+        if ((g_playerEntity.zoneFlags & 0x20) != 0) {
             g_playerEntity.isBeingAttackedFlag = 0x80;
             g_playerEntity.animFrameId = 1;
             g_message_flags &= 0xffbf;
@@ -3465,7 +3457,7 @@ static void player_behavior_10_push(void)
 // zone (msf bit 4 set by set_stairs_zone). Eight states: walk up to the ladder
 // (0/1), turn to face it (2), start the climb animation (3), climb with
 // step-sounds and a camera effect (4), descend setup and walk back (5-7), then
-// release control (8). unk_03 bit 0x10 selects the ladder variant (0x35 anim)
+// release control (8). zoneFlags bit 0x10 selects the ladder variant (0x35 anim)
 // over the plain stairs/doors one (0x33).
 // ============================================================================
 extern void entity_rotate_toward_target(VECTOR* pos, unsigned short angleStep); // 0x004899b0
@@ -3522,7 +3514,7 @@ static void player_behavior_0b_ladder(void)
         g_playerEntity.attackAnim = 0x33;
         g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf = 0;
-        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+        if ((g_playerEntity.zoneFlags & 0x10) != 0) {
             g_playerEntity.attackAnim = 0x35;
         }
         g_playerEntity.action_state = 4;
@@ -3533,7 +3525,7 @@ static void player_behavior_0b_ladder(void)
     case 4:
         {
             unsigned char sndId = 0x2d;
-            if ((g_playerEntity.unk_03 & 0x10) == 0) {
+            if ((g_playerEntity.zoneFlags & 0x10) == 0) {
                 // step-sound frames on the plain climb
                 if (g_ladderStepFrames[g_playerEntity.move_speed_current] ==
                     g_playerEntity.animation_frame_id) {
@@ -3547,7 +3539,7 @@ static void player_behavior_0b_ladder(void)
             } else {
                 // ladder variant: reposition on frame 0x0f, grunt at 0x1a
                 if ((g_playerEntity.animation_frame_id == 0x0f) &&
-                    ((g_playerEntity.unk_03 & 0x10) != 0)) {
+                    ((g_playerEntity.zoneFlags & 0x10) != 0)) {
                     g_playerDisplacement = 0xfffff8f8;
                     g_playerEntity.posY = 0xa8c;
                     if (0x800 < g_playerEntity.directionAngle) {
@@ -3580,7 +3572,7 @@ ladder_step_done:
             g_scaled_down_dist = 1000;
         }
         g_playerEntity.scaMatrixData.localMatrix.t[1] = 0;
-        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+        if ((g_playerEntity.zoneFlags & 0x10) != 0) {
             g_scaled_down_dist = -2000;
             if (0x800 < g_playerEntity.directionAngle) {
                 g_scaled_down_dist = 2000;
@@ -3595,7 +3587,7 @@ ladder_step_done:
         g_playerEntity.pushVelocity.x = 0;
         g_playerEntity.posY = (unsigned short)g_playerEntity.scaMatrixData.localMatrix.t[1];
         g_playerEntity.pushVelocity.z = 0;
-        if ((g_playerEntity.unk_03 & 0x10) != 0) {
+        if ((g_playerEntity.zoneFlags & 0x10) != 0) {
             g_playerEntity.action_state = 8;
             return;
         }
@@ -3626,7 +3618,7 @@ ladder_step_done:
         g_playerEntity.attackDirection--;
         break;
     case 8:
-        g_playerEntity.unk_03 &= 0xef;
+        g_playerEntity.zoneFlags &= 0xef;
         g_main_state_flags &= ~0x10;
         ((unsigned char*)&g_message_flags)[0] |= 0x40;
         g_playerEntity.isBeingAttackedFlag = 0;
@@ -6456,12 +6448,12 @@ void update_player_anim(void)
 
     g_playerEntity.scaMatrixData.field_00 = 0;
 
-    // 0x00494e11: bit 0 of unk_03 = player is inside the current camera zone
-    g_playerEntity.unk_03 &= 0xfe;
-    g_playerEntity.unk_03 |= (unsigned char)is_entity_in_switch_zone(
+    // 0x00494e11: bit 0 of zoneFlags = player is inside the current camera zone
+    g_playerEntity.zoneFlags &= 0xfe;
+    g_playerEntity.zoneFlags |= (unsigned char)is_entity_in_switch_zone(
         (VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t, g_CurrentRdtDataTypePtr);
 
-    if ((((g_playerEntity.unk_03 & 0x7f) != 0) &&
+    if ((((g_playerEntity.zoneFlags & 0x7f) != 0) &&
          (((unsigned char)g_playerEntity.unk_e0 & 0x40) == 0)) ||
         ((g_stageId == 3) && (g_roomId == 0xd))) {
         player_update_shadow_sprite((int)g_playerEntity.scaMatrixData.localMatrix.t,
@@ -6800,7 +6792,7 @@ int set_key_flag(unsigned char* entry)
 // check_door_side (0x0041b790) — room_check_actions[6]
 // The Z-axis sibling of check_door: records the approach side for doors whose
 // zone spans the Z axis (check_door splits on X). Same flag protocol -
-// unk_03 bits 0x20/0x10 (0x60 here) and msf2 0x400000 feed the door animation.
+// zoneFlags bits 0x20/0x10 (0x60 here) and msf2 0x400000 feed the door animation.
 // ============================================================================
 int check_door_side(unsigned char* entry)
 {
@@ -6951,7 +6943,7 @@ int room_action_effect(unsigned char* entry)
 
 // ============================================================================
 // set_stairs_zone (0x0041baa0) — room_check_actions[0x0C]
-// Marks the player as inside a stairs/ladder zone: unk_03 bit 0x20 (in zone,
+// Marks the player as inside a stairs/ladder zone: zoneFlags bit 0x20 (in zone,
 // plus 0x10 for the ladder variant when +2 != 0), latches the ladder base
 // position into unk_c6/unk_c8, toggles the entry's +2 flag byte (so the next
 // zone hit flips it back) and raises msf bit 4 (ladder mode). The +2 toggle is
@@ -6959,10 +6951,10 @@ int room_action_effect(unsigned char* entry)
 // ============================================================================
 int set_stairs_zone(unsigned char* entry)
 {
-    unsigned char prev = g_playerEntity.unk_03;
-    g_playerEntity.unk_03 |= 0x20;
+    unsigned char prev = g_playerEntity.zoneFlags;
+    g_playerEntity.zoneFlags |= 0x20;
     if (*(unsigned short*)(entry + 2) != 0) {
-        g_playerEntity.unk_03 = prev | 0x30;
+        g_playerEntity.zoneFlags = prev | 0x30;
     }
     g_playerEntity.unk_c6 = *(unsigned short*)(entry + 4);
     g_playerEntity.unk_c8 = *(unsigned short*)(entry + 6);

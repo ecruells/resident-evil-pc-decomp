@@ -42,7 +42,12 @@ struct PlayerEntity {
     unsigned char  flags;               // 0x00
     unsigned char  id;                  // 0x01
     unsigned char  equippedWeaponId;    // 0x02
-    unsigned char  unk_03;              // 0x03
+    unsigned char  zoneFlags;           // 0x03 - interaction/zone state bitfield:
+                                        //        0x01 = inside current camera switch zone
+                                        //        0x10 = door swings other way / ladder variant
+                                        //        0x20 = inside stairs/ladder/door zone
+                                        //        0x40 = door direction modifier (with angle bit 0x400)
+                                        //        0x80 = grabbed/captured by enemy
     unsigned int   Sca_info;            // 0x04
     unsigned int   pSca_hit_data;       // 0x08
 
