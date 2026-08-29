@@ -306,7 +306,7 @@ _fade_done:
 
     if ((g_main_state_flags & 0x4008000) == 0) {
         if (g_spriteAnimIntensity != 0) {
-            if ((g_stageId == 4) && (g_roomId == 0x13) && (g_roomCameraId == 5)) {
+            if ((g_stageId == STAGE_LABORATORY) && (g_roomId == ROOM_MAIN_LAB) && (g_roomCameraId == 5)) {
                 draw_rect(&g_LetterboxBarTop, 0, 0);
                 draw_rect(&g_LetterboxBarBottom, 0, 0);
             } else {
@@ -323,8 +323,8 @@ _fade_done:
             g_FadingRect.g = g_SpecialG1 & lightMask;
             g_FadingRect.b = lightMask & g_SpecialB1;
 
-            // Stage 2, Room 5, Camera 3: double color components
-            if ((g_stageId == 2) && (g_roomId == 5) && (g_roomCameraId == 3)) {
+            // Stage 3, Room 5, Camera 3: double color components
+            if ((g_stageId == STAGE_COURTYARD) && (g_roomId == ROOM_FOUNTAIN) && (g_roomCameraId == 3)) {
                 if ((g_FadingRect.r & 0x80) == 0) {
                     g_FadingRect.r = g_FadingRect.r << 1;
                 } else {
@@ -344,7 +344,7 @@ _fade_done:
 
             g_SpecialRoomLightState += g_SpecialRoomLightDelta;
 
-            if ((g_stageId == 3) && (g_roomId == 0x11)) {
+            if ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_CONTROL_ROOM)) {
                 draw_rect(&g_FadingRect, 0x14, 0);
                 int blend2;
                 if ((g_roomCameraId == 4) || (g_roomCameraId == 3)) {
@@ -356,26 +356,26 @@ _fade_done:
             } else {
                 bool useSpecialFade = true;
 
-                if ((g_stageId == 2) && (useSpecialFade = (g_roomId != 0), g_roomId == 1)) {
+                if ((g_stageId == STAGE_COURTYARD) && (useSpecialFade = (g_roomId != ROOM_COURTYARD_GARDEN), g_roomId == ROOM_WATER_GATE)) {
                     useSpecialFade = false;
                 }
-                if (g_stageId == 2) {
-                    if (g_roomId == 2) {
+                if (g_stageId == STAGE_COURTYARD) {
+                    if (g_roomId == ROOM_FALLS) {
                         useSpecialFade = false;
                     }
-                    if ((g_roomId == 5) && (g_roomCameraId == 0)) {
-                        useSpecialFade = false;
-                    }
-                }
-                if (g_stageId == 2) {
-                    if ((g_roomId == 0xF) && (g_roomCameraId == 1)) {
-                        useSpecialFade = false;
-                    }
-                    if ((g_roomId == 0x10) && (g_roomCameraId == 0)) {
+                    if ((g_roomId == ROOM_FOUNTAIN) && (g_roomCameraId == 0)) {
                         useSpecialFade = false;
                     }
                 }
-                if ((g_stageId == 4) && (g_roomId == 0)) {
+                if (g_stageId == STAGE_COURTYARD) {
+                    if ((g_roomId == ROOM_BOULDER_2_PASSAGE) && (g_roomCameraId == 1)) {
+                        useSpecialFade = false;
+                    }
+                    if ((g_roomId == ROOM_ELEVATOR_TO_LABORATORY) && (g_roomCameraId == 0)) {
+                        useSpecialFade = false;
+                    }
+                }
+                if ((g_stageId == STAGE_LABORATORY) && (g_roomId == ROOM_LABORATORY_ENTRY)) {
                     useSpecialFade = false;
                 }
 

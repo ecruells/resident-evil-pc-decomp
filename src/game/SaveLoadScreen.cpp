@@ -239,12 +239,12 @@ void EnsureDirectoryExists(const char* path)
 // ============================================================================
 int GetSaveLocationIndex(int stageId, int roomId)
 {
-    int locIdx = stageId % 5;
-    if (locIdx == 0) {
-        if (roomId == 6) locIdx = 1;
-        if (locIdx == 0 && roomId == 0x18) locIdx = 5;
+    int locIdx = stageId % 5; // get zero-indexed absolute stage id
+    if (locIdx == STAGE_MANSION_1F) {
+        if (roomId == ROOM_MAIN_HALL) locIdx = 1;
+        if (locIdx == STAGE_MANSION_1F && roomId == ROOM_MANSION_STOREROOM) locIdx = 5;
     }
-    if (locIdx == 2 && roomId == 7) locIdx = 6;
+    if (locIdx == STAGE_COURTYARD && roomId == ROOM_UNDERGROUND_ENTRY) locIdx = 6;
     return locIdx;
 }
 

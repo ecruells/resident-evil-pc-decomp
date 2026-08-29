@@ -290,8 +290,8 @@ static void char_init_wesker(void)
 
     ENTITY->Sca_info = (unsigned int)&g_charScaInfo[4];
 
-    // 0x0046b21c: compares the packed stage/room word, not g_stageId alone
-    if (*(unsigned short*)&g_stageId == 0x1104) {
+    // 0x0046b21c: compares the packed stage/room word (stageId | roomId << 8), not g_stageId alone
+    if (*(unsigned short*)&g_stageId == (STAGE_LABORATORY | (ROOM_POWER_ROOM << 8))) {
         ENTITY->status_flags |= 2;
     }
 

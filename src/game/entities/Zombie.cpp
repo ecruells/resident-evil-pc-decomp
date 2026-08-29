@@ -690,7 +690,7 @@ static void explode_leg_and_drop(void)
         // Crawls away instead of dying: needs behaviour != 4, not stage/room
         // 0x0201, clear floor, and health still above zero.
         if (ENTITY->behavior_flags != 4
-            && *(unsigned short*)&g_stageId != 0x201
+            && *(unsigned short*)&g_stageId != (STAGE_MANSION_2F | (ROOM_DINING_ROOM_2F << 8))
             && g_playerDisplacement == 0
             && ENTITY->health > 0)
         {
@@ -809,7 +809,8 @@ static void benddown_and_standup(void)
         ENTITY->action_state       = 0;
         // Plain byte stores, and a WORD compare spanning g_stageId + g_roomId.
         ENTITY->behavior_flags = 0;
-        if (*(unsigned short*)&g_stageId == 0x504) {
+        // lab naked zombie behavior on o-passage room
+        if (*(unsigned short*)&g_stageId == (STAGE_LABORATORY | (ROOM_LAB_B3_O_PASSAGE << 8))) {
             ENTITY->behavior_flags = 4;
         }
         ENTITY->hit_state = 0;
@@ -1251,7 +1252,7 @@ void zombie_dead_animation(void)
         if ((ENTITY->behavior_flags & 0x40) == 0
             && ENTITY->behavior_flags != 0x04
             && (*(unsigned char*)((int)ENTITY->jointsStructs + 0xF8) & 0xCC) == 0
-            && *(unsigned short*)&g_stageId != 0x201
+            && *(unsigned short*)&g_stageId != (STAGE_MANSION_2F | (ROOM_DINING_ROOM_2F << 8))
             && ENTITY->animationId == 8
             && g_playerDisplacement == 0
             && (g_RandSeed & 3) == 0
@@ -2024,7 +2025,7 @@ void zombie_eating(void)
             // CMP word [0x00be9820],0x504 - a WORD compare spanning g_stageId
             // (low byte, 4) and g_roomId (high byte, 5). The old 32-bit read
             // dragged in roomCameraId and attractMode_RoomCameraId as well.
-            if (*(unsigned short*)&g_stageId == 0x504) {
+            if (*(unsigned short*)&g_stageId == (STAGE_LABORATORY | (ROOM_LAB_B3_O_PASSAGE << 8))) {
                 ENTITY->behavior_flags = 4;
             }
             // MOV dword [_ENTITY+0x84],0x30101 - state=1, ignore=1,

@@ -369,12 +369,12 @@ int cmd_item_set(void)
         g_RoomItemEventHead = entry;
     }
     entry[0] = g_ScdOpcodes[10];
-    entry[1] = g_ScdOpcodes[0xb];
-    *(unsigned short*)(entry + 2) = *(unsigned short*)(g_ScdOpcodes + 0xc);
-    *(unsigned short*)(entry + 4) = *(unsigned short*)(g_ScdOpcodes + 0xe);
-    *(unsigned short*)(entry + 6) = *(unsigned short*)(g_ScdOpcodes + 0x10);
+    entry[1] = g_ScdOpcodes[11];
+    *(unsigned short*)(entry + 2) = *(unsigned short*)(g_ScdOpcodes + 12);
+    *(unsigned short*)(entry + 4) = *(unsigned short*)(g_ScdOpcodes + 14);
+    *(unsigned short*)(entry + 6) = *(unsigned short*)(g_ScdOpcodes + 16);
     *(unsigned int*)(entry + 8) = (unsigned int)(g_ScdOpcodes + 2);
-    g_ScdOpcodes += 0x12;
+    g_ScdOpcodes += 18;
     return 1;
 }
 
@@ -735,7 +735,7 @@ int cmd_item_model_set(void)
     *(int*)(deskPtr + 0x38) = (int)scd_read_s16(0x10);
     *(int*)(deskPtr + 0x3c) = (int)scd_read_s16(0x12);
 
-    if (g_stageId == 6 && g_roomId == 0x15 && (deskPtr[1] & 0x3f) == 1) {
+    if (g_stageId == STAGE_MANSION_RETURN_2F && g_roomId == ROOM_TROPHY_ROOM && (deskPtr[1] & 0x3f) == 1) {
         *(int*)(deskPtr + 0x3c) = scd_read_s16(0x12) - 0x96;
     }
 
@@ -934,31 +934,31 @@ int cmd_omodel_set(void)
         DAT_008e1c7c = g_TextureBankID;
         DAT_008e1c74 = g_TextureDepthByte;
 
-        // Stage 4 room-specific texture bank overrides.
+        // Stage 5 room-specific texture bank overrides.
         //
         // The original's control flow here has THREE outcomes, not two - a bank
         // override falls straight past both the palette block and ProcessTmdAsync:
-        //   stage4/room4  bank==9        -> override, no palette, NO async
-        //   stage4/room4  bank!=9        -> jmp LAB_00461d35: async only
-        //   stage4/room6  bank in 7/9/0B -> override, no palette, NO async
-        //   stage4/room6  other bank     -> jmp LAB_00461d35: async only
-        //   stage4/other room            -> jmp LAB_00461bfe: palette + async
+        //   stage5/room4  bank==9        -> override, no palette, NO async
+        //   stage5/room4  bank!=9        -> jmp LAB_00461d35: async only
+        //   stage5/room6  bank in 7/9/0B -> override, no palette, NO async
+        //   stage5/room6  other bank     -> jmp LAB_00461d35: async only
+        //   stage5/other room            -> jmp LAB_00461bfe: palette + async
         //   stage != 4                   -> palette + async
         // The port previously nested ProcessTmdAsync inside the `else`, so stage 4
-        // never called it at all, and stage-4 rooms other than 4/6 also skipped
+        // never called it at all, and stage-5 rooms other than 4/6 also skipped
         // ClearTmdProcessingFlag.
         bool doPaletteBlock = true;
         bool doProcessAsync = true;
 
-        if (g_stageId == 4) {
+        if (g_stageId == STAGE_LABORATORY) {
             doPaletteBlock = false;
-            if (g_roomId == 4) {
+            if (g_roomId == ROOM_VISUAL_DATA_ROOM) {
                 if (g_TextureBankID == 9) {
                     g_TextureBankID = 0x0e;
                     g_TextureDepthByte = 0x13;
                     doProcessAsync = false;
                 }
-            } else if (g_roomId == 6) {
+            } else if (g_roomId == ROOM_SMALL_LABORATORY) {
                 if (g_TextureBankID == 7) {
                     g_TextureBankID = 9;
                     g_TextureDepthByte++;
@@ -978,8 +978,8 @@ int cmd_omodel_set(void)
         }
 
         if (doPaletteBlock) {
-            // Stage 0 room 12: adjust TMD colors
-            if (g_stageId == 0 && g_roomId == 12 && (g_ScdOpcodes[1] & 0x3f) == 0) {
+            // Stage 1 room 12: adjust TMD colors
+            if (g_stageId == STAGE_MANSION_1F && g_roomId == ROOM_GREENHOUSE && (g_ScdOpcodes[1] & 0x3f) == 0) {
                 unsigned short* colorPtr = (unsigned short*)(modelData[1] + 0x14);
                 for (int i = 0; i < 256; i++) {
                     unsigned short c = *colorPtr;
@@ -994,13 +994,13 @@ int cmd_omodel_set(void)
                 }
             }
 
-            if (!(g_stageId == 6 && g_roomId == 0x16 && (g_ScdOpcodes[1] & 0x3f) == 0)) {
+            if (!(g_stageId == STAGE_MANSION_RETURN_2F && g_roomId == ROOM_LARGE_LIBRARY && (g_ScdOpcodes[1] & 0x3f) == 0)) {
                 ClearTmdProcessingFlag();
             }
 
-            // Stage 1 room 11: fix transparent colors.
+            // Mansion 2F (stages 2/7) room 11: fix transparent colors.
             // The original zeroes palette entry 0 before the scan; that was missing.
-            if ((g_stageId + 1) % 5 == 2 && g_roomId == 0x0b && (g_ScdOpcodes[1] & 0x3f) == 0) {
+            if ((g_stageId + 1) % 5 == 2 && g_roomId == ROOM_FRONT_LESSON_ROOM && (g_ScdOpcodes[1] & 0x3f) == 0) {
                 unsigned short* colorPtr = (unsigned short*)(modelData[1] + 0x14);
                 *colorPtr = 0;
                 for (int i = 0; i < 256; i++) {
@@ -1022,19 +1022,19 @@ int cmd_omodel_set(void)
             QueueTextureForProcessing((char)DAT_008e1c74,
                 (unsigned char)(((unsigned int)texResult & 0xFFFFFF00) | (g_ScdOpcodes[1] & 0xBF)));
         }
-        if (g_stageId == 2 && g_roomId == 3 && (g_ScdOpcodes[1] & 0x3f) < 5) {
+        if (g_stageId == STAGE_COURTYARD && g_roomId == ROOM_HELIPORT && (g_ScdOpcodes[1] & 0x3f) < 5) {
             FUN_00473e40(*modelData);
         }
     }
 
     // Stage-specific adjustments
-    if ((g_stageId + 1) % 5 == 2 && g_roomId == 10 && (g_ScdOpcodes[1] & 0x3f) == 1) {
+    if ((g_stageId + 1) % 5 == MANSION_2F && g_roomId == ROOM_STUDY_2F && (g_ScdOpcodes[1] & 0x3f) == 1) {
         DAT_004d2be0 = 0x30;
     }
-    if (g_stageId == 0 && g_roomId == 13 && (g_ScdOpcodes[1] & 0x3f) == 1) {
+    if (g_stageId == STAGE_MANSION_1F && g_roomId == ROOM_TIGER_STATUE_ROOM && (g_ScdOpcodes[1] & 0x3f) == 1) {
         FUN_00473e40(*modelData);
     }
-    if ((g_stageId + 1) % 5 == 2 && g_roomId == 10 && (g_ScdOpcodes[1] & 0x3f) == 0) {
+    if ((g_stageId + 1) % 5 == MANSION_2F && g_roomId == ROOM_STUDY_2F && (g_ScdOpcodes[1] & 0x3f) == 0) {
         FUN_00484d90(modelData[1], DAT_008e1c7c, DAT_008e1c74);
         FUN_00484e40(*modelData, DAT_008e1c7c, DAT_008e1c74);
     }
@@ -1101,11 +1101,11 @@ setupObject:
     *(int*)(objPtr + 0x3c) = (int)posZ;
 
     // Stage/room-specific position adjustments
-    if (g_stageId == 0 && g_roomId == 5 && g_playerEntity.id == 1 && (g_ScdOpcodes[1] & 0x3f) == 1) {
+    if (g_stageId == STAGE_MANSION_1F && g_roomId == ROOM_DINING_ROOM && g_playerEntity.id == 1 && (g_ScdOpcodes[1] & 0x3f) == 1) {
         *(short*)(objPtr + 0x6e) = -5;
         *(int*)(objPtr + 0x38) = -5;
     }
-    if ((g_stageId + 1) % 5 == 2 && g_roomId == 0x0b) {
+    if ((g_stageId + 1) % 5 == MANSION_2F && g_roomId == ROOM_FRONT_LESSON_ROOM) {
         if ((g_ScdOpcodes[1] & 0x3f) == 0) {
             short adjZ = scd_read_s16(8) + 10;
             *(short*)(objPtr + 0x70) = adjZ;
@@ -1117,8 +1117,8 @@ setupObject:
             *(int*)(objPtr + 0x3c) = (int)adjZ;
         }
     }
-    if (g_stageId == 3) {
-        if (g_roomId == 3 && (g_ScdOpcodes[1] & 0x3f) == 0) {
+    if (g_stageId == STAGE_GUARDHOUSE) {
+        if (g_roomId == ROOM_GUARDHOUSE_SAVE_ROOM && (g_ScdOpcodes[1] & 0x3f) == 0) {
             *(short*)(objPtr + 0x6c) = scd_read_s16(4) + 0x1e;
             *(int*)(objPtr + 0x34) = (int)*(short*)(objPtr + 0x6c);
             *(short*)(objPtr + 0x6e) = scd_read_s16(6) - 10;
@@ -1126,7 +1126,7 @@ setupObject:
             *(short*)(objPtr + 0x70) = scd_read_s16(8) + 0x82;
             *(int*)(objPtr + 0x3c) = (int)*(short*)(objPtr + 0x70);
         }
-        if (g_roomId == 0x0f && (g_ScdOpcodes[1] & 0x3f) == 0) {
+        if (g_roomId == ROOM_SECURITY_ROOM && (g_ScdOpcodes[1] & 0x3f) == 0) {
             *(short*)(objPtr + 0x6e) = scd_read_s16(6) - 0x15e;
             *(int*)(objPtr + 0x38) = (int)*(short*)(objPtr + 0x6e);
         }
@@ -1755,7 +1755,7 @@ int cmd_obj_flag_set(void)
     g_ScdOpcodes += 2;
 
     // Special case: stage 3 room 13 object 5
-    if (g_stageId == 3 && g_roomId == 13 && ((unsigned char)op2 & 0x3f) == 5) {
+    if (g_stageId == STAGE_GUARDHOUSE && g_roomId == ROOM_WATER_TANK_ENTRY && ((unsigned char)op2 & 0x3f) == 5) {
         *(unsigned char*)g_omodel_table[op2 & 0xff] = 0;
         return 1;
     }

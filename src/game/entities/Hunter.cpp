@@ -1715,14 +1715,14 @@ static void hunter_behavior_intro(void) // 0x00418640
 {
     if (ENTITY->action_state == 0) {
         unsigned short stageRoom = (unsigned short)(g_stageId | (g_roomId << 8));
-        if (stageRoom == 0x305) {
+        if (stageRoom == (STAGE_MANSION_RETURN_1F | (ROOM_F_PASSAGE << 8))) {
             hunter_intro_jump_kind = 3;
-        } else if (stageRoom == 0x905) {
+        } else if (stageRoom == (STAGE_MANSION_RETURN_1F | (ROOM_TRAP_PASSAGE << 8))) {
             hunter_intro_jump_kind = 4;
             if (g_AttractMode_RoomCameraId == 10 || g_AttractMode_RoomCameraId == 21) {
                 hunter_intro_jump_kind = 5;
             }
-        } else if (stageRoom == 0xA02) {
+        } else if (stageRoom == (STAGE_COURTYARD | (ROOM_ENRICO_ROOM << 8))) {
             hunter_intro_jump_kind = 2;
         }
         ENTITY->action_state = 1;

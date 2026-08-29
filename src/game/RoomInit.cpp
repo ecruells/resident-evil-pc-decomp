@@ -382,8 +382,10 @@ void room_set(void)
     // 0x004779d6: object_delete_00442170(3)
     object_delete_00442170(3);
 
-    // 0x004779f3: Set room event flags for room 0x13 camera 4
-    if ((g_roomCameraId == 4) && (g_roomId == 0x13)) {
+    // 0x004779f3: Set room event flags for room 0x13 camera 4. The original
+    // tests the raw room id with no stage guard; the Tyrant-room (main lab)
+    // is the only one with a camera 4.
+    if ((g_roomCameraId == 4) && (g_roomId == ROOM_MAIN_LAB)) {
         Flg_on((int)&g_RoomEventFlags, 0x52);
         Flg_on((int)&g_RoomEventFlags, 0x53);
         Flg_on((int)&g_RoomEventFlags, 0x54);
@@ -514,8 +516,8 @@ void room_set(void)
 
     printf("after of model set\n");
 
-    // 0x00477e7c: Special case for stage 4, room 4
-    if ((g_stageId == 4) && (g_roomId == 4)) {
+    // 0x00477e7c: Special case for lab visual data room (slide projector)
+    if ((g_stageId == STAGE_LABORATORY) && (g_roomId == ROOM_VISUAL_DATA_ROOM)) {
         load_slides_images();
     }
 
@@ -539,8 +541,8 @@ void room_set(void)
         display_room_camera_bg();
     }
 
-    // 0x00477f26: Special case for stage 2, room 3
-    if ((g_stageId == 2) && (g_roomId == 3)) {
+    // 0x00477f26: Special case for the courtyard heliport
+    if ((g_stageId == STAGE_COURTYARD) && (g_roomId == ROOM_HELIPORT)) {
         DAT_00d213c0 = g_loadDataDestPointer;
     }
 

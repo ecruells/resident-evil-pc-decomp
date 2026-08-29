@@ -981,7 +981,7 @@ void ending_state(void)
     ending_slots_clear();
 
     g_SavesCounter = 0;
-    g_stageId = 0;
+    g_stageId = STAGE_MANSION_1F;
     g_playerEntity.healthStatusFlags = 0;
     g_playerEntity.health = (short)((g_playerEntity.id & 1) * -44 + 140);
     g_PlayerHealthCopy = g_playerEntity.health;

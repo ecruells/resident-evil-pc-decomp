@@ -1421,7 +1421,7 @@ static int menu_item_check_combine(void)
             play_sfx(3, 6, 0);
             if ((bVar1 < 0x13) || (0x1a < bVar1)) {
                 if ((0x42 < bVar1) && (bVar1 < 0x4c)) return 2;
-            } else if ((g_roomId != 9) || (g_stageId != 3)) {
+            } else if ((g_roomId != ROOM_DRUG_STOREHOUSE) || (g_stageId != STAGE_GUARDHOUSE)) {
                 return 1;
             }
             *(unsigned char*)(ITEM_SLOTS + (unsigned int)bVar3 * 2) = pRec[1];
@@ -3351,21 +3351,21 @@ static void map_build_area_mask(unsigned char* state)
             switch (group) {
             case 0: MAP_AREA_MASK |= 1; break;
             case 1:
-                if ((room < 0x1a) || (room == 0x1d)) MAP_AREA_MASK |= 2;
+                if ((room < ROOM_MANSION_B1_PASSAGE_1) || (room == 0x1d)) MAP_AREA_MASK |= 2;
                 else MAP_AREA_MASK |= 4;
                 break;
             case 2:
-                if ((room < 6) || (room == 0x10)) MAP_AREA_MASK |= 8;
+                if ((room < ROOM_ITEM_CHAMBER) || (room == ROOM_ELEVATOR_TO_LABORATORY)) MAP_AREA_MASK |= 8;
                 else MAP_AREA_MASK |= 0x10;
                 break;
             case 3:
-                if (room < 0xd) MAP_AREA_MASK |= 0x20;
+                if (room < ROOM_WATER_TANK_ENTRY) MAP_AREA_MASK |= 0x20;
                 else MAP_AREA_MASK |= 0x40;
                 break;
             case 4:
-                if ((room < 2) || (room == 0x16)) MAP_AREA_MASK |= 0x80;
-                else if (room < 5) MAP_AREA_MASK |= 0x100;
-                else if (room < 0x13) MAP_AREA_MASK |= 0x200;
+                if ((room < ROOM_LAB_LADDER_ROOM) || (room == 0x16)) MAP_AREA_MASK |= 0x80;
+                else if (room < ROOM_LAB_B3_O_PASSAGE) MAP_AREA_MASK |= 0x100;
+                else if (room < ROOM_MAIN_LAB) MAP_AREA_MASK |= 0x200;
                 else MAP_AREA_MASK |= 0x400;
                 break;
             }
@@ -3399,7 +3399,7 @@ static void map_update_variant(void)
     }
     if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_2E) != 0) {
         if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_4A) == 0) {
-            if ((g_stageId != 0) && (g_stageId != 1)) {
+            if ((g_stageId != STAGE_MANSION_1F) && (g_stageId != STAGE_MANSION_2F)) {
                 if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_38) != 0) { MAP_MODE = 1; return; }
                 MAP_MODE = 0;
                 return;
@@ -3429,16 +3429,16 @@ static void menu_init_map_screen(void)
     MAP_ROOM_IDX[3] = 3;
     *(unsigned int*)&DAT_00ac9890[0] = 0;   // state, substate, blink, zoom
     MAP_ROOM = g_roomId;
-    MAP_GROUP = g_stageId % 5;
+    MAP_GROUP = g_stageId % 5; // get zero-indexed absolute stage ID
     switch (MAP_GROUP) {
-    case 0:
-        if (((g_roomId == 7) && (2 < g_roomCameraId)) && (g_roomCameraId < 7)) {
+    case STAGE_MANSION_1F:
+        if (((g_roomId == ROOM_GALLERY) && (2 < g_roomCameraId)) && (g_roomCameraId < 7)) {
             MAP_AREA = 0;
             MAP_ROOM = 0x1d;
-        } else if ((g_roomId == 0xf) && ((g_roomCameraId == 3) || (g_roomCameraId == 4))) {
+        } else if ((g_roomId == ROOM_MANSION_BAR) && ((g_roomCameraId == 3) || (g_roomCameraId == 4))) {
             MAP_AREA = 0;
             MAP_ROOM = 0x1e;
-        } else if ((g_roomId == 0x10) && (g_roomCameraId == 0)) {
+        } else if ((g_roomId == ROOM_MANSION_1F_ELEVATOR_FRONT) && (g_roomCameraId == 0)) {
             MAP_AREA = 2;
             MAP_ROOM = 0x1e;
             MAP_GROUP = 1;
@@ -3446,44 +3446,44 @@ static void menu_init_map_screen(void)
             MAP_AREA = 0;
         }
         break;
-    case 1:
-        if ((g_roomId == 0xf) && ((g_roomCameraId == 2) || (g_roomCameraId == 5))) {
+    case STAGE_MANSION_2F:
+        if ((g_roomId == ROOM_SMALL_DINING) && ((g_roomCameraId == 2) || (g_roomCameraId == 5))) {
             MAP_AREA = 1;
             MAP_ROOM = 0x1d;
-        } else if ((g_roomId == 0xc) && (3 < g_roomCameraId) && (g_roomCameraId < 8)) {
+        } else if ((g_roomId == ROOM_LESSON_ROOM) && (3 < g_roomCameraId) && (g_roomCameraId < 8)) {
             MAP_AREA = 0;
             MAP_ROOM = 0x1f;
             MAP_GROUP = 0;
-        } else if (g_roomId < 0x1a) {
+        } else if (g_roomId < ROOM_MANSION_B1_PASSAGE_1) {
             MAP_AREA = 1;
         } else {
             MAP_AREA = 2;
         }
         break;
-    case 2:
-        if (((g_roomId == 0xb) && (4 < g_roomCameraId)) && (g_roomCameraId < 7)) {
+    case STAGE_COURTYARD:
+        if (((g_roomId == ROOM_BOULDER_1_PASSAGE) && (4 < g_roomCameraId)) && (g_roomCameraId < 7)) {
             MAP_AREA = 4;
             MAP_ROOM = 0x11;
-        } else if ((g_roomId == 0xf) && (g_roomCameraId == 6)) {
+        } else if ((g_roomId == ROOM_BOULDER_2_PASSAGE) && (g_roomCameraId == 6)) {
             MAP_AREA = 4;
             MAP_ROOM = 0x12;
-        } else if (g_roomId < 6) {
+        } else if (g_roomId < ROOM_ITEM_CHAMBER) {
             MAP_AREA = 3;
         } else {
             MAP_AREA = 4;
         }
         break;
-    case 3:
-        if (g_roomId < 0xd) MAP_AREA = 5;
+    case STAGE_GUARDHOUSE:
+        if (g_roomId < ROOM_WATER_TANK_ENTRY) MAP_AREA = 5;
         else MAP_AREA = 6;
         break;
-    case 4:
-        if ((g_roomId == 7) && (g_roomCameraId < 4)) {
+    case STAGE_LABORATORY:
+        if ((g_roomId == ROOM_MORGUE) && (g_roomCameraId < 4)) {
             MAP_AREA = 9;
             MAP_ROOM = 0x16;
-        } else if (g_roomId < 2) {
+        } else if (g_roomId < ROOM_LAB_LADDER_ROOM) {
             MAP_AREA = 7;
-        } else if (g_roomId < 5) {
+        } else if (g_roomId < ROOM_LAB_B3_O_PASSAGE) {
             MAP_AREA = 8;
         } else {
             MAP_AREA = 9;

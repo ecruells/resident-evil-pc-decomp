@@ -1183,13 +1183,13 @@ void check_itembox_state(void)
 //   4    - desk menu closed: restore the room camera, clear the opened flag
 //   5    - open the take-item menu over the desk, re-arm the entry
 //   35   - desk camera pan (counts down one per frame through `default`)
-// Stage 3 room 10 (Chris's study) resets the flow until PlayerFlags bit 0x7b.
+// Guardhouse room 003 resets the flow until PlayerFlags bit 0x7b.
 // ============================================================================
 extern unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
 
 void check_desk_state(void)
 {
-    if ((g_stageId == 3) && (g_roomId == 0xa) && ((g_playerEntity.id & 3) == 1) &&
+    if ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_003) && ((g_playerEntity.id & 3) == 1) &&
         (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)) {
         g_desk_check_state = 0;
     }

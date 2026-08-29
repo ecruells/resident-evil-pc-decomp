@@ -752,7 +752,7 @@ static int effect_projectile_hit_check(int range, short x, short z)
         }
     }
 
-    if ((g_EnemiesList[1].id == 0x13) && (g_stageId == 2) && (g_roomId == 0xc)) {
+    if ((g_EnemiesList[1].id == 0x13) && (g_stageId == STAGE_COURTYARD) && (g_roomId == ROOM_BLACK_TIGER_ROOM)) {
         Entity* shark = &g_EnemiesList[1];
         if (effect_distance_to_entity(x, z, shark)) {
             if (*(unsigned char*)((char*)shark + 0x138) == 0) {
@@ -2597,14 +2597,14 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     row = g_EffectBlendTable[g_EffectBlendStart[rec]] + i * 4;
 
     unsigned char blendMode = row[2];
-    if ((g_stageId == 3) && ((g_roomId == 0xe) || (g_roomId == 0xf) || (g_roomId == 0x11))) {
+    if ((g_stageId == STAGE_GUARDHOUSE) && ((g_roomId == ROOM_WATER_TANK) || (g_roomId == ROOM_SECURITY_ROOM) || (g_roomId == ROOM_CONTROL_ROOM))) {
         blendMode = 0;
     }
     unsigned int colorIdx = row[3];
 
     int tint = (int)g_TextureDesc.printClutTint;
 
-    if (texVHack && (g_stageId == 6) && (g_roomId == 0xc)
+    if (texVHack && (g_stageId == STAGE_MANSION_RETURN_2F) && (g_roomId == ROOM_LESSON_ROOM)
         && ((tint == 2) || (tint == 1))
         && (0x1a < g_TextureDesc.texV)
         && ((unsigned short)(g_TextureDesc.texV + g_TextureDesc.height) < 99)) {
@@ -2659,15 +2659,16 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     int scaleYadd = g_EffectLightRecords[lightRec][1] + g_EffectScaleBiasY;
     int brightness = g_EffectLightRecords[lightRec][2];
 
-    // ---- stage-4 room-0x13 camera-5 special case (in-game path only): the
-    // bird's-eye view renders the effect unscaled and at a fixed depth ----
+    // ---- stage-5 room-0x13 camera-5 special case (in-game path only): the
+    // Tyrant's perspective inside the stasis pod view renders the effect unscaled
+    // and at a fixed depth ----
     //
     // The colour is NOT reset here. 0x0047c99e is `LEA ECX,[EDI+EDI*2]` then
     // `ADD ECX,[EBP+0x4c528c]` - tint*3 added to the record table, exactly like
     // the general path. This branch only zeroes the two scale addends and pins
     // the depth to 0x3c; brightness and blendMode carry through untouched.
     unsigned int depthArg;
-    if (stage4Special && (g_stageId == 4) && (g_roomId == 0x13) && (g_roomCameraId == 5)) {
+    if (stage4Special && (g_stageId == STAGE_LABORATORY) && (g_roomId == ROOM_MAIN_LAB) && (g_roomCameraId == 5)) {
         scaleXadd = 0;
         scaleYadd = 0;
         depthArg = 0x3c;

@@ -2077,11 +2077,11 @@ static void player_state_03(void)
         }
         break;
     case 2:
-        // Scripted-death rooms (stage 1 room 5, stage 3 room 9, stage 4 room 7)
+        // Scripted-death rooms (armor room, drug storehouse, morgue)
         // skip the blood billboard and go straight to state 4.
-        if ((*(unsigned short*)&g_stageId != 0x501) &&
-            (*(unsigned short*)&g_stageId != 0x903) &&
-            (*(unsigned short*)&g_stageId != 0x704)) {
+        if ((*(unsigned short*)&g_stageId != (STAGE_MANSION_2F | (ROOM_ARMOR_ROOM << 8))) &&
+            (*(unsigned short*)&g_stageId != (STAGE_GUARDHOUSE | (ROOM_DRUG_STOREHOUSE << 8))) &&
+            (*(unsigned short*)&g_stageId != (STAGE_LABORATORY | (ROOM_MORGUE << 8)))) {
             BillboardSetColor(&g_playerEntity.pushVelocity, 1, 2, 0xFFFF50);
             BillboardAdjSize(&g_playerEntity.pushVelocity, -0x64, -0x64);
             g_playerEntity.action_state = 3;
@@ -2841,7 +2841,10 @@ static void player_door_open_sequence(void)      // 0x00457390
         if ((g_playerEntity.zoneFlags & 0x10) != 0) {
             g_svecScratch.y = 0x29;
         }
-        if ((g_roomId == 0xe) || (g_roomId == 5)) {
+        // The original tests the raw room id with NO stage guard, so this hits
+        // id 5 (dining room) and id 0xE (keeper's bedroom) on the mansion 1F
+        // stages AND the same ids on the other stages.
+        if ((g_roomId == ROOM_KEEPERS_BEDROOM) || (g_roomId == ROOM_DINING_ROOM)) {
             g_svecScratch.y = -0x24;
             if ((g_playerEntity.zoneFlags & 0x10) != 0) {
                 g_svecScratch.y = 0x24;
@@ -2896,8 +2899,9 @@ static void player_door_open_sequence(void)      // 0x00457390
             player_distance_z = 0xb45;
         }
 
-        // Rooms 5 and 0xE have shallower doorways.
-        if ((g_roomId == 0xe) || (g_roomId == 5)) {
+        // Rooms 5 and 0xE have shallower doorways (same unguarded raw room id
+        // test as above - dining room / keeper's bedroom ids across stages).
+        if ((g_roomId == ROOM_DINING_ROOM) || (g_roomId == ROOM_KEEPERS_BEDROOM)) {
             g_scaled_down_dist   = 0;
             g_playerDisplacement = dir * 0x842;
             if (sideways != 0) {
@@ -6491,7 +6495,7 @@ void update_player_anim(void)
 
     if ((((g_playerEntity.zoneFlags & 0x7f) != 0) &&
          (((unsigned char)g_playerEntity.unk_e0 & 0x40) == 0)) ||
-        ((g_stageId == 3) && (g_roomId == 0xd))) {
+        ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_WATER_TANK_ENTRY))) {
         player_update_shadow_sprite((int)g_playerEntity.scaMatrixData.localMatrix.t,
                                     (int)&g_playerEntity.pushVelocity,
                                     (int)g_playerEntity.posY,
@@ -6689,7 +6693,7 @@ int door_try_enter(unsigned char* entry)
     set_message_display(0xc3, 0xff);
 
     int sfxId;
-    if (g_stageId == 4 && g_roomId == 5) {
+    if (g_stageId == STAGE_LABORATORY && g_roomId == ROOM_LAB_B3_O_PASSAGE) {
         play_sfx(2, 0x17, 0);
         play_sfx(2, 0x18, 0);
         sfxId = 0x19;

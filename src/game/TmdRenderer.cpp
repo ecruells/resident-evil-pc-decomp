@@ -823,9 +823,8 @@ void calc_entity_lighting(Entity* ent)
             if (g_animFrameIdSave == 0) {
                 if ((jointFlags & 0x74) != 0) goto checkSwitchZone;
 doRender:
-                // Original skips a specific hunter in stage 6 / room 0xC / camera 3
-                if (((entBytes[1] != 18) || (g_stageId != 6)) ||
-                    ((g_roomId != 0x0C) || (g_roomCameraId != 3))) {
+                if (((entBytes[1] != 18) || (g_stageId != STAGE_MANSION_RETURN_2F)) ||
+                    ((g_roomId != ROOM_LESSON_ROOM) || (g_roomCameraId != 3))) {
                     g_entityJointPosX = pJoint->t[0];
                     SetLightMatrix(&g_matrixScratch);
                     SetRotAndTransMatrix(&localMatrix);
@@ -1265,42 +1264,42 @@ static void RoomObjectRender(unsigned char* obj)
     MulMatrix0(&g_lightMatrix, (MATRIX*)(obj + 0x20), &g_matrixScratch);
     SetLightMatrix(&g_matrixScratch);
 
-    // 0x0047465f: stage 2 room 3 item models 1-4 (pass 0 only) sit 1000 units
+    // 0x0047465f: heliport item models 1-4 (pass 0 only) sit 1000 units
     // further along the view axis — the room's shelf displays.
-    if ((g_stageId == 2) && (g_roomId == 3) && (DAT_008f8688 == 0)) {
+    if ((g_stageId == STAGE_COURTYARD) && (g_roomId == ROOM_HELIPORT) && (DAT_008f8688 == 0)) {
         int t = obj[1] & 0x3f;
         if (t != 0 && t < 5) {
             localMatrix.t[2] += 1000;
         }
     }
 
-    // 0x0047466e: DAT_00ae9ee4 — the stage-1 rooms 0xA/0xB open-lid model
-    // renders at the fixed depth 0x33 instead of 0x32.
+    // 0x0047466e: DAT_00ae9ee4 — the mansion-2F study / front lesson room
+    // open-lid model renders at the fixed depth 0x33 instead of 0x32.
     DAT_00ae9ee4 = 0;
-    int stageMod = g_stageId % 5;
-    if (stageMod == 1) {
-        if ((g_roomId == 0x0a) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 1)) DAT_00ae9ee4 = 1;
-        if ((g_roomId == 0x0b) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 1)) DAT_00ae9ee4 = 1;
+    int stageMod = g_stageId % 5; // get mansion absolute index
+    if (stageMod == STAGE_MANSION_2F) {
+        if ((g_roomId == ROOM_STUDY_2F) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 1)) DAT_00ae9ee4 = 1;
+        if ((g_roomId == ROOM_FRONT_LESSON_ROOM) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 1)) DAT_00ae9ee4 = 1;
     }
 
     // 0x004746d2-0x004747b7: room-specific objects that must not render
     // (mirror/door-frame stand-ins the SCD keeps for interaction but that
-    // have their own model elsewhere, e.g. the stage-3 room 6 mirror).
+    // have their own model elsewhere, e.g. the guardhouse room 002 mirror).
     bool skip = false;
-    if ((g_stageId == 3) && (g_roomId == 6) && (g_roomCameraId == 4) &&
+    if ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_002) && (g_roomCameraId == 4) &&
         (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0)) {
         skip = true;
-    } else if ((g_stageId == 4) && (g_roomId == 10) &&
+    } else if ((g_stageId == STAGE_LABORATORY) && (g_roomId == ROOM_LAB_B3_PRIVATE_ROOM_B) &&
                ((g_roomCameraId == 0) || (g_roomCameraId == 4)) &&
                (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0)) {
         skip = true;
-    } else if ((stageMod == 0) && (g_roomId == 0x15) && (g_roomCameraId == 0) &&
+    } else if ((stageMod == STAGE_MANSION_1F) && (g_roomId == ROOM_TRAP_ROOM) && (g_roomCameraId == 0) &&
                (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0) &&
                (*(int*)(obj + 0x34) == 0x12fc) &&
                (*(int*)(obj + 0x38) == -0x2828) &&
                (*(int*)(obj + 0x3c) == 0x12fc)) {
         skip = true;
-    } else if ((stageMod == 2) && (g_roomId == 0x0f) && (g_roomCameraId == 3) &&
+    } else if ((stageMod == STAGE_COURTYARD) && (g_roomId == ROOM_BOULDER_2_PASSAGE) && (g_roomCameraId == 3) &&
                (DAT_008f8688 == 0) && ((obj[1] & 0x3f) == 0) &&
                (*(int*)(obj + 0x34) > 0x7274)) {
         // 0x004747ab: CMP dword ptr [EDI], 0x7274 / JG <return>, with EDI at
@@ -1323,17 +1322,18 @@ static void RoomObjectRender(unsigned char* obj)
     if (skip) return;
 
     // 0x004747b7-0x0047488b: DAT_00ae9ef8 — keep the fixed ordering-table
-    // depth for these rooms instead of sorting by GTE t[2].
+    // depth for flooded rooms instead of sorting by GTE t[2].
     DAT_00ae9ef8 = 0;
-    int stageModP1 = (g_stageId + 1) % 5;
-    if (stageModP1 == 4) {
-        if ((g_roomId == 0x0d) || (g_roomId == 0x0f) || (g_roomId == 0x0e) ||
-            (g_roomId == 0x10) || (g_roomId == 0x11)) {
+    int stageModP1 = (g_stageId + 1) % 5; // get 1-indexed stage id
+    if (stageModP1 == GUARDHOUSE) {
+        if ((g_roomId == ROOM_WATER_TANK_ENTRY) || (g_roomId == ROOM_SECURITY_ROOM) ||
+            (g_roomId == ROOM_WATER_TANK) || (g_roomId == ROOM_ARMS_STOREHOUSE) ||
+            (g_roomId == ROOM_CONTROL_ROOM)) {
             DAT_00ae9ef8 = 1;
         }
     }
-    if ((stageModP1 == 3) && (g_roomId == 1)) DAT_00ae9ef8 = 1;
-    if ((stageMod == 1) && (g_roomId == 0x0b) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) < 2)) DAT_00ae9ef8 = 1;
+    if ((stageModP1 == COURTYARD) && (g_roomId == ROOM_WATER_GATE)) DAT_00ae9ef8 = 1;
+    if ((stageMod == MANSION_1F) && (g_roomId == ROOM_1F_RIGHT_STAIRS) && (DAT_008f8688 == 0) && ((obj[1] & 0x3f) < 2)) DAT_00ae9ef8 = 1;
 
     // 0x00474890: push the composed matrix into the GTE rotation/translation
     // buffer — FUN_00483270 reads the transform from there.
@@ -1344,7 +1344,7 @@ static void RoomObjectRender(unsigned char* obj)
 
     // 0x004748d2
     // path (FUN_00485000) with a clamped depth.
-    if ((stageModP1 == 2) && (g_roomId == 0x0a) && ((obj[1] & 0x3f) == 0)) {
+    if ((stageModP1 == MANSION_2F) && (g_roomId == ROOM_STUDY_2F) && ((obj[1] & 0x3f) == 0)) {
         FUN_00485000();
     }
 

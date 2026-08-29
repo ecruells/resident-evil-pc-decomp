@@ -737,7 +737,7 @@ static void bgm_load_and_start(unsigned char bgmState)
     //   (id & 3) == 1 && Flg_ck(0x5c) && Flg_ck(0x48) && !Flg_ck(0x55)
     // and the two-channel case is the default, not the exception. The previous
     // transcription had the condition inverted and never reached it for Chris.
-    if (g_stageId == 2 && g_roomId == 7 &&
+    if (g_stageId == STAGE_COURTYARD && g_roomId == ROOM_UNDERGROUND_ENTRY &&
         !((g_playerEntity.id & 3) == 1 &&
           Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_5C) &&
           Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_48) &&
@@ -1259,7 +1259,7 @@ static void voice_load_and_play(unsigned int id)
         pan_set(g_BgmSoundBank, 0);
         int volume = g_voiceVolume;
         // 0x0047558?: one line in stage 0 is mixed well down
-        if ((id == 0x33) && (g_stageId == 0)) {
+        if ((id == 0x33) && (g_stageId == STAGE_MANSION_1F)) {
             volume = -300;
         }
         set_volume(g_BgmSoundBank, volume);

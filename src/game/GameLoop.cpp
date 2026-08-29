@@ -364,18 +364,18 @@ LAB_00480e89:
                     if (((g_main_state_flags2 & 0x90000000) == 0) &&
                         (g_CountdownTimer != 180))
                     {
-                        if ((g_stageId == 1) && (g_roomId == 0x10)) {
-                            // Stage 1, Room 16: immediate death fade
+                        if ((g_stageId == STAGE_MANSION_2F) && (g_roomId == ROOM_ATTIC)) {
+                            // Yawn 1 death: immediate death fade
                             TimeoutDeathFadeOut();
                             DAT_00be9614 = 3;
                         }
-                        else if ((g_stageId == 6) && (g_roomId == 0x0C)) {
-                            // Stage 6, Room 12: immediate death fade
+                        else if ((g_stageId == STAGE_MANSION_RETURN_2F) && (g_roomId == ROOM_LESSON_ROOM)) {
+                            // Yawn 2 death: immediate death fade
                             TimeoutDeathFadeOut();
                             DAT_00be9614 = 3;
                         }
-                        else if ((g_stageId == 3) && (g_roomId == 0x0E)) {
-                            // Stage 3, Room 14: immediate death fade
+                        else if ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_WATER_TANK)) {
+                            // Neptune death: immediate death fade
                             TimeoutDeathFadeOut();
                             DAT_00be9614 = 3;
                         }

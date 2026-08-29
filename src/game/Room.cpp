@@ -20,7 +20,7 @@ void cut_set(void) // 0x004628c0
     printf("cut set  start\n");
     if ((unsigned char)g_SavedTextureBankID != 0) {
         int maskFrames;
-        if ((g_stageId == 5) && (g_roomId == 0x13)) {
+        if ((g_stageId == STAGE_MANSION_RETURN_1F) && (g_roomId == ROOM_MANSION_BATHROOM)) {
             maskFrames = 3;
         } else {
             maskFrames = 2;
@@ -550,8 +550,8 @@ void DrawRoomSpr(void)
     const int   fadeBias  = rec->fadeBias;
     const int   mode      = rec->mode;
 
-    // 0x00475c0d: the stage 2 / room 0x0B / camera 5 shot hides two overlays.
-    if (g_stageId == 2 && g_roomId == 0x0b && cam == 5) {
+    // 0x00475c0d: the courtyard boulder 1 passage / camera 5 shot hides two overlays.
+    if (g_stageId == STAGE_COURTYARD && g_roomId == ROOM_BOULDER_1_PASSAGE && cam == 5) {
         g_RoomSprEntries[25].active = 0;
         g_RoomSprEntries[26].active = 0;
     }
@@ -562,9 +562,9 @@ void DrawRoomSpr(void)
     // walk forward; everything else walks the entries backwards so that
     // same-depth overlays keep the original painter order.
     if ((pathFlags & (1u << (cam & 7))) != 0) {
-        // 0x00475c42: the stage 2 / room 0x02 / camera 0 shot pushes overlay 18
+        // 0x00475c42: the falls / camera 0 shot pushes overlay 18
         // 200 units farther back than its posData asks for.
-        const bool pushEntry18 = (g_stageId == 2 && g_roomId == 2 && cam == 0);
+        const bool pushEntry18 = (g_stageId == STAGE_COURTYARD && g_roomId == ROOM_FALLS && cam == 0);
 
         for (int i = 0; i < count; i++) {
             RoomSprEntry* entry = &g_RoomSprEntries[i];
@@ -596,8 +596,8 @@ void DrawRoomSpr(void)
 
     // 0x00475da2: the backward walk, with two rooms carrying hand-tuned
     // per-overlay offsets that the shared record cannot express.
-    const bool isRoom3_0e = (g_stageId == 3 && g_roomId == 0x0e);
-    const bool isRoom3_0f = (g_stageId == 3 && g_roomId == 0x0f);
+    const bool isRoom3_0e = (g_stageId == STAGE_GUARDHOUSE && g_roomId == ROOM_WATER_TANK);
+    const bool isRoom3_0f = (g_stageId == STAGE_GUARDHOUSE && g_roomId == ROOM_SECURITY_ROOM);
 
     for (int i = count - 1; i >= 0; i--) {
         RoomSprEntry* entry = &g_RoomSprEntries[i];
@@ -701,7 +701,10 @@ void load_room_masks(int param_1) // 0x00475a90
         g_maskPathTemplate[GAME_DATA_PATH_IDX(0x13)] = (char)(g_roomId % 10 + 0x30);
 
         void* pakData;
-        if ((g_stageId == 2) && (g_roomId == 0x11)) {
+        // ROOM3110.RDT (scrapped dev heliport, Stage 3 + ROOM_SCRAPPED_HELIPORT) is
+        // a stub with empty camera mask blocks, so its mask pak is loaded directly
+        // instead of coming from the preloaded g_bgMaskDataBuffer.
+        if ((g_stageId == STAGE_COURTYARD) && (g_roomId == ROOM_SCRAPPED_HELIPORT)) {
             LoadFile(g_maskPathTemplate, &g_bgPakLoadBuffer, 0x20);
             pakData = &g_bgPakLoadBuffer;
         } else {
@@ -793,13 +796,17 @@ void load_room_bg(void) // 0x00462b00
 // ============================================================================
 void load_room_bg_image(void) // 0x004629c0
 {
-    if (g_bgCacheMode == 0 && (g_stageId != 2 || g_roomId != 0x11)) {
+    // ROOM3110.RDT (Courtyard 0x11) is a scrapped dev heliport stub RDT that also
+    // exists in the PS1 version - the game never enters it (the shipped heliport is
+    // ROOM_HELIPORT). Its own bg paks rc3110-2.pak are the heliport at different
+    // camera angles, loaded directly on every camera switch instead of from the cache.
+    if (g_bgCacheMode == 0 && (g_stageId != STAGE_COURTYARD || g_roomId != ROOM_SCRAPPED_HELIPORT)) {
         // empty_00470960(g_roomCameraId): empty in the original - call dropped
         return;
     }
 
     void* pakData;
-    if (g_stageId == 2 && g_roomId == 0x11) {
+    if (g_stageId == STAGE_COURTYARD && g_roomId == ROOM_SCRAPPED_HELIPORT) {
         g_bgPathTemplate[GAME_DATA_PATH_IDX(0x10)] = g_hexCharTable[1];
         g_bgPathTemplate[GAME_DATA_PATH_IDX(0x11)] = g_hexCharTable[1];
         g_bgPathTemplate[GAME_DATA_PATH_IDX(0x12)] = g_hexCharTable[g_roomCameraId];

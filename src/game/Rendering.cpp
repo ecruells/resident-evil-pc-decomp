@@ -1234,7 +1234,7 @@ msg_draw_char:
             g_DepthSortOverride = 0;
 
             // Fade type selection for specific room/camera
-            if ((g_stageId == 3) && (g_roomId == 0x11) &&
+            if ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_CONTROL_ROOM) &&
                 (g_roomCameraId == 0x04 || g_roomCameraId == 0x00)) {
                 fade = 0;
             } else {
@@ -1599,7 +1599,7 @@ msg_skip_char:
                 g_TextureDesc.screenX = screenX - g_ScreenOffsetX;
                 g_TextureDesc.screenY = g_MessageScreenY + 0x10;
 
-                if ((g_stageId == 3) && (g_roomId == 0x11) && (g_roomCameraId == 0x04)) {
+                if ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_CONTROL_ROOM) && (g_roomCameraId == 0x04)) {
                     fade = 0;
                 } else {
                     fade = 2;

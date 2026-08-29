@@ -313,7 +313,7 @@ void characterSelectionScreen(void)
 
     sounds_reset();
     g_loadDataDestPointer = g_DataBuffer;
-    g_roomId = 0x1B;
+    g_roomId = 0x1B;   // 0x0049239? - placeholder room id for the selection screen, not a real location
 
     LoadSoundBank(BANK_SELECT, g_DataBuffer);
 

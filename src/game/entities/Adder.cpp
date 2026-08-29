@@ -1001,7 +1001,7 @@ void adder_death_retreat(void)
                 if (i == 0) break;
             }
             ENTITY->behavior_flags = 2;
-            if (g_roomId == 1) {
+            if (g_roomId == ROOM_WATER_GATE) {
                 ENTITY->behavior_flags = 1;
             }
             // state = 0, ignore_player_flag = 0, behaviour = 0, sub-state = 0,

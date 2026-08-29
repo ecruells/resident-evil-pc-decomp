@@ -194,7 +194,7 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
         }
 
         unsigned char finalBrightness = brightness;
-        if ((g_stageId == 3) && (g_roomId == 17) && (g_roomCameraId == 4)) {
+        if ((g_stageId == STAGE_GUARDHOUSE) && (g_roomId == ROOM_CONTROL_ROOM) && (g_roomCameraId == 4)) {
             finalBrightness = 0;
         }
 

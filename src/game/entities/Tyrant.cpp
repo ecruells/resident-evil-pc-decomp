@@ -2358,7 +2358,7 @@ void em_scd_behavior_pod(void)
         ty_anim() = 6;
         ty_ticks() = 5;
         Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x80);
-        if (g_stageId == 4) StMask(0, 3);
+        if (g_stageId == STAGE_LABORATORY) StMask(0, 3);
         // fallthrough
     case 1:
         ty_ticks() = (short)(ty_ticks() - 1);
@@ -2750,8 +2750,8 @@ void em_scd_behavior_impale(void)
     unsigned char sub = ty_sub();
 
     if (sub == 0) {
-        // 0x0047d120 - drop texture set 2 on stage 4 room 0x13 only.
-        if (g_stageId == 4 && g_roomId == 0x13) TexturePage_DeleteSet(2);
+        // 0x0047d120 - drop texture set 2 on main lab only.
+        if (g_stageId == STAGE_LABORATORY && g_roomId == ROOM_MAIN_LAB) TexturePage_DeleteSet(2);
 
         ty_sub() = 1;
         ty_frame() = 0;

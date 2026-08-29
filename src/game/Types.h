@@ -224,6 +224,166 @@ static_assert(sizeof(ScaMatrixData) == 0x50, "ScaMatrixData size mismatch");
 #define ITEM_INGRAM             0x6F    // Jill's exclusive sub machinegun
 #define ITEM_MINIMI             0x70    // Chris' exclusive machinegun
 
+
+// ============================================================================
+// Stages - zero-index stages constants. 
+// 
+// Stages directories and some stage id tests use 1-index format.
+// ============================================================================
+
+#define STAGE_MANSION_1F            0x00
+#define STAGE_MANSION_2F            0x01 // limited west wing access
+#define STAGE_COURTYARD             0x02 // courtyard and underground
+#define STAGE_GUARDHOUSE            0x03
+#define STAGE_LABORATORY            0x04
+#define STAGE_MANSION_RETURN_1F     0x05 // same as stage 1, but with access to elevator and study
+#define STAGE_MANSION_RETURN_2F     0x06 // west wing access, plus mansion B1
+
+// mansion stages share the same rooms between stages variants (start game mansion and 
+// return from courtyard mansion). the return mansion RDTs that were accesible in earlier stages
+// has the same structure, but its items, events and enemies changes (zombies and cerberus for early game 
+// stages, hunters and spiders for return stages), but the return stages directories do not have 
+// background images files to avoid having duplicates (to save disk storage probably). For this, the engine
+// does a modulus calculus to get the absolute mansion stage index ((g_stageId + 1) % 5). This is because
+// Stages directories and RTD files uses 1-indexed ids.
+#define MANSION_1F      1
+#define MANSION_2F      2
+#define COURTYARD       3
+#define GUARDHOUSE      4
+#define LABORATORY      5
+
+// ============================================================================
+// Rooms
+// ============================================================================
+
+// Stage 1/6 (Mansion 1F)
+#define ROOM_MANSION_SAVE_ROOM          0x00
+#define ROOM_1F_LEFT_STAIRS             0x01 // west wing stairs
+#define ROOM_VACANT_ROOM                0x02 // broken shotgun room
+#define ROOM_F_PASSAGE                  0x03 // west wing central corridor
+#define ROOM_TEA_ROOM                   0x04 // first zombie room
+#define ROOM_DINING_ROOM                0x05
+#define ROOM_MAIN_HALL                  0x06
+#define ROOM_GALLERY                    0x07
+#define ROOM_L_PASSAGE                  0x08 // first cerberus room
+#define ROOM_TRAP_PASSAGE               0x09 // east wing winding corridor 
+#define ROOM_BACK_PASSAGE               0x0a // corridor near back of the mansion
+#define ROOM_1F_RIGHT_STAIRS            0x0b // east wing stairs
+#define ROOM_GREENHOUSE                 0x0c
+#define ROOM_TIGER_STATUE_ROOM          0x0d
+#define ROOM_KEEPERS_BEDROOM            0x0e              
+#define ROOM_MANSION_BAR                0x0f
+#define ROOM_MANSION_1F_ELEVATOR_FRONT  0x10 // elevator stairway (stage 6 only)
+#define ROOM_DRESSING_ROOM              0x11
+#define ROOM_WARDROBE                   0x12 // big mirror room
+#define ROOM_MANSION_BATHROOM           0x13 
+#define ROOM_BOILER                     0x14
+#define ROOM_TRAP_ROOM                  0x15
+#define ROOM_LIVING_ROOM                0x16 // where you get the shotgun
+#define ROOM_LARGE_GALLERY              0x17
+#define ROOM_MANSION_STOREROOM          0x18 // storeroom under east wing stairs
+#define ROOM_MANSION_1F_STUDY           0x19 // stage 6 only
+#define ROOM_ROOFED_PASSAGE             0x1a // passage to courtyard
+#define ROOM_STOREROOM                  0x1b // storeroom next to courtyard
+#define ROOM_WARDROBE_CLOSET            0x1c // alternate outfit change room
+
+// Stage 2/7 (Mansion 2F and B1)
+#define ROOM_MANSION_1F_TO_B1_ELEVATOR  0x00 // stage 7 only
+#define ROOM_2F_LEFT_STAIRS             0x01 // west wing stairs
+#define ROOM_DINING_ROOM_2F             0x02
+#define ROOM_MAIN_HALL_2F               0x03
+#define ROOM_C_PASSAGE                  0x04 // 2F east wing main corridor
+#define ROOM_ARMOR_ROOM                 0x05
+#define ROOM_SMALL_LIBRARY              0x06
+#define ROOM_2F_RIGHT_STAIRS            0X07 // 2F east wing stairs
+#define ROOM_DEER_ROOM                  0x08 
+#define ROOM_MANSION_2F_BEDROOM         0x09
+#define ROOM_STUDY_2F                   0x0a                 
+#define ROOM_FRONT_LESSON_ROOM          0x0b
+#define ROOM_LESSON_ROOM                0x0c // Yawn2 room
+#define ROOM_PILLAR_PASSAGE             0x0d // Richard's room
+#define ROOM_FRONT_OF_ATTIC             0x0e
+#define ROOM_SMALL_DINING               0x0f // small dining room near attic
+#define ROOM_ATTIC                      0x10 // Yawn1 room
+#define ROOM_TERRACE_PASSAGE            0x11
+#define ROOM_TERRACE                    0x12
+#define ROOM_MANSION_2F_FRONT_ELEVATOR  0x13 // elevator passage (stage 7 only)
+#define ROOM_mansion_2F_ROUGH_PASSAGE   0x14 // west wing central corridor (stage 7 only)
+#define ROOM_TROPHY_ROOM                0x15 // stage 7 only
+#define ROOM_LARGE_LIBRARY              0x16 // stage 7 only
+#define ROOM_PRIVATE_LIBRARY            0x17 // stage 7 only
+#define ROOM_HELIPORT_LOOKOUT           0x18 // stage 7 only
+#define ROOM_MANSION_SHED               0x19 // where you get courtyard elevator battery (stage 7 only)
+#define ROOM_MANSION_B1_PASSAGE_1       0x1a // stage 7 only
+#define ROOM_MANSION_B1_PASSAGE_2       0x1b // stage 7 only
+#define ROOM_MANSION_KITCHEN            0x1c // mansion b1, stage 7 only
+
+// Stage 3 (Courtyard and Underground)
+#define ROOM_COURTYARD_GARDEN           0x00
+#define ROOM_WATER_GATE                 0x01
+#define ROOM_FALLS                      0x02
+#define ROOM_HELIPORT                   0x03
+#define ROOM_GUARDHOUSE_GATE            0x04
+#define ROOM_FOUNTAIN                   0x05
+#define ROOM_ITEM_CHAMBER               0x06 // where you get the doom book 2 (underground)
+#define ROOM_UNDERGROUND_ENTRY          0x07
+#define ROOM_BRANCHED_PASSAGE           0x08 // underground branched passage
+#define ROOM_UNDERGROUND_GENERATOR      0x09
+#define ROOM_ENRICO_ROOM                0x0a // undergorund
+#define ROOM_BOULDER_1_PASSAGE          0x0b
+#define ROOM_BLACK_TIGER_ROOM           0x0c // Black Tiger (giant spider) boss room
+#define ROOM_STRAIGHT_PASSAGE           0x0d // near underground save room
+#define ROOM_UNDERGROUND_SAVE_ROOM      0x0e
+#define ROOM_BOULDER_2_PASSAGE          0x0f
+#define ROOM_ELEVATOR_TO_LABORATORY     0x10 // fountain's elevator to laboratory
+#define ROOM_SCRAPPED_HELIPORT          0x11 // dev leftover, never used: stub heliport RDT (ROOM3110.RDT, also present in the PS1
+                                             // version). The shipped heliport is ROOM_HELIPORT. Special-cased in Room.cpp because its
+                                             // stub RDT has no masks/models and its bg must bypass the cache (see room3110 memory note)
+
+// Stage 4 (Guardhouse)
+#define ROOM_GUARDHOUSE_ENTRY           0x00
+#define ROOM_001                        0x01
+#define ROOM_001_BATHROOM               0x02
+#define ROOM_GUARDHOUSE_SAVE_ROOM       0x03
+#define ROOM_GUARDHOUSE_BAR             0x04
+#define ROOM_GUARDHOUSE_CENTER_PASSAGE  0x05
+#define ROOM_002                        0x06
+#define ROOM_002_BATHROOM               0x07
+#define ROOM_BEEHIVE_PASSAGE            0x08
+#define ROOM_DRUG_STOREHOUSE            0x09
+#define ROOM_003                        0x0a
+#define ROOM_003_BATHROOM               0x0b
+#define ROOM_PLANT_42_ROOM              0x0c // Plant42 boss room
+#define ROOM_WATER_TANK_ENTRY           0x0d
+#define ROOM_WATER_TANK                 0x0e
+#define ROOM_SECURITY_ROOM              0x0f
+#define ROOM_ARMS_STOREHOUSE            0x10
+#define ROOM_CONTROL_ROOM               0x11
+
+// Stage 5 (Laboratory)
+#define ROOM_LABORATORY_ENTRY           0x00
+#define ROOM_EMERGENCY_TUNNEL           0x01 // heliport elevator passage
+#define ROOM_LAB_LADDER_ROOM            0x02
+#define ROOM_LAB_B2_STAIRWAY            0x03
+#define ROOM_VISUAL_DATA_ROOM           0x04
+#define ROOM_LAB_B3_O_PASSAGE           0x05 // Lab b3 central passage
+#define ROOM_SMALL_LABORATORY           0x06
+#define ROOM_MORGUE                     0x07
+#define ROOM_LAB_B3_PRIVATE_PASSAGE     0x08 // where the cell entry locks are
+#define ROOM_LAB_B3_PRIVATE_ROOM_A      0x09 // where a MO disk reader terminal is
+#define ROOM_LAB_B3_PRIVATE_ROOM_B      0x0a // the blue light switch room
+#define ROOM_CELL_ENTRY                 0x0b
+#define ROOM_LAB_B3_ELEVATOR_ENTRY      0x0c
+#define ROOM_ESCAPE_ELEVETOR            0x0d
+#define ROOM_LAB_SAVE_ROOM              0x0e
+#define ROOM_POWER_MAZE_1               0x0f
+#define ROOM_POWER_MAZE_2               0x10
+#define ROOM_POWER_ROOM                 0x11
+#define ROOM_CELL                       0x12
+#define ROOM_MAIN_LAB                   0x13 // Tyrant 1 room (lab b4)
+#define ROOM_MAIM_LAB_ENTRY             0x14 // lab b4
+#define ROOM_LAB_B3_TO_B4_ELEVATOR      0x15
+
 // ============================================================================
 // RDT Light structure (0x14 / 20 bytes each)
 // ============================================================================

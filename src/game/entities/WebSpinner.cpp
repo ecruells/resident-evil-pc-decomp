@@ -319,7 +319,7 @@ void wsp_state0(void)
         eub(ENTITY, 0x76) = 0;         // angle_z low
         eub(ENTITY, 0x77) = 0;         // angle_z high
         ei(ENTITY, 0x38) = 0xFFFFE818; // world Y = -6136 (PS1 negative up)
-        if (g_stageId == 3) {
+        if (g_stageId == STAGE_GUARDHOUSE) {
             ei(ENTITY, 0x38) = 0xFFFFE3E0; // world Y = -7200 in stage 3
         }
         if (3 < ENTITY->behavior_flags) {
