@@ -692,9 +692,10 @@ int   g_PlayerInputConfig_5a = 0;
 // Indexed by g_playerEntityPointer.animFrameId * 4
 void* g_playerAnimFunctions[52] = {};     // 0x00bebbd8
 
-// Player animation jump tables (populated from binary data)
-// TODO: Extract actual table contents from binary
-void* DAT_004c2ac8[32] = {};   // jump table for player_anim_set_attacked_flag dispatch (action_behavior)
+// (0x004c2ac8) - player_anim_set_attacked_flag dispatch (action_behavior). It was
+// the compiler's 3-entry jump table (0x00469410/0x00469840/0x004699d0), not
+// installable handlers; its cases are folded into the switch inside
+// player_anim_set_attacked_flag (PlayerAnimations.cpp), so no array is needed.
 // DAT_004ba360 - player_anim_limb_physics dispatch (action_behavior). Three real
 // entries, and they are all Tyrant player-hit reactions living inside the Tyrant's
 // own data block (0x004ba240..0x004ba377), so the table is DEFINED IN Tyrant.cpp

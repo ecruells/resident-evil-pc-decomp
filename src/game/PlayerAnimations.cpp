@@ -248,7 +248,7 @@ void player_anim_crawling(void) {
 //
 // 0x00469400 is nothing but `JMP [action_behavior*4 + 0x004c2ac8]` - the
 // compiler's jump table for a three-case switch, NOT a data table of installable
-// handlers. The port modelled it as the latter and left `DAT_004c2ac8` an
+// handlers. The port modelled it as the latter and left 0x004c2ac8 an
 // all-NULL array, so this whole state machine did nothing.
 //
 // That machine is how a grabbed player RECOVERS. Plant 42 drops the player with
@@ -913,7 +913,16 @@ void player_anim_death_billboard(void) {
         }
     } else if (g_playerEntity.action_state == 2) {
         g_playerEntity.zoneFlags |= 0x80;
-        // TODO: Apply RotMatrix / ApplyLVAndMul0Matrix transforms using g_EnemiesList[0] joint matrices
+        // 0x00be6484 = g_EnemiesList[0].scaMatrixData.localMatrix (enemy base 0x00be6464 + 0x20)
+        // 0x00be6304 = g_playerEntity.scaMatrixData.localMatrix  (player base 0x00be62e4 + 0x20)
+        extern MATRIX neptune_capture_matrix;   // 0x004bc988 (Neptune.cpp)
+        RotMatrix(reinterpret_cast<SVECTOR*>(&g_EnemiesList[0].position.pad),
+                  &g_EnemiesList[0].scaMatrixData.localMatrix);
+        ApplyLVAndMul0Matrix(&g_EnemiesList[0].scaMatrixData.localMatrix,
+                             &g_EnemiesList[0].jointsStructs->transform,
+                             &g_matrixScratch);
+        ApplyLVAndMul0Matrix(&g_matrixScratch, &neptune_capture_matrix,
+                             &g_playerEntity.scaMatrixData.localMatrix);
     }
 }
 void player_anim_limb_physics(void) {         // 0x00424fb0 - dispatch via DAT_004ba360[action_behavior]
@@ -946,7 +955,34 @@ void player_anim_enemy_interact(void) {
     } else if (g_playerEntity.action_state == 1) {
         if (g_playerEntity.animation_frame_id == 8) {
             Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
-            // TODO: Billboard effects on joints at frame 8/9 and >95
+            JointStruct* joints = g_playerEntity.jointsStructs;
+            JointApplyColorTint(joints,      0x30, 0x80820, &DAT_00606060);
+            JointApplyColorTint(joints + 1,  0x30, 0x80820, &DAT_00606060);
+            JointApplyColorTint(joints + 2,  0x30, 0x80820, &DAT_00606060);
+            JointApplyColorTint(joints + 9,  0x30, 0x80820, &DAT_00606060);
+            JointApplyColorTint(joints + 12, 0x30, 0x80820, &DAT_00606060);
+        }
+        {
+            // g_deadMoveValue fields: 0x14/0x18/0x1c/0x20 = deadData[5..8]
+            int* deadData = (int*)g_deadMoveValue;
+            if (g_playerEntity.animation_frame_id < 9) {
+                g_playerPosScratch.x = deadData[5];
+                g_playerPosScratch.z = deadData[7];
+                g_playerPosScratch.pad = deadData[8];
+                g_playerPosScratch.y = -0x5dc;
+                Effect_CreateBillboard(0, 0, 0,
+                                       &g_playerEntity.scaMatrixData.localMatrix,
+                                       &g_playerPosScratch, 0);
+            }
+            if (g_playerEntity.animation_frame_id > 0x5f) {
+                g_playerPosScratch.x = deadData[5];
+                g_playerPosScratch.y = deadData[6];
+                g_playerPosScratch.z = deadData[7];
+                g_playerPosScratch.pad = deadData[8];
+                Effect_CreateBillboard(0, 0, 0,
+                                       &g_playerEntity.scaMatrixData.localMatrix,
+                                       &g_playerPosScratch, 0);
+            }
         }
         entity_apply_anim_vertex((Entity*)&g_playerEntity, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2);
         char cVar2 = Joint_move(0, g_playerEntity.emdScratchPtr1, g_playerEntity.emdScratchPtr2, 0x400);
