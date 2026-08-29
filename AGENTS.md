@@ -32,6 +32,9 @@ This is a decompilation project for Resident Evil 1 (also known as Biohazard 1) 
 - When you finish to fix something that you cannot test, like play the game, do not asumed the problem is solved, ask the user to test the game and tell you if the problem was solved
 - As DirectX 5.0 does not work in current Windows Version, we must add a DX11 layer to the MarniSystem to use current DirectX/XInput API
 
+## Game design
+- Stages directories and Rooms RDT files are 1-idexed based, but g_stageId is 0-index based, for most stages tests, it uses the 0-index format and you must use the 0-index stage constants in Types.h. Be careful because in some tests it uses the 1-index format to get the absolute indexes of mansion stages (see ./game/Types.h). If you want to comment an stage, use the 1 index format or it name, if you need to document the memory index, use the hex format for the 0-index notation.
+
 ## Key Architectural Decisions
 
 1. **PSYQ Compatibility Layer**: The Marni System allows most PlayStation code to run on Windows with minimal changes
