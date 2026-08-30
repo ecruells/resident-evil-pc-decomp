@@ -1133,7 +1133,7 @@ unsigned char* message_item_name_lookup(unsigned char itemId)
     unsigned char bVar2 = itemId - 1;
     unsigned char* puVar3 = (unsigned char*)g_ItemNamePointers[bVar2];
     if ((bVar2 < 0x4d) && ((bVar2 = g_ItemImageLookupTable[(unsigned int)bVar2 * 4 + 6], (bVar2 & 0x80) == 0))) {
-        if (Flg_ck((int)g_gameFlags_bc, (unsigned int)bVar2) == 0) {
+        if (Flg_ck((int)g_itemExaminedFlags, (unsigned int)bVar2) == 0) {
             puVar3 = (unsigned char*)g_UnknownItemNamePointers[bVar2];
         }
     }

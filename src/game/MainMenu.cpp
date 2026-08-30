@@ -5443,7 +5443,7 @@ static int FUN_0044ed40(void)
         unsigned char exType = g_ItemExamineTypes[flagIndex];
         if ((exType & 0xf0) == 0) {
             g_bItemViewerActionIndex = 2;
-            Flg_on((int)g_gameFlags_bc, (unsigned int)flagIndex);
+            Flg_on((int)g_itemExaminedFlags, (unsigned int)flagIndex);
             set_message_display(g_ItemHealTable[(unsigned int)flagIndex + 0x51], 0);
             return 1;
         }
@@ -5470,7 +5470,7 @@ static int FUN_0044ed40(void)
                 return 1;
             }
             g_bItemViewerActionIndex = 2;
-            Flg_on((int)g_gameFlags_bc, (unsigned int)flagIndex);
+            Flg_on((int)g_itemExaminedFlags, (unsigned int)flagIndex);
             set_message_display(g_ItemHealTable[(unsigned int)flagIndex + 0x51], 0);
             return 1;
         }
@@ -5717,7 +5717,7 @@ static void FUN_0044e8c0(void)
     if ((g_menu_choice_id & 0x80) == 0) {
         if (g_bItemMenuSelectedItemId == ITEM_RED_BOOK) {
             if (DAT_00ae9f5e != 0) {
-                Flg_on((int)g_gameFlags_bc, 0xd);
+                Flg_on((int)g_itemExaminedFlags, 0xd);
             }
         } else if (((ITEM_RED_BOOK < g_bItemMenuSelectedItemId) && (g_bItemMenuSelectedItemId < ITEM_FIRST_AID_SPRAY)) && (DAT_00ae9f5e != 0)) {
             g_bItemViewerActionIndex = 3;
