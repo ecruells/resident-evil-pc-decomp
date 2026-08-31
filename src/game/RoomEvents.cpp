@@ -1028,13 +1028,17 @@ void room_event_item_pickup(void)
 
     *evt = 0;                                     // deactivate the event entry
     ((unsigned char*)g_interactable_table[record[10]])[0] = 0;
-    if (*(short*)((char*)g_interactable_table[record[10]] + 0x86) != 0) {
+    unsigned short fxSlot =
+        *(unsigned short*)((char*)g_interactable_table[record[10]] + 0x86);
+    if (fxSlot != 0) {
         g_freeEffectSlots++;
-        // The original indexes the pool in DWORDs (stride 4), clearing 0x21
-        // dwords = exactly one 0x84-byte effect slot.
-        memset_((unsigned int*)g_effectPool +
-                *(unsigned short*)((char*)g_interactable_table[record[10]] + 0x86),
-                0x21);
+        // The original addresses the slot as pool_base + slot*0x21 dwords
+        // (0x0045175b: MOV EAX,ECX / SHL ECX,5 / ADD ECX,EAX / LEA EAX,[ECX*4+pool]),
+        // i.e. a full 0x84-byte Effect per slot. A dword-stride index cleared bytes
+        // 4*slot..4*slot+0x84 - 33x too low - so picking an item zeroed unrelated
+        // pool bytes and the item's sparkle billboard kept rendering until the room
+        // reload wiped the pool (e.g. ROOM1000's sword key, slot 63).
+        memset_((unsigned int*)&g_effectPool[fxSlot], 0x21);
     }
     FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
 
