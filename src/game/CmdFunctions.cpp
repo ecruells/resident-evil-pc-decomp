@@ -125,7 +125,7 @@ int cmd_end_if(void)
 //		0=g_ScenarioFlags, 
 //		1=g_ScenarioFlags2, 
 //		2=g_LocksFlags,
-//		3=g_RoomEventFlags, 
+//		3=g_EnemiesFlags, 
 //		4=g_SysFlags, 
 //		5=g_main_state_flags,      
 //		6=g_message_flags, 
@@ -144,7 +144,7 @@ int cmd_bit_test(void)
     case 0: flagBank = (unsigned int*)&g_ScenarioFlags; break;
     case 1: flagBank = (unsigned int*)&g_ScenarioFlags2; break;
     case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
-    case 3: flagBank = (unsigned int*)g_RoomEventFlags; break;
+    case 3: flagBank = (unsigned int*)g_EnemiesFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
     case 5: flagBank = (unsigned int*)&g_main_state_flags; break;
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
@@ -179,7 +179,7 @@ int cmd_bit_op(void)
     case 0: flagBank = (unsigned int*)&g_ScenarioFlags; break;
     case 1: flagBank = (unsigned int*)&g_ScenarioFlags2; break;
     case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
-    case 3: flagBank = (unsigned int*)g_RoomEventFlags; break;
+    case 3: flagBank = (unsigned int*)g_EnemiesFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
     case 5: flagBank = (unsigned int*)&g_main_state_flags; break;
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
@@ -786,12 +786,7 @@ int cmd_enemy_set(void)
     dbg_printf("ENEMY SET START %s\n", "enemy_set");
 
     if ((char)g_ScdOpcodes[3] != -1) {
-        // The original ZERO-extends the flag byte (MOV CL,AL / MOVZX), so a
-        // flag id >= 0x80 is a valid small bit index. The Ghidra decompiler
-        // rendered the argument as `*(char*)`, and the signed cast made
-        // Flg_ck compute a ~33MB byte offset -> access violation on rooms
-        // whose enemy entries use flags 0x80-0xFE.
-        if (Flg_ck((int)g_RoomEventFlags, (unsigned char)g_ScdOpcodes[3]) != 0) {
+        if (Flg_ck((int)g_EnemiesFlags, (unsigned char)g_ScdOpcodes[3]) != 0) {
             g_ScdOpcodes += 0x16;
             dbg_printf("ENEMY SET END %s\n", "enemy_set");
             return 1;

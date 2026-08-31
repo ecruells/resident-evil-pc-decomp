@@ -495,7 +495,7 @@ void mp_die_case_2(void)
     MP_TICKS = (unsigned short)(MP_TICKS - 1);
     if (MP_TICKS == 0) {
         ENTITY->ignore_player_flag = (unsigned char)(ENTITY->ignore_player_flag + 1);
-        Flg_on((int)(void*)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)(void*)g_EnemiesFlags, ENTITY->death_event_id);
     }
 
     // behavior_flags bit 0 = the withering colour ramp.

@@ -1178,7 +1178,7 @@ static void crow_state_death(void)
 
     switch (ENTITY->action_behavior) {
     case 0:
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         ENTITY->animationId = 6;
         // hit_state bit 0 means the killing blow already knocked it sideways;
         // in that case it just tumbles instead of flapping.

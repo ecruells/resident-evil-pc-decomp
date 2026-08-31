@@ -1475,7 +1475,7 @@ static void neptune_death_boss(void)
 // dead, spawn the big one-shot effect, and fall straight into the first charge.
 static void neptune_boss_death_begin(void)
 {
-    Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+    Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
     int joints = (int)ENTITY->jointsStructs;
 
     ENTITY->action_behavior++;

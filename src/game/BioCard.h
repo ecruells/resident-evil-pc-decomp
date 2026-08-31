@@ -58,7 +58,7 @@ struct BioCardLayout {
     // flags
     unsigned char scenarioFlags2[32];        // 0x234
     unsigned char locksFlags[8];             // 0x254
-    unsigned char roomEventFlags[32];        // 0x25C
+    unsigned char enemiesFlags[32];          // 0x25C
     unsigned char roomItemsFlags[32];        // 0x27C
     unsigned char itemExaminedFlags[4];      // 0x29C - "item examined" flags: bit per examinable item (indexed via g_ItemImageLookupTable)
     unsigned char scenarioFlags[16];         // 0x2A0
@@ -123,7 +123,7 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 
 #define g_ScenarioFlags2          (g_BioCard.scenarioFlags2)                    // BYTE[32] 0x00be9854 (orig. playerFlags3)
 #define g_LocksFlags              (g_BioCard.locksFlags)                        // BYTE[8] 0x00be9874
-#define g_RoomEventFlags          (g_BioCard.roomEventFlags)                    // BYTE[32] 0x00be987c
+#define g_EnemiesFlags            (g_BioCard.enemiesFlags)                      // BYTE[32] 0x00be987c
 #define g_roomItemsFlags          (g_BioCard.roomItemsFlags)                    // BYTE[32] 0x00be989c (orig. playerFlags2, SCD bank 7)
 #define g_itemExaminedFlags       (g_BioCard.itemExaminedFlags)                 // BYTE[4] 0x00be98bc - "item examined" flag bank (real vs generic item names)
 #define g_ScenarioFlags           (g_BioCard.scenarioFlags)                     // BYTE[16] 0x00be98c0 (orig. playerFlags)

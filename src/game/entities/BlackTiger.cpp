@@ -919,19 +919,19 @@ void bt_web_shoot_a(void)
         euw(ENTITY, 0xC2) = 0;
         euw(ENTITY, 0xC4) = 0x5A;
         ENTITY->Sca_info = (unsigned int)(uintptr_t)bt_sca_info_shoot;
-        Flg_on((int)g_RoomEventFlags, BT_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, BT_DEATH_EV);
         // fall through
     case 3:
         BillboardAdjSize(&ENTITY->pushVelocity, 9, 9);
         BT_DWELL = (short)(BT_DWELL - 1);
         if (BT_DWELL == 0) {
-            Flg_on((int)g_RoomEventFlags, BT_DEATH_EV);
+            Flg_on((int)g_EnemiesFlags, BT_DEATH_EV);
             BT_SUBSTATE = 4;
             ws_clone_entity(0x33, 0xF2, ENTITY->jointCount, (unsigned int*)&ENTITY->scd_target_ptr);
         }
         return;
     case 4:
-        Flg_on((int)g_RoomEventFlags, BT_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, BT_DEATH_EV);
         ws_update_webs(0x33);
         return;
     }
@@ -1002,7 +1002,7 @@ void bt_web_shoot_b(void)
         BT_TIMING = 0;
         BT_HITSTATE = 0;
         BT_DWELL = 0xB4;
-        Flg_on((int)g_RoomEventFlags, BT_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, BT_DEATH_EV);
         // fall through
     case 3: {
         ENTITY->status_flags = (unsigned char)(ENTITY->status_flags & 0x1F);
@@ -1040,7 +1040,7 @@ void bt_web_shoot_b(void)
                         ENTITY->jointCount, (unsigned int*)&ENTITY->scd_target_ptr);
         return;
     case 6:
-        Flg_on((int)g_RoomEventFlags, BT_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, BT_DEATH_EV);
         ws_update_webs((char)((BT_HITSTATE >> 3) * 5 + 1));
         return;
     }
@@ -1122,7 +1122,7 @@ void bt_web_shoot_c(void)
         BT_DWELL = 0xD2;
         eub(ENTITY, 0x00) |= 0xA;         // status_flags
         BT_HITSTATE = 0;
-        Flg_on((int)g_RoomEventFlags, BT_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, BT_DEATH_EV);
         BT_SUBSTATE = 3;
         // fall through
     case 3: {
@@ -1193,7 +1193,7 @@ void bt_web_shoot_c(void)
         }
         break;
     case 8:
-        Flg_on((int)g_RoomEventFlags, BT_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, BT_DEATH_EV);
         ws_update_webs((char)((BT_HITSTATE >> 3) * 5 + 1));
         return;
     }

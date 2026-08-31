@@ -1576,7 +1576,7 @@ void yawn_action_flee(void)
         eub(ENTITY, 0x17c) = 1;
         eub(ENTITY, 0x16c) = 1;
         ew(ENTITY, 0x172) = 0;
-        Flg_on((int)g_RoomEventFlags, eub(ENTITY, 0x163));
+        Flg_on((int)g_EnemiesFlags, eub(ENTITY, 0x163));
     }
 
     if (eub(ENTITY, 0x17e) > 6) {
@@ -1810,7 +1810,7 @@ void yawn_die_run(void)
         Effect_CreateBillboard(0, 0x0b, 0, head, &g_playerPosScratch, 0);
         Effect_CreateBillboard(0, 0x08, 0, head, &g_playerPosScratch, 0);
         Snd_em(2);
-        Flg_on((int)g_RoomEventFlags, eub(ENTITY, 0x163));
+        Flg_on((int)g_EnemiesFlags, eub(ENTITY, 0x163));
         // fall through
     }
     case 1:

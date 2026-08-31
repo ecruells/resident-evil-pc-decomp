@@ -966,11 +966,11 @@ void tyrant_behavior_restrained(void)
         eub(ENTITY, 0x8c) = 0x0f;
         ty_anim() = 8;
         euw(ENTITY, 0x88) = 0xffff;          // health = -1: unkillable while bound
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
     } else if (sub != 1) {
         if (sub == 2) {
             ENTITY->status_flags |= 10;
-            Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+            Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         }
         tyrant_root_motion(0, 0);
         Add_speedXZ(0);
@@ -990,7 +990,7 @@ void tyrant_behavior_restrained(void)
 // --- 0x00424d70 - behaviour 1: hand control to the SCD ----------------------
 void tyrant_behavior_yield_to_scd(void)
 {
-    Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+    Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
     ENTITY->behavior_flags |= 0x40;
     ty_frame() = 0;
     eub(ENTITY, 0xbf) = 0;

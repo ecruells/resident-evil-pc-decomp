@@ -40,7 +40,7 @@
 //
 // Once destroyed the web raises status_flags bit 1, which is the "intangible"
 // bit ResolveEntityScaCollision tests, so the player walks through; and raises
-// its death_event_id in g_RoomEventFlags, which is what the room script polls to
+// its death_event_id in g_EnemiesFlags, which is what the room script polls to
 // let the door open.
 #include "EntityCommon.h"
 #include "../../Globals.h"
@@ -208,7 +208,7 @@ void spiderweb_destroy(void)
     ENTITY->status_flags |= 0x02;
 
     // The room script polls this flag to open the door.
-    Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+    Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
 
     set_state_word(4);                                  // -> the do-nothing state
 }

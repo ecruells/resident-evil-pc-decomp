@@ -834,7 +834,7 @@ static void enemy_hit_reaction_zombie(Entity* enemy)
             // outside the zombie entirely - the wrong head-explosion effects.
             Entity* savedEntity = ENTITY;
             ENTITY = enemy;
-            Flg_on((int)g_RoomEventFlags, enemy->death_event_id);
+            Flg_on((int)g_EnemiesFlags, enemy->death_event_id);
             joint_setup_attack_effect((int)((char*)enemy->jointsStructs + 0xf8), 30, 2, 3);
             Snd_em(6);                 // head-explosion sound
             ENTITY = savedEntity;

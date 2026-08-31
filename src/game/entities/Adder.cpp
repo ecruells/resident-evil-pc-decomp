@@ -883,7 +883,7 @@ void adder_death_writhe(void)
             }
             BillboardSetSize(&ENTITY->pushVelocity, 0, 0);
             ENTITY->action_behavior = 4;
-            Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+            Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
             return;
         }
 
@@ -904,7 +904,7 @@ void adder_death_writhe(void)
             return;
         }
         ENTITY->action_behavior = 4;
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         return;
     }
 

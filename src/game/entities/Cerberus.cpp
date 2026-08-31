@@ -2069,7 +2069,7 @@ void cerberus_die(void)
 {
     switch (ENTITY->ignore_player_flag) {
     case 0: {
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         ENTITY->animation_frame_id = 0;
         ENTITY->timing_control = 0;
         ENTITY->blend_counter = 7;

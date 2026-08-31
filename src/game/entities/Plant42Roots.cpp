@@ -69,7 +69,7 @@
 //                    8th frame flashes scd_model_tint_apply(0,-1,-2) six times
 //   phase 3  sink    amplitude bleeds off 0x70/frame, wobble word (Entity+0x17E,
 //                    seeded 2 in init) ticks up every 4th frame, and once it
-//                    bottoms out Flg_on(g_RoomEventFlags, death_event_id) fires
+//                    bottoms out Flg_on(g_EnemiesFlags, death_event_id) fires
 // While cycling, roots_move_a bobs the altitude: t[1] += velocity>>8, then the
 // velocity reloads itself from +/-amplitude every frame (a violent ±22-unit
 // shake at full amplitude). Two random root groans play: Play3DSnd(2, 0x19)
@@ -195,7 +195,7 @@ void roots_phase_sink(void)
     if (PR_AMPLITUDE <= 0) {
         pr_phase() += 1;
         // death_event_id is 0xFF here (em_set flag byte) - flag 255 of the room bank.
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
     }
 }
 

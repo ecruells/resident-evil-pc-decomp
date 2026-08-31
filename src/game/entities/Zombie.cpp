@@ -710,7 +710,7 @@ static void explode_leg_and_drop(void)
         ENTITY->health = -1;
         BillboardSetColor(&ENTITY->pushVelocity, 1, 2, 0x00ffff50);
         BillboardAdjSize(&ENTITY->pushVelocity, -100, -100);
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         ENTITY->action_state = 3;
         ENTITY->status_flags |= 0x0E;
         ENTITY->move_speed_current = 0;
@@ -1126,11 +1126,11 @@ void zombie_die(void)
         }
 
         ENTITY->behavior_step &= ~0x04;
-        // `PUSH 0xbe987c` at 0x004341a8 - that is g_RoomEventFlags, NOT
+        // `PUSH 0xbe987c` at 0x004341a8 - that is g_EnemiesFlags, NOT
         // g_roomItemsFlags (0x00be989c). Raising the death bit in the item bank
         // meant a killed zombie never fired its room event and scribbled on
         // item state instead.
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);  // 0x163
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);  // 0x163
     }
 
     // 0x004341f0: Death behavior dispatch
@@ -1275,7 +1275,7 @@ void zombie_dead_animation(void)
         ENTITY->health = -1;
         BillboardSetColor(&ENTITY->pushVelocity, 1, 2, 0x00ffff50);
         BillboardAdjSize(&ENTITY->pushVelocity, -100, -100);
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         ENTITY->action_state = 3;
         ENTITY->status_flags |= 0x0E;
         // fall through
@@ -1463,14 +1463,10 @@ static void zombie_attack_vomit(void)
 
 // zombie_attack cases 7 and 9 are the same code twice in the original, only the
 // order of two stores differs. Both park a headless corpse.
-//   BillboardSetColor takes entity+0xE4 (pushVelocity), NOT entity+0x1C.
-//   Flg_on takes g_RoomEventFlags (0xbe987c), not g_roomItemsFlags.
-//   `MOV dword [_ENTITY+0x84],0x03020103` -> state=3, ignore=1,
-//   action_behavior=2, action_state=3; the old code wrote only state and ignore.
 static void zombie_attack_headless_death(void)
 {
     BillboardSetColor(&ENTITY->pushVelocity, 1, 2, 0x00ffff50);
-    Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+    Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
     ENTITY->death_timer = 0x46;
     ENTITY->state              = ZOMBIE_STATE_DIE;
     ENTITY->ignore_player_flag = 1;

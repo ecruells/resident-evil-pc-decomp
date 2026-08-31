@@ -1003,7 +1003,7 @@ void wasp_state_death(void)
         WA_TIMER = (short)(t - 1);
         if (t == 0) {
             ENTITY->action_state = 4;
-            Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+            Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         }
         return;
     }
@@ -1093,7 +1093,7 @@ void wasp_state_death(void)
     }
 
     ENTITY->action_state = 4;
-    Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+    Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
 }
 
 }  // namespace

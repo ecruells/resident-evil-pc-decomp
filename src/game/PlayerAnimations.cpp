@@ -6888,15 +6888,7 @@ int flag_bank_set(unsigned char* entry)
     case 0:  pFlags = (unsigned int*)&g_ScenarioFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 1:  pFlags = (unsigned int*)&g_ScenarioFlags2[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 2:  pFlags = (unsigned int*)&g_LocksFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
-    case 3:  pFlags = (unsigned int*)&g_RoomEventFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
-    // Banks 4 and 9 are DWORD arrays (g_SysFlags[2], g_itemUseFlags[2]), so
-    // `&g_SysFlags[(bit>>3) & ~3]` is ELEMENT indexing = byte offset * 4 and
-    // lands past the array for every bit >= 32 (the original does byte
-    // arithmetic: (uint*)((int)g_SysFlags + ((bit>>3) & 0xfffffffc))). Bit
-    // 0x23 (byte 4) wrote 16 bytes past g_SysFlags, so the piano room's
-    // item-use zones (bank 4 bit 0x23, bank 9 bits 0x40+) never reached the
-    // flag the room SCD waits on - the piano cutscene never triggered. The
-    // BYTE[] banks above index correctly with a byte offset.
+    case 3:  pFlags = (unsigned int*)&g_EnemiesFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 4:  pFlags = (unsigned int*)((char*)g_SysFlags + ((*(unsigned short*)(entry + 4) >> 3) & ~3u)); break;
     case 5:  pFlags = (unsigned int*)&g_main_state_flags; break;
     case 6:  pFlags = (unsigned int*)&g_message_flags; break;

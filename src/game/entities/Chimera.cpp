@@ -1759,7 +1759,7 @@ static void chimera_death_dissolve(void) // 0x0043b520
         C_TICKS = (short)(C_TICKS - 1);
         if (prev == 0) {
             ENTITY->action_state = 4;
-            Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+            Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         }
         break;
     }
@@ -1827,7 +1827,7 @@ static void chimera_death_drop_dissolve(void) // 0x0043b710
         C_TICKS = (short)(C_TICKS - 1);
         if (prev == 0) {
             ENTITY->action_state = 5;
-            Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+            Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
             return;
         }
         break;

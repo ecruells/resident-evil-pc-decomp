@@ -1842,10 +1842,6 @@ char           g_pakStringBuf[512] = {};
 // Room data globals (populated by room_set from RDT file data)
 // ============================================================================
 
-// 0x00be987c - SCD flag bank 3: room event flags (case 3 in cmd_bit_test/cmd_bit_op)
-// Used by SCD scripts to track triggered events, doors, cutscenes, enemy deaths.
-// g_RoomEventFlags is now a macro to g_BioCard.roomEventFlags (see BioCard.h)
-
 // 0x00d226b0 - Room-object (omodel) record table. Each slot points at one
 // 0xA4-byte record carved from the RDT VB region by room_set (count = RDT
 // omodel_slot_count) and filled by cmd_omodel_set; walked by

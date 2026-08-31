@@ -386,9 +386,9 @@ void room_set(void)
     // tests the raw room id with no stage guard; the Tyrant-room (main lab)
     // is the only one with a camera 4.
     if ((g_roomCameraId == 4) && (g_roomId == ROOM_MAIN_LAB)) {
-        Flg_on((int)&g_RoomEventFlags, 0x52);
-        Flg_on((int)&g_RoomEventFlags, 0x53);
-        Flg_on((int)&g_RoomEventFlags, 0x54);
+        Flg_on((int)&g_EnemiesFlags, 0x52);
+        Flg_on((int)&g_EnemiesFlags, 0x53);
+        Flg_on((int)&g_EnemiesFlags, 0x54);
     }
 
     printf("after of Room load\n");

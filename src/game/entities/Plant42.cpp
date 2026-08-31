@@ -1468,7 +1468,7 @@ static void plant42_behavior_death(void)
         eub(ENTITY, 0x16c) = (unsigned char)((rand() & 1) * -0x40 + 0x20);
         eb(ENTITY, 0x16d)  = (signed char)((char)rand() * -0x80 + 0x40);
         if ((ENTITY->behavior_flags & 1) == 0) {
-            Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+            Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
             Snd_em(7);
             g_playerPosScratch = *reinterpret_cast<VECTOR*>(static_cast<uintptr_t>(g_deadMoveValue) + 0x14);
             Effect_CreateBillboard(0, 0x1b, 0, &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);

@@ -368,7 +368,7 @@ same `action_behavior == 2` test that picks animation 7 vs 6 — its frame gate 
 ### 3 · `zombie_die` @ 0x004340e0
 
 Picks `action_behavior` once, then dispatches. Raises the death room event via
-`Flg_on(`**`g_RoomEventFlags`**`, death_event_id)` — bank `0x00be987c`, *not*
+`Flg_on(`**`g_EnemiesFlags`**`, death_event_id)` — bank `0x00be987c`, *not*
 `g_roomItemsFlags` (`0x00be989c`). Using the item bank means the kill never fires
 its scripted event and scribbles on item state instead.
 
@@ -432,7 +432,7 @@ back (vomit).
 > Sub-states 7 and 9 store the dword `0x03020103` at `+0x84`
 > (state 3, ignore 1, behaviour 2, sub 3), call `BillboardSetColor` on
 > **`+0xE4`** (`pushVelocity`, the shadow quad — not `+0x1C`), and use
-> `g_RoomEventFlags`.
+> `g_EnemiesFlags`.
 
 ### 8 · `zombie_action_update` @ 0x00454ab0
 
@@ -700,7 +700,7 @@ corrupts memory rather than merely misbehaving.
 Zombies are spawned by `cmd_omodel_set`; cutscene actors by `cmd_enemy_set`. The
 entity's `id` selects `enemies_update_functions_tbl[id]` (**48** entries — ids
 0–21 monsters, 22–47 the shared human driver in `CharacterNpc.cpp`).
-`death_event_id` at `+0x163` is the `g_RoomEventFlags` bit raised on death.
+`death_event_id` at `+0x163` is the `g_EnemiesFlags` bit raised on death.
 
 Script-driven zombies set `behavior_flags & 0x40` and run through state 8.
 

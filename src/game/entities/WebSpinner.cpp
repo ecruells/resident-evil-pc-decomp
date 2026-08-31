@@ -1166,7 +1166,7 @@ void ws_web_shoot_a(void)
         g_playerPosScratch.z = 0;
         Effect_CreateBillboard(0, 8, 0, (void*)(joints + 0x44), &g_playerPosScratch, 0);
         Effect_CreateBillboard(0, 8, 0, (void*)(joints + 0x978), &g_playerPosScratch, 0);
-        Flg_on((int)g_RoomEventFlags, WS_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, WS_DEATH_EV);
         Snd_em(5);
         unsigned int j = 8;
         do {
@@ -1206,7 +1206,7 @@ void ws_web_shoot_a(void)
     default:
         return;
     case 6:
-        Flg_on((int)g_RoomEventFlags, WS_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, WS_DEATH_EV);
         ws_update_webs((char)((WS_HITSTATE >> 2 & 0xFE) + 8));
         return;
     }
@@ -1261,7 +1261,7 @@ void ws_web_shoot_b(void)
         eub(ENTITY, 0x8c) = 3;
         eub(ENTITY, 0x8a) = 0;
         eub(ENTITY, 0xbd) = 4;
-        Flg_on((int)g_RoomEventFlags, WS_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, WS_DEATH_EV);
         // fall through
     }
     case 1:
@@ -1307,7 +1307,7 @@ void ws_web_shoot_b(void)
     case 5:
         goto ws_shoot_b_dangle;
     case 6:
-        Flg_on((int)g_RoomEventFlags, WS_DEATH_EV);
+        Flg_on((int)g_EnemiesFlags, WS_DEATH_EV);
         ws_update_webs((char)((WS_HITSTATE >> 2 & 0xFE) + 4));
         return;
     default:

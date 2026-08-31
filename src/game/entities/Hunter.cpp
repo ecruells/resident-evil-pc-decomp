@@ -590,7 +590,7 @@ static void hunter_death_dispatch(void) // 0x004164c0
             ENTITY->action_behavior = 6;
         }
 
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         hunter_scream_latch = 0;
     }
 
@@ -2278,7 +2278,7 @@ static void hunter_death_fall_driver(void) // 0x00419310
     case 2:
         BillboardSetColor((short*)((char*)ENTITY + 0xE4), 1, 2, 0x00FFFF50);
         BillboardAdjSize((short*)((char*)ENTITY + 0xE4), -100, -100);
-        Flg_on((int)g_RoomEventFlags, ENTITY->death_event_id);
+        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         ENTITY->action_state = 3;
         ENTITY->status_flags |= 0x0A;
         H_SPEED_W = 0;
