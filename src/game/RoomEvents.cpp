@@ -1183,7 +1183,7 @@ void check_itembox_state(void)
 //   4    - desk menu closed: restore the room camera, clear the opened flag
 //   5    - open the take-item menu over the desk, re-arm the entry
 //   35   - desk camera pan (counts down one per frame through `default`)
-// Guardhouse room 003 resets the flow until PlayerFlags bit 0x7b.
+// Guardhouse room 003 resets the flow until ScenarioFlags bit 0x7b.
 // ============================================================================
 extern unsigned int Flg_ck(int baseAddr, unsigned int bitIndex);
 
@@ -1249,7 +1249,7 @@ void check_desk_state(void)
 // ============================================================================
 // check_typewriter_state (0x0041c330)
 // Per-frame save-point flow. State 1 prompts "use ink ribbon?" (223) or, for
-// Chris before PlayerFlags bit 0x7b, "save your progress?" (224); state 2
+// Chris before ScenarioFlags bit 0x7b, "save your progress?" (224); state 2
 // waits for the choice - no closes, yes fades out; state 3 calls
 // LoadSaveGameState with the ribbon slot (entry+2); state 4 waits for the
 // fade back in and closes.

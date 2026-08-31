@@ -121,12 +121,12 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define g_PlayerDirAngleCopy      (g_BioCard.playerDirAngleCopy)                // SHORT 0x00be9850
 #define g_PlayerHealthStatusCopy  (g_BioCard.playerHealthStatusCopy)            // BYTE 0x00be9852
 
-#define g_ScenarioFlags2          (g_BioCard.scenarioFlags2)                    // BYTE[32] 0x00be9854 (orig. playerFlags3)
+#define g_ScenarioFlags2          (g_BioCard.scenarioFlags2)                    // BYTE[32] 0x00be9854
 #define g_LocksFlags              (g_BioCard.locksFlags)                        // BYTE[8] 0x00be9874
 #define g_EnemiesFlags            (g_BioCard.enemiesFlags)                      // BYTE[32] 0x00be987c
-#define g_roomItemsFlags          (g_BioCard.roomItemsFlags)                    // BYTE[32] 0x00be989c (orig. playerFlags2, SCD bank 7)
+#define g_roomItemsFlags          (g_BioCard.roomItemsFlags)                    // BYTE[32] 0x00be989c
 #define g_itemExaminedFlags       (g_BioCard.itemExaminedFlags)                 // BYTE[4] 0x00be98bc - "item examined" flag bank (real vs generic item names)
-#define g_ScenarioFlags           (g_BioCard.scenarioFlags)                     // BYTE[16] 0x00be98c0 (orig. playerFlags)
+#define g_ScenarioFlags           (g_BioCard.scenarioFlags)                     // BYTE[16] 0x00be98c0
 #define g_RoomFlags               (g_BioCard.roomFlags)                         // BYTE[20] 0x00be98d0
 
 #define g_itemboxSlots            (g_BioCard.itemboxSlots)                      // ItemSlot[48] 0x00be98e4

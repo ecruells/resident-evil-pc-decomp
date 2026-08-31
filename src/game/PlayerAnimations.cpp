@@ -7019,7 +7019,7 @@ int set_room_event_flag(unsigned char* entry)
 //     still has something to give)
 //   - Jill (id&3 == 3) gets turned away (message 0xd7)
 //   - a locked desk (LocksFlags bit at entry+2 clear) needs the small key
-//     (0x3d) or Jill's lockpick (PlayerFlags bit 0x7c) - otherwise "locked"
+//     (0x3d) or Jill's lockpick (ScenarioFlags bit 0x7c) - otherwise "locked"
 //     (0xd8); with the key it arms the desk-open state (g_desk_check_state 1)
 //   - an unlocked desk swings open: mark the desk model opened (byte 0 of
 //     g_interactable_table[entry[deskIdx].field4] |= 1), cut to the desk
@@ -7101,7 +7101,7 @@ int pickup_key_event(unsigned char* entry)
 // The save-point interaction. With the typewriter idle and the message system
 // ready: an ink ribbon (item 0x2f) in the inventory starts the save flow
 // (g_typewriter_state 1, ribbon slot remembered at entry+2); Chris (ids 1/5)
-// may save without a ribbon until PlayerFlags bit 0x7b is set; otherwise the
+// may save without a ribbon until ScenarioFlags bit 0x7b is set; otherwise the
 // "no ink ribbon" message (0xde) plays.
 // ============================================================================
 int check_typewriter(unsigned char* entry)
