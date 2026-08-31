@@ -335,8 +335,7 @@ void main_menu(void)
     // 0x004637d4-0x0046381c: Load mode-specific assets
     switch (DAT_00ae9f10) {
     case 1:
-        // Use item mode: check if it's a map item
-        if (0x32 < g_selectedItemId) {
+        if (ITEM_OIL < g_selectedItemId) {
             DAT_00ae9f10 = 6;
             g_bItemMenuSelectedItemId = g_selectedItemId;
             goto LAB_0046381c;
@@ -6040,7 +6039,7 @@ static void FUN_0040a250(MATRIX* src, MATRIX* dst)
 // InitScaMatrix), with each parent's child back-ref at +0x4C. The walk
 // follows the owners to the root and composes local -> world from the root
 // down, exactly like the original. Shared with room_camera_and_lighting_update
-// (FUN_004745f0) which composes each room item/desk object the same way.
+// (FUN_004745f0) which composes each room item/model object the same way.
 void FUN_00483580(int* joint, MATRIX* out)
 {
     int* chain[0x14];

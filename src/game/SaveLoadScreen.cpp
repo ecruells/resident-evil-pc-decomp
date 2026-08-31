@@ -304,7 +304,7 @@ void use_room_action_item(void)
     g_usedItemId = g_selectedItemId;
 
     // Lockpick doesn't consume
-    if (g_selectedItemId == 0x31) return;
+    if (g_selectedItemId == ITEM_LOCK_PICK) return;
 
     // Find the item in inventory
     unsigned char index = 0;
@@ -315,7 +315,7 @@ void use_room_action_item(void)
     }
 
     // If item is a weapon (ID < 0x0B): unequip and remove
-    if (g_selectedItemId < 0x0B) {
+    if (g_selectedItemId < ITEM_CLIP) {
         slots[index * 2] = 0;
         if ((unsigned int)g_EquippedItemId - (unsigned int)index == 1) {
             g_EquippedItemId = 0;
@@ -330,7 +330,7 @@ void use_room_action_item(void)
         slots[index * 2 + 1] = quantity - 1;
         if (slots[index * 2 + 1] == 0) {
             // Item depleted
-            if (g_selectedItemId > 0x32 && g_selectedItemId < 0x3D) {
+            if (g_selectedItemId > ITEM_OIL && g_selectedItemId < ITEM_DESK_KEY) { // is door key
                 // Key item depleted — display drop message
                 g_main_state_flags |= 0x2000;
                 return;

@@ -7015,47 +7015,48 @@ int set_room_event_flag(unsigned char* entry)
 // check_desk (0x0041bb10) — room_check_actions[0x0E]
 // The desk interaction. Gates on the desk flow idle and the message system
 // ready, then:
-//   - the roomItems flag named by entry[deskIdx].field6 must be SET (the desk
+//   - the roomItems flag named by entry[eventIdx].field6 must be SET (the desk
 //     still has something to give)
 //   - Jill (id&3 == 3) gets turned away (message 0xd7)
 //   - a locked desk (LocksFlags bit at entry+2 clear) needs the small key
 //     (0x3d) or Jill's lockpick (ScenarioFlags bit 0x7c) - otherwise "locked"
 //     (0xd8); with the key it arms the desk-open state (g_desk_check_state 1)
-//   - an unlocked desk swings open: mark the desk model opened (byte 0 of
-//     g_interactable_table[entry[deskIdx].field4] |= 1), cut to the desk
+//   - an unlocked desk swings open: mark its model opened (byte 0 of
+//     g_interactable_table[entry[eventIdx].field4] |= 1), cut to the desk
 //     camera (entry+6), and run the camera-zone walk to the new cut.
 // ============================================================================
-int check_desk(unsigned char* deskId)
+int check_desk(unsigned char* entry)
 {
     if ((g_desk_check_state == 0) &&
         (g_playerEntity.isBeingAttackedFlag == 0) &&
         (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
         ((unsigned short)g_message_flags & 0x40) != 0) {
-        unsigned short deskIdx = *(unsigned short*)(deskId + 4);
-        // The flag index and desk-slot index live in the +6/+4 fields of the
-        // event-table entry at index deskIdx (ITEMS_FLAGS = g_RoomItemEventTable+6).
-        unsigned short itemFlagIdx = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 6 + (unsigned int)deskIdx * 0xc);
+        unsigned short eventIdx = *(unsigned short*)(entry + 4);
+        // The flag index and interactable-model slot index live in the +6/+4
+        // fields of the event-table entry at index eventIdx
+        // (ITEMS_FLAGS = g_RoomItemEventTable+6).
+        unsigned short itemFlagIdx = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 6 + (unsigned int)eventIdx * 0xc);
         if (Flg_ck((int)g_roomItemsFlags, itemFlagIdx) != 0) {
             if ((g_playerEntity.id & 3) == 3) {
                 set_message_display(0xd7, 0xff);
                 return 0;
             }
-            if (Flg_ck((int)g_LocksFlags, *(unsigned short*)(deskId + 2)) == 0) {
+            if (Flg_ck((int)g_LocksFlags, *(unsigned short*)(entry + 2)) == 0) {
                 if ((get_item_slot(ITEM_DESK_KEY) < 0) && (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) == 0)) {
                     set_message_display(0xd8, 0xff);
                     return 0;
                 }
-                g_room_event_index = deskId;
+                g_room_event_index = entry;
                 g_desk_check_state = 1;
                 return 0;
             }
             // Desk already unlocked: swing the lid open and cut to its camera.
-            g_room_event_index = deskId;
-            unsigned short deskSlot = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 4 + (unsigned int)deskIdx * 0xc);
-            ((unsigned char*)g_interactable_table[deskSlot])[0] |= 1;
+            g_room_event_index = entry;
+            unsigned short modelSlot = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 4 + (unsigned int)eventIdx * 0xc);
+            ((unsigned char*)g_interactable_table[modelSlot])[0] |= 1;
             play_sfx(2, 0x24, 0);
             g_cutId = g_roomCameraId;
-            g_roomCameraId = *(unsigned char*)(deskId + 6);
+            g_roomCameraId = *(unsigned char*)(entry + 6);
             g_desk_check_state = 35;
             // Walk the camera-zone list to the new camera (same as cmd_current_cut_set).
             unsigned short camId = *(unsigned short*)((char*)g_RdtPointer->cam_switch_zones + 2);
@@ -7081,8 +7082,8 @@ static void set_room_item_seen_flag(int itemIdMinus4e)
 
 // ============================================================================
 // pickup_key_event (0x0041be70) — room_check_actions[0x0F]
-// Direct key pickup: deactivates the entry, clears the desk-opened flag on the
-// desk model byte 0, clears the roomItems flag at record+0x14, marks the item
+// Direct key pickup: deactivates the entry, clears the interactable model's
+// byte 0, clears the roomItems flag at record+0x14, marks the item
 // "seen" in RoomFlags (bit 0x7c + itemId - 0x4e) and records the item id in
 // g_pickedItemId for the message system.
 // ============================================================================

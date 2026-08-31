@@ -617,7 +617,7 @@ extern void*         g_room_event_index;               // 0x00d226a4
 
 // Room model record tables (populated by room_set from the RDT VB region)
 extern void*         g_omodel_table[8];      // 0x00d226b0 - room-object (omodel) records
-extern void*         g_interactable_table[8];// 0x00d21360 - interactable obstacle records (desks etc.)
+extern void*         g_interactable_table[8];// 0x00d21360 - interactable obstacle records (room 3D models)
 
 // Enemy model loading state (used by room_set and cmd_omodel_set)
 extern int           g_omodelCount;                    // 0x00ae9ef4 - object model count (cmd_omodel_set)
@@ -1100,7 +1100,7 @@ extern int           g_SpriteAsyncFlag;
 extern SpriteAnimSlot g_spriteAnimSlots[6];            // 0x00be9a60
 
 // Per-frame room object render state (room_camera_and_lighting_update, 0x00473ff0)
-extern int           DAT_008f8688;                     // 0x008f8688 - pass index (0 = items, 1 = desks)
+extern int           DAT_008f8688;                     // 0x008f8688 - pass index (0 = items, 1 = interactable models)
 extern int           DAT_00ae9ee4;                     // 0x00ae9ee4 - force object depth 0x33 (stage 1 rooms A/B lid)
 extern int           DAT_00ae9ef8;                     // 0x00ae9ef8 - keep the fixed 0x32/0x33 object depth
 

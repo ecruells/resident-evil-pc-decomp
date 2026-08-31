@@ -567,14 +567,14 @@ int cmd_sfx_3d_play(void)
 
 // ============================================================================
 // 0x18 - cmd_item_model_set (0x00461220)
-// Set up an interactive item model (desks, obstacles, etc.).
+// Set up an interactive room 3D model (obstacles, containers, lids, etc.).
 // ============================================================================
 int cmd_item_model_set(void)
 {
     dbg_printf("ITEM MODEL START %s\n", "imodel_set");
 
-    // Check for '/' character special case with Jill
-    if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
+    // skip ink ribbon model set if jill's first playthrough
+    if ((char)g_ScdOpcodes[10] == ITEM_INK_RIBBONS && (g_playerEntity.id & 3) == 1) {
         if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
             FUN_00473f10((int*)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
             g_ScdOpcodes += 0x1a;
@@ -618,15 +618,15 @@ int cmd_item_model_set(void)
         g_RoomItemEventHead = entry;
     }
 
-    char* deskPtr = (char*)g_interactable_table[g_ScdOpcodes[0xc]];
+    char* modelPtr = (char*)g_interactable_table[g_ScdOpcodes[0xc]];
     int* obstacleData = (int*)((char*)g_RdtPointer->obstacles_models + (unsigned int)g_ScdOpcodes[0xc] * 8);
 
-    // spriteInfo is chosen per branch below (it is NOT always deskPtr+0x20).
-    MATRIX* spriteInfo = (MATRIX*)(deskPtr + 0x20);
+    // spriteInfo is chosen per branch below (it is NOT always modelPtr+0x20).
+    MATRIX* spriteInfo = (MATRIX*)(modelPtr + 0x20);
 
     if (*obstacleData == 0) {
-        deskPtr[0x14] = 0; deskPtr[0x15] = 0;
-        deskPtr[0x16] = 0; deskPtr[0x17] = 0;
+        modelPtr[0x14] = 0; modelPtr[0x15] = 0;
+        modelPtr[0x16] = 0; modelPtr[0x17] = 0;
     } else {
         if (((char)g_ItemModelCount == 0 || DAT_00bca0d0[1] != obstacleData[1]) && obstacleData[1] != 0) {
             DAT_008e1c78 = g_TextureBankID;
@@ -654,28 +654,28 @@ int cmd_item_model_set(void)
         if ((char)g_ItemModelCount == 0 || *obstacleData != *DAT_00bca0d0) {
             ProcessTmdTextures(2, (unsigned int*)(unsigned int)*obstacleData, DAT_008e1c78, DAT_008e1c70);
         }
-        FUN_00473ea0(*obstacleData, deskPtr + 0xc, (ScaMatrixData*)(deskPtr + 0x1c));
+        FUN_00473ea0(*obstacleData, modelPtr + 0xc, (ScaMatrixData*)(modelPtr + 0x1c));
         if ((char)g_ScdOpcodes[10] == 0x1e) {
-            FUN_004870d0(*(int*)(deskPtr + 0x18));
+            FUN_004870d0(*(int*)(modelPtr + 0x18));
         }
 
         unsigned char parentType = g_ScdOpcodes[0xd];
         if (parentType == 0xff) {
-            deskPtr[100] = 0; deskPtr[0x65] = 0;
-            deskPtr[0x66] = 0; deskPtr[0x67] = 0;
-            spriteInfo = (MATRIX*)(deskPtr + 0x20);
+            modelPtr[100] = 0; modelPtr[0x65] = 0;
+            modelPtr[0x66] = 0; modelPtr[0x67] = 0;
+            spriteInfo = (MATRIX*)(modelPtr + 0x20);
         } else if (parentType == 0xfe) {
-            *(int*)(deskPtr + 100) = (int)&g_playerEntity + 0x1c;
+            *(int*)(modelPtr + 100) = (int)&g_playerEntity + 0x1c;
             spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
         } else {
-            *(int*)(deskPtr + 100) = (int)g_omodel_table[parentType] + 0x1c;
+            *(int*)(modelPtr + 100) = (int)g_omodel_table[parentType] + 0x1c;
             spriteInfo = (MATRIX*)((int)g_omodel_table[parentType] + 0x20);
         }
-        InitScaMatrix(*(int*)(deskPtr + 100), (ScaMatrixData*)(deskPtr + 0x1c));
+        InitScaMatrix(*(int*)(modelPtr + 100), (ScaMatrixData*)(modelPtr + 0x1c));
     }
 
-    deskPtr[0x86] = 0;
-    deskPtr[0x87] = 0;
+    modelPtr[0x86] = 0;
+    modelPtr[0x87] = 0;
 
     int flagResult = Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
     if (flagResult != 0 && (flags18 & 0x8000) != 0) {
@@ -704,39 +704,39 @@ int cmd_item_model_set(void)
         }
         // spriteInfo is the one selected by the parent-type branch above.
         unsigned char effResult = Effect_CreateBillboard(0x0b, effectId, 0, spriteInfo, &g_playerPosScratch, 0);
-        *(short*)(deskPtr + 0x86) = (short)(char)effResult;
+        *(short*)(modelPtr + 0x86) = (short)(char)effResult;
     }
 
-    // These two writes target the DESK object's byte 0 (`*pcVar5` in the original),
+    // These two writes target the interactable model's byte 0 (`*pcVar5` in the original),
     // not the room-item-event entry - the entry's byte 0 was already set from
     // visFlag further up.
     flagResult = Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
-    deskPtr[0] = (char)(1 - (flagResult == 0));
+    modelPtr[0] = (char)(1 - (flagResult == 0));
 
-    if ((char)g_ScdOpcodes[10] == '/' && (g_playerEntity.id & 3) == 1) {
+    if ((char)g_ScdOpcodes[10] == ITEM_INK_RIBBONS && (g_playerEntity.id & 3) == CHAR_JILL) {
         if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
-            deskPtr[0] = 0;
+            modelPtr[0] = 0;
         }
     }
 
-    deskPtr[1] = (char)g_ItemModelCount;
-    deskPtr[0x72] = 0; deskPtr[0x73] = 0;
-    *(unsigned short*)(deskPtr + 0x74) = scd_read_u16(0x14);
-    deskPtr[0x76] = 0; deskPtr[0x77] = 0;
-    deskPtr[0xc] = 0; deskPtr[0xd] = 0;
-    deskPtr[0xe] = 0; deskPtr[0xf] = 0x40;
+    modelPtr[1] = (char)g_ItemModelCount;
+    modelPtr[0x72] = 0; modelPtr[0x73] = 0;
+    *(unsigned short*)(modelPtr + 0x74) = scd_read_u16(0x14);
+    modelPtr[0x76] = 0; modelPtr[0x77] = 0;
+    modelPtr[0xc] = 0; modelPtr[0xd] = 0;
+    modelPtr[0xe] = 0; modelPtr[0xf] = 0x40;
 
     if (g_ScdOpcodes[1] & 0x80) {
-        deskPtr[0xc] = 0x40; deskPtr[0xd] = 0;
-        deskPtr[0xe] = 0;   deskPtr[0xf] = 0x40;
+        modelPtr[0xc] = 0x40; modelPtr[0xd] = 0;
+        modelPtr[0xe] = 0;   modelPtr[0xf] = 0x40;
     }
 
-    *(int*)(deskPtr + 0x34) = (int)scd_read_s16(0xe);
-    *(int*)(deskPtr + 0x38) = (int)scd_read_s16(0x10);
-    *(int*)(deskPtr + 0x3c) = (int)scd_read_s16(0x12);
+    *(int*)(modelPtr + 0x34) = (int)scd_read_s16(0xe);
+    *(int*)(modelPtr + 0x38) = (int)scd_read_s16(0x10);
+    *(int*)(modelPtr + 0x3c) = (int)scd_read_s16(0x12);
 
-    if (g_stageId == STAGE_MANSION_RETURN_2F && g_roomId == ROOM_TROPHY_ROOM && (deskPtr[1] & 0x3f) == 1) {
-        *(int*)(deskPtr + 0x3c) = scd_read_s16(0x12) - 0x96;
+    if (g_stageId == STAGE_MANSION_RETURN_2F && g_roomId == ROOM_TROPHY_ROOM && (modelPtr[1] & 0x3f) == 1) {
+        *(int*)(modelPtr + 0x3c) = scd_read_s16(0x12) - 0x96;
     }
 
     *(char*)&g_ItemModelCount = (char)g_ItemModelCount + 1;
@@ -747,15 +747,15 @@ int cmd_item_model_set(void)
 }
 
 // ============================================================================
-// 0x19 - cmd_desk_flag_set (0x00460f50)
-// Set a byte on a desk/obstacle pointer.
+// 0x19 - cmd_model_flag_set (0x00460f50)
+// Set a byte on an interactable room model record (g_interactable_table).
 // ============================================================================
-int cmd_desk_flag_set(void)
+int cmd_model_flag_set(void)
 {
-    unsigned char deskIdx = g_ScdOpcodes[1];
+    unsigned char modelIdx = g_ScdOpcodes[1];
     unsigned char value = g_ScdOpcodes[2];
     g_ScdOpcodes += 4;
-    *(unsigned char*)g_interactable_table[deskIdx] = value;
+    *(unsigned char*)g_interactable_table[modelIdx] = value;
     return 1;
 }
 
@@ -1861,12 +1861,7 @@ int cmd_obj_rotation_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     g_ScdOpcodes += 2;
-    // Original selector offsets (both are BYTE offsets into the pointer tables):
-    //   desks      (uVar1 >> 6) & 0xfffffffc  == (op1 >> 8) * 4      -> element op1 >> 8
-    //   itemboxes  (uVar1 & 0x7f00) >> 6      == ((op1 >> 8) & 0x7f) * 4
-    // The desks branch previously used element index ((op1 >> 6) & 0x3f), which is
-    // 4x too large - for op1 = 0x0100 it picked desk 4 instead of desk 1.
-    // Note the asymmetry is the original's: only the itembox branch masks with 0x7f.
+
     char* objPtr;
     if (op1 < 0x8000) {
         objPtr = (char*)g_interactable_table[op1 >> 8];
@@ -2359,7 +2354,7 @@ void* script_command_funcs_table[256] = {
     /* 0x16 */ (void*)cmd_bgm_stop,               // 0x00460c70
     /* 0x17 */ (void*)cmd_sfx_3d_play,            // 0x00460d80
     /* 0x18 */ (void*)cmd_item_model_set,         // 0x00461220
-    /* 0x19 */ (void*)cmd_desk_flag_set,          // 0x00460f50
+    /* 0x19 */ (void*)cmd_model_flag_set,          // 0x00460f50
     /* 0x1A */ (void*)cmd_item_search,            // 0x00460f80
     /* 0x1B */ (void*)cmd_enemy_set,              // 0x004617d0
     /* 0x1C */ (void*)cmd_room_light_fade_set,    // 0x00462210

@@ -1134,7 +1134,7 @@ void FUN_00483080(void* spriteData, int depthShift)
 // obstacle models (g_interactable_table) were never queued and FlushTmdObjects
 // only ever drew entities.
 //
-// Item/desk record layout (0xA4 bytes, one per RDT model slot):
+// Item/model record layout (0xA4 bytes, one per RDT model slot):
 //   +0x00  flags byte (bit 0 = visible, bit 7 = coarse depth shift 10)
 //   +0x01  model type id (low 6 bits)
 //   +0x04  pointer to the +0x88 sub-record
@@ -1246,7 +1246,7 @@ static void FUN_00485000(void)
     ExecAsync((void*)FUN_00484eb0);
 }
 
-// (0x004745f0) - Render one item/desk record: compose matrices, set lights,
+// (0x004745f0) - Render one item/model record: compose matrices, set lights,
 // cull against the camera switch zones, and queue the object's TMD.
 static void RoomObjectRender(unsigned char* obj)
 {
@@ -1360,7 +1360,7 @@ static void RoomObjectRender(unsigned char* obj)
 // (0x00473ff0) - room_camera_and_lighting_update
 // Per-frame render pass for the room's own 3D content. Pass 0 walks the item
 // models (g_omodel_table, count = RDT omodel_slot_count), pass 1 the
-// desk/obstacle models (g_interactable_table, count = RDT unknown_03[0]).
+// interactable models (g_interactable_table, count = RDT unknown_03[0]).
 // Each visible record with a bound model gets its rotation matrix rebuilt from
 // its +0x72 SVECTOR, its ScaMatrixData marked dirty for the compose, and is
 // handed to RoomObjectRender. Called from game_loop while

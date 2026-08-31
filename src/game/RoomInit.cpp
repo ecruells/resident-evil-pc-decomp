@@ -426,7 +426,7 @@ void room_set(void)
         } while (i < g_RdtPointer->omodel_slot_count);
     }
 
-    // Desk/unknown_03 processing
+    // Interactable model (unknown_03) processing
     i = 0;
     if (g_RdtPointer->unknown_03[0] != 0) {
         do {

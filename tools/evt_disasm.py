@@ -55,7 +55,7 @@ S0 = {
     0x01: ('enter_state1',   1, 'animation state'),
     0x02: ('enter_state2_i', 1, 'movement state + reset entity action'),
     0x03: ('enter_state2',   1, 'movement state'),
-    0x04: ('set_entity',     3, '0=player 1=enemy 2=itembox 3=desk, idx @+2'),
+    0x04: ('set_entity',     3, '0=player 1=enemy 2=itembox 3=interactable model, idx @+2'),
     0x05: ('event_create',   4, 'slot @+1, script @+2'),
     0x06: ('run_scd',        0, 'inline SCD block, length = byte @+1'),
     0x07: ('exec_scd',       0, 'one SCD command, length = byte @+1'),
@@ -221,7 +221,7 @@ def walk(data, base, start, limit, want_state=0):
         elif state == 0 and op == 0x05:
             note = f'slot {data[off + 1]:#x} <- script {data[off + 2]:#x}'
         elif state == 0 and op == 0x04:
-            kind = {0: 'player', 1: 'enemy', 2: 'itembox', 3: 'desk'}.get(data[off + 1], '?')
+            kind = {0: 'player', 1: 'enemy', 2: 'itembox', 3: 'model'}.get(data[off + 1], '?')
             note = f'{kind} idx {data[off + 2]:#x}'
         elif state == 1 and op == 0x84:
             # 0x84 forces action_behavior = 1; the byte at +1 IS the animation id.

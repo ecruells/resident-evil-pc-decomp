@@ -56,13 +56,13 @@ static void scd_event_cmd_set_entity(void)
     case 0: // Player entity
         g_pScdEventCurrent->entity = (Entity*)&g_playerEntity;
         break;
-    case 1: // Enemy entity
+    case 1: // Enemy/NPC entity
         g_pScdEventCurrent->entity = &g_EnemiesList[p[1]];
         break;
-    case 2: // Item box/cover
+    case 2: // Items, obstacle, itembox cover, etc
         g_pScdEventCurrent->entity = (Entity*)g_omodel_table[p[1]];
         break;
-    case 3: // Desk object
+    case 3: // Interactable room actions (messages, desks, typewritters, etc)
         g_pScdEventCurrent->entity = (Entity*)g_interactable_table[p[1]];
         break;
     }
@@ -1012,8 +1012,8 @@ void* room_check_actions[ROOM_CHECK_ACTION_COUNT] = {
 // prompt is dismissed.
 //
 // Reads the record at g_room_event_index+8: +8 = item id, +9 = quantity,
-// +0x14 = roomItems flag index, +10 = desk slot. The entry itself is
-// deactivated (first byte 0) and the desk's opened flag cleared.
+// +0x14 = roomItems flag index, +10 = interactable model slot. The entry itself is
+// deactivated (first byte 0) and the model's opened flag cleared.
 //
 // Stackable items (ids 0x0b-0x12 and 0x2f) merge into an existing slot first:
 // up to the character's slot count ((4 - (id&3)!=1) * 2 - Chris 8, Jill 6),
@@ -1045,12 +1045,14 @@ void room_event_item_pickup(void)
     g_pickedItemId = record[8];
     unsigned char itemId = record[8];
     unsigned char quantity = record[9];
-    if (itemId == 0x2f) {                         // '/': ammo pickup always yields 3
+    // ink ribbon always pickup 3 units
+    if (itemId == ITEM_INK_RIBBONS) {
         quantity = 3;
     }
 
-    if (((10 < g_selectedItemId) && (g_selectedItemId < 0x13)) ||
-        (g_selectedItemId == 0x2f)) {
+    // if ammo or ink ribbon
+    if (((ITEM_ROCKET_LAUNCHER < g_selectedItemId) && (g_selectedItemId < ITEM_EMPTY_BOTTLE)) ||
+        (g_selectedItemId == ITEM_INK_RIBBONS)) {
         // Stackable: merge into an existing slot of the same item id.
         unsigned char slotCount = (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2);
         unsigned char idx = 0;

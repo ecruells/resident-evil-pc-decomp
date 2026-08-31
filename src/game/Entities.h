@@ -228,7 +228,7 @@ struct Entity {
     unsigned int   weaponJointsPtr;     // 0xAC - pointer to weapon part joint data
     // ---- SCD event data (0xB0 - 0xBC) ----
     unsigned char  pad_b0[8];           // 0xB0-0xB7
-    unsigned int   scd_target_ptr;      // 0xB8 - SCD event target pointer (entity/item/desk)
+    unsigned int   scd_target_ptr;      // 0xB8 - SCD event target pointer (entity/item/model)
     unsigned char  death_timer;          // 0xBC - countdown after death until entity removal (70 = 2.3s)
 
     // ---- Animation fields (0xBD - 0xBF) ----

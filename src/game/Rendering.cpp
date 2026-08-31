@@ -1292,7 +1292,7 @@ static void handle_message_post_action(void)
     case 1: // Use selected item
         {
             g_usedItemId = g_selectedItemId;
-            if (g_selectedItemId != 0x31) {
+            if (g_selectedItemId != ITEM_LOCK_PICK) {
                 unsigned char bVar4 = 0;
                 unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
                 bVar1 = slots[0];
@@ -1300,7 +1300,7 @@ static void handle_message_post_action(void)
                     bVar4 = bVar4 + 1;
                     bVar1 = slots[(unsigned int)bVar4 * 2];
                 }
-                if (g_selectedItemId < 0xb) {
+                if (g_selectedItemId < ITEM_CLIP) { // is weapon
                     slots[(unsigned int)bVar4 * 2] = 0;
                     if ((unsigned int)g_EquippedItemId - (unsigned int)bVar4 == 1) {
                         g_EquippedItemId = 0;
@@ -1312,7 +1312,7 @@ static void handle_message_post_action(void)
                 if (bVar1 != 0) {
                     slots[(unsigned int)bVar4 * 2 + 1] = bVar1 - 1;
                     if (slots[(unsigned int)bVar4 * 2 + 1] == 0) {
-                        if ((0x32 < g_selectedItemId) && (g_selectedItemId < 0x3d)) {
+                        if ((ITEM_OIL < g_selectedItemId) && (g_selectedItemId < ITEM_DESK_KEY)) { // is door key
                             g_main_state_flags = g_main_state_flags | 0x2000;
                             return;
                         }

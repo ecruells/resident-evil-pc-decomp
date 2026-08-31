@@ -493,7 +493,7 @@ int g_charSfxVolume = -1;              // 0x00ac98fc
 SpriteAnimSlot g_spriteAnimSlots[6] = {};
 
 // Per-frame room object render state (room_camera_and_lighting_update, 0x00473ff0)
-int    DAT_008f8688 = 0;    // 0x008f8688 - pass index (0 = items, 1 = desks)
+int    DAT_008f8688 = 0;    // 0x008f8688 - pass index (0 = items, 1 = interactable models)
 int    DAT_00ae9ee4 = 0;    // 0x00ae9ee4 - force object depth 0x33 (stage 1 rooms A/B lid)
 int    DAT_00ae9ef8 = 0;    // 0x00ae9ef8 - keep the fixed 0x32/0x33 object depth
 
@@ -1849,10 +1849,10 @@ char           g_pakStringBuf[512] = {};
 // update_room_objects / check_climb_object and targetable from SCD scripts.
 void*          g_omodel_table[8] = {};
 
-// 0x00d21360 - Interactable obstacle record table (desks, containers, lids).
-// One 0xA4-byte record per RDT obstacles_models pair (count = header byte
-// 0x03), loaded by the SCD item-event command and driven by check_desk /
-// open_itembox; also a generic entity target for event scripts.
+// 0x00d21360 - Interactable obstacle record table (room 3D models: containers,
+// lids, desks, ...). One 0xA4-byte record per RDT obstacles_models pair
+// (count = header byte 0x03), loaded by the SCD item-event command and driven by
+// check_desk / open_itembox; also a generic entity target for event scripts.
 void*          g_interactable_table[8] = {};
 
 // 0x00ae9ef4 - Count of object models loaded by cmd_omodel_set in current room
