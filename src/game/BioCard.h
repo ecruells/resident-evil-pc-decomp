@@ -154,12 +154,10 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define SCENARIO_FLAG_ALTERNATE_OUTFIT     0x2A  // alternate outfit (model id + 8)
 #define SCENARIO_FLAG_WESKER_VARIANT       0x37  // Wesker later-animation variant
 #define SCENARIO_FLAG_YAWN_SERUM           0x47  // Yawn serum marker - first Yawn poisons only while clear
-#define SCENARIO_FLAG_PROGRESS_48          0x48  // map variant gate + stage 2 room 7 BGM condition
+#define SCENARIO_FLAG_PROGRESS_48          0x48  // map variant gate (bank 0; MainMenu map modes)
 #define SCENARIO_FLAG_PROGRESS_49          0x49  // map display variant gate
 #define SCENARIO_FLAG_PROGRESS_4A          0x4A  // map display variant gate
-#define SCENARIO_FLAG_PROGRESS_55          0x55  // stage 2 room 7 keeps 2 BGM channels when set
 #define SCENARIO_FLAG_MONSTER_PLANT_PROG   0x5B  // monster plant combat progression (3+ hits)
-#define SCENARIO_FLAG_PROGRESS_5C          0x5C  // stage 2 room 7 third BGM channel condition (Jill)
 #define SCENARIO_FLAG_SECOND_PLAYTHROUGH   0x7B  // second playthrough ("hard mode") - set after clearing
 #define SCENARIO_FLAG_HAS_LOCKPICK         0x7C  // has the lockpick (Jill)
 #define SCENARIO_FLAG_MENU_FADE_LATCH      0x7D  // fade-in latch, cleared when the menu closes
@@ -174,7 +172,10 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 #define SCENARIO2_FLAG_PROGRESS_2E         0x2E  // map display variant gate
 #define SCENARIO2_FLAG_PROGRESS_38         0x38  // map variant gate + radio-tab availability gate
 #define SCENARIO2_FLAG_YAWN_POISONED       0x43  // poisoned by Yawn (cleared by the serum)
+#define SCENARIO2_FLAG_PROGRESS_48         0x48  // stage 2 room 7 keeps 2 BGM channels when set
 #define SCENARIO2_FLAG_SECOND_SURVIVOR     0x4B  // ending "second survivor" bit
+#define SCENARIO2_FLAG_PROGRESS_55         0x55  // stage 2 room 7 Barry/Hunter cutscene already played
+#define SCENARIO2_FLAG_PROGRESS_5C         0x5C  // stage 2 room 7 third BGM channel condition (Jill)
 #define SCENARIO2_FLAG_PARTNER_ALIVE       0xC0  // ending "partner survived" bit
 
 

@@ -737,11 +737,21 @@ static void bgm_load_and_start(unsigned char bgmState)
     //   (id & 3) == 1 && Flg_ck(0x5c) && Flg_ck(0x48) && !Flg_ck(0x55)
     // and the two-channel case is the default, not the exception. The previous
     // transcription had the condition inverted and never reached it for Chris.
+    //
+    // The flag base the original pushes is 0x00be9854 = g_ScenarioFlags2 (SCD
+    // bank 1) - the same bank the room's init script tests to spawn Barry and
+    // schedule the cutscene. An earlier revision tested g_ScenarioFlags
+    // (0x00be98c0, bank 0) here; bank 0 never carries 0x5c/0x48 at that point,
+    // so the condition always failed, g_SndBank[2] was destroyed and the third
+    // channel's wav (g_BgmNameTable[0x26][2] = "V110_00", the underground
+    // Jill/Barry cutscene's mixed dialogue track) never loaded. The scene's
+    // SCD opcode 0x15 (cmd_bgm_play, operand 0x0215) then started an empty
+    // channel and the cutscene ran with no voices.
     if (g_stageId == STAGE_COURTYARD && g_roomId == ROOM_UNDERGROUND_ENTRY &&
         !((g_playerEntity.id & 3) == 1 &&
-          Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_5C) &&
-          Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_48) &&
-          !Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_55))) {
+          Flg_ck((int)&g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_5C) &&
+          Flg_ck((int)&g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_48) &&
+          !Flg_ck((int)&g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_55))) {
         slotCount = 2;
         if (g_SndBank[2].handle != 0) {
             destroySndBank(g_SndBank[2].handle);
