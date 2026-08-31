@@ -385,7 +385,7 @@ void setup_effect_sprite_textures(unsigned char startSlot)
 // so nothing else in the effect path changes.
 // ============================================================================
 static void blit_effect_tim_at(DWORD* page, const unsigned char* tim,
-                               unsigned int yOff)
+                               unsigned int yOff, unsigned int clutRow)
 {
     if (tim == NULL) return;
     if (*(const unsigned int*)tim != 0x10) return;   // TIM magic
@@ -402,11 +402,17 @@ static void blit_effect_tim_at(DWORD* page, const unsigned char* tim,
     }
     if (clutW == 0 || clutH == 0 || clutW * clutH > 64) return;
 
-    // 4bpp sheets: CLUT row 0 (16 entries), entry 0 = transparent.
+    // 4bpp sheets: 16-entry CLUT rows, entry 0 = transparent. The rows are
+    // palette VARIANTS of the same art (see load_effect_sprites); row 0 is the
+    // base palette and the effect renderer picks the row matching the spawn's
+    // tint index from the per-row SRVs.
+    if (clutRow >= clutH) clutRow = clutH - 1;
+    p += (int)clutRow * (clutW * 2);
     unsigned short clut[16];
-    for (int i = 0; i < 16 && i < clutW * clutH; i++) {
+    for (int i = 0; i < 16 && i < clutW; i++) {
         clut[i] = *(const unsigned short*)(p + i * 2);
     }
+    p -= (int)clutRow * (clutW * 2);
     p += clutW * clutH * 2;
 
     p += 4;                                          // image data size
@@ -440,7 +446,8 @@ static void blit_effect_tim_at(DWORD* page, const unsigned char* tim,
 static void load_effect_sprites(void)
 {
     // The room's esp sprites use sheet slots 8-11 (the weapon FX hold 0-7),
-    // mapped to SRV slots 11-14. Free exactly those four on each room change.
+    // mapped to SRV slots 11-14. Free exactly those four on each room change,
+    // plus the per-row variant pages at 152..167 (see below).
     for (int i = 0; i < 4; i++) {
         int slot = 11 + i;
         if (g_TexturePageSRV[slot] != MARNI_NULL_HANDLE) {
@@ -448,8 +455,41 @@ static void load_effect_sprites(void)
             g_TexturePageSRV[slot] = MARNI_NULL_HANDLE;
         }
     }
+    for (int i = 0; i < 16; i++) {
+        int slot = 152 + i;
+        if (g_TexturePageSRV[slot] != MARNI_NULL_HANDLE) {
+            if (Marni_DX() != NULL) Marni_DX()->DestroyTexture(g_TexturePageSRV[slot]);
+            g_TexturePageSRV[slot] = MARNI_NULL_HANDLE;
+        }
+    }
 
-    // Composite each declared room sprite into its page buffer.
+    // Record each declared sprite's CLUT row count. Room esp TIMs are 4bpp with
+    // up to four 16-entry CLUT rows, and the rows are palette VARIANTS of the
+    // same art selected per spawn by the tint index (printClutTint =
+    // depthGroup >> 3) - exactly like the weapon-FX sheets in core00.etm (the
+    // Plant 42 white-blood fix). ROOM5080's passcode light is the room-side
+    // proof: its sheet ships row 0 red / row 1 cyan-blue / row 2 orange /
+    // row 3 bright blue, the init SCD spawns the red instances (depthGroup
+    // 0x00-0x02) and the main SCD re-spawns the same type with depthGroup
+    // 0x08-0x0A when a pass code is entered - one art block, one palette per
+    // tint. clutW/clutH live at TIM+16/+18 (the +24/+26 misread made the first
+    // LoadEffectTextureSheetVariants attempt a silent no-op - see that note).
+    for (unsigned int slot = 0; slot < 8; slot++) {
+        unsigned char type = g_abEffSpriteIndexTable[8 + slot];
+        if (type == 0xFF) continue;
+        unsigned int rows = 1;
+        const unsigned char* tim = (const unsigned char*)DAT_00ac9cd0[slot];
+        if (tim != NULL && *(const unsigned int*)tim == 0x10 &&
+            (*(const unsigned int*)(tim + 4) & 8)) {
+            unsigned int clutH = *(const unsigned short*)(tim + 18);
+            if (clutH > 4) clutH = 4;
+            if (clutH > 1) rows = clutH;
+        }
+        g_effectSpriteClutRows[type] = (unsigned char)rows;
+    }
+
+    // Composite each declared room sprite into its page buffer (CLUT row 0 -
+    // the base palette, uploaded to SRV 11-14 as before).
     static DWORD s_pageBuffer[4][256 * 256];
     for (int i = 0; i < 4; i++) {
         memset(s_pageBuffer[i], 0, sizeof(s_pageBuffer[i]));
@@ -466,7 +506,7 @@ static void load_effect_sprites(void)
         // samples exactly the blitted region.
         blit_effect_tim_at(s_pageBuffer[page],
                            (const unsigned char*)DAT_00ac9cd0[slot],
-                           g_effectSpritePageV[type]);
+                           g_effectSpritePageV[type], 0);
     }
 
     // Upload the pages that got content (some pages may stay empty).
@@ -481,6 +521,45 @@ static void load_effect_sprites(void)
             g_TexturePageWidth[slot] = 256;
             g_TexturePageHeight[slot] = 256;
             g_TexturePageBpp[slot] = 16;
+        }
+    }
+
+    // Bake the variant rows. Row r (r >= 1) of a page composites every sprite
+    // whose sheet declares more than r rows and lands in
+    // SRV 152 + page*4 + (r-1); the renderer redirects there on the matching
+    // tint (see effect_submit_sprite). Single-row sheets are untouched, so
+    // rooms whose art ships one palette behave exactly as before.
+    for (unsigned int row = 1; row < 4; row++) {
+        bool anyRow = false;
+        for (int i = 0; i < 4; i++) {
+            memset(s_pageBuffer[i], 0, sizeof(s_pageBuffer[i]));
+        }
+        for (unsigned int slot = 0; slot < 8; slot++) {
+            unsigned char type = g_abEffSpriteIndexTable[8 + slot];
+            if (type == 0xFF) continue;
+            unsigned char sheetSlot = g_effectSpriteSheetSlot[type];
+            if (sheetSlot == 0xFF) continue;
+            unsigned int page = sheetSlot - 8;
+            if (page >= 4) continue;
+            if ((unsigned int)g_effectSpriteClutRows[type] <= row) continue;
+            blit_effect_tim_at(s_pageBuffer[page],
+                               (const unsigned char*)DAT_00ac9cd0[slot],
+                               g_effectSpritePageV[type], row);
+            anyRow = true;
+        }
+        if (!anyRow) break;
+        for (int i = 0; i < 4; i++) {
+            bool hasContent = false;
+            for (int px = 0; px < 256 * 256; px++) {
+                if (s_pageBuffer[i][px] != 0) { hasContent = true; break; }
+            }
+            if (hasContent) {
+                int slot = 152 + i * 4 + (int)row - 1;
+                MarniCreateTexture(256, 256, 32, s_pageBuffer[i], &g_TexturePageSRV[slot]);
+                g_TexturePageWidth[slot] = 256;
+                g_TexturePageHeight[slot] = 256;
+                g_TexturePageBpp[slot] = 16;
+            }
         }
     }
 
@@ -592,6 +671,7 @@ void InitRoomEffSprite(void)
             // room's sheet mapping cannot be reached from the next room.
             g_effectSpriteSheetSlot[spriteIdx] = 0xFF;
             g_effectSpritePageV[spriteIdx] = 0;
+            g_effectSpriteClutRows[spriteIdx] = 0;
         }
     } while (i < 8);
 

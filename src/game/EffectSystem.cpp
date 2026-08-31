@@ -2536,8 +2536,12 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     //     through it. That asymmetry in the ORIGINAL is what the old note
     //     mistook for something the port had dropped.
     //
-    // So depthGroup >> 3 has exactly one effect anywhere: picking the RGB triple
-    // that multiplies the sprite. There is no second palette mechanism.
+    // So through THIS path depthGroup >> 3 has exactly one effect: picking the
+    // RGB triple that multiplies the sprite. The multi-row-sheet palette
+    // variants (blood rows, room light rows) are a SECOND axis that lives in
+    // the sheet TIMs' CLUT rows and is resolved at submit time by the
+    // sheetSlot redirects further down - see the Plant 42 white-sap fix
+    // (2026-08-25) and the room redirect below (ROOM5080 light).
     //
     // The old note also reasoned that Plant 42's tint resolving to FFFFFF meant
     // the sap "should be white". FFFFFF is the identity multiplier - it means no
@@ -2714,6 +2718,42 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
         }
         if (g_TexturePageSRV[varSlot] != MARNI_NULL_HANDLE) {
             texSlot = varSlot;
+        }
+    }
+
+    // ---- room RDT sheets: the same CLUT-row variant selection ----
+    //
+    // The room esp TIMs carry the same per-row palette variants the weapon
+    // sheets do, selected per spawn by the tint index. ROOM5080's passcode
+    // panel light is the proof: the init SCD spawns type 0x0A with depthGroup
+    // 0x00-0x02 (red instances) and the main SCD re-spawns it with depthGroup
+    // 0x08-0x0A once a pass code is entered, while the sheet ships row 0 red /
+    // row 1 cyan-blue / row 2 orange / row 3 bright blue. The band multiplier
+    // cannot be the colour mechanism here: the light's band (page 1, V=3)
+    // maps to colour record 4 - the BLOOD record {69,1e,0a / 37,5a,14 /
+    // 91,5a,14 / ff,ff,ff} shared with the zombie splatter that packs to the
+    // same page position - which multiplies, and a red ramp times anything
+    // stays red. So the row IS the tint, as with the weapon sheets above.
+    // load_effect_sprites bakes rows 1-3 to SRV 152 + (sheetSlot-8)*4 +
+    // (row-1); row 0 stays on the plain page SRVs 11-14. Single-row room
+    // sheets (g_effectSpriteClutRows[type] <= 1) are untouched and keep
+    // rendering their base palette from the page SRV.
+    if (sheetSlot >= 8) {
+        int rows = (int)g_effectSpriteClutRows[eff->effectType];
+        if (rows > 1) {
+            int clutRow = (int)g_TextureDesc.printClutTint;
+            if (clutRow > rows - 1) clutRow = rows - 1;
+            if (clutRow > 3) clutRow = 3;
+            if (clutRow > 0) {
+                int varSlot = 152 + ((int)sheetSlot - 8) * 4 + (clutRow - 1);
+                while (clutRow > 1 && g_TexturePageSRV[varSlot] == MARNI_NULL_HANDLE) {
+                    clutRow--;
+                    varSlot--;
+                }
+                if (g_TexturePageSRV[varSlot] != MARNI_NULL_HANDLE) {
+                    texSlot = varSlot;
+                }
+            }
         }
     }
 

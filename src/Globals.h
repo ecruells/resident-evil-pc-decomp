@@ -551,6 +551,12 @@ extern unsigned char g_effectSpriteBandV[50];
 // Distinct from g_effectSpriteBandV (which stays 0 for room sprites - their UV
 // records are edited in place) so the blend band scan is unaffected.
 extern unsigned char g_effectSpritePageV[50];
+// Per-sprite CLUT row count of the sheet TIM that carries its art (1 for a
+// single-row sheet). The rows are palette VARIANTS selected per spawn by the
+// tint index - the same mechanism the weapon-FX sheets use. Filled by
+// load_effect_sprites from the RDT-embedded room TIMs (and by
+// load_shoot_direction_data for the core00 sheets). Port-only companion table.
+extern unsigned char g_effectSpriteClutRows[50];
 
 // Entity joint animation copy base (set by SetupEntityJointAnimation)
 extern int           DAT_00be0e00;                     // 0x00be0e00
