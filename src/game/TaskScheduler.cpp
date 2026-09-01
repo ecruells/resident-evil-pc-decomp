@@ -61,10 +61,19 @@
 #define TASK_GUARD_SIZE   4096
 static BYTE* g_TaskStackBase = NULL;   // start of slot 0's usable area
 
+// Initial ESP for a task START dispatch. The original layout had contiguous
+// stacks, so tasks were entered with ESP exactly at slot_top and a read at
+// [slot_top] hit the next slot's memory. With the port's guard pages,
+// slot_top IS the first PAGE_NOACCESS byte, and the MSVC Release stack-
+// alignment prologue (push ebx / mov ebx,esp / and esp,-16 / mov ebp,[ebx+4])
+// reads [entry_esp] — e.g. options_menu+0xD faulting on its movaps alignment
+// prologue (0xC0000005 at options_menu+0xd, EBX=slot_top-4, ESP=slot_top-0x10).
+// Enter tasks 16 bytes below the guard so [entry_esp] stays readable and the
+// ESP stays 16-byte aligned like the original dispatch.
 static DWORD TaskStackTop(int id)
 {
     return (DWORD)(g_TaskStackBase + id * (TASK_STACK_SIZE + TASK_GUARD_SIZE)
-                   + TASK_STACK_SIZE);
+                   + TASK_STACK_SIZE) - 16;
 }
 
 #pragma warning(disable: 4731)  // frame pointer register modified by inline asm

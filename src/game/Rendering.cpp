@@ -1151,7 +1151,13 @@ static void message_render_chars(void)
     unsigned char* pbVar2;
     unsigned char* pbVar3;
     unsigned short fade;
-    unsigned char* savedPtr;
+    // 0x00456020: case 7 (return-from-item-name) resumes at savedPtr+2 from the
+    // last case 6 tag. A tag 7 can arrive without a preceding tag 6 when
+    // set_message_display restarts the pass mid-substitution (rapid menu
+    // open/close); reading the uninitialized local sent the render loop through
+    // stale stack garbage (release crash: EIP=0x000EA98D, garbage call target;
+    // debug crash log: EAX/EDX=0xCCCCCCCE in message_render_chars).
+    unsigned char* savedPtr = NULL;
 
     g_TextureDesc.screenX = 0x30 - g_ScreenOffsetX;
     g_TextureDesc.screenY = g_MessageScreenY;
@@ -1202,7 +1208,13 @@ static void message_render_chars(void)
             break;
 
         case 7: // return from item name
-            pbVar3 = savedPtr + 2;
+            if (savedPtr != NULL) {
+                pbVar3 = savedPtr + 2;
+            } else {
+                // No matching tag 6 this pass: skip the stray tag instead of
+                // dereferencing stale stack data.
+                pbVar3 = pbVar2 + 1;
+            }
             break;
 
         case 0xf8: // single-width character
