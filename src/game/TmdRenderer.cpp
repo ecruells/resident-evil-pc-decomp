@@ -105,7 +105,7 @@ struct TmdDrawEntry {
 
 // Lighting state AS OF QUEUE TIME, one record per queue slot. Unlike the
 // transform (which the caller writes after insertion, see TmdQueueObject) the
-// lights are already set when an object is queued: calc_entity_lighting calls
+// lights are already set when an object is queued: render_entity calls
 // update_entity_lighting for the entity, then SetLightMatrix per joint, and only
 // then queues. On real hardware the driver latched the light state per
 // DrawPrimitive, so each entity kept its own lighting; reading the globals at
@@ -765,11 +765,17 @@ void update_entity_lighting(VECTOR* entityPos)
     }
 }
 
-// (0x0048c350) - Render entity joints with lighting (in-game entity renderer)
-// Per-joint loop: computes camera-space matrices, sets light/rot matrices,
-// and queues each visible joint's TMD object for rendering. Skipped for
-// entity types 0x0D/0x12 with sub-type 1 (they render elsewhere).
-void calc_entity_lighting(Entity* ent)
+// (0x0048c350) - render_entity: the in-game character renderer.
+// Ghidra called this calc_entity_lighting, but the lighting maths lives in
+// update_entity_lighting (0x00481660), which this calls once for the entity
+// (and again per joint for types 0x0D/0x12) before drawing. The body is a
+// per-joint loop: composes the camera matrix with the joint's world matrix,
+// sets the light/rot matrices, and queues the joint's TMD object. Joints
+// flagged 0x20 go to the path-trail step instead, flag 4 to the severed-limb
+// ballistic step, and flags 0x74 render only inside the camera switch zone.
+// Skipped for entity types 0x0D/0x12 with sub-type 1 (they render elsewhere).
+// The menu-side twin is options_render_entity (0x004775b0).
+void render_entity(Entity* ent)
 {
     int param_1 = (int)ent;
     unsigned char* entBytes = (unsigned char*)ENTITY;
@@ -1131,7 +1137,7 @@ void FUN_00483080(void* spriteData, int depthShift)
 // 0x00483270). This is the per-frame pass the original runs between the player
 // update and the entity render in game_loop; the port had it as an empty stub
 // in EngineStubs.cpp, so the RDT's item models (g_omodel_table) and
-// obstacle models (g_interactable_table) were never queued and FlushTmdObjects
+// obstacle models (g_item_model_table) were never queued and FlushTmdObjects
 // only ever drew entities.
 //
 // Item/model record layout (0xA4 bytes, one per RDT model slot):
@@ -1357,27 +1363,28 @@ static void RoomObjectRender(unsigned char* obj)
     }
 }
 
-// (0x00473ff0) - room_camera_and_lighting_update
-// Per-frame render pass for the room's own 3D content. Pass 0 walks the item
-// models (g_omodel_table, count = RDT omodel_slot_count), pass 1 the
-// interactable models (g_interactable_table, count = RDT unknown_03[0]).
-// Each visible record with a bound model gets its rotation matrix rebuilt from
-// its +0x72 SVECTOR, its ScaMatrixData marked dirty for the compose, and is
-// handed to RoomObjectRender. Called from game_loop while
-// g_dwCameraLightingEnabled is set; was an empty stub, which is why room items
-// and 3D objects never appeared.
-void room_camera_and_lighting_update(void)
+// (0x00473ff0) - render_room_objects
+// Per-frame draw of the room's own 3D content - despite the Ghidra name
+// (room_camera_and_lighting_update) it touches neither the camera nor the
+// lights. Pass 0 walks the omodel records (g_omodel_table, count = RDT
+// omodel_slot_count), pass 1 the item models (g_item_model_table, count = RDT
+// item_count). Each visible record with a bound model gets its rotation matrix
+// rebuilt from its +0x72 SVECTOR, its ScaMatrixData marked dirty for the
+// compose, and is handed to RoomObjectRender. Called from game_loop while
+// g_dwRoomObjectRenderEnabled is set; was an empty stub, which is why room
+// items and 3D objects never appeared.
+void render_room_objects(void)
 {
     for (int pass = 0; pass < 2; pass++) {
         int count = (pass == 0)
             ? g_RdtPointer->omodel_slot_count
-            : g_RdtPointer->unknown_03[0];
+            : g_RdtPointer->item_count;
         DAT_008f8688 = pass;
 
         for (int i = 0; i < count; i++) {
             unsigned char* obj = (pass == 0)
                 ? (unsigned char*)g_omodel_table[i]
-                : (unsigned char*)g_interactable_table[i];
+                : (unsigned char*)g_item_model_table[i];
 
             // Visible (bit 0) and with a bound model (AnimSlot ptr at +0x14).
             if ((obj != NULL) && ((*obj & 1) != 0) && (*(int*)(obj + 0x14) != 0)) {

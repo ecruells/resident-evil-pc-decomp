@@ -526,7 +526,7 @@ Full chain for one entity joint:
 
 | Step | Function | File | What it does |
 |------|----------|------|--------------|
-| 1 | `calc_entity_lighting` (0x0048c350) / `options_render_entity` (0x004775b0) | EngineStubs.cpp / OptionsMenu.cpp | Per joint: composes the camera matrix with `joint->world` (`ApplyLVAndMul0Matrix`), pushes it through `SetLightMatrix` + `SetRotAndTransMatrix`, then calls `FUN_00483250` with the joint's `anim_object` |
+| 1 | `render_entity` (0x0048c350) / `options_render_entity` (0x004775b0) | EngineStubs.cpp / OptionsMenu.cpp | Per joint: composes the camera matrix with `joint->world` (`ApplyLVAndMul0Matrix`), pushes it through `SetLightMatrix` + `SetRotAndTransMatrix`, then calls `FUN_00483250` with the joint's `anim_object` |
 | 2 | `FUN_00483250` (0x00483250) | EngineStubs.cpp | Thin forwarder: `FUN_00483080(animObject, depthShift)` |
 | 3 | `FUN_00483080` (0x00483080) | EngineStubs.cpp | Bails if `g_gteRotTransMatrix.t[2] < 0` (behind camera) or `data[1] == 0` (no textured prims). Calls `AsyncCreateTmdObject` → builds the model→view float matrix from `g_gteRotTransMatrix` → `FUN_00486190` folds the view in → `Transform` |
 | 4 | `CreateTmdObjectInternal` (0x00483910) | TmdAnimation.cpp | Finds/reuses a `CMarniDirect3DTMD` slot, calls `PSXObject_Store` to parse the TMD into the slot's embedded `CMarniViewport2` elements, then matches each parsed object against a texture page and calls `Create` |

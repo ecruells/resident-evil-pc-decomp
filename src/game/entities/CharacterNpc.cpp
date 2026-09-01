@@ -1544,7 +1544,7 @@ static short FUN_00460180(short value, short probeWithFlag, short lo, short hi)
 // ----------------------------------------------------------------------------
 static unsigned char FUN_004720d0(char flag, int pos_x, int pos_z)
 {
-    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char* zoneBase = g_RdtPointer->walk_zones;
     unsigned short* entryA = (unsigned short*)(zoneBase + 2
                              + (unsigned int)ENTITY->splatter_flag * 0xC);
     unsigned short* entryB = (unsigned short*)(zoneBase + 2
@@ -1588,7 +1588,7 @@ static unsigned char FUN_004720d0(char flag, int pos_x, int pos_z)
 static unsigned short zone_crossing_heading(short pos_x, short pos_z,
                                    char pathZone, unsigned char entityZone)
 {
-    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char* zoneBase = g_RdtPointer->walk_zones;
     unsigned char count = *zoneBase;
 
     if ((char)entityZone < 0) {

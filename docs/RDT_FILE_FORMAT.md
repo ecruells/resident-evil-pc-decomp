@@ -30,9 +30,9 @@ meaning once relocated or rewritten at load time. Those cases are called out.
 |--------|-------|--------|-------------|
 | 0x00   | 1     | uchar  | `sprites_count` — number of active room sprite entries (`g_RoomSprEntries`). Overwritten at runtime by `Room_LoadCameraSprites` (0x004757c0), so the file value is never used as-is |
 | 0x01   | 1     | uchar  | `cameras_count` — number of camera entries following the header (also drives background PAK loading) |
-| 0x02   | 1     | uchar  | `omodel_slot_count` — number of `{TMD,TIM}` model pairs at `items_models` **and** number of 0xA4-byte omodel records `room_set` carves out of the VB block. Never read by any sound path on the PC engine |
-| 0x03   | 1     | uchar  | `obstacles_count` — number of `{TMD,TIM}` pairs at `obstacles_models` and of 0xA4-byte interactable-obstacle records carved after the omodel records (`g_interactable_table`) |
-| 0x04   | 2     | uchar  | Reserved — no reader anywhere in the decompiled binary |
+| 0x02   | 1     | uchar  | `omodel_slot_count` — number of `{TMD,TIM}` model pairs at `object_models` **and** number of 0xA4-byte omodel records `room_set` carves out of the VB block. Never read by any sound path on the PC engine |
+| 0x03   | 1     | uchar  | `item_count` — number of `{TMD,TIM}` pairs at `item_models`, of 0xA4-byte item/interactable records carved after the omodel records (`g_item_model_table`), and of icon tiles at `item_icons`. The original format's `nItem` |
+| 0x04   | 2     | uchar  | `pad_04` — reserved. No reader anywhere in the decompiled binary, and zero in all 320 shipped RDT files |
 | 0x06   | 2     | short  | Ambient light — Red component (12-bit PS1 channel) |
 | 0x08   | 2     | short  | Ambient light — Green component (12-bit PS1 channel) |
 | 0x0A   | 2     | short  | Ambient light — Blue component (12-bit PS1 channel) |
@@ -71,8 +71,8 @@ dword from 0x48 to 0x94 by adding the load base minus 3.
 |--------|------|--------|--------------------------|-------------|-------|
 | 0x48   | 4    | ptr    | `cam_switch_zones`       | Camera switch zone table (see below) | — |
 | 0x4C   | 4    | ptr    | `boundaries`             | Room collision boundaries (see `.blk` section) | .blk |
-| 0x50   | 4    | ptr    | `items_models`           | Room-object (omodel) models — pushable/climbable objects: `omodel_slot_count` × `{TMD*, TIM*}` pairs, consumed by SCD 0x1F | .tmd/.tim |
-| 0x54   | 4    | ptr    | `obstacles_models`       | Interactable obstacle models (desks/containers): header byte 0x03 × `{TMD*, TIM*}` pairs | .tmd/.tim |
+| 0x50   | 4    | ptr    | `object_models`          | Room-object (omodel) models — pushable/climbable objects: `omodel_slot_count` × `{TMD*, TIM*}` pairs, consumed by SCD 0x1F | .tmd/.tim |
+| 0x54   | 4    | ptr    | `item_models`            | Item models — the 3D model of each pick-up in the room: `item_count` × `{TMD*, TIM*}` pairs, consumed by `cmd_item_model_set` (SCD 0x18) into `g_item_model_table` | .tmd/.tim |
 | 0x58   | 4    | ptr    | `walk_zones`             | Walkable-zone grid used for NPC navigation (see below) | — |
 | 0x5C   | 4    | ptr    | `footstep_sound_zones`   | Footstep sound zone map (see below) | .flr |
 | 0x60   | 4    | ptr    | `initialization_scd`     | Init script (run once at room load) | .scd |
@@ -81,24 +81,24 @@ dword from 0x48 to 0x94 by adding the load base minus 3.
 | 0x6C   | 4    | ptr    | `player_anim_header`     | Room-specific player animation **header**, copied into `g_playerEntity.jointMoveData2` by `room_set` and driven with `Joint_move` (e.g. the scripted door-push / stair motions in `PlayerAnimations.cpp`) | — |
 | 0x70   | 4    | ptr    | `player_anim_base`       | Matching animation **frame-data base** → `jointMoveData3` | — |
 | 0x74   | 4    | ptr    | `messages`               | Message text table (see `.msg` section) | .msg |
-| 0x78   | 4    | ptr    | —                        | Reserved: no reader anywhere in the decompiled binary | ? |
+| 0x78   | 4    | ptr    | `item_icons`             | `item_count` × 1200-byte inventory icons (40×30, 8bpp), the same tiles as `Data/ITEM_ALL.tim`. PS1 leftover — no reader anywhere in the decompiled binary (see below) | — |
 | 0x7C   | 4    | ptr    | `effect_anim_index`      | Effect animation index block | .esp |
 | 0x80   | 4    | ptr    | `effect_anim_data`       | Effect animation frame data | .eff |
 | 0x84   | 4    | ptr    | `effect_anim_sprite`     | 8 dwords of effect sprite-sheet relative pointers (see below) | .tim |
 | 0x88   | 4    | ptr    | `sound_attribute_table`  | Sound attribute table (.snd). Relocated like the rest but **never dereferenced** by the PC engine — PS1 leftover; the port plays WAVs instead | .snd |
 | 0x8C   | 4    | ptr    | `vab_header_file`        | VAB header (.vh). Loaded, also unused on PC (WAV replacement) | .vh |
-| 0x90   | 4    | ptr    | `vab_sound_file`         | VAB body (.vb). On PC this region is **reused as scratch memory**: `room_set` carves `omodel_slot_count` + byte-0x03 0xA4-byte room-object records out of it (`g_omodel_table`, `g_interactable_table`) before the init script runs | .vb |
+| 0x90   | 4    | ptr    | `vab_sound_file`         | VAB body (.vb). On PC this region is **reused as scratch memory**: `room_set` carves `omodel_slot_count` + `item_count` 0xA4-byte room-object records out of it (`g_omodel_table`, `g_item_model_table`) before the init script runs | .vb |
 
 ### Pointer relocation passes (`LoadRoomRdt`, 0x00477d90)
 
 1. **Header pointers 0x48..0x93**: `value += file_base - 3`.
 2. **Camera entries**: for each of `cameras_count` cameras, both `mask_pointer`
    and `tim_mask_pointer` get the same treatment.
-3. **Item model pairs**: `omodel_slot_count` pairs at `items_models`; each
+3. **Omodel pairs**: `omodel_slot_count` pairs at `object_models`; each
    non-null half gets `+= file_base - 3`. The matching slot in
    `g_omodel_table` is zeroed in reverse order.
-4. **Obstacle model pairs**: same, count = header byte 0x03, into
-   `g_interactable_table`.
+4. **Item model pairs**: same, count = `item_count`, into
+   `g_item_model_table`.
 5. **Event script table** (RDT+0x68) is special: its leading dword offsets are
    relative to the *table itself* and are relocated with plain
    `offset += table_base` (no -3), terminated by a zero dword.
@@ -171,16 +171,40 @@ uchar  pad
   edges through this table, and `walk_zone_shared_edge` computes edge midpoints
   between adjacent zones.
 
-### Item & obstacle model tables (RDT+0x50 / RDT+0x54)
+### Item icon tiles (RDT+0x78)
+
+`item_count` × 1200 bytes, one per item slot: a **40×30 8-bit indexed bitmap**,
+row-major, no header — the item's inventory icon. `Data/ITEM_ALL.tim` is the
+same tiles back to back (0x14 header + 72 × 1200 = 86420 bytes, its file size
+exactly), so the room copies are redundant on PC.
+
+Evidence: the block length is `item_count * 1200` in all 320 shipped RDTs;
+row-to-row autocorrelation picks width 40 over every other divisor of 1200; and
+matching all 582 room blocks against the 72 `ITEM_ALL` tiles gives 325
+byte-identical hits and 253 more within 120 differing pixels (99.3%). The
+handful of near-misses are icon revisions between the PS1 art and the PC sheet.
+
+**Nothing in the PC binary reads it.** `LoadRoomRdt` relocates the pointer with
+the rest of the 0x48..0x94 block and no code ever dereferences it — no
+`mov`/`lea` against `[rdt + 0x78]` exists anywhere in the image. The PC engine
+draws inventory icons from `ITEM_ALL.tim`; the per-room copies are how the PS1
+build shipped them.
+
+### Omodel & item model tables (RDT+0x50 / RDT+0x54)
 
 Both are flat arrays of 8-byte `{ TMD*, TIM* }` pairs (either half may be null).
-The item pairs are consumed by SCD command 0x1F `cmd_omodel_set`
-(`items_models + slot * 8`, `CmdFunctions.cpp:914`) to build the pushable/
-climbable room objects; the obstacle pairs by the interactable item-event
-command (`obstacles_models + index * 8`, `CmdFunctions.cpp:611`) that builds
-desks/containers. Counts come from the header: item pair count is
-**`omodel_slot_count`**, obstacle pair count is header byte 0x03 — each table
-feeds its own 0xA4-byte record pool (`g_omodel_table` / `g_interactable_table`).
+The omodel pairs are consumed by SCD command 0x1F `cmd_omodel_set`
+(`object_models + slot * 8`, `CmdFunctions.cpp:914`) to build the pushable/
+climbable room objects; the item pairs by the item-event command
+(`item_models + index * 8`, `CmdFunctions.cpp:611`) that builds pick-ups and
+searchable room models (containers, lids, desks, ...) and fills
+`g_RoomItemEventTable`. Counts come from the header: omodel pair count is
+**`omodel_slot_count`**, item pair count is **`item_count`** — each table
+feeds its own 0xA4-byte record pool (`g_omodel_table` / `g_item_model_table`).
+
+That RDT+0x54 is the *item* table (the original `nItem` / item-model block) is
+confirmed twice over: its consumer is the item-event command, and the icon
+section at RDT+0x78 holds exactly `item_count` inventory icons.
 
 ### Footstep sound zones (RDT+0x5C, .flr)
 
@@ -241,8 +265,8 @@ dereferenced by the PC engine; all audio loads from `.wav` banks instead
 (`bgm_load_and_start`, `load_character_sfx`, `Room_LoadEnemySoundBanks` use
 their own stage/room name tables). The `.vb` body has a second life as heap
 space: `room_set` slices it into 0xA4-byte room-object records — first
-`omodel_slot_count` for `g_omodel_table`, then header byte 0x03 more
-for `g_interactable_table` — before running the init script, which is why the
+`omodel_slot_count` for `g_omodel_table`, then `item_count` more
+for `g_item_model_table` — before running the init script, which is why the
 room-object system indexes those two tables rather than allocating.
 
 ## Collision Boundary Data (.blk)

@@ -1165,7 +1165,7 @@ void SetRotAndTransMatrix(MATRIX* m) {
 
 // ============================================================================
 // FUN_004896c0 (0x004896c0)
-// Severed-limb ballistic step. calc_entity_lighting calls this once per frame
+// Severed-limb ballistic step. render_entity calls this once per frame
 // for every joint whose flags carry 0x4 (blown off - see short_push_back and
 // explode_leg_and_drop), having first reloaded the launch velocity into the
 // joint's rotation SVECTOR: rotation.x = -20, rotation.y = 200, rotation.z = 0.

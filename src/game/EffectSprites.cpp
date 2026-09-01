@@ -685,7 +685,8 @@ void InitRoomEffSprite(void)
     do {
         unsigned int idx = (unsigned int)i;
         i = i + 1;
-        DAT_00ac9cd0[idx] = (int)pRdt->unknown_03 + *(int*)(spriteImBase - idx * 4) - 3;
+        // (RDT+3)-3 in the decompile: the offsets are relative to the RDT base.
+        DAT_00ac9cd0[idx] = (int)pRdt + *(int*)(spriteImBase - idx * 4);
     } while (i < 8);
 
     // 0x0047ba5c: Set up effect sprite texture positions

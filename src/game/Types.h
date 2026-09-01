@@ -502,27 +502,40 @@ static_assert(sizeof(RDT_BoundaryHeader) == 0x18, "RDT_BoundaryHeader size misma
 struct RDT {
     unsigned char  sprites_count;       // 0x00 - number of room sprite entries in g_RoomSprEntries
     unsigned char  cameras_count;       // 0x01
-    unsigned char  omodel_slot_count;   // 0x02 - item-model {TMD,TIM} pair count AND
-                                        //         omodel record slot count (never used
-                                        //         for sounds on PC)
-    unsigned char  unknown_03[3];       // 0x03-0x05
+    unsigned char  omodel_slot_count;   // 0x02 - omodel {TMD,TIM} pair count at
+                                        //         object_models AND the omodel record
+                                        //         slot count (never used for sounds
+                                        //         on PC)
+    unsigned char  item_count;          // 0x03 - item {TMD,TIM} pair count at
+                                        //         item_models, the 0xA4-byte record
+                                        //         slot count carved into
+                                        //         g_item_model_table, and the number
+                                        //         of icon tiles at item_icons
+    unsigned char  pad_04[2];           // 0x04-0x05 - no reader in the binary; zero in
+                                        //             all 320 shipped RDTs
     short          ambient_light_r;     // 0x06
     short          ambient_light_g;     // 0x08
     short          ambient_light_b;     // 0x0A
     RDT_Light      lights[3];           // 0x0C-0x47
     unsigned char* cam_switch_zones;    // 0x48
     unsigned char* boundaries;          // 0x4C
-    unsigned char* items_models;        // 0x50
-    unsigned char* obstacles_models;    // 0x54
-    unsigned char* unknown_58;          // 0x58
+    unsigned char* object_models;       // 0x50 - omodel_slot_count x {TMD*, TIM*}
+    unsigned char* item_models;         // 0x54 - item_count x {TMD*, TIM*}
+    unsigned char* walk_zones;          // 0x58 - NPC navigation grid: count byte,
+                                        //         then 0xC-byte zones from +2
     unsigned char* footstep_sound_zones;// 0x5C
     unsigned char* initialization_scd;  // 0x60
     unsigned char* scd_opcodes;         // 0x64
     unsigned char* scd_opcodes2;        // 0x68
-    unsigned char* unknown_6c;          // 0x6C
-    unsigned char* unknown_70;          // 0x70
+    unsigned char* player_anim_header;  // 0x6C - room's player animation pair; both
+    unsigned char* player_anim_base;    // 0x70   go to g_playerEntity.jointMoveData2/3
+                                        //        and feed Joint_move (door / push /
+                                        //        crank poses)
     unsigned char* messages;            // 0x74
-    unsigned char* unknown_78;          // 0x78
+    unsigned char* item_icons;          // 0x78 - item_count x 1200-byte 40x30 8bpp
+                                        //         inventory icons, the same tiles as
+                                        //         Data/ITEM_ALL.tim. PS1 leftover:
+                                        //         no reader anywhere in the binary
     unsigned char* effect_anim_index;   // 0x7C
     unsigned char* effect_anim_data;    // 0x80
     unsigned char* effect_anim_sprite;  // 0x84
@@ -747,8 +760,8 @@ struct D3DRendererInfo {
 // ============================================================================
 // SpriteAnimSlot (0x14 / 20 bytes each)
 // Sprite animation data table entry. 6 entries at 0x00be9a60.
-// Indexed by g_spriteAnimActive in room_camera_and_lighting_update and
-// calc_entity_lighting (stride 0x14).
+// Indexed by g_spriteAnimActive in render_room_objects and
+// render_entity (stride 0x14).
 // ============================================================================
 #pragma pack(push, 1)
 struct SpriteAnimSlot {

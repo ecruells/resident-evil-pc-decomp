@@ -403,14 +403,14 @@ extern int           DAT_004d2288;                     // 0x004d2288 - death del
 // in" constants, not runtime state.
 //
 // Do not initialize these to 0 and do not alias them onto port-side variables.
-// g_dwEntityRenderEnabled gates BOTH calc_entity_lighting calls in game_loop —
+// g_dwEntityRenderEnabled gates BOTH render_entity calls in game_loop —
 // the enemy loop and the player — so a zero here silently removes every
 // character model from the screen while the room still renders normally. It was
 // previously read through the port's own g_SpriteQueueCount (which happens to
 // live at the same address in the Ghidra labels but is a per-frame sprite
 // counter reset to 0 by SpriteRenderer), which is exactly that failure.
-extern int           g_dwCameraLightingEnabled;         // 0x004d46a4 - gates room_camera_and_lighting_update
-extern int           g_dwEntityRenderEnabled;           // 0x004d46a8 - gates calc_entity_lighting (all entities)
+extern int           g_dwRoomObjectRenderEnabled;       // 0x004d46a4 - build-time gate on render_room_objects (never written)
+extern int           g_dwEntityRenderEnabled;           // 0x004d46a8 - build-time gate on render_entity (never written)
 extern int           g_displayDebugSaveMenu;           // 0x004d4680 - debug save menu trigger
 extern int           g_debugSaveMenuFlag;              // 0x004d4684 - debug save menu state flag
 extern BYTE          g_VideoModeOverlayActive;         // 0x004d461c - video-mode overlay flag
@@ -617,7 +617,7 @@ extern void*         g_room_event_index;               // 0x00d226a4
 
 // Room model record tables (populated by room_set from the RDT VB region)
 extern void*         g_omodel_table[8];      // 0x00d226b0 - room-object (omodel) records
-extern void*         g_interactable_table[8];// 0x00d21360 - interactable obstacle records (room 3D models)
+extern void*         g_item_model_table[8]; // 0x00d21360 - item model records (room pick-up 3D models)
 
 // Enemy model loading state (used by room_set and cmd_omodel_set)
 extern int           g_omodelCount;                    // 0x00ae9ef4 - object model count (cmd_omodel_set)
@@ -1096,11 +1096,11 @@ extern int           g_SpriteBufferFlag;
 extern int           g_SpriteAsyncFlag;
 
 // Sprite animation slot table (6 entries x 0x14 bytes at 0x00be9a60)
-// Indexed by g_spriteAnimActive in room_camera_and_lighting_update / calc_entity_lighting
+// Indexed by g_spriteAnimActive in render_room_objects / render_entity
 extern SpriteAnimSlot g_spriteAnimSlots[6];            // 0x00be9a60
 
-// Per-frame room object render state (room_camera_and_lighting_update, 0x00473ff0)
-extern int           DAT_008f8688;                     // 0x008f8688 - pass index (0 = items, 1 = interactable models)
+// Per-frame room object render state (render_room_objects, 0x00473ff0)
+extern int           DAT_008f8688;                     // 0x008f8688 - pass index (0 = omodels, 1 = item models)
 extern int           DAT_00ae9ee4;                     // 0x00ae9ee4 - force object depth 0x33 (stage 1 rooms A/B lid)
 extern int           DAT_00ae9ef8;                     // 0x00ae9ef8 - keep the fixed 0x32/0x33 object depth
 
@@ -1593,15 +1593,15 @@ void door_transition_update(void);                   // 0x00495d70
 void room_event_item_pickup(void);                   // 0x00451700
 void room_event_take_item(void);                     // 0x004631c0 (was FUN_004631c0)
 void use_room_action_item(void);                     // 0x004631f0
-void DrawFadeSpr(void);                               // 0x00456d30
+void DrawFadeSpr(void);                              // 0x00456d30
 // 0x00474090 - room 3D-object collision + the walk-into-it push driver.
 // Ghidra calls this `update_sounds`; it has nothing to do with sound.
 void update_room_objects(void);                       // 0x00474090
 int  ChkEntitySlide(unsigned char* ent, unsigned char* obj, int moveObject); // 0x00474330
-void room_camera_and_lighting_update(void);           // 0x00473ff0
-void    EntityComputeJointWorldMatrices(int ca); // 0x0048c190 - Compute entity joint world matrices
+void render_room_objects(void);                       // 0x00473ff0
+void EntityComputeJointWorldMatrices(int ca);         // 0x0048c190 - Compute entity joint world matrices
 void EntityApplyLookAtRotation(void);                 // 0x0045a2e0
-void calc_entity_lighting(Entity* ent);               // 0x0048c350
+void render_entity(Entity* ent);                      // 0x0048c350
 void update_2d_effects(void);                         // 0x0047c0c0
 void DrawRoomSpr(void);                               // 0x00475b80
 void DebugSaveMenu(void);                             // 0x00494050

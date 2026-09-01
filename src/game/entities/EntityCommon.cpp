@@ -1008,7 +1008,7 @@ short         g_zonePathPrev[16][2] = {};  // 0x00be0f00 - per-step previous-pos
 
 // ============================================================================
 // walk_zone_find (0x00460230)
-// Which zone of the RDT+0x58 grid contains (x, z)? Entry layout (verified
+// Which zone of the RDT walk_zones grid contains (x, z)? Entry layout (verified
 // against the shipped RDTs): {x1, z1, x2, z2, field, flags} at a 0xC-byte
 // stride, count byte at the table base; the test is x in [x1, x2), z in
 // [z1, z2). On a hit the record's +8/+10 fields land in
@@ -1018,7 +1018,7 @@ short         g_zonePathPrev[16][2] = {};  // 0x00be0f00 - per-step previous-pos
 // ============================================================================
 unsigned int walk_zone_find(short x, short z)
 {
-    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char* zoneBase = g_RdtPointer->walk_zones;
     unsigned char count = *zoneBase;
 
     int i = count - 1;
@@ -1051,8 +1051,8 @@ unsigned int walk_zone_find(short x, short z)
 // ============================================================================
 unsigned char walk_zone_shared_edge(unsigned int zoneA, unsigned int zoneB)
 {
-    unsigned short* a = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneA & 0xFFFF) * 0xC);
-    unsigned short* b = (unsigned short*)(g_RdtPointer->unknown_58 + 2 + (zoneB & 0xFFFF) * 0xC);
+    unsigned short* a = (unsigned short*)(g_RdtPointer->walk_zones + 2 + (zoneA & 0xFFFF) * 0xC);
+    unsigned short* b = (unsigned short*)(g_RdtPointer->walk_zones + 2 + (zoneB & 0xFFFF) * 0xC);
 
     if (b[2] == a[0]) {                     // B sits left of A, sharing x = a.x1
         g_playerDisplacement = (unsigned int)a[0];
@@ -1116,7 +1116,7 @@ unsigned char walk_zone_shared_edge(unsigned int zoneA, unsigned int zoneB)
 static unsigned char zone_walk_ccw(unsigned int zoneStart, unsigned char zoneTarget,
                                    short targetX, short targetZ)
 {
-    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char* zoneBase = g_RdtPointer->walk_zones;
     unsigned char count = *zoneBase;
 
     // Fresh-position marker: every position 1..15 starts as "never probed"
@@ -1255,7 +1255,7 @@ exit_check:
 static unsigned char zone_walk_cw(unsigned int zoneStart, unsigned char zoneTarget,
                                   short targetX, short targetZ)
 {
-    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char* zoneBase = g_RdtPointer->walk_zones;
     unsigned char count = *zoneBase;
 
     int step = 0;
@@ -1393,7 +1393,7 @@ exit_check:
 // ============================================================================
 unsigned char zone_path_find(int pos1_x, int pos1_z, int* pos2_x, int* pos2_z)
 {
-    unsigned char* zoneBase = g_RdtPointer->unknown_58;
+    unsigned char* zoneBase = g_RdtPointer->walk_zones;
     unsigned char count = *zoneBase;
 
     unsigned char startZone = (unsigned char)walk_zone_find(
@@ -1572,12 +1572,12 @@ void set_next_entity_data_buffer(int count)
 // A joint whose flags carry 0x40 is then probed: mirror_point_visible against the
 // joint's world translation (+0x58, which is world.t and therefore inside the
 // block just copied) sets or clears bit 0 of the COPY's flag byte. Bit 0 is
-// what calc_entity_lighting's `(jointFlags & 1)` gate tests, so bit 0 means
+// what render_entity's `(jointFlags & 1)` gate tests, so bit 0 means
 // "draw this joint in the reflection". It is forced clear again when the source
 // joint is not being drawn at all, so a hidden joint can never show up in the
 // mirror.
 //
-// The copy exists because calc_entity_lighting WRITES into the joints it draws
+// The copy exists because render_entity WRITES into the joints it draws
 // (the `jointFlags & 4` branch patches m[0][2], m[1][0], m[1][1]); running the
 // reflection pass over the live array would corrupt the next real frame.
 // ============================================================================
@@ -1646,7 +1646,7 @@ void entity_build_mirror_joints(void)
 //      about the mirror plane, folding both the eye and the look-at target.
 //   4. MatrixToCamera installs it; composing an identity with a negated m[0][0]
 //      into g_RoomCameraData flips the handedness the reflection introduced.
-//   5. calc_entity_lighting (0x0048c350) submits the model through that camera.
+//   5. render_entity (0x0048c350) submits the model through that camera.
 //   6. The real camera and joint pointer are restored.
 //
 // ENTITY is re-read from the global at each step, as the original does.
@@ -1676,7 +1676,7 @@ void entity_draw_mirror_reflection(void)
     Matrix_MulMatrix(&g_matrixScratch, &g_RoomCameraData);
 
     // 0x0048be4d: the reflection itself.
-    calc_entity_lighting(ENTITY);
+    render_entity(ENTITY);
 
     // 0x0048be5c-0x0048be91: restore the real camera and joint array.
     MatrixToCamera((MATRIX*)camera);

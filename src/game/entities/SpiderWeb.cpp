@@ -34,7 +34,7 @@
 // ------------
 // The web model has six joints. Each damage tick re-derives how many of them
 // should be gone from the remaining health and clears their flags byte, which
-// drops them out of calc_entity_lighting's render loop (it gates on joint
+// drops them out of render_entity's render loop (it gates on joint
 // flags & 1). Joints disappear from the top down - 5 first, then 4, 3, 2, 1 -
 // and the final destroy pass clears all six including joint 0.
 //
@@ -76,7 +76,7 @@ const unsigned int JOINT5_FLAGS   = 5 * JOINT_STRIDE;   // 0x26C
 const int          SPIDERWEB_JOINTS = 6;
 
 // The flags byte at joint+0x00. Clearing it drops the joint from the render
-// loop in calc_entity_lighting (0x0048c350), which gates on `flags & 1`.
+// loop in render_entity (0x0048c350), which gates on `flags & 1`.
 static inline unsigned char& joint_flags(int index)
 {
     return *((unsigned char*)ENTITY->jointsStructs + (unsigned int)index * JOINT_STRIDE);

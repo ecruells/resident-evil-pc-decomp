@@ -7022,7 +7022,7 @@ int set_room_event_flag(unsigned char* entry)
 //     (0x3d) or Jill's lockpick (ScenarioFlags bit 0x7c) - otherwise "locked"
 //     (0xd8); with the key it arms the desk-open state (g_desk_check_state 1)
 //   - an unlocked desk swings open: mark its model opened (byte 0 of
-//     g_interactable_table[entry[eventIdx].field4] |= 1), cut to the desk
+//     g_item_model_table[entry[eventIdx].field4] |= 1), cut to the desk
 //     camera (entry+6), and run the camera-zone walk to the new cut.
 // ============================================================================
 int check_desk(unsigned char* entry)
@@ -7032,7 +7032,7 @@ int check_desk(unsigned char* entry)
         (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
         ((unsigned short)g_message_flags & 0x40) != 0) {
         unsigned short eventIdx = *(unsigned short*)(entry + 4);
-        // The flag index and interactable-model slot index live in the +6/+4
+        // The flag index and item-model slot index live in the +6/+4
         // fields of the event-table entry at index eventIdx
         // (ITEMS_FLAGS = g_RoomItemEventTable+6).
         unsigned short itemFlagIdx = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 6 + (unsigned int)eventIdx * 0xc);
@@ -7053,7 +7053,7 @@ int check_desk(unsigned char* entry)
             // Desk already unlocked: swing the lid open and cut to its camera.
             g_room_event_index = entry;
             unsigned short modelSlot = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 4 + (unsigned int)eventIdx * 0xc);
-            ((unsigned char*)g_interactable_table[modelSlot])[0] |= 1;
+            ((unsigned char*)g_item_model_table[modelSlot])[0] |= 1;
             play_sfx(2, 0x24, 0);
             g_cutId = g_roomCameraId;
             g_roomCameraId = *(unsigned char*)(entry + 6);
@@ -7082,7 +7082,7 @@ static void set_room_item_seen_flag(int itemIdMinus4e)
 
 // ============================================================================
 // pickup_key_event (0x0041be70) — room_check_actions[0x0F]
-// Direct key pickup: deactivates the entry, clears the interactable model's
+// Direct key pickup: deactivates the entry, clears the item model's
 // byte 0, clears the roomItems flag at record+0x14, marks the item
 // "seen" in RoomFlags (bit 0x7c + itemId - 0x4e) and records the item id in
 // g_pickedItemId for the message system.
@@ -7090,7 +7090,7 @@ static void set_room_item_seen_flag(int itemIdMinus4e)
 int pickup_key_event(unsigned char* entry)
 {
     *entry = 0;
-    ((unsigned char*)g_interactable_table[*(unsigned short*)(entry + 4)])[0] = 0;
+    ((unsigned char*)g_item_model_table[*(unsigned short*)(entry + 4)])[0] = 0;
     FUN_00473f10((int*)&g_roomItemsFlags, *(unsigned char*)(*(unsigned char**)(entry + 8) + 0x14));
     set_room_item_seen_flag(*(unsigned char*)(*(unsigned char**)(entry + 8) + 8) - 0x4e);
     g_pickedItemId = *(unsigned char*)(*(unsigned char**)(entry + 8) + 8);

@@ -218,7 +218,7 @@ static int s_optLightData2[4];  // 0x00d22720
 
 // 0x00be9a88 is g_spriteAnimSlots[2] (base 0x00be9a60 + 2 * 0x14); the original
 // options renderer indexes from there with g_spriteAnimActive, same as
-// calc_entity_lighting does in gameplay.
+// render_entity does in gameplay.
 #define DAT_00be9a88 (*(unsigned char*)&g_spriteAnimSlots[2])
 
 // Load/save state flag (aliased from g_loadSaveStateFlag)

@@ -171,7 +171,7 @@ free slot.
 | `0x01` | 1 | → state 1 (wait animation). |
 | `0x02` | 1 | → state 2, and `entity->ignore_player_flag = 2`, `action_behavior = 0`, `action_state = 0`. |
 | `0x03` | 1 | → state 2 without touching the entity. |
-| `0x04` | 3 | Set `entity` from `[type][index]`: 0=player, 1=`g_EnemiesList[i]`, 2=`g_omodel_table[i]`, 3=`g_interactable_table[i]`. |
+| `0x04` | 3 | Set `entity` from `[type][index]`: 0=player, 1=`g_EnemiesList[i]`, 2=`g_omodel_table[i]`, 3=`g_item_model_table[i]` (item models). |
 | `0x05` | 3 | `ScdEventEntry_Create(p[1], p[2])`. |
 | `0x06` | var | `run_command_functions(p+2)`, then `scriptPtr += p[1]`. |
 | `0x07` | var | Set `g_ScdOpcodes = p+2`, `scriptPtr += (*(u16*)p >> 8)`, then dispatch one command through the table. |
@@ -254,7 +254,7 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 | `0x01` | `cmd_if` | `004604e0` | 2 | `[op, skipLen]`. Pushes `(p+2) + skipLen` on the branch stack, `++g_ScriptContinueFlag`. |
 | `0x02` | `cmd_else` | `00460520` | 2 | `[op, jumpLen]`. Pops the branch stack and jumps `p += jumpLen`. |
 | `0x03` | `cmd_end_if` | `00460550` | 2 | Pops the branch stack. |
-| `0x04` | `cmd_bit_test` | `00460570` | 4 | **Cond.** `[op, bank][sel, expect]`. `sel & 0x1F` = bit index, `(sel & 0xE0) >> 3` = byte offset into the bank. Returns `bitIsSet ^ expect`. Banks: 0 `g_PlayerFlags`, 1 `g_PlayerFlags3`, 2 `g_LocksFlags` (0x00be9874 — the same array `door_try_enter` checks), 3 `g_RoomEventFlags`, 4 `g_SysFlags`, 5 `g_main_state_flags`, 6 `g_message_flags`, 7 `g_roomItemsFlags`, 8 `g_RoomFlags`, 9 `DAT_00d213a0`. |
+| `0x04` | `cmd_bit_test` | `00460570` | 4 | **Cond.** `[op, bank][sel, expect]`. `sel & 0x1F` = bit index, `(sel & 0xE0) >> 3` = byte offset into the bank. Returns `bitIsSet ^ expect`. Banks: 0 `g_ScenarioFlags`, 1 `g_ScenarioFlags2`, 2 `g_LocksFlags`, 3 `g_EnemiesFlags`, 4 `g_SysFlags`, 5 `g_main_state_flags`, 6 `g_message_flags`, 7 `g_roomItemsFlags`, 8 `g_RoomFlags`, 9 `g_itemUseFlags` (0x00d213a0 — per-frame item-use flags, cleared by `game_loop` each frame and re-armed by room logic; bits `itemId-0x1B` = "item usable here", bit `0x3F` = radio transmission active). |
 | `0x05` | `cmd_bit_op` | `00460650` | 4 | `[op, bank][sel, mode]`. `mode` 0=set, 1=clear, 2=toggle. Same bank/sel encoding as `0x04`. |
 | `0x06` | `cmd_room_state_test` | `00460760` | 4 | **Cond.** `[op, fieldIdx][mode, cmpVal]`. Compares the byte at `(&g_stageId)[fieldIdx]`. `mode` 0 `==`, 1 `>`, 2 `>=`, 3 `<`, 4 `<=`, 5 `!=` (relative to `cmpVal`). |
 | `0x07` | `cmd_fade_state_test` | `00460800` | 6 | **Cond.** `[op, pad][fieldIdx, mode][cmpVal:u16]`. Compares `((u16*)&g_fading_state)[fieldIdx]`. |
@@ -274,10 +274,10 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 | `0x15` | `cmd_bgm_play` | `00460a80` | 2 | `[op, ch]`. Sound channel record = `(u8*)&g_SndBank + ch*8` (bank `int` at `+0`, slot byte at `+5`). Calls `SetSndSlot`, sets `g_BGM_STATE |= 1 << (ch+3)`. |
 | `0x16` | `cmd_bgm_stop` | `00460c70` | 2 | `[op, ch]`. If `g_BGM_STATE` bit `ch+3` set: `setSndStop`, clear the bit, `set_volume(bank, -1)`. |
 | `0x17` | `cmd_sfx_3d_play` | `00460d80` | 6 or 10 | `[op, bank][sndId, vol][posType, enemyIdx]` then 4 more bytes for `posType` 0-3. `posType` 0 = explicit `(x,0,z)` written into `g_playerPosScratch` (`0x00be11b0`, three **ints**); 1 = `g_playerEntity.scaMatrixData.localMatrix.t` (`+0x34`); 2 = `g_EnemiesList[enemyIdx].scaMatrixData.localMatrix.t`; 3 = `play_sfx(bank, bank)`. `posType > 3` consumes only 6 bytes. Positions come from the 3-int `localMatrix.t`, **not** the packed `position` SVECTOR at `+0x6C`. |
-| `0x18` | `cmd_item_model_set` | `00461220` | 26 | Interactive obstacle/desk model. `p[1] & 0x7F` = event slot (bit 7 = alt rotation), `p[0xA]` = item type, `p[0xC]` = desk index, `p[0xD]` = SCA parent (`0xFF` none, `0xFE` player, else itembox), `p[0xE..0x13]` = position `s16 x/y/z`, `p[0x14..0x15]` = anim word, `p[0x16]` = `g_roomItemsFlags` bit, `p[0x17..0x19]` = entry flags. Loads the TMD, may spawn a billboard when the flag is set and bit `0x8000` is present. |
-| `0x19` | `cmd_desk_flag_set` | `00460f50` | 4 | `[op, deskIdx][value, pad]`. `*(u8*)g_interactable_table[deskIdx] = value`. |
+| `0x18` | `cmd_item_model_set` | `00461220` | 26 | Room items model. `p[1] & 0x7F` = event slot (bit 7 = alt rotation), `p[0xA]` = item type, `p[0xC]` = model index, `p[0xD]` = SCA parent (`0xFF` none, `0xFE` player, else itembox), `p[0xE..0x13]` = position `s16 x/y/z`, `p[0x14..0x15]` = anim word, `p[0x16]` = `g_roomItemsFlags` bit, `p[0x17..0x19]` = entry flags. Loads the TMD, may spawn a billboard when the flag is set and bit `0x8000` is present. |
+| `0x19` | `cmd_model_flag_set` | `00460f50` | 4 | `[op, modelIdx][value, pad]`. `*(u8*)g_item_model_table[modelIdx] = value`. |
 | `0x1A` | `cmd_item_search` | `00460f80` | 2 | **Cond.** `[op, itemId]`. Scans `g_ItemSlotsPointer` (stride 2) over `g_TotalHeldItems`. |
-| `0x1B` | `cmd_enemy_set` | `004617d0` | 22 | Enemy spawn. `p[1]` = enemy type id, `p[2]` = `behavior_flags`, `p[3]` = `g_RoomEventFlags` guard bit (`0xFF` = none; if already set, skip the spawn), `p[4]` = force-init, `p[5]` = SCA hit-data size / 6, `p[6..7]` = `position.pad`, `p[8..9]` = yaw, `p[0xA..0xB]` = pitch, `p[0xC..0xD]` = x, `p[0xE..0xF]` = y, `p[0x10..0x11]` = z, `p[0x12] & 0xF` = slot, `p[0x13]` = `animationId`, `p[0x14]` = `animation_frame_id`, `p[0x15]` = extra flags. |
+| `0x1B` | `cmd_enemy_set` | `004617d0` | 22 | Enemy spawn. `p[1]` = enemy type id, `p[2]` = `behavior_flags`, `p[3]` = `g_EnemiesFlags` guard bit (`0xFF` = none; if already set, skip the spawn), `p[4]` = force-init, `p[5]` = SCA hit-data size / 6, `p[6..7]` = `position.pad`, `p[8..9]` = yaw, `p[0xA..0xB]` = pitch, `p[0xC..0xD]` = x, `p[0xE..0xF]` = y, `p[0x10..0x11]` = z, `p[0x12] & 0xF` = slot, `p[0x13]` = `animationId`, `p[0x14]` = `animation_frame_id`, `p[0x15]` = extra flags. |
 | `0x1C` | `cmd_room_light_fade_set` | `00462210` | 6 | `[op, lightR][delta:s16][rgbMask:u16]`. Special room light: `delta != 0` seeds `g_SpecialRoomLightState` to `0` or `0x7FFF` by sign. Mask bits 0/1/2 → B/G/R = `0xFF`. |
 | `0x1D` | `cmd_equipped_weapon_test` | `00460ee0` | 2 | **Cond.** `[op, weaponId]`. Compares the equipped slot's item id. |
 | `0x1E` | `cmd_sfx_set` | `00461a80` | 4 | `[op, type][param:u16]`. `play_sound_and_voice_effect`, then `g_main_state_flags |= 0x20000`. |
@@ -303,23 +303,23 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 | `0x32` | `cmd_skip_4bytes` | `00431b00` | 4 | No-op that advances. |
 | `0x33` | `cmd_damage_set` | `004314b0` | 2/4 | `[op, subCmd][param:u16]`. `subCmd`: 0 unequip (2 bytes), 1 set `isBeingAttackedFlag` + reset anim, 3 `flags` SET/OR/XOR, 4 `action_behavior=1, action_state=6` (2 bytes), 5 `directionAngle`, 6 clear `unk_8c` (2 bytes), 7 reset to idle (2 bytes), 8 `healthStatusFlags` SET/OR/XOR, 9 toggle joint flags, 10 set/clear `unk_e0 & 0x40`. |
 | `0x34` | `cmd_model_tint_set` | `00431b10` | 8 | `[op][variant][bias][p3][p4][p5][p6][p7]`, all bytes; `bias = byte - 0x80`. `variant` 0 → `FUN_00473b10`, 1 → `FUN_00473d10`, 2 → `FUN_00473d60`. |
-| `0x35` | `cmd_obj_flag_set` | `00431bf0` | 4 | `[op, table][objIdx, value]`. `table` 0 = `g_omodel_table`, 1 = `g_interactable_table`; writes byte `[0]`. Special-cases stage 3 / room 13 / object 5 → force 0. |
+| `0x35` | `cmd_obj_flag_set` | `00431bf0` | 4 | `[op, table][objIdx, value]`. `table` 0 = `g_omodel_table`, 1 = `g_item_model_table`; writes byte `[0]`. Special-cases stage 3 / room 13 / object 5 → force 0. |
 | `0x36` | `cmd_obj_field_test` | `00431c90` | 4 | **Cond.** `[op, objIdx][mode, cmpVal]`. Compares the `u16` at `itembox[objIdx] + 0x86` (the billboard effect handle). |
 | `0x37` | `cmd_room_bgm_state_set` | `00460a30` | 4 | `[op, stage][roomIdx, value]`. `g_roomBgmState[stage*32 + roomIdx] = value`. |
 | `0x38` | `cmd_dpad_test` | `00431dc0` | 4 | **Cond.** `[op, invert][mask:u16]`. Tests `g_PlayerDpadHeld & mask`; `invert != 0` negates. |
 | `0x39` | `cmd_enemy_flags_get` | `00431e10` | 2 | `[op, enemyIdx]`. `g_scdLastEnemyFlags = g_EnemiesList[enemyIdx].behavior_flags`. |
 | `0x3A` | `cmd_cut_zone_set` | `00431e50` | 4 | `[op, zoneIdx][toCam, fromCam]`. Rewrites `cam_switch_zones[zoneIdx]` fields at `+2` and `+0`. |
-| `0x3B` | `cmd_obj_rotation_set` | `00431ea0` | 6 | `[op, sel][a:u16][b:u16]`. `sel < 0x8000` → desk `(sel >> 6) & 0x3F`, else itembox `(sel & 0x7F00) >> 8`. Writes `+0x72` and `+0x76` only when the object is active. |
-| `0x3C` | `cmd_player_dist_test` | `00431f20` | 6 | **Cond.** `[op, pad][targetSpec:u16][maxDist:u16]`. `targetSpec & 0xFF`: 0 = enemy `spec >> 8`, 1 = itembox, 2 = desk. Returns `SquareRoot0(dx²+dz²) <= maxDist` against the player. |
+| `0x3B` | `cmd_obj_rotation_set` | `00431ea0` | 6 | `[op, sel][a:u16][b:u16]`. `sel < 0x8000` → item model `(sel >> 6) & 0x3F`, else itembox `(sel & 0x7F00) >> 8`. Writes `+0x72` and `+0x76` only when the object is active. |
+| `0x3C` | `cmd_player_dist_test` | `00431f20` | 6 | **Cond.** `[op, pad][targetSpec:u16][maxDist:u16]`. `targetSpec & 0xFF`: 0 = enemy `spec >> 8`, 1 = itembox, 2 = item model. Returns `SquareRoot0(dx²+dz²) <= maxDist` against the player. |
 | `0x3D` | `cmd_bullet_effect_spawn` | `00431770` | 12 | Same layout as `0x2A`. Additionally stashes the type in `g_bulletEffectId` and the matrix in `DAT_00bf0a34` for `0x3E`. |
 | `0x3E` | `cmd_bullet_effect_clear` | `00431840` | 2 | `FUN_0047cf80(9, g_bulletEffectId, 0, 0, DAT_00bf0a34)` — frees every effect-pool slot whose type **and** sprite matrix match the values stashed by `cmd_bullet_effect_spawn` (`FUN_0047cf80` is a criteria-masked slot remover, not a spawner). Pairs with `0x3D`: spawn impact billboards now, sweep them later. |
 | `0x3F` | `cmd_player_dir_test` | `00431fd0` | 6 | **Cond.** `[op,pad][minAngle:u16][maxAngle:u16]`. Wrap-aware range test on `directionAngle`. |
 | `0x40` | `cmd_light_param_set` | `00432010` | 16 | `[op, lightIdx]` + seven `s16`. Writes light fields `[0..5]` and `[8]` at `&g_RdtPointer[1].lights + lightIdx*0x2C - 4`. |
-| `0x41` | `cmd_entity_unk8e_set` | `00432090` | 4 | `[op, entIdx][value:u16]`. `entIdx == 0` → `g_playerEntity.unk_8e`, else entity `entIdx` at `+0x82`. |
+| `0x41` | `cmd_entity_posy_set` | `00432090` | 4 | `[op, entIdx][value:u16]`. `entIdx == 0` → `g_playerEntity.posY`, else entity `entIdx` at `+0x82`. |
 | `0x42` | `cmd_effect_clear_typed` | `00431870` | 4 | `[op, type][param:u16]`. `FUN_0047cf80(3, type, param, 0, 0)`. |
 | `0x43` | `cmd_bgm_volume_ramp` | `00460d20` | 4 | `[op, ch][a, b]`. Only acts when `g_BGM_STATE` bit `ch+3` is set. |
 | `0x44` | `cmd_scd_event_kill` | `00461080` | 2 | `[op, slot]`. `g_ScdEventTable[slot].active = 0`. |
-| `0x45` | `cmd_entity_unk8e_add` | `004320f0` | 2 | `[op, delta]`. `g_playerEntity.unk_8e += (s8)delta`. |
+| `0x45` | `cmd_entity_posy_add` | `004320f0` | 2 | `[op, delta]`. `g_playerEntity.posY += (s8)delta`. |
 | `0x46` | `cmd_room_lights_set` | `00432110` | 44 | `[op,pad]` then 3 × 12-byte light records `[x:s16][y:s16][z:s16][r][g][b][zero2:u8][radius:s16]` written into `RDT.lights[0..2]` (`+0x00/04/08` as ints, `+0x0C/0D/0E` bytes, word at `+0x10`, `radius` at `+0x12`), then 3 × `s16` into `RDT+6/8/10`. Ends with `setBackColor(RDT+6, RDT+8, RDT+10)`. |
 | `0x47` | `cmd_obj_transform_set` | `00431080` | 14 | `[op, objIdx]` + six `s16`: rotation `+0x72/+0x74/+0x76` and position `+0x6C/+0x6E/+0x70` (mirrored into `+0x34/+0x38/+0x3C`) of `g_omodel_table[objIdx]`. |
 | `0x48` | `cmd_effect_pool_clear` | `004318a0` | 2 | Clears `animId`/`updateId` on all 64 effect-pool slots. |

@@ -615,7 +615,7 @@ next enemy type will fail the same ways.
 
 ### Severed-limb physics — `FUN_004896c0` @ 0x004896c0
 
-`calc_entity_lighting` calls this once per frame for every joint whose flags carry
+`render_entity` calls this once per frame for every joint whose flags carry
 `0x4`, having first reloaded the launch velocity into the joint's rotation
 SVECTOR: `rotation.x = -20`, `rotation.y = 200`, `rotation.z = 0`. Arguments are
 `(joint, gravity = -35, floorY = -100, siblingIdx = 1)`.

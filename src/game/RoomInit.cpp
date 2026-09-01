@@ -426,15 +426,15 @@ void room_set(void)
         } while (i < g_RdtPointer->omodel_slot_count);
     }
 
-    // Interactable model (unknown_03) processing
+    // Item model record slots
     i = 0;
-    if (g_RdtPointer->unknown_03[0] != 0) {
+    if (g_RdtPointer->item_count != 0) {
         do {
-            g_interactable_table[i] = g_loadDataDestPointer;
+            g_item_model_table[i] = g_loadDataDestPointer;
             *(unsigned char*)g_loadDataDestPointer = 0;
             g_loadDataDestPointer = (char*)g_loadDataDestPointer + 0xa4;
             i++;
-        } while (i < g_RdtPointer->unknown_03[0]);
+        } while (i < g_RdtPointer->item_count);
     }
 
     // 0x00477bc8: Reset enemy count and model state
@@ -471,8 +471,8 @@ void room_set(void)
     object_delete_00442170(9);
 
     // 0x00477c84: Set player joint movement data from RDT
-    g_playerEntity.jointMoveData2 = (unsigned int)g_RdtPointer->unknown_6c;
-    g_playerEntity.jointMoveData3 = (unsigned int)g_RdtPointer->unknown_70;
+    g_playerEntity.jointMoveData2 = (unsigned int)g_RdtPointer->player_anim_header;
+    g_playerEntity.jointMoveData3 = (unsigned int)g_RdtPointer->player_anim_base;
 
     // 0x00477ca0: Reset enemy model cache and set up entity loop
     g_LastEnemyModelId = 0xff;
@@ -605,27 +605,27 @@ void LoadRoomRdt(void)
         ptrField++;
     }
 
-    // 0x00477e7e-0x00477ec0: Resolve item model pointers
+    // 0x00477e7e-0x00477ec0: Resolve omodel (room object) model pointers
     // Iterates forward through entries, zeros table backward
-    int* itemPtr = (int*)g_RdtPointer->items_models;
-    int itemCount = g_RdtPointer->omodel_slot_count;
-    for (int i = itemCount; i > 0; i--) {
+    int* omodelPtr = (int*)g_RdtPointer->object_models;
+    int omodelCount = g_RdtPointer->omodel_slot_count;
+    for (int i = omodelCount; i > 0; i--) {
         // Zero out table entry (reverse order: table[count-1] down to table[0])
         ((int*)g_omodel_table)[i - 1] = 0;
+        if (omodelPtr[0] != 0) omodelPtr[0] += (int)g_RdtPointer;
+        if (omodelPtr[1] != 0) omodelPtr[1] += (int)g_RdtPointer;
+        omodelPtr += 2;
+    }
+
+    // 0x00477ec9-0x00477f0b: Resolve item model pointers
+    // Same pattern: forward through entries, backward through table
+    int* itemPtr = (int*)g_RdtPointer->item_models;
+    int itemCount = g_RdtPointer->item_count;
+    for (int i = itemCount; i > 0; i--) {
+        ((int*)g_item_model_table)[i - 1] = 0;
         if (itemPtr[0] != 0) itemPtr[0] += (int)g_RdtPointer;
         if (itemPtr[1] != 0) itemPtr[1] += (int)g_RdtPointer;
         itemPtr += 2;
-    }
-
-    // 0x00477ec9-0x00477f0b: Resolve obstacle model pointers
-    // Same pattern: forward through entries, backward through table
-    int* obstPtr = (int*)g_RdtPointer->obstacles_models;
-    int obstCount = g_RdtPointer->unknown_03[0];
-    for (int i = obstCount; i > 0; i--) {
-        ((int*)g_interactable_table)[i - 1] = 0;
-        if (obstPtr[0] != 0) obstPtr[0] += (int)g_RdtPointer;
-        if (obstPtr[1] != 0) obstPtr[1] += (int)g_RdtPointer;
-        obstPtr += 2;
     }
 
     // 0x00477f12-0x00477f27: Set up SCD script pointers

@@ -567,7 +567,8 @@ int cmd_sfx_3d_play(void)
 
 // ============================================================================
 // 0x18 - cmd_item_model_set (0x00461220)
-// Set up an interactive room 3D model (obstacles, containers, lids, etc.).
+// Set up one of the room's item models (the pick-up you see lying in the room,
+// or the one a desk close-up reveals) in g_item_model_table.
 // ============================================================================
 int cmd_item_model_set(void)
 {
@@ -618,17 +619,17 @@ int cmd_item_model_set(void)
         g_RoomItemEventHead = entry;
     }
 
-    char* modelPtr = (char*)g_interactable_table[g_ScdOpcodes[0xc]];
-    int* obstacleData = (int*)((char*)g_RdtPointer->obstacles_models + (unsigned int)g_ScdOpcodes[0xc] * 8);
+    char* modelPtr = (char*)g_item_model_table[g_ScdOpcodes[0xc]];
+    int* itemModelData = (int*)((char*)g_RdtPointer->item_models + (unsigned int)g_ScdOpcodes[0xc] * 8);
 
     // spriteInfo is chosen per branch below (it is NOT always modelPtr+0x20).
     MATRIX* spriteInfo = (MATRIX*)(modelPtr + 0x20);
 
-    if (*obstacleData == 0) {
+    if (*itemModelData == 0) {
         modelPtr[0x14] = 0; modelPtr[0x15] = 0;
         modelPtr[0x16] = 0; modelPtr[0x17] = 0;
     } else {
-        if (((char)g_ItemModelCount == 0 || DAT_00bca0d0[1] != obstacleData[1]) && obstacleData[1] != 0) {
+        if (((char)g_ItemModelCount == 0 || DAT_00bca0d0[1] != itemModelData[1]) && itemModelData[1] != 0) {
             DAT_008e1c78 = g_TextureBankID;
             DAT_008e1c70 = g_TextureDepthByte;
             ClearTmdProcessingFlag();
@@ -636,7 +637,7 @@ int cmd_item_model_set(void)
             // darkened: each 5-bit channel drops by 9, clamped at 0, bit 15 kept.
             // This loop was missing entirely.
             if ((char)g_ScdOpcodes[10] == 'R' || (char)g_ScdOpcodes[10] == 'P') {
-                unsigned short* pal = (unsigned short*)(obstacleData[1] + 0x14);
+                unsigned short* pal = (unsigned short*)(itemModelData[1] + 0x14);
                 for (int n = 0; n < 256; n++) {
                     unsigned short c = *pal;
                     unsigned char r = (unsigned char)(c & 0x1f);
@@ -649,12 +650,12 @@ int cmd_item_model_set(void)
                     pal++;
                 }
             }
-            ProcessTmdAsync((unsigned int)obstacleData[1]);
+            ProcessTmdAsync((unsigned int)itemModelData[1]);
         }
-        if ((char)g_ItemModelCount == 0 || *obstacleData != *DAT_00bca0d0) {
-            ProcessTmdTextures(2, (unsigned int*)(unsigned int)*obstacleData, DAT_008e1c78, DAT_008e1c70);
+        if ((char)g_ItemModelCount == 0 || *itemModelData != *DAT_00bca0d0) {
+            ProcessTmdTextures(2, (unsigned int*)(unsigned int)*itemModelData, DAT_008e1c78, DAT_008e1c70);
         }
-        FUN_00473ea0(*obstacleData, modelPtr + 0xc, (ScaMatrixData*)(modelPtr + 0x1c));
+        FUN_00473ea0(*itemModelData, modelPtr + 0xc, (ScaMatrixData*)(modelPtr + 0x1c));
         if ((char)g_ScdOpcodes[10] == 0x1e) {
             FUN_004870d0(*(int*)(modelPtr + 0x18));
         }
@@ -707,7 +708,7 @@ int cmd_item_model_set(void)
         *(short*)(modelPtr + 0x86) = (short)(char)effResult;
     }
 
-    // These two writes target the interactable model's byte 0 (`*pcVar5` in the original),
+    // These two writes target the item model's byte 0 (`*pcVar5` in the original),
     // not the room-item-event entry - the entry's byte 0 was already set from
     // visFlag further up.
     flagResult = Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
@@ -741,21 +742,21 @@ int cmd_item_model_set(void)
 
     *(char*)&g_ItemModelCount = (char)g_ItemModelCount + 1;
     g_ScdOpcodes += 0x1a;
-    DAT_00bca0d0 = obstacleData;
+    DAT_00bca0d0 = itemModelData;
     dbg_printf("ITEM MODEL END %s\n", "imodel_set");
     return 1;
 }
 
 // ============================================================================
 // 0x19 - cmd_model_flag_set (0x00460f50)
-// Set a byte on an interactable room model record (g_interactable_table).
+// Set a byte on an interactable room model record (g_item_model_table).
 // ============================================================================
 int cmd_model_flag_set(void)
 {
     unsigned char modelIdx = g_ScdOpcodes[1];
     unsigned char value = g_ScdOpcodes[2];
     g_ScdOpcodes += 4;
-    *(unsigned char*)g_interactable_table[modelIdx] = value;
+    *(unsigned char*)g_item_model_table[modelIdx] = value;
     return 1;
 }
 
@@ -917,7 +918,7 @@ int cmd_omodel_set(void)
 
     unsigned int slotIdx = (unsigned int)(g_ScdOpcodes[1] & 0x3f);
     char* objPtr = (char*)g_omodel_table[slotIdx];
-    int* modelData = (int*)((char*)g_RdtPointer->items_models + slotIdx * 8);
+    int* modelData = (int*)((char*)g_RdtPointer->object_models + slotIdx * 8);
 
     if (*modelData == 0) {
         *(int*)(objPtr + 0x14) = 0;
@@ -1759,7 +1760,7 @@ int cmd_obj_flag_set(void)
     if (op1 >> 8 == 0) {
         *(unsigned char*)g_omodel_table[op2 & 0xff] = value;
     } else if (op1 >> 8 == 1) {
-        *(unsigned char*)g_interactable_table[op2 & 0xff] = value;
+        *(unsigned char*)g_item_model_table[op2 & 0xff] = value;
     }
     return 1;
 }
@@ -1864,7 +1865,7 @@ int cmd_obj_rotation_set(void)
 
     char* objPtr;
     if (op1 < 0x8000) {
-        objPtr = (char*)g_interactable_table[op1 >> 8];
+        objPtr = (char*)g_item_model_table[op1 >> 8];
     } else {
         objPtr = (char*)g_omodel_table[(op1 >> 8) & 0x7f];
     }
@@ -1895,7 +1896,7 @@ int cmd_player_dist_test(void)
     } else if ((targetSpec & 0xff) == 1) {
         targetPos = (int*)(*(int*)((int)&g_omodel_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
     } else if ((targetSpec & 0xff) == 2) {
-        targetPos = (int*)(*(int*)((int)&g_interactable_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
+        targetPos = (int*)(*(int*)((int)&g_item_model_table + ((targetSpec >> 6) & 0xfffffffc)) + 0x34);
     } else {
         return 0;
     }
@@ -2093,8 +2094,10 @@ int cmd_room_lights_set(void)
         *(short*)((char*)light + 0x12) = scd_read_s16(10);
         g_ScdOpcodes += 12;
     }
+    // Ghidra rendered this as a walk from RDT+0x03; the three shorts it writes
+    // are RDT+0x06/0x08/0x0A, i.e. the ambient light colour read just below.
     for (unsigned int i = 0; i < 6; i += 2) {
-        *(short*)(g_RdtPointer->unknown_03 + i + 3) = scd_read_s16(0);
+        *(short*)((char*)&g_RdtPointer->ambient_light_r + i) = scd_read_s16(0);
         g_ScdOpcodes += 2;
     }
     // RDT ambient_light is a COLOR of three SHORTS (Ghidra: COLOR at RDT+6,

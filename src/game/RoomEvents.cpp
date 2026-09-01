@@ -62,8 +62,8 @@ static void scd_event_cmd_set_entity(void)
     case 2: // Items, obstacle, itembox cover, etc
         g_pScdEventCurrent->entity = (Entity*)g_omodel_table[p[1]];
         break;
-    case 3: // Interactable room actions (messages, desks, typewritters, etc)
-        g_pScdEventCurrent->entity = (Entity*)g_interactable_table[p[1]];
+    case 3: // Item model (g_item_model_table) - the room's pick-up models
+        g_pScdEventCurrent->entity = (Entity*)g_item_model_table[p[1]];
         break;
     }
     g_pScdEventCurrent->scriptPtr += 2;
@@ -391,7 +391,7 @@ static int scd_event_state1_anim(void)
                         ent->scd_target_ptr = (unsigned int)g_omodel_table[targetIndex];
                         break;
                     case 3:
-                        ent->scd_target_ptr = (unsigned int)g_interactable_table[targetIndex];
+                        ent->scd_target_ptr = (unsigned int)g_item_model_table[targetIndex];
                         break;
                     }
                 } else {
@@ -1012,7 +1012,7 @@ void* room_check_actions[ROOM_CHECK_ACTION_COUNT] = {
 // prompt is dismissed.
 //
 // Reads the record at g_room_event_index+8: +8 = item id, +9 = quantity,
-// +0x14 = roomItems flag index, +10 = interactable model slot. The entry itself is
+// +0x14 = roomItems flag index, +10 = item model slot. The entry itself is
 // deactivated (first byte 0) and the model's opened flag cleared.
 //
 // Stackable items (ids 0x0b-0x12 and 0x2f) merge into an existing slot first:
@@ -1027,9 +1027,9 @@ void room_event_item_pickup(void)
     unsigned char* record = *(unsigned char**)(evt + 8);
 
     *evt = 0;                                     // deactivate the event entry
-    ((unsigned char*)g_interactable_table[record[10]])[0] = 0;
+    ((unsigned char*)g_item_model_table[record[10]])[0] = 0;
     unsigned short fxSlot =
-        *(unsigned short*)((char*)g_interactable_table[record[10]] + 0x86);
+        *(unsigned short*)((char*)g_item_model_table[record[10]] + 0x86);
     if (fxSlot != 0) {
         g_freeEffectSlots++;
         // The original addresses the slot as pool_base + slot*0x21 dwords
@@ -1229,7 +1229,7 @@ void check_desk_state(void)
     case 4:
         display_room_camera_bg();
         g_desk_check_state = 0;
-        ((unsigned char*)g_interactable_table[*(unsigned short*)((char*)g_room_event_index + 4)])[0] &=
+        ((unsigned char*)g_item_model_table[*(unsigned short*)((char*)g_room_event_index + 4)])[0] &=
             0xfe;
         return;
     case 5:

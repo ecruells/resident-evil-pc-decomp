@@ -489,11 +489,11 @@ int g_charSfxVolume = -1;              // 0x00ac98fc
 // --- Game init ---
 
 // 0x00be9a60 - Sprite animation slot table (6 entries x 0x14 bytes)
-// Indexed by g_spriteAnimActive in room_camera_and_lighting_update / calc_entity_lighting
+// Indexed by g_spriteAnimActive in render_room_objects / render_entity
 SpriteAnimSlot g_spriteAnimSlots[6] = {};
 
-// Per-frame room object render state (room_camera_and_lighting_update, 0x00473ff0)
-int    DAT_008f8688 = 0;    // 0x008f8688 - pass index (0 = items, 1 = interactable models)
+// Per-frame room object render state (render_room_objects, 0x00473ff0)
+int    DAT_008f8688 = 0;    // 0x008f8688 - pass index (0 = omodels, 1 = item models)
 int    DAT_00ae9ee4 = 0;    // 0x00ae9ee4 - force object depth 0x33 (stage 1 rooms A/B lid)
 int    DAT_00ae9ef8 = 0;    // 0x00ae9ef8 - keep the fixed 0x32/0x33 object depth
 
@@ -1849,11 +1849,13 @@ char           g_pakStringBuf[512] = {};
 // update_room_objects / check_climb_object and targetable from SCD scripts.
 void*          g_omodel_table[8] = {};
 
-// 0x00d21360 - Interactable obstacle record table (room 3D models: containers,
-// lids, desks, ...). One 0xA4-byte record per RDT obstacles_models pair
-// (count = header byte 0x03), loaded by the SCD item-event command and driven by
-// check_desk / open_itembox; also a generic entity target for event scripts.
-void*          g_interactable_table[8] = {};
+// 0x00d21360 - Item model record table. One 0xA4-byte record per RDT item_models
+// pair (count = RDT item_count), carved from the VB region by room_set and filled
+// by cmd_item_model_set (SCD 0x18): the 3D model of each pick-up in the room -
+// the one lying on the floor, or the one a desk close-up reveals. Byte 0 bit 0 is
+// "currently drawn" (renderer pass 1); pickup clears it and frees the sparkle
+// billboard at +0x86. Also an entity target for event scripts.
+void*          g_item_model_table[8] = {};
 
 // 0x00ae9ef4 - Count of object models loaded by cmd_omodel_set in current room
 int            g_omodelCount = 0;
@@ -1940,10 +1942,10 @@ int            DAT_004d2294 = 0;
 // 0x004d2288 - Death delay countdown (set to 90 frames before triggering fade)
 int            DAT_004d2288 = 0;
 
-// 0x004d46a4 - Camera/lighting update enable flag (set by room_set)
+// 0x004d46a4 - room-object draw enable flag (Ghidra: g_dwCameraLightingEnabled)
 // 0x004d46a4 / 0x004d46a8 - render feature gates, both statically 1 in the
 // original .data and never written. See the note in Globals.h before changing.
-int            g_dwCameraLightingEnabled = 1;
+int            g_dwRoomObjectRenderEnabled = 1;
 int            g_dwEntityRenderEnabled = 1;
 
 // 0x004d4680 - Debug save menu display trigger (toggled by debug key)

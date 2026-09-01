@@ -4117,7 +4117,7 @@ static int menu_update_status_screen(void)
         // Pickup complete: consume the entry and clear its flags.
         unsigned char* evt = (unsigned char*)g_room_event_index;
         unsigned char* record = *(unsigned char**)(evt + 8);
-        ((unsigned char*)g_interactable_table[record[10]])[0] = 0;
+        ((unsigned char*)g_item_model_table[record[10]])[0] = 0;
         *evt = 0;
         FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
         g_pickedItemId = record[8];
@@ -5261,7 +5261,7 @@ static void FUN_0044e920(void);
 // Non-static: the ending epilogue (EndingScreen.cpp) reuses the item viewer.
 void FUN_004846d0(int slot);
 static void FUN_004844c0(void);
-extern void FUN_00483580(int* joint, MATRIX* out);   // shared with room_camera_and_lighting_update
+extern void FUN_00483580(int* joint, MATRIX* out);   // shared with render_room_objects
 static void FUN_004841f0(void);
 extern void ResolveAnimPointers(unsigned char* data);
 extern void InitScaMatrix(int parentPtr, ScaMatrixData* matrix);
@@ -6038,7 +6038,7 @@ static void FUN_0040a250(MATRIX* src, MATRIX* dst)
 // through the OWNER back-pointers (ScaMatrixData.owner at +0x48, set by
 // InitScaMatrix), with each parent's child back-ref at +0x4C. The walk
 // follows the owners to the root and composes local -> world from the root
-// down, exactly like the original. Shared with room_camera_and_lighting_update
+// down, exactly like the original. Shared with render_room_objects
 // (FUN_004745f0) which composes each room item/model object the same way.
 void FUN_00483580(int* joint, MATRIX* out)
 {

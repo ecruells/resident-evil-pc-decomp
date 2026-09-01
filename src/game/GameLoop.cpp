@@ -280,14 +280,14 @@ LAB_00480e89:
                 DrawFadeSpr();
                 update_room_objects();
 
-                // 0x00480ed4: Camera/lighting update
-                if (g_dwCameraLightingEnabled != 0) {
-                    room_camera_and_lighting_update();
+                // 0x00480ed4: Draw the room's own 3D objects (omodels + item models)
+                if (g_dwRoomObjectRenderEnabled != 0) {
+                    render_room_objects();
                 }
 
                 // 0x00480ee5-0x00480f52: Entity rendering loop (enemies).
                 // EntityComputeJointWorldMatrices, EntityApplyLookAtRotation and
-                // calc_entity_lighting all operate on the GLOBAL ENTITY pointer,
+                // render_entity all operate on the GLOBAL ENTITY pointer,
                 // so the loop has to advance that global — walking a local copy
                 // leaves every helper transforming whichever entity was set last.
                 ENTITY = g_EnemiesList;
@@ -298,7 +298,7 @@ LAB_00480e89:
                         EntityComputeJointWorldMatrices(*(unsigned short*)&ENTITY->pad_ca);
                         EntityApplyLookAtRotation();
                         if (g_dwEntityRenderEnabled != 0) {
-                            calc_entity_lighting(ENTITY);
+                            render_entity(ENTITY);
                         }
                     }
                     ENTITY++;
@@ -309,7 +309,7 @@ LAB_00480e89:
                 EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
                 EntityApplyLookAtRotation();
                 if (g_dwEntityRenderEnabled != 0) {
-                    calc_entity_lighting((Entity*)&g_playerEntity);
+                    render_entity((Entity*)&g_playerEntity);
                 }
 
                 // 0x00480f6e-0x00480f70: 2D effects and room sprites

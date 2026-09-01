@@ -1078,7 +1078,7 @@ src/
 │
 ├── game/
 │   ├── MainLoop.cpp            # main_loop (0x00428eb0): per-frame orchestration
-│   ├── GameLoop.cpp            # entity update dispatch, calc_entity_lighting calls
+│   ├── GameLoop.cpp            # entity update dispatch, render_entity calls
 │   ├── GameInit.cpp            # init_and_start_game + load_global_assets
 │   ├── LogosScreen.cpp         # logos_state (0x00442bb0)
 │   ├── DebugScreens.cpp        # debug/test states: input test, texture viewer, SFX player

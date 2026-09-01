@@ -2,7 +2,7 @@
 // original DX5 ordering-table 3D path).
 //
 // Original data flow (from the binary):
-//   options_render_entity / calc_entity_lighting
+//   options_render_entity / render_entity
 //     -> FUN_00483250 -> FUN_00483080 (0x00483080)
 //          builds model->view float matrix, computes OT depth
 //       -> CMarniDirect3DTMD::Transform (0x00415520)

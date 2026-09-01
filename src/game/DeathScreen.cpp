@@ -419,7 +419,7 @@ void display_die_screen(void)
                 g_playerEntity.jointsStructs[2].transform.t[1] = sVec.y;
             }
             EntityApplyLookAtRotation();
-            calc_entity_lighting((Entity*)&g_playerEntity);
+            render_entity((Entity*)&g_playerEntity);
         }
     }
 

@@ -6,7 +6,7 @@
  //   FUN_00485aa0 (0x00485aa0) -> AsyncTrailReleaseSlot   (0x00485a30)
  //
  // A joint whose flags carry 0x20 is driven along an RDT waypoint path
- // (calc_entity_lighting calls FUN_0048a210 for it). Each frame the joint's
+ // (render_entity calls FUN_0048a210 for it). Each frame the joint's
  // current segment matrix is built from the path waypoints, handed to the GTE
  // state buffer via SetRotAndTransMatrix, then per-segment geometry is staged
  // into two 16-entry CMarniViewport2 pools through the async workers.
@@ -124,7 +124,7 @@ void FUN_00485aa0(void* trailObj)
 
 // ===========================================================================
 // FUN_0048a210 (0x0048a210) - entity path animation step, called from
-// calc_entity_lighting for every joint flagged 0x20 (path-driven).
+// render_entity for every joint flagged 0x20 (path-driven).
 //
 // Joint fields (raw offsets - see TmdRenderer/OptionsMenu call sites):
 //   +0x02  step counter (byte)         +0x03  total steps (byte)
