@@ -347,9 +347,12 @@ void wsp_state0(void)
     ENTITY->status_flags = (unsigned char)(ENTITY->status_flags & 0x1F);
     WS_TILT = (short)((ENTITY->behavior_flags & 4) * 0xaaa);   // always 0 after the clamp to 2
 
-    eu(ENTITY, 0x172) = 0;             // delay + what follows
-    eu(ENTITY, 0x176) = 0;
-    eu(ENTITY, 0x17a) = 0;
+    // 0x0047830c..: four WORD clears. A dword write here would also wipe 0x176
+    // (the room-collision result) and 0x17c, which the original leaves alone.
+    WS_DELAY  = 0;                     // 0x172
+    WS_SPLAT  = 0;                     // 0x174
+    WS_COUNT  = 0;                     // 0x178
+    WS_WEBIDX = 0;                     // 0x17a
 }
 
 // ============================================================================
@@ -361,11 +364,22 @@ void wsp_state1(void)
 {
     if ((ENTITY->behavior_flags & 0x80) != 0) return;   // bit 7 = skip the whole update
 
+    // 0x00478430: the picker and the runner are NOT mutually exclusive. The
+    // original tests ignore_player_flag, calls the picker when it is 0, and then
+    // FALLS THROUGH into the runner (0x00478443 CALL picker -> 0x00478448 CALL
+    // runner). Only a flag that is neither 0 nor 1 jumps past the runner.
+    //
+    // This matters: the whole autonomous idle -> pick -> walk -> idle cycle runs
+    // with ignore_player_flag at 0 (every behaviour clears it back to 0 when it
+    // completes; the flag is only the picker-override latch). Gating the runner
+    // on == 1 froze the spider in place - no animation, no movement - on every
+    // frame in which no picker condition happened to fire.
     if (eub(ENTITY, 0x85) == 0) {
         // Pick a behaviour: compute the Manhattan distance, then dispatch on the
         // spawn kind to handlerA/B/C (aliased at wsp_state_table[6 + kind]).
         ws_dist();
         wsp_state_table[6 + (ENTITY->behavior_flags & 3)]();
+        ws_action_runner();
     } else if (eub(ENTITY, 0x85) == 1) {
         ws_action_runner();
     }
@@ -838,14 +852,17 @@ void ws_behaviour_approach(void)
         return;
     }
 
-    int turn = turn_toward_target((VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t, WS_TURN);
+    // The original sign-extends the return through a short before the == 0 test,
+    // so the "am I facing the player" check sees the TRUNCATED value.
+    short turn = (short)turn_toward_target(
+        (VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t, WS_TURN);
     short d = WS_DWELL;
     WS_DWELL = (short)(d - 1);
     if (d == 0 || turn == 0) {
         eub(ENTITY, 0x87) = 2;
     }
     Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
-    WS_ANGLE = (short)(WS_ANGLE + (short)turn);
+    WS_ANGLE = (short)(WS_ANGLE + turn);
 }
 
 // ============================================================================
@@ -973,7 +990,8 @@ void ws_behaviour_spit(void)
         Snd_em(7);
     } else if (sub != 1) {
         if (sub != 2) return;
-        eub(ENTITY, 0x84) = 1;
+        euw(ENTITY, 0x84) = 1;         // WORD: state -> run AND 0x85 (the picker
+                                       // latch) -> 0, as ws_web_build also does.
         euw(ENTITY, 0x86) = 0xB;
         euw(ENTITY, 0x172) = 0xF;
         return;
@@ -1001,8 +1019,8 @@ void ws_behaviour_webdrop(void)
     case 1:
         WS_Y = WS_Y + (int)(short)WS_DWELL * (int)(short)WS_DWELL * 8;
         WS_DWELL = (short)(WS_DWELL + 1);
-        WS_TILT = (short)(WS_TILT - 0x100);
-        if ((WS_TILT & 0x8000) != 0) WS_TILT = 0;
+        ew(ENTITY, 0x72) = (short)(ew(ENTITY, 0x72) - 0x100);   // pitch, not WS_TILT
+        if ((ew(ENTITY, 0x72) & 0x8000) != 0) ew(ENTITY, 0x72) = 0;
         if ((*(unsigned char*)((char*)ENTITY + 0x3B) & 0x80) == 0) {
             eu(ENTITY, 0x38) = 0;
             euw(ENTITY, 0x72) = 0;
