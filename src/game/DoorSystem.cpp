@@ -1488,14 +1488,6 @@ void room_transition_load(void)
     g_playerEntity.position.y = sy;
     g_playerEntity.position.z = (short)uz;
 
-    // DIAGNOSTIC - remove once placement is confirmed. Prints the raw entry point the
-    // door record specifies, so "the model is placed further from the door than it
-    // should be" can be attributed to the data or to how we apply it.
-    dbg_printf("[roomtrans] entry point from rec: x=%u y=%d z=%u ang=%d (raw %04X %04X %04X)\n",
-               (unsigned int)ux, (int)sy, (unsigned int)uz,
-               (int)g_playerEntity.directionAngle,
-               (unsigned int)ux, (unsigned int)(unsigned short)sy, (unsigned int)uz);
-
     // 0x004814f9: load the destination room.
     //
     // Bit 0x80 of record+0x0B means "camera-only transition" - stay in this room and
@@ -1551,13 +1543,6 @@ void room_transition_load(void)
     } else {
         check_camera_switch(1);
     }
-
-    // DIAGNOSTIC - remove once the transition is confirmed. Proves which room's data
-    // is actually live after the load, which is the thing the old gate hid.
-    dbg_printf("[roomtrans] loaded: stage=%u room=%u cam=%u rdt=%p entryCam=%u msf=%08X\n",
-               (unsigned int)g_stageId, (unsigned int)g_roomId,
-               (unsigned int)g_roomCameraId, (void*)g_RdtPointer,
-               (unsigned int)g_nextRoomCameraId, (unsigned int)g_main_state_flags);
 
     update_room_bgm();
     if ((flags & 0x40) == 0) {

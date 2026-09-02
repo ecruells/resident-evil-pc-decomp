@@ -724,7 +724,7 @@ static unsigned char bgm_group_for(unsigned char roomId, unsigned char bgmState)
 // section, and the assets still ship the two halves separately (bgm_24a.wav
 // 739454 samples + bgm_24b.wav 227316 samples = bgm_24.wav 966470 samples, the
 // only such pair among the 61 BGM files). The PC build simply plays the joined
-// file and loops all of it. User-confirmed 2026-08-17.
+// file and loops all of it.
 // ============================================================================
 
 static void bgm_load_and_start(unsigned char bgmState)

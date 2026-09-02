@@ -79,32 +79,13 @@
 #include "EntityCommon.h"
 #include "../../Globals.h"
 #include "../BioCard.h"
-#include "../../DebugPrint.h"
 #include <cstring>
 #include <cstdlib>
 
 // ---------------------------------------------------------------------------
-// Diagnostics, off by default.
-//
-// YAWN_DEBUG        one-shot init dump + a periodic head trace (state, world
-//                   position, switch zone, active slot count) and the anchor
-//                   deltas out of yawn_anim_advance.
-// YAWN_DEBUG_VERBOSE  per-joint rotation / local offset / world position dumps
-//                   either side of the first chain rebuild.
-//
-// The verbose dump is what pinned the GteFixedMul12 int32 overflow (see the
-// note on that function in GteMatrix.cpp): every yaw was 0 and every local
-// offset -1099 in both dumps, yet the rebuilt chain stepped +947 per segment.
-// Turn it back on if the body ever builds itself in the wrong direction again.
-//
 // Yawn hardcodes a 15-joint skeleton (joints[0..14]) in three places, exactly
 // as the original does - the real Yawn EMD has 15 joints, confirmed at runtime.
-// With YAWN_DEBUG on, a model with fewer disables the chain instead of writing
-// past the end of the joint array into the room data buffer behind it.
 // ---------------------------------------------------------------------------
-#define YAWN_DEBUG 0
-#define YAWN_DEBUG_VERBOSE 0
-#define YAWN_JOINT_COUNT 15
 
 // ---------------------------------------------------------------------------
 // Engine dependencies
@@ -148,11 +129,6 @@ namespace {
 short s_yawnScaInfo[6] = {
     (short)0x8000, 0, (short)0xf830, 0, 0x07d0, 0x0320
 };
-
-#if YAWN_DEBUG
-// True once this Yawn's skeleton has been checked; see YAWN_JOINT_COUNT.
-bool s_yawnJointsOk = false;
-#endif
 
 // 0x004b1a3c - bite damage window, two bytes per form: {first frame, length}.
 // The test is `(unsigned char)(animation_frame_id - start) < length`, so the
@@ -426,40 +402,11 @@ void yawn_chain_align(JointStruct* lead, JointStruct* seg)
 // ============================================================================
 unsigned char yawn_anim_advance(unsigned char reverse, short blendStep)
 {
-#if YAWN_DEBUG
-    // Walks joints[0..14] unconditionally; without the full skeleton this
-    // writes past the joint array into the room data buffer.
-    if (!s_yawnJointsOk) return 0;
-#endif
     unsigned char* timing = (unsigned char*)ENTITY + 0xbf;
     if (*timing > 1) {
         *timing = (unsigned char)(*timing - 1);
         return 0;
     }
-
-#if YAWN_DEBUG_VERBOSE
-    // One-shot: the chain state going INTO the first rebuild. If the body is
-    // built in the wrong direction the culprit is one of these rotations.
-    static bool s_dumpedPre = false;
-    if (!s_dumpedPre) {
-        s_dumpedPre = true;
-        JointStruct* dj = ENTITY->jointsStructs;
-        dbg_printf("[YAWN] PRE  angle=%d entRot=(%d,%d,%d)\n",
-                   (int)ENTITY->angle,
-                   (int)*(short*)((char*)ENTITY + 0x72),
-                   (int)*(short*)((char*)ENTITY + 0x74),
-                   (int)*(short*)((char*)ENTITY + 0x76));
-        for (int k = 0; k < 15; k++) {
-            dbg_printf("[YAWN] PRE  j%-2d rot=(%6d,%6d,%6d) velY=%6d "
-                       "tr=(%7d,%7d,%7d) w=(%8d,%8d,%8d) flags=%02x\n",
-                       k, (int)dj[k].rotation.x, (int)dj[k].rotation.y,
-                       (int)dj[k].rotation.z, (int)dj[k].velY,
-                       dj[k].transform.t[0], dj[k].transform.t[1], dj[k].transform.t[2],
-                       dj[k].world.t[0], dj[k].world.t[1], dj[k].world.t[2],
-                       dj[k].flags);
-        }
-    }
-#endif
 
     int animHeader = (int)ENTITY->animHeader;
     g_playerDisplacement = (int)(*(short*)(animHeader + 6) / 2);
@@ -632,42 +579,6 @@ unsigned char yawn_anim_advance(unsigned char reverse, short blendStep)
         back -= 0x7c;
     } while (YAWN_TMP-- != 0);
 
-#if YAWN_DEBUG
-    // The anchor step is the only thing besides Add_speedXZ that moves the
-    // entity. If the snake drifts, these deltas are where it comes from:
-    // anchor* is joint 13 BEFORE the rebuild (world scale), new* is joint 13
-    // AFTER it (<<9 scale), and they should agree to within a few units.
-    {
-        static int s_n = 0;
-        if ((s_n++ % 30) == 0) {
-            dbg_printf("[YAWN] anim anchor=(%d,%d,%d)<<9=(%d,%d,%d) "
-                       "new13=(%d,%d,%d) off>>9=(%d,%d,%d) blend=%u anim=%d f=%d\n",
-                       anchorX, (int)anchorY, anchorZ,
-                       anchorX << 9, (int)anchorY << 9, anchorZ << 9,
-                       *(int*)(end - 0xa0), *(int*)(end - 0x9c), *(int*)(end - 0x98),
-                       offX >> 9, offY >> 9, offZ >> 9,
-                       g_entity_bkp, (int)eub(ENTITY, 0xbd), (int)eub(ENTITY, 0xbe));
-        }
-    }
-#endif
-#if YAWN_DEBUG_VERBOSE
-    // One-shot: the chain state coming OUT of the first rebuild. This runs
-    // after the write-back loop, so these are already world scale.
-    static bool s_dumpedPost = false;
-    if (!s_dumpedPost) {
-        s_dumpedPost = true;
-        JointStruct* dj = ENTITY->jointsStructs;
-        for (int k = 2; k < 15; k++) {
-            dbg_printf("[YAWN] POST j%-2d rot=(%6d,%6d,%6d) velY=%6d "
-                       "w<<9=(%10d,%10d,%10d) w/512=(%7d,%7d,%7d)\n",
-                       k, (int)dj[k].rotation.x, (int)dj[k].rotation.y,
-                       (int)dj[k].rotation.z, (int)dj[k].velY,
-                       dj[k].world.t[0], dj[k].world.t[1], dj[k].world.t[2],
-                       dj[k].world.t[0] / 512, dj[k].world.t[1] / 512,
-                       dj[k].world.t[2] / 512);
-        }
-    }
-#endif
 
     ENTITY->scaMatrixData.localMatrix.t[0] += (offX >> 9);
     ENTITY->scaMatrixData.localMatrix.t[2] += (offZ >> 9);
@@ -785,9 +696,6 @@ void yawn_post_move(short angleStep)
     ApplyLVAndMul0Matrix(&ENTITY->scaMatrixData.localMatrix, &j[0].transform, &j[0].world);
     ApplyLVAndMul0Matrix(&j[0].world, &j[2].transform, &j[2].world);
 
-#if YAWN_DEBUG
-    if (!s_yawnJointsOk) return;   // the chain below touches joints[2..14]
-#endif
     for (int k = 2; k < 10; k++) {
         yawn_chain_follow(&j[k], &j[k + 1], angleStep);
     }
@@ -2212,9 +2120,6 @@ void yawn_init(void)
 
     j[0].transform.t[0] = 0;
     j[0].transform.t[2] = 0;
-#if YAWN_DEBUG
-    if (s_yawnJointsOk)
-#endif
     for (int k = 3; k <= 14; k++) {
         j[k].flags |= 8;
     }
@@ -2388,35 +2293,6 @@ void yawn_update(void)
             eub(ENTITY, 0x185) = (unsigned char)(eub(ENTITY, 0x185) - 1);
         }
 
-#if YAWN_DEBUG
-        // Head trace. The renderer culls joints 0-2 unless the ENTITY is in a
-        // camera switch zone, and joints 3-14 per-joint on their own world
-        // position - so "zone=0" or a position outside the room explains a
-        // model that vanishes without anything else going wrong.
-        {
-            static int s_tick = 0;
-            if ((s_tick++ % 30) == 0) {
-                int active = 0;
-                for (int i = 0; i < 30; i++) {
-                    if ((g_EnemiesList[i].status_flags & 1) != 0) active++;
-                }
-                dbg_printf("[YAWN] st=%d/%d act=%d/%d pos=(%d,%d,%d) "
-                           "j0=(%d,%d,%d) j14=(%d,%d,%d) status=%02x zone=%02x "
-                           "hp=%d count=%d active=%d\n",
-                           eub(ENTITY, 0x84), eub(ENTITY, 0x86),
-                           eub(ENTITY, 0x87), eub(ENTITY, 0x16e),
-                           ENTITY->scaMatrixData.localMatrix.t[0],
-                           ENTITY->scaMatrixData.localMatrix.t[1],
-                           ENTITY->scaMatrixData.localMatrix.t[2],
-                           jwt(0)[0], jwt(0)[1], jwt(0)[2],
-                           s_yawnJointsOk ? jwt(14)[0] : 0,
-                           s_yawnJointsOk ? jwt(14)[1] : 0,
-                           s_yawnJointsOk ? jwt(14)[2] : 0,
-                           ENTITY->status_flags, ENTITY->has_enter_switch_zone,
-                           (int)ew(ENTITY, 0x88), g_enemy_count, active);
-            }
-        }
-#endif
     }
 
     // Segment: mirror the joint it owns, and take damage from the boss's death.

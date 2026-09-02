@@ -2718,7 +2718,7 @@ static void player_ctrl_behavior_run(void)
     // relies on g_enemy_count never exceeding the number of slots with
     // status_flags bit 0 set. If that invariant does not hold in the port the loop
     // runs off the end of the 30-slot array and never terminates. Bounded to the
-    // real array size, and it reports when the bound is what stopped it.
+    // real array size.
     unsigned char enemyInView = 0;
     {
         Entity* e = g_EnemiesList;
@@ -2734,15 +2734,6 @@ static void player_ctrl_behavior_run(void)
             }
             e++;
             slot++;
-        }
-        if (remaining != 0) {
-            static int reported = 0;
-            if (reported == 0) {
-                reported = 1;
-                dbg_printf("[prun] enemy scan hit the 30-slot bound with %d left of"
-                           " g_enemy_count=%d - the original would have looped here\n",
-                           (int)remaining, (int)g_enemy_count);
-            }
         }
     }
 
@@ -2844,22 +2835,6 @@ static void player_door_open_sequence(void)      // 0x00457390
     // 0x00457399: latched at entry, before the switch, and still the entry value
     // when case 1 falls through into case 2.
     JointStruct* joints = g_playerEntity.jointsStructs;
-
-    // DIAGNOSTIC - remove once the door animation is confirmed. Reports each step
-    // change plus the inputs that select the variant, so a machine stuck in one
-    // state is obvious and names the reason.
-    {
-        static int lastState = -1;
-        if ((int)g_playerEntity.action_state != lastState) {
-            lastState = (int)g_playerEntity.action_state;
-            dbg_printf("[dooranim] st=%d beh=%u unk03=%02X angle=%04X msf=%08X msf2=%08X\n",
-                       lastState, (unsigned int)g_playerEntity.action_behavior,
-                       (unsigned int)g_playerEntity.zoneFlags,
-                       (unsigned int)(unsigned short)g_playerEntity.directionAngle,
-                       (unsigned int)g_main_state_flags,
-                       (unsigned int)g_main_state_flags2);
-        }
-    }
 
     switch (g_playerEntity.action_state) {
     case 0: {
@@ -3178,17 +3153,6 @@ static void player_input_to_behavior(void)
 
     // 0x004957c6: aim button. Two ranges of equippedWeaponId select the same
     // aim behaviour; the knife (id 1) uses a different animFrameId.
-    if ((held & 0x100) != 0) {
-        static int lastAimWeapon = -1;
-        if ((int)g_playerEntity.equippedWeaponId != lastAimWeapon) {
-            lastAimWeapon = (int)g_playerEntity.equippedWeaponId;
-            dbg_printf("[aim] aim button held, equippedWeaponId=%u behavior=%u state=%u frameId=%u\n",
-                       (unsigned int)g_playerEntity.equippedWeaponId,
-                       (unsigned int)g_playerEntity.action_behavior,
-                       (unsigned int)g_playerEntity.action_state,
-                       (unsigned int)g_playerEntity.animFrameId);
-        }
-    }
     if ((held & 0x100) != 0 &&
         (g_playerEntity.equippedWeaponId > 0x6e ||
          (g_playerEntity.equippedWeaponId != 0 && g_playerEntity.equippedWeaponId < 0xb))) {
@@ -4325,15 +4289,6 @@ static void player_behavior_12_gun_aim(void)
     unsigned char ret = (unsigned char)Joint_move(0, g_playerEntity.jointMoveData0,
                                                   g_playerEntity.jointMoveData1, 0x400);
     g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
-    static unsigned char lastB12Frame = 0xff;
-    if (g_playerEntity.animation_frame_id != lastB12Frame || ret != 0) {
-        lastB12Frame = g_playerEntity.animation_frame_id;
-        dbg_printf("[aim] b12 state %u ret %u frame %u anim %u blend %u\n",
-                   (unsigned int)g_playerEntity.action_state, (unsigned int)ret,
-                   (unsigned int)g_playerEntity.animation_frame_id,
-                   (unsigned int)g_playerEntity.attackAnim,
-                   (unsigned int)g_playerEntity.unk_8c);
-    }
 
     if ((g_PlayerDpadHeld & 2) != 0) {
         g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
@@ -4383,15 +4338,6 @@ static void player_behavior_12_gun_aim(void)
 // ============================================================================
 static void player_behavior_13_gun_raise(void)
 {
-    static unsigned char lastRaiseState = 0xff;
-    if (g_playerEntity.action_state != lastRaiseState) {
-        lastRaiseState = g_playerEntity.action_state;
-        dbg_printf("[aim] b13 raise state %u blend %u anim %u frame %u\n",
-                   (unsigned int)g_playerEntity.action_state,
-                   (unsigned int)g_playerEntity.unk_8c,
-                   (unsigned int)g_playerEntity.attackAnim,
-                   (unsigned int)g_playerEntity.animation_frame_id);
-    }
     if (g_playerEntity.action_state >= 4) return;
 
     char dir = (char)(g_playerEntity.weaponAimFlags >> 7);
@@ -4487,15 +4433,6 @@ static void player_behavior_13_gun_raise(void)
 // ============================================================================
 static void player_behavior_13_gun_hold_input(void)
 {
-    static unsigned char lastHoldState = 0xff;
-    if (g_playerEntity.action_state != lastHoldState) {
-        lastHoldState = g_playerEntity.action_state;
-        dbg_printf("[aim] b13 hold state %u blend %u flags %02x dpad %04x\n",
-                   (unsigned int)g_playerEntity.action_state,
-                   (unsigned int)g_playerEntity.unk_8c,
-                   (unsigned int)g_playerEntity.weaponAimFlags,
-                   (unsigned int)g_PlayerDpadHeld);
-    }
     unsigned char old = g_playerEntity.weaponAimFlags;
     g_animFrameIdSave = (unsigned int)old;
     g_playerEntity.weaponAimFlags = (g_playerEntity.weaponAimFlags & 0x1f) | 0x40;
@@ -5811,17 +5748,6 @@ static void player_ctrl_frame2(void)
 // ============================================================================
 static void player_ctrl_frame3(void)
 {
-    static int lastBehavior = -1;
-    if ((int)g_playerEntity.action_behavior != lastBehavior) {
-        lastBehavior = (int)g_playerEntity.action_behavior;
-        dbg_printf("[aim] frame3 behavior 0x%02x state %u weapon %u animFrame %u jmd0=%08x jmd1=%08x\n",
-                   (unsigned int)g_playerEntity.action_behavior,
-                   (unsigned int)g_playerEntity.action_state,
-                   (unsigned int)g_playerEntity.equippedWeaponId,
-                   (unsigned int)g_playerEntity.animation_frame_id,
-                   (unsigned int)g_playerEntity.jointMoveData0,
-                   (unsigned int)g_playerEntity.jointMoveData1);
-    }
     switch (g_playerEntity.action_behavior) {
     case 0x12:
         player_behavior_12_gun_aim();
@@ -6348,23 +6274,6 @@ static void player_scd_behavior_03(void)
             int dx = g_playerEntity.scaMatrixData.localMatrix.t[0] - (int)g_playerEntity.unk_c6;
             int dist = SquareRoot0(dz * dz + dx * dx);
 
-            // DIAGNOSTIC: the run target and the closing distance. If dist stops
-            // shrinking, or the target is not a sane room coordinate, the run
-            // overshoots and the player leaves the room. Remove once verified.
-            {
-                static int lastDist = -1;
-                if (lastDist < 0 || dist > lastDist || (lastDist - dist) > 64) {
-                    dbg_printf("[run] pos=%d,%d target=%u,%u dist=%d speed=%d ang=%d\n",
-                               g_playerEntity.scaMatrixData.localMatrix.t[0],
-                               g_playerEntity.scaMatrixData.localMatrix.t[2],
-                               (unsigned int)g_playerEntity.unk_c6,
-                               (unsigned int)g_playerEntity.unk_c8,
-                               dist, (int)(short)g_playerEntity.move_speed_current,
-                               (int)g_playerEntity.directionAngle);
-                }
-                lastDist = dist;
-            }
-
             if (dist < 0xfa) {
                 if ((g_playerEntity.healthStatusFlags & 0x80) == 0) {
                     g_playerEntity.action_state = 4;
@@ -6593,16 +6502,6 @@ void update_player_anim(void)
     ENTITY = (Entity*)&g_playerEntity;
 
     // 0x00494da1: only run the state machine when input/messages allow it
-    if ((g_message_flags & 1) == 0 && g_playerEntity.animFrameId >= 3) {
-        static int lastBlockedMsg = -1;
-        if ((int)g_message_flags != lastBlockedMsg) {
-            lastBlockedMsg = (int)g_message_flags;
-            dbg_printf("[aim] update_player_anim BLOCKED (g_message_flags=%04x) at animFrameId=%u behavior=0x%02x\n",
-                       (unsigned int)g_message_flags,
-                       (unsigned int)g_playerEntity.animFrameId,
-                       (unsigned int)g_playerEntity.action_behavior);
-        }
-    }
     if ((g_message_flags & 1) != 0) {
         // The original is an unmasked, unbounded CALL through the table. Bound it
         // to the real 10 entries instead of masking with 0x0f, which used to fold
@@ -6715,15 +6614,6 @@ static void door_locked_message(unsigned int msgIndex)
 // sleep, then StMask - not a fade. This is why the in-game door cut is instant.
 static void door_begin_transition(unsigned char* record)
 {
-    // DIAGNOSTIC - remove once the door transition is confirmed. This is the exact
-    // moment the room change is committed; if this never prints, the door was never
-    // accepted, and if it prints but no room loads the fault is downstream in
-    // room_transition_load / the g_openMenuFlag handoff.
-    dbg_printf("[door] BEGIN TRANSITION rec=%p dest=%02X cam=%02X msf=%08X openMenu=%d\n",
-               record, (unsigned int)record[0x0d],
-               (unsigned int)(record[0x0b] & 0x3f),
-               (unsigned int)g_main_state_flags, (int)g_openMenuFlag);
-
     g_pendingDoorRecord = (int)record;          // the room the transition will load
     g_main_state_flags |= 0x2000000;
     g_message_flags = 0;
@@ -6753,32 +6643,11 @@ int door_try_enter(unsigned char* entry)
 {
     // 0x0041b400: already mid-transition (climb/door), do nothing.
     if ((g_main_state_flags & 0x80) != 0) {
-        // DIAGNOSTIC - remove once the door transition is confirmed.
-        static int reported = 0;
-        if (!reported) {
-            reported = 1;
-            dbg_printf("[door] try_enter bailed: msf&0x80 set (mid climb/door), msf=%08X\n",
-                       (unsigned int)g_main_state_flags);
-        }
         return 0;
     }
 
     unsigned char* record = *(unsigned char**)(entry + 8);
     unsigned char  lock   = record[0xc];
-
-    // DIAGNOSTIC - remove once the door transition is confirmed. Reports the lock
-    // descriptor once per distinct record so the log shows whether this door is
-    // treated as open, character-barred, or needing an item.
-    {
-        static unsigned char* lastRecord = nullptr;
-        if (record != lastRecord) {
-            lastRecord = record;
-            dbg_printf("[door] try_enter rec=%p type0A=%02X dir08=%02X lock=%02X need=%02X dest=%02X flags0B=%02X\n",
-                       record, (unsigned int)record[0x0a], (unsigned int)record[0x08],
-                       (unsigned int)lock, (unsigned int)record[0x16],
-                       (unsigned int)record[0x0d], (unsigned int)record[0x0b]);
-        }
-    }
 
     // 0x0041b41a: some doors are barred for one of the two characters.
     if ((lock & 0x40) != 0 && (g_playerEntity.id & 3) == 3) {
@@ -7306,13 +7175,10 @@ int stairs_height_update(unsigned char* entry)
 // entries with 0x40 are tested against the player's actual position. Flag 0x80
 // disables an entry. `mask` gates which entries participate this frame.
 // ============================================================================
-// Calls since the last action-zone hit; drives the [zone] diagnostic's rate limit.
-static int g_zoneHitGap = 1000;
 
 void update_player_position(PlayerEntity* ent, int mask)
 {
     int actionResult = 0;
-    g_zoneHitGap++;
 
     // 0x0041c060: build the reach probe 600 units ahead of the facing direction
     g_svecScratch.x = 600;
@@ -7353,67 +7219,9 @@ void update_player_position(PlayerEntity* ent, int mask)
 
             // 0x0041c125: dispatch the room action handler
             if (hit) {
-                // DIAGNOSTIC: report every zone hit, not just the missing-handler
-                // case, and re-report when the entry changes. Pressing action at a
-                // door does nothing if EITHER the probe never reaches the zone or
-                // the handler is absent, and those need telling apart. Rate-limited
-                // to one line per (entry, handler-present) transition.
-                // Reported on a gap rather than on a key: the previous version keyed
-                // on (entry, act), which never changes for a given door, so it fired
-                // once and then suppressed every later hit - making continuous hits
-                // look like a single one. g_zoneHitGap counts calls since the last
-                // hit, so re-entering the zone reports again without spamming while
-                // the player stands in it.
-                {
-                    if (g_zoneHitGap > 30) {
-                        dbg_printf("[zone] HIT entry=%d act=%u flg=%02X handler=%s"
-                                   " probe=%s pl=(%d,%d)\n",
-                                   (int)index, (unsigned int)*entry,
-                                   (unsigned int)flags,
-                                   room_check_actions[*entry] ? "present" : "NULL",
-                                   (flags & 0x40) ? "position" : "reach",
-                                   g_playerPosScratch.x, g_playerPosScratch.z);
-                    }
-                    g_zoneHitGap = 0;
-                }
-
                 void* handler = room_check_actions[*entry];
                 if (handler != NULL) {
                     actionResult = ((int(*)(unsigned char*))handler)(entry);
-                }
-            } else {
-                // DIAGNOSTIC - remove once placement is confirmed. Reports how far the
-                // tested point is from the zone, per axis, so "Chris stops short of the
-                // door" becomes a number instead of a guess. Both comparisons in
-                // is_point_in_action_zone are UNSIGNED, so a point below the origin
-                // wraps to a huge value - the signed deltas printed here are what
-                // actually tell you which side you are on.
-                unsigned short* z = *(unsigned short**)(entry + 8);
-                if (z != NULL) {
-                    int px = (flags & 0x40) ? ent->scaMatrixData.localMatrix.t[0]
-                                            : g_playerPosScratch.x;
-                    int pz = (flags & 0x40) ? ent->scaMatrixData.localMatrix.t[2]
-                                            : g_playerPosScratch.z;
-                    int dx = px - (int)z[0];      // <0 = before the zone, >w = past it
-                    int dz = pz - (int)z[1];
-                    static int lastKey = -1;
-                    static int missGap = 0;
-                    int key = (int)index * 4 + ((dx >= 0 && dx <= (int)z[2]) ? 1 : 0)
-                                             + ((dz >= 0 && dz <= (int)z[3]) ? 2 : 0);
-                    if (++missGap > 90 || key != lastKey) {
-                        missGap = 0;
-                        lastKey = key;
-                        // dbg_printf("[zone] MISS entry=%d act=%u probe=%s pt=(%d,%d)"
-                        //            " zone=(%u..%u, %u..%u) dx=%d%s dz=%d%s\n",
-                        //            (int)index, (unsigned int)*entry,
-                        //            (flags & 0x40) ? "position" : "reach", px, pz,
-                        //            (unsigned int)z[0],
-                        //            (unsigned int)(z[0] + z[2]),
-                        //            (unsigned int)z[1],
-                        //            (unsigned int)(z[1] + z[3]),
-                        //            dx, (dx >= 0 && dx <= (int)z[2]) ? "(in)" : "(OUT)",
-                        //            dz, (dz >= 0 && dz <= (int)z[3]) ? "(in)" : "(OUT)");
-                    }
                 }
             }
         }
