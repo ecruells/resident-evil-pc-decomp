@@ -268,8 +268,15 @@ extern void ProcessTmdAsync(unsigned int param1);
 
 // ============================================================================
 // FUN_00462790 (0x00462790) - Adjust weapon animation positions
-// Modifies weapon animation vertex positions based on character offsets.
-// param1: weapon type index (0 = basic weapons, 1 = special)
+// Bakes a fixed rotation into the three special-weapon aim motions (5 = aim
+// neutral, 6 = aim down, 7 = aim up) of the freshly loaded w18/w08.EMW so the
+// rocket launcher / machinegun arms line up with the weapon model.
+// param1: 0 = w18 (rocket launcher, joints 10+11), 1 = w08 (MINIMI, one axis).
+//
+// EMW/EMR header (all u16): +0 armature offset, +2 FRAME DATA BASE, +4 joint
+// count, +6 FRAME STRIDE. For every w*.EMW that is 100 / 176 / 15 / 104, so
+// frame f lives at animBuffer + 104*f + 176 and the +0x42..+0x4c / +0x64
+// writes below are joint angles inside that frame.
 // ============================================================================
 void AdjustWeaponAnimationPositions(int param1)
 {
@@ -279,11 +286,21 @@ void AdjustWeaponAnimationPositions(int param1)
 
     do {
         unsigned int uVar5 = *(unsigned int*)(animEnd + local_8 * 4);
-        unsigned int* puVar6 = (unsigned int*)(((uVar5 >> 16) & 0xFFFFFFFC) + animEnd);
+        unsigned int* puVar6 = (unsigned int*)((((int)uVar5 >> 16) & 0xFFFFFFFC) + animEnd);
         for (unsigned int count = uVar5 & 0xFFFF; count != 0; count--) {
             unsigned int uVar4 = *puVar6;
             puVar6++;
-            int offset = ((*(short*)(animBuffer + 2) >> 16) * (uVar4 & 0xFFFF) + (*(short*)animBuffer >> 16)) & 0xFFFFFFFC;
+            // 0x004627db/0x004627e4: MOV EDX,[ECX+4] / SAR EDX,0x10 and
+            // MOV EAX,[ECX] / SAR EAX,0x10 - the original loads the DWORDs at
+            // +4 and +0 and keeps their HIGH halves, i.e. the u16 at +6 (frame
+            // stride, 104) and the u16 at +2 (frame base, 176). Ghidra renders
+            // those as "*(short *)(animBuffer + 2) >> 16", which as C is a
+            // short promoted to int then shifted right 16 - always 0 - so every
+            // frame collapsed onto offset 0 and the angles were added to the
+            // EMR armature header instead of to the aim frames.
+            int stride = (int)*(short*)(animBuffer + 6);
+            int base   = (int)*(short*)(animBuffer + 2);
+            int offset = (stride * (int)(uVar4 & 0xFFFF) + base) & 0xFFFFFFFC;
             if (param1 == 0) {
                 short* psVar1;
                 psVar1 = (short*)(animBuffer + offset + 0x42);
