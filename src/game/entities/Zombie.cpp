@@ -1408,15 +1408,30 @@ static void zombie_attack_head_bite(void)
 
         joint_setup_attack_effect(jointPtr + 0xF8, 0x1E, 0, 3);
 
-        VECTOR tmpPos = { 0, 0, 0, 0 };
+        // 0x004354f9: the spawn offset is the 4-dword block at
+        // *(g_deadMoveValue + 0x14), staged through g_playerPosScratch exactly
+        // like explode_leg_and_drop - NOT a zeroed local. With (0,0,0) the
+        // billboards were placed at the joint's own origin.
+        {
+            const int* spawn = (const int*)((char*)g_deadMoveValue + 0x14);
+            g_playerPosScratch.x   = spawn[0];
+            g_playerPosScratch.y   = spawn[1];
+            g_playerPosScratch.z   = spawn[2];
+            g_playerPosScratch.pad = spawn[3];
+        }
 
-        Effect_CreateBillboard(3, 0, 0, (void*)(jointPtr + 0x13C), &tmpPos, 0);
-        tmpPos.x += 500;
-        Effect_CreateBillboard(4, 0, 0x800, &ENTITY->scaMatrixData, &tmpPos, 0);
-        Effect_CreateBillboard(4, 1, 0x5E8, &ENTITY->scaMatrixData, &tmpPos, 0);
-        Effect_CreateBillboard(4, 2, 0x9F4, &ENTITY->scaMatrixData, &tmpPos, 0);
-        Effect_CreateBillboard(4, 4, 0xB84, &ENTITY->scaMatrixData, &tmpPos, 0);
-        Effect_CreateBillboard(4, 2, 0xDB8, &ENTITY->scaMatrixData, &tmpPos, 0);
+        // ENTITY + 0x20 is scaMatrixData.localMatrix, not scaMatrixData: the
+        // effect renderer memcpy's 0x20 bytes from this pointer straight into
+        // the slot's MATRIX (EffectActor_UpdateAndRender), so the bare
+        // scaMatrixData address shifted every row by 4 bytes and the
+        // translation came out of localMatrix.m[7..8] - garbage coordinates.
+        Effect_CreateBillboard(3, 0, 0, (void*)(jointPtr + 0x13C), &g_playerPosScratch, 0);
+        g_playerPosScratch.x += 500;
+        Effect_CreateBillboard(4, 0, 0x800, &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
+        Effect_CreateBillboard(4, 1, 0x5E8, &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
+        Effect_CreateBillboard(4, 2, 0x9F4, &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
+        Effect_CreateBillboard(4, 4, 0xB84, &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
+        Effect_CreateBillboard(4, 2, 0xDB8, &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
 
         JointApplyColorTint((JointStruct*)(jointPtr + 0x174), 0x30, 0x80820, &DAT_00606060);
         JointApplyColorTint((JointStruct*)(jointPtr + 0x2E8), 0x30, 0x80820, &DAT_00606060);
@@ -1446,8 +1461,15 @@ static void zombie_attack_vomit(void)
             *(unsigned char*)(jointPtr + 0xFA) = 0;
             *(unsigned char*)(jointPtr + 0xFB) = 0;
 
-            VECTOR tmpPos = { 0, 0, 0, 0 };
-            Effect_CreateBillboard(0, 0, 0, (void*)(jointPtr + 0x13C), &tmpPos, 0);
+            // Same g_deadMoveValue spawn block as the head-bite path
+            // (0x004356f2); the old zeroed local put the spray at the joint
+            // origin.
+            const int* spawn = (const int*)((char*)g_deadMoveValue + 0x14);
+            g_playerPosScratch.x   = spawn[0];
+            g_playerPosScratch.y   = spawn[1];
+            g_playerPosScratch.z   = spawn[2];
+            g_playerPosScratch.pad = spawn[3];
+            Effect_CreateBillboard(0, 0, 0, (void*)(jointPtr + 0x13C), &g_playerPosScratch, 0);
         }
 
         if ((*(unsigned char*)(jointPtr + 0xF8) & 0x40) != 0) {
@@ -1773,18 +1795,18 @@ static void zombie_headshot(void)
         g_playerPosScratch.z = 0;
         joint_setup_attack_effect(joint + 0xF8, 30, 2, 3);
         Effect_CreateBillboard(3, 0, (short)(away + 0x800),
-                               &ENTITY->scaMatrixData, &g_playerPosScratch, 0);
+                               &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
 
         g_playerPosScratch.x = 0;
         g_playerPosScratch.y = -600;
         g_playerPosScratch.z = 0;
         Effect_CreateBillboard(0, 3, 0, (void*)(joint + 0x44), &g_playerPosScratch, 0);
         Effect_CreateBillboard(4, 0, (short)(away + 1536),
-                               &ENTITY->scaMatrixData, &g_playerPosScratch, 0);
+                               &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         Effect_CreateBillboard(4, 2, (short)(away + 1792),
-                               &ENTITY->scaMatrixData, &g_playerPosScratch, 0);
+                               &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         Effect_CreateBillboard(4, 3, (short)(away + 2304),
-                               &ENTITY->scaMatrixData, &g_playerPosScratch, 0);
+                               &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         Snd_em(6);                          // head explode
     }
 
@@ -2141,11 +2163,17 @@ static void zombie_slow_walk(void)
         ENTITY->blend_counter = 3;
         ENTITY->action_ticks_counter = (unsigned short)((g_RandSeed & 0x7F) + 300);
 
-        // Waypoint 5000 units ahead. The seed matrix is g_deadMoveValue
-        // (0x00d1fdd0), NOT g_identityMatrixData - the original copies 8 dwords
-        // out of it. Seeding from the identity instead gave RotMatrixY a
-        // different base and steered the waypoint wrong.
-        memcpy(&g_matrixScratch, &g_deadMoveValue, 32);
+        // Waypoint 5000 units ahead. At 0x00434d1a the original copies 8 dwords
+        // FROM the address g_deadMoveValue (0x00d1fdd0) HOLDS - it is a pointer
+        // variable, and GameStart parks &g_identityMatrixData in it, so the
+        // seed is the identity. `&g_deadMoveValue` copied the pointer's own
+        // .bss storage plus 28 bytes of whatever globals follow it, and since
+        // RotMatrixY computes Ry(r) * m from the EXISTING m[0][*]/m[2][*] the
+        // composed rotation was garbage: ApplyMatrixSV then sent the 5000-unit
+        // waypoint off in a nonsense direction, which is the wander target
+        // zombie_walk2 feeds to entity_pathfind_update. Same form as
+        // CharacterNpc.cpp and Yawn.cpp, which already deref correctly.
+        memcpy(&g_matrixScratch, (const void*)g_deadMoveValue, 32);
         g_svecScratch.x = 5000;
         g_svecScratch.z = 0;
         g_svecScratch.y = 0;
@@ -2612,7 +2640,7 @@ static void benddown_and_eat(void)
         Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
         if ((ENTITY->animation_frame_id & 7) == 0) {
             VECTOR eatPos = { 800, -300, 0, 0 };
-            Effect_CreateBillboard(0, 0, 0, &ENTITY->scaMatrixData, &eatPos, 0);
+            Effect_CreateBillboard(0, 0, 0, &ENTITY->scaMatrixData.localMatrix, &eatPos, 0);
             Snd_em(3);
         }
         if (ENTITY->animation_frame_id == 0x0E) {
@@ -2705,7 +2733,16 @@ static void zombie_vomiting(void)
         ENTITY->animationId = 5;
         {
             VECTOR vPos = { 500, -2500, 0, 0 };
-            Effect_CreateBillboard(0x20, 0, 0, &ENTITY->scaMatrixData, &vPos, 0);
+            // ENTITY + 0x20 = scaMatrixData.localMatrix. Passing
+            // &scaMatrixData handed the effect renderer a MATRIX pointer 4
+            // bytes early, so the 0x20-byte memcpy in
+            // EffectActor_UpdateAndRender built the slot transform from
+            // field_00 + localMatrix.m[0..6] and read the translation out of
+            // localMatrix.m[7]/m[8]/pad. The vomit blob spawned at a nonsense
+            // world position: is_entity_in_switch_zone culled the sprite (no
+            // FX) and effect_projectile_hit_check's 600-unit splash test never
+            // came near the player (no damage).
+            Effect_CreateBillboard(0x20, 0, 0, &ENTITY->scaMatrixData.localMatrix, &vPos, 0);
         }
         Snd_em(7);
         // FALLS THROUGH into sub-state 1 in the original.
