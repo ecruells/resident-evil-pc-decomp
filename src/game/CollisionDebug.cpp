@@ -1,8 +1,9 @@
 // CollisionDebug.cpp - debug-only overlay that draws the room's RDT collision
 // boundaries on top of the pre-rendered background.
 //
-// [Debug] ShowCollision=1 in config.ini sets the initial state; F8 toggles it at
-// runtime (WindowProc.cpp). Not part of the original game; this is a diagnostic
+// Starts off; F8 toggles it at runtime (WindowProc.cpp) while debug features
+// are enabled ([Debug] EnableDebug in config.ini). Not part of the original
+// game; this is a diagnostic
 // for comparing the collision data against the background photo and against
 // where the player actually stops. It is drawn between the background and the
 // 3D models, so characters occlude it.
@@ -29,10 +30,10 @@
 #include "../marni/MarniSystem.h"
 #include <cmath>
 
-// Entire overlay is debug-only: compiled out of release builds. The F8 toggle
-// (WindowProc) and the [Debug] ShowCollision/CollisionY config reads (main.cpp)
-// are gated with the same #ifdef.
-#ifdef _DEBUG
+// Compiled into both configurations; only active while g_debugFeaturesEnabled
+// is set (Globals.h). The F8 toggle (WindowProc) and the [Debug]
+// ShowCollision/CollisionY config reads (main.cpp) are gated with the same
+// flag, and CollisionDebug_Draw early-returns on g_bShowCollisionDebug.
 
 // Set from config.ini by LoadIniConfiguration (main.cpp).
 BOOL g_bShowCollisionDebug = FALSE;
@@ -360,5 +361,3 @@ void CollisionDebug_Draw(void)
 
     CollDbg_Flush();
 }
-
-#endif // _DEBUG

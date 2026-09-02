@@ -418,17 +418,28 @@ extern int           g_ShowVideoModeOverlay;           // 0x004d4600 - video-mod
 extern int           g_VideoModeOverlayTimer;          // 0x004d475c - overlay frame countdown
 extern int           DAT_004d228c;                     // 0x004d228c - menu processing active flag
 
-// Port-added debug helpers (no original address; set by F2/F3/F6 in WindowProc,
-// consumed by the game loop). F2 = save screen, F3 = item box menu,
-// F6 = texture viewer overlay. Compiled out of release builds.
-#ifdef _DEBUG
-extern int           g_debugOpenSaveScreenFlag;
+// Master switch for every port-added debug feature (F1 debug menu, F6/F7/F8
+// tools, quick access, collision overlay). Default 0 in release builds, 1 in
+// debug builds; [Debug] EnableDebug=1 in config.ini overrides it either way
+// (read by LoadIniConfiguration, main.cpp). The code is compiled into both
+// configurations - only this runtime flag gates it.
+extern int           g_debugFeaturesEnabled;
+
+// Port-added debug helpers (no original address; set by F6 in WindowProc
+// and by the F1 debug menu's QUICK ACCESS screen, consumed by the game loop).
+// F6 = texture viewer overlay,
+// g_debugOpenLoadScreenFlag = load screen (title flow).
+extern int           g_debugOpenLoadScreenFlag;
 extern int           g_debugOpenItemboxFlag;
 extern int           g_debugTextureViewerFlag;   // F6: request the overlay (edge)
-extern int           g_debugDumpDrawFlag;        // F7: dump one frame of draw commands
 extern int           g_debugTextureViewerOpen;   // 1 while the overlay is active
 int texture_viewer_overlay(void);                 // DebugScreens.cpp - per-frame overlay; 0 when closed
-#endif
+extern int           g_debugMenuOpen;            // 1 while the F1 debug menu overlay is open
+int debug_menu_overlay(void);                     // DebugMenu.cpp - F1 overlay; 1 while open
+void DebugRoomChange_ApplyPendingPlacement(void); // DebugMenu.cpp - post room_transition_load placement
+extern int           g_debugLoadSlot;             // quick access load: selected slot index (0-7)
+void DebugQuick_SaveSlot(int slot);               // SaveLoadScreen.cpp - write the bio card to savedat<slot+1>.dat
+void DebugQuick_LoadSlot(int slot);               // SaveLoadScreen.cpp - restore the bio card from savedat<slot+1>.dat
 
 // Room interaction state (0x00be9616-0x00be9618, adjacent to g_eventItemUsedFlag)
 extern unsigned char g_typewriter_state;               // 0x00be9616 - typewriter save-flow state machine
@@ -979,15 +990,13 @@ extern CollisionShapeHandler g_CollisionShapeHandlers[6];
 extern int g_collPushDepthZHi;                         // 0x00be0dec - push scratch
 extern int g_collPushDepthZLo;                         // 0x00be0df0 - push scratch
 
-// --- Debug-only collision overlay (CollisionDebug.cpp, not in the original) ---
-// [Debug] ShowCollision=1 in config.ini draws the room's RDT boundary records
-// over the background, projected through the same path the character model uses.
-// Compiled out of release builds (the F5 toggle and config reads are gated too).
-#ifdef _DEBUG
+// --- Collision overlay (CollisionDebug.cpp, not in the original) ---
+// Starts off; F8 toggles it while debug features are enabled (g_debugFeaturesEnabled).
+// Drawn over the background, projected through the same path the character
+// model uses.
 extern BOOL g_bShowCollisionDebug;
-extern int  g_iCollisionDebugY;   // [Debug] CollisionY - world Y of the overlay plane
+extern int  g_iCollisionDebugY;   // world Y of the overlay plane (0 = room floor)
 void CollisionDebug_Draw(void);
-#endif
 
 // --- Room boundary collision (RoomCollision.cpp) ---
 void          Room_SetupCollisionCallbacks(void);                      // 0x0047d140

@@ -109,32 +109,10 @@ void FlushSpriteCommandsRange(unsigned int minDepth, unsigned int maxDepth,
     float scaleX, scaleY;
     MarniGetRenderScale(&scaleX, &scaleY);
 
-    // F7 (debug builds): dump every command this pass will draw.
-#ifdef _DEBUG
-    if (g_debugDumpDrawFlag) {
-        dbg_printf("[dump] FlushSpriteCommandsRange min=%u max=%u classMask=%u count=%d\n",
-                   minDepth, maxDepth, classMask, g_SpriteQueueCount);
-    }
-#endif
-
     for (int i = 0; i < g_SpriteQueueCount; i++) {
         TextureDraw* cmd = &g_SpriteCommandBuffer[i];
         if (cmd->depthSort < minDepth || cmd->depthSort >= maxDepth) continue;
         if ((cmd->sortClass & classMask) == 0) continue;
-
-#ifdef _DEBUG
-        if (g_debugDumpDrawFlag) {
-            dbg_printf("[dump]  spr#%3d type=%u cls=%u depth=%u tex=%u"
-                       " xy=(%d,%d)-(%d,%d) uv=(%d,%d)-(%d,%d)"
-                       " rgb=(%.2f,%.2f,%.2f) a=%.3f va=%.3f flags=%08X rf=%08X\n",
-                       i, cmd->type, cmd->sortClass, cmd->depthSort,
-                       (unsigned int)cmd->extraFlags,
-                       cmd->x0, cmd->y0, cmd->x1, cmd->y1,
-                       cmd->u0, cmd->v0, cmd->u1, cmd->v1,
-                       cmd->r, cmd->g, cmd->b, cmd->alpha, cmd->variantAlpha,
-                       cmd->spriteFlags, cmd->renderFlags);
-        }
-#endif
 
         // Line primitives (type 11): used by the menu EKG health bar.
         // The original FUN_00470c60 built a line primitive and inserted it

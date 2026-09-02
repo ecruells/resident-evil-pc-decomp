@@ -1968,13 +1968,19 @@ int            g_VideoModeOverlayTimer = 0;
 // 0x004d228c - Menu processing active flag (set during menu open/close)
 int            DAT_004d228c = 0;
 
-// Port-added debug helpers (no original address; set by F2/F3 in WindowProc).
-// F2 requests the save screen, F3 requests the item box menu,
-// F6 requests the texture viewer overlay. Compiled out of release builds.
+// Master switch for the port-added debug features (Globals.h). Default 1 in
+// debug builds, 0 in release; [Debug] EnableDebug in config.ini overrides.
 #ifdef _DEBUG
-int            g_debugOpenSaveScreenFlag = 0;
+int            g_debugFeaturesEnabled = 1;
+#else
+int            g_debugFeaturesEnabled = 0;
+#endif
+
+// Port-added debug helpers (no original address; set by F6 in WindowProc
+// and by the F1 debug menu's QUICK ACCESS screen). F6 requests the texture viewer
+// overlay, g_debugOpenLoadScreenFlag requests the load screen (title flow).
+int            g_debugOpenLoadScreenFlag = 0;
+int            g_debugLoadSlot = 0;    // quick access load: selected slot index
 int            g_debugOpenItemboxFlag = 0;
 int            g_debugTextureViewerFlag = 0;
-int            g_debugDumpDrawFlag = 0;
 int            g_debugTextureViewerOpen = 0;
-#endif

@@ -47,15 +47,17 @@ static BOOL LoadIniConfiguration(void)
     g_dwBitDepth = GetPrivateProfileIntA("Display", "BitDepth", 32, foundPath);
     g_bVSync = (GetPrivateProfileIntA("Display", "VSync", 0, foundPath) != 0);
 
+    // Master switch for the port-added debug features (F1 menu, F6/F7/F8,
+    // quick access, collision overlay). Absent key: on in debug builds,
+    // off in release builds.
+    g_debugFeaturesEnabled =
+        GetPrivateProfileIntA("Debug", "EnableDebug",
 #ifdef _DEBUG
-    // Debug-only: draw the room's RDT collision boundaries over the background.
-    g_bShowCollisionDebug =
-        (GetPrivateProfileIntA("Debug", "ShowCollision", 0, foundPath) != 0);
-    // World Y of the plane the overlay is drawn on. 0 is the room floor; nudge it
-    // for a room whose walkable level is not at y = 0. Note -Y is up.
-    g_iCollisionDebugY =
-        GetPrivateProfileIntA("Debug", "CollisionY", 0, foundPath);
+                              1,
+#else
+                              0,
 #endif
+                              foundPath);
 
 
     // Clamp to reasonable values

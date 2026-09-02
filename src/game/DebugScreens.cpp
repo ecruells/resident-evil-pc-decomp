@@ -350,7 +350,6 @@ void texture_viewer_state(void)
 // Returns 1 while the overlay should stay open, 0 when it closed. While open
 // the game's own pad state is zeroed so the player does not move underneath.
 // ============================================================================
-#ifdef _DEBUG
 int texture_viewer_overlay(void)
 {
     static int      initialized = 0;
@@ -477,7 +476,6 @@ int texture_viewer_overlay(void)
     }
     return 1;
 }
-#endif
 
 // ============================================================================
 // debug_state — SFX Player Debug Menu

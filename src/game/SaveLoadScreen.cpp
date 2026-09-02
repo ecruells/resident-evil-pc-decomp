@@ -395,6 +395,42 @@ void rearrange_item_slots(void)
     }
 }
 
+// Restore a save file buffer into the bio card / input-config globals.
+// Shared by STATE_LOAD_SLOT_SELECTED and DebugQuick_LoadSlot. The block
+// restore always runs; the extra areas past 0x800 are size-gated so older
+// (smaller) save files still load. The original restores the block with one
+// 0x800 memcpy; the port models that region as g_BioCard + the input-config
+// globals, so each part is copied into its own global (the unmodeled
+// tail 0x43D..0x800 is discarded).
+static void RestoreSaveBlock(const char* fileBuffer, int fileSize)
+{
+    memcpy(g_BioCardData, fileBuffer, sizeof(BioCardLayout));
+    memcpy(g_padRemapSubTable3, fileBuffer + OFFSET_PAD_REMAP,
+           sizeof(g_padRemapSubTable3));
+    g_controllerConfig = fileBuffer[OFFSET_CONTROLLER_CFG];
+    if (fileSize > SAVE_BLOCK_SIZE) {
+        memcpy(g_keyBindingData, fileBuffer + OFFSET_KEY_BINDINGS, 0x20);
+        memcpy(g_JoyRemapTbl, fileBuffer + OFFSET_JOY_REMAP, 0x100);
+        InitInputKeyBindings();
+        if (fileSize > 0x920) {
+            memcpy(g_roomBgmState, fileBuffer + OFFSET_ROOM_BGM, 0xE0);
+            if (fileSize > 0xA00) {
+                // file[0xA00] holds the saved sidewinder flag; the
+                // original loads it into a dead stack local.
+                memcpy(&g_bCostumeVariant, fileBuffer + OFFSET_COSTUME_VARIANT, 1);
+                if (fileSize > 0xA02) {
+                    memcpy(g_joyRemapBackupKey, fileBuffer + OFFSET_KEY_BACKUP, 0x80);
+                    memcpy(g_joyRemapBackupJoy, fileBuffer + OFFSET_JOY_BACKUP, 0x80);
+                    memcpy(g_JoyRemapTbl[1],
+                           g_isSideWinderConnected
+                               ? g_joyRemapBackupJoy : g_joyRemapBackupKey,
+                           0x80);
+                }
+            }
+        }
+    }
+}
+
 // ============================================================================
 // LoadSaveGameState (0x00493310)
 //
@@ -623,38 +659,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
                 sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, selected_slot + 1);
                 EnsureDirectoryExists(GAME_SAVE_ROOT);
                 int fileSize = ReadSaveFile(g_saveFileName, fileBuffer);
-
-                // The block restore always runs; the extra areas past 0x800 are
-                // size-gated so older (smaller) save files still load. The
-                // original restores the block with one 0x800 memcpy; the port
-                // models that region as g_BioCard + the input-config globals,
-                // so each part is copied into its own global (the unmodeled
-                // tail 0x43D..0x800 is discarded).
-                memcpy(g_BioCardData, fileBuffer, sizeof(BioCardLayout));
-                memcpy(g_padRemapSubTable3, fileBuffer + OFFSET_PAD_REMAP,
-                       sizeof(g_padRemapSubTable3));
-                g_controllerConfig = fileBuffer[OFFSET_CONTROLLER_CFG];
-                if (fileSize > SAVE_BLOCK_SIZE) {
-                    memcpy(g_keyBindingData, fileBuffer + OFFSET_KEY_BINDINGS, 0x20);
-                    memcpy(g_JoyRemapTbl, fileBuffer + OFFSET_JOY_REMAP, 0x100);
-                    InitInputKeyBindings();
-                    if (fileSize > 0x920) {
-                        memcpy(g_roomBgmState, fileBuffer + OFFSET_ROOM_BGM, 0xE0);
-                        if (fileSize > 0xA00) {
-                            // file[0xA00] holds the saved sidewinder flag; the
-                            // original loads it into a dead stack local.
-                            memcpy(&g_bCostumeVariant, fileBuffer + OFFSET_COSTUME_VARIANT, 1);
-                            if (fileSize > 0xA02) {
-                                memcpy(g_joyRemapBackupKey, fileBuffer + OFFSET_KEY_BACKUP, 0x80);
-                                memcpy(g_joyRemapBackupJoy, fileBuffer + OFFSET_JOY_BACKUP, 0x80);
-                                memcpy(g_JoyRemapTbl[1],
-                                       g_isSideWinderConnected
-                                           ? g_joyRemapBackupJoy : g_joyRemapBackupKey,
-                                       0x80);
-                            }
-                        }
-                    }
-                }
+                RestoreSaveBlock(fileBuffer, fileSize);
 
                 g_main_state_flags |= 0x10000000;
                 g_playerEntityPointer.id = g_SelectedCharactedId;
@@ -1022,4 +1027,53 @@ void DebugSaveMenu(void)
         OutputDebugStringA(dbg);
     }
     g_SavesCounter++;
+}
+
+// ============================================================================
+// DebugQuick_SaveSlot / DebugQuick_LoadSlot (port-added) - slot save/load for
+// the F1 debug menu's QUICK ACCESS lists (DebugMenu.cpp), driven inline in the
+// debug menu instead of the real save/load screens.
+//
+// Save mirrors STATE_PERFORM_SAVE's player snapshot, then writes the 0x800
+// bio-card block the same way DebugSaveMenu (0x00494050) does - the load side
+// size-gates everything past 0x800, so the file stays valid for both the real
+// load screen and the quick access load.
+// Load mirrors STATE_LOAD_SLOT_SELECTED's block restore (RestoreSaveBlock) and
+// arms g_main_state_flags bit 0x10000000; the caller (GameLoop.cpp's quick
+// access load machine) then chains game_start, whose InitializeGame continue
+// branch rebuilds the saved stage from the restored card.
+// ============================================================================
+void DebugQuick_SaveSlot(int slot)
+{
+    // Snapshot the current player state into the bio card (STATE_PERFORM_SAVE)
+    g_PlayerPosXCopy         = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+    g_PlayerPosZCopy         = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+    g_SelectedCharactedId    = g_playerEntity.id;
+    g_PlayerHealthStatusCopy = g_playerEntity.healthStatusFlags;
+    g_PlayerDirAngleCopy     = g_playerEntity.directionAngle;
+
+    EnsureDirectoryExists(GAME_SAVE_ROOT);
+    sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slot + 1);
+    int written = FileWrite(g_saveFileName, g_BioCardData, 0x800);
+    if (g_SavesCounter + 1 < 100) {
+        g_SavesCounter = g_SavesCounter + 1;
+    }
+
+    dbg_printf("[debugmenu] quick save: slot %d -> '%s' (%s, %d bytes)\n",
+               slot + 1, g_saveFileName, (written < 0) ? "FAILED" : "OK", written);
+}
+
+void DebugQuick_LoadSlot(int slot)
+{
+    char fileBuffer[SAVE_FILE_SIZE + 8];
+    sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slot + 1);
+    int fileSize = ReadSaveFile(g_saveFileName, fileBuffer);
+    if (fileSize < 0x200) {
+        dbg_printf("[debugmenu] quick load: slot %d has no valid save\n", slot + 1);
+        return;
+    }
+    RestoreSaveBlock(fileBuffer, fileSize);
+    g_main_state_flags |= 0x10000000;   // InitializeGame continue branch
+    dbg_printf("[debugmenu] quick load: slot %d restored from '%s' (%d bytes)\n",
+               slot + 1, g_saveFileName, fileSize);
 }

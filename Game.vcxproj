@@ -123,6 +123,7 @@
     <ClCompile Include="src\game\MainLoop.cpp" />
     <ClCompile Include="src\game\LogosScreen.cpp" />
     <ClCompile Include="src\game\DebugScreens.cpp" />
+    <ClCompile Include="src\game\DebugMenu.cpp" />
     <ClCompile Include="src\game\GameStart.cpp" />
     <ClCompile Include="src\game\GameLoop.cpp" />
     <ClCompile Include="src\game\MainMenu.cpp" />

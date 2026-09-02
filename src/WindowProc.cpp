@@ -158,44 +158,25 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             if (wParam == VK_SNAPSHOT) {
                 CreateTimestampedLogFile();
             }
-            // Not in the original: F5 arms the ORIGINAL debug save menu
-            // (0x00494050). Nothing in the retail binary ever writes the flag
-            // at 0x004d4680 - Capcom devs set it with a debugger - so the key
-            // reproduces exactly that: raise the flag, game_loop's 0x00480f70
-            // branch runs the save task once and clears it. KEYUP (single-fire,
-            // no autorepeat); debug builds only.
-#ifdef _DEBUG
-            else if (wParam == VK_F5) {
-                g_displayDebugSaveMenu = 1;
-            }
             // Not in the original: F8 toggles the collision boundary overlay.
             // Handled on KEYUP like PrintScreen above, because WM_KEYDOWN
             // autorepeats while the key is held and would flip the toggle
-            // every repeat. Debug builds only. (Was F5 before the original
-            // debug save menu took that key.)
+            // every repeat. Only while debug features are enabled
+            // ([Debug] EnableDebug in config.ini).
             else if (wParam == VK_F8) {
-                g_bShowCollisionDebug = g_bShowCollisionDebug ? FALSE : TRUE;
+                if (g_debugFeaturesEnabled) {
+                    g_bShowCollisionDebug = g_bShowCollisionDebug ? FALSE : TRUE;
+                }
             }
-#endif
-            // Not in the original: debug helpers. F2 requests the save screen,
-            // F3 requests the item box menu, F6 the texture viewer overlay.
-            // Also KEYUP (single-fire, no autorepeat); the game loop consumes
-            // the flags. Debug builds only.
-#ifdef _DEBUG
-            else if (wParam == VK_F2) {
-                g_debugOpenSaveScreenFlag = 1;
-            }
-            else if (wParam == VK_F3) {
-                g_debugOpenItemboxFlag = 1;
-            }
+            // Not in the original: debug helpers. F6 requests the texture
+            // viewer overlay. Also KEYUP (single-fire, no autorepeat); the
+            // game loop consumes the flags. Only while debug features are
+            // enabled.
             else if (wParam == VK_F6) {
-                g_debugTextureViewerFlag = 1;
+                if (g_debugFeaturesEnabled) {
+                    g_debugTextureViewerFlag = 1;
+                }
             }
-            // F7: dump every draw command submitted for one frame.
-            else if (wParam == VK_F7) {
-                g_debugDumpDrawFlag = 1;
-            }
-#endif
             break;
         
         // --- WM_SYSCOMMAND ---

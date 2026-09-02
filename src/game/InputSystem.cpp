@@ -208,6 +208,24 @@ DWORD PlayerPad_Update(void)
 	// Part 6: Edge detect on DPad
 	g_PlayerDpadPressed = ~prevDpadState & g_PlayerDpadHeld;
 
+	// While the F1 debug menu is open, publish a blank pad to gameplay but
+	// keep the internal state (g_button_pressed_id, g_RawPadHeld,
+	// g_RawPadState, prevDpadState inputs) continuous. Blanking the published
+	// values here - instead of after debug_menu_overlay in game_loop - is
+	// what keeps that continuity: part 1 derives prevDpadState from
+	// g_button_pressed_id, so zeroing that global mid-session would re-mint
+	// every still-held key as a fresh rising edge on the frame the menu
+	// closes, firing the door / typewriter / item action the player stands in
+	// front of (ENTER/SPACE is the action key). The overlay itself samples
+	// the keyboard directly and is unaffected. g_debugMenuOpen stays 0 while
+	// debug features are disabled.
+	if (g_debugMenuOpen != 0) {
+		g_PlayerPadPressed = 0;
+		g_PlayerPadHeld = 0;
+		g_PlayerDpadHeld = 0;
+		g_PlayerDpadPressed = 0;
+	}
+
 	return g_button_pressed_id;
 }
 

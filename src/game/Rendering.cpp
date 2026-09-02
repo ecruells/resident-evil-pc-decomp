@@ -20,7 +20,11 @@ extern void rearrange_item_slots(void);
 // Pending sprite queue (filled by AddTintSprite / draw_rect / OT_InsertPrimitive,
 // rendered by FrameRateGovernor)
 // ============================================================================
-#define MAX_PENDING_SPRITES 300
+// 512: the F1 debug menu's flag editor pages a 32-byte bank as 16 rows of
+// per-glyph text sprites (~390 sprites with hints) - at the original 300 the queue
+// overflowed, silently dropping the bottom rows AND the background quad that
+// OT_InsertPrimitive adds at present time, which blacked the whole screen.
+#define MAX_PENDING_SPRITES 512
 
 // Pending sprites at or above this depth are scene elements drawn BEFORE the
 // 3D TMD pass (room backgrounds, window fills); below it they are overlays that
@@ -377,26 +381,6 @@ void FrameRateGovernor(void)
 
             FUN_0040a8f0(NULL);
 
-            // F7 (debug builds): dump one frame of every draw class.
-#ifdef _DEBUG
-            if (g_debugDumpDrawFlag) {
-                dbg_printf("[dump] ===== frame stage=%d room=%d cam=%d"
-                           " pending=%d sprites=%d =====\n",
-                           (int)g_stageId, (int)g_roomId, (int)g_roomCameraId,
-                           g_pendingSpriteCount, g_SpriteQueueCount);
-                for (int i = 0; i < g_pendingSpriteCount; i++) {
-                    PendingSprite* ps = &g_pendingSprites[i];
-                    dbg_printf("[dump]  pend#%3d valid=%d depth=%u tex=%u"
-                               " xywh=(%.0f,%.0f,%.0f,%.0f) uv=(%.3f,%.3f)-(%.3f,%.3f)"
-                               " color=%08X\n",
-                               i, ps->valid, ps->depth, (unsigned int)ps->tex,
-                               (float)ps->x, (float)ps->y, (float)ps->w, (float)ps->h,
-                               (float)ps->u0, (float)ps->v0, (float)ps->u1, (float)ps->v1,
-                               (unsigned int)ps->color);
-                }
-            }
-#endif
-
             // Sort pending sprites by depth (descending: high depth first = behind, low depth last = on top)
             for (int i = 0; i < g_pendingSpriteCount - 1; i++) {
                 for (int j = i + 1; j < g_pendingSpriteCount; j++) {
@@ -443,12 +427,13 @@ void FrameRateGovernor(void)
                 }
             }
 
-#ifdef _DEBUG
-            // Debug-only collision boundary overlay ([Debug] ShowCollision, F8).
-            // Between the background and the 3D so characters occlude the
-            // outlines and it reads as geometry lying on the floor.
+            // Collision boundary overlay ([Debug] ShowCollision, F8) - drawn
+            // only while debug features are enabled (the flag is set from
+            // config.ini / the F8 toggle under the same gate, and the draw
+            // itself early-returns on it). Between the background and the 3D
+            // so characters occlude the outlines and it reads as geometry
+            // lying on the floor.
             CollisionDebug_Draw();
-#endif
 
             // Render queued 3D TMD objects (entities, options-menu character)
             FlushTmdObjects();
@@ -531,9 +516,6 @@ void FrameRateGovernor(void)
         // of masks - each baked with a different screen-shake offset - could
         // end up on screen at once during the shake.
         ResetSpriteQueue();
-#ifdef _DEBUG
-        g_debugDumpDrawFlag = 0;   // F7 dump covers exactly one frame
-#endif
 
         g_frameTimeAccumulator -= g_frameTargetTime;
         if (g_frameTimeAccumulator < 0) g_frameTimeAccumulator = 0;
@@ -584,7 +566,14 @@ void OT_InsertPrimitive(void* prim, unsigned int depth)
     if (p[0] != 1) return;
 
     if (g_displayImageSRV == MARNI_NULL_HANDLE) return;
-    if ((g_main_state_flags & 0x40000000) != 0) return;
+    // Menu-mode bit hides the room bg quad (the real menus draw their own
+    // graphics). The F1 debug menu keeps the frozen game visible underneath,
+    // so don't drop the bg while it is open - its flag editor can set this
+    // very bit (g_main_state_flags is flag bank 5), which blacked the screen.
+    // g_debugMenuOpen stays 0 while debug features are disabled.
+    if ((g_main_state_flags & 0x40000000) != 0 && g_debugMenuOpen == 0) {
+        return;
+    }
     if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return;
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;

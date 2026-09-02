@@ -28,11 +28,14 @@ extern void room_events_check(void);
 extern void room_state_reset(void);
 extern void BuildSndFadeTbl(char distSteps, int fadeType);   // SoundSystem.cpp (0x0047ff90)
 
-// Debug: F2 save-screen request state machine (0 = idle, 1 = fade out,
-// 2 = save screen open, 3 = fade back in). Port-added, debug builds only.
-#ifdef _DEBUG
-static int g_debugSaveScreenState = 0;
-#endif
+// Debug: load-screen request state machine (0 = idle, 1 = fade out,
+// 2 = restore + restart). Port-added; armed by the F1 debug menu's QUICK
+// ACCESS load list with g_debugLoadSlot set (debug features enabled only).
+// Restores the picked slot's bio card (DebugQuick_LoadSlot) and takes the
+// title-load route into game_start: with g_main_state_flags bit 0x10000000
+// set, InitializeGame takes its continue branch and rebuilds the saved stage
+// (TitleScreen.cpp cases 2/3, GameStart.cpp InitializeGame).
+static int g_debugLoadScreenState = 0;
 
 // ============================================================================
 // game_loop (0x00480b30)
@@ -109,45 +112,40 @@ LAB_00480c33:
             check_typewriter_state();
             check_event_item_usage();
 
-            // ---- Debug: F2 opens the save screen directly (no ink ribbon) ----
-            // Mirrors check_typewriter_state's fade-out -> LoadSaveGameState ->
-            // fade-back-in sequence, with useInkRibbon = 0 so nothing is consumed.
-#ifdef _DEBUG
-            if (g_debugOpenSaveScreenFlag != 0) {
-                g_debugOpenSaveScreenFlag = 0;
+            // Debug: quick access load. Fade-out gate; restores the slot
+            // picked in the debug menu's load list. The arming flag is only
+            // ever set while debug features are enabled.
+            // DebugQuick_LoadSlot only RETURNS on success (an invalid slot is
+            // rejected by the menu), and Task_chain(game_start) below replaces
+            // this task, so state 2 never falls through.
+            if (g_debugOpenLoadScreenFlag != 0) {
+                g_debugOpenLoadScreenFlag = 0;
                 if ((g_openMenuFlag == 0) && (g_loadSaveStateFlag == 0) &&
                     ((g_main_state_flags & 0x8000) == 0)) {
-                    g_debugSaveScreenState = 1;
+                    g_debugLoadScreenState = 1;
                 }
             }
-            switch (g_debugSaveScreenState) {
+            switch (g_debugLoadScreenState) {
             case 1: // fade out to black
                 g_fade_type_id = 2;
                 g_fading_counter = 0x1000;
                 fade_update();
-                g_debugSaveScreenState = 2;
+                g_debugLoadScreenState = 2;
                 break;
-            case 2: // black reached: open the save screen (blocking)
+            case 2: // black reached: restore the slot, restart gameplay
                 if ((short)g_fading_state < 0) {
-                    LoadSaveGameState(0, (int)g_loadDataDestPointer, 0, 2, 0);
+                    // Title load flow (TitleScreen.cpp cases 2/3): the restored
+                    // card carries 0x10000000 in g_main_state_flags, so
+                    // InitializeGame's continue branch rebuilds the saved stage
+                    DebugQuick_LoadSlot(g_debugLoadSlot);
                     g_loadSaveStateFlag = 0;
-                    cut_set();
-                    g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x80000000;
-                    StMask(1, 0);
-                    g_fade_type_id = 2;
-                    g_fading_counter = 0xf000;
-                    fade_update();
-                    g_debugSaveScreenState = 3;
-                }
-                break;
-            case 3: // wait for fade back in
-                if ((short)g_fading_state < 0) {
-                    g_debugSaveScreenState = 0;
-                    ((unsigned char*)&g_message_flags)[0] |= 0x45;
+                    Game_timer = g_gameTimerSnapshot;
+                    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+                    g_debugLoadScreenState = 0;     // not reached: Task_chain swaps the task
+                    Task_chain((void*)game_start);
                 }
                 break;
             }
-#endif
 
             // 0x00480c6a-0x00480ca0: Countdown timer management (self-destruct)
             if ((DAT_004d2294 > 29) || (g_CountdownTimer == 0x7FFF)) {
@@ -176,12 +174,21 @@ LAB_00480d7c:
                 // 0x00475700); room_events_check and room_state_reset used to be
                 // commented out here, which meant no room event script ever
                 // advanced during gameplay.
-                run_command_functions((unsigned short*)g_RoomScdOpcodes);
-                room_events_check();
-                room_state_reset();
+                //
+                // Debug menu open: skip them along with the rest of the pause
+                // (update_entities / scene render below). The scripts test the
+                // same flag banks the flag editor writes - letting them run
+                // fires the script's event branch (fade-out, cutscene) the
+                // moment a bit is toggled, blacking the background.
+                // g_debugMenuOpen stays 0 while debug features are disabled.
+                if (g_debugMenuOpen == 0) {
+                    run_command_functions((unsigned short*)g_RoomScdOpcodes);
+                    room_events_check();
+                    room_state_reset();
 
-                // 0x00480d98: Check interactive screen display
-                check_and_display_interactive_screen();
+                    // 0x00480d98: Check interactive screen display
+                    check_and_display_interactive_screen();
+                }
 
                 // 0x00480d9d-0x00480dcd: Handle game reset request (F9 key)
                 if (g_resetGameFlag != 0) {
@@ -203,12 +210,13 @@ LAB_00480d7c:
                 // 0x00480de8-0x00480e89: Menu button detection
                 WORD savedMsgFlags = g_message_flags;
 
-                // Debug: F3 opens the item box directly. Sets menu mode 2
+                // Debug: opens the item box (the F1 debug menu's quick access
+                // ITEMBOX entry arms g_debugOpenItemboxFlag). Sets menu mode 2
                 // (0x1000, consumed by main_menu's mode scan) and requests the
                 // menu through the same g_openMenuFlag path as the START button.
                 // The mode bits are cleared when the menu closes
                 // (menu_restore_game_state: g_main_state_flags &= 0xFFFF00FF).
-#ifdef _DEBUG
+                // Only armed while debug features are enabled.
                 if (g_debugOpenItemboxFlag != 0) {
                     g_debugOpenItemboxFlag = 0;
                     if ((g_openMenuFlag == 0) && (g_loadSaveStateFlag == 0) &&
@@ -233,8 +241,20 @@ LAB_00480d7c:
                         g_debugTextureViewerOpen = 0;
                     }
                 }
-#endif
 
+                // Debug: F1 opens the interactive debug menu overlay. While it
+                // reports open, gameplay is paused underneath: skip
+                // update_entities below, and the pad is blanked for this
+                // frame by PlayerPad_Update (InputSystem.cpp), which keeps
+                // the raw/edge history continuous so closing the menu does
+                // not re-fire held keys as fresh presses. Confirming "ROOM
+                // CHANGE" closes it and hands a synthetic door record to
+                // game_loop's menu path (DebugMenu.cpp).
+                if (debug_menu_overlay() != 0) {
+                    g_debugMenuOpen = 1;
+                } else {
+                    g_debugMenuOpen = 0;
+                }
                 if (((g_playerEntity.isBeingAttackedFlag == 0) &&
                      ((g_message_flags & 0x100) != 0) &&
                      ((g_message_flags & 0x40) != 0) &&
@@ -261,7 +281,11 @@ LAB_00480d7c:
 
 LAB_00480e89:
                 // 0x00480e89-0x00480ebd: Update entities and player
-                update_entities();
+                // Debug menu open: pause entity/enemy updates while it is up.
+                // g_debugMenuOpen stays 0 while debug features are disabled.
+                if (g_debugMenuOpen == 0) {
+                    update_entities();
+                }
 
                 if (((g_playerEntity.zoneFlags & 0x20) != 0) ||
                     ((g_message_flags & 0x100) == 0))
@@ -275,46 +299,52 @@ LAB_00480e89:
                 g_main_state_flags2 &= ~1;
                 update_player_position(&g_playerEntity, 1);
 
-                // 0x00480ecf-0x00480ed4: Screen effects, then the room 3D-object
-                // pass (collision + the walk-into-it push driver).
-                DrawFadeSpr();
-                update_room_objects();
+                // 0x00480ecf-0x00480f70: Screen effects, room objects, entity
+                // and player rendering, 2D effects and room sprites.
+                // Debug menu open: skip the whole scene render so the pending
+                // queue only holds the menu box + text (drawn over the last
+                // presented frame) and nothing draws on top of the menu.
+                // g_debugMenuOpen stays 0 while debug features are disabled.
+                if (g_debugMenuOpen == 0) {
+                    DrawFadeSpr();
+                    update_room_objects();
 
-                // 0x00480ed4: Draw the room's own 3D objects (omodels + item models)
-                if (g_dwRoomObjectRenderEnabled != 0) {
-                    render_room_objects();
-                }
-
-                // 0x00480ee5-0x00480f52: Entity rendering loop (enemies).
-                // EntityComputeJointWorldMatrices, EntityApplyLookAtRotation and
-                // render_entity all operate on the GLOBAL ENTITY pointer,
-                // so the loop has to advance that global — walking a local copy
-                // leaves every helper transforming whichever entity was set last.
-                ENTITY = g_EnemiesList;
-                int entCount = g_enemy_count;
-                while (entCount != 0) {
-                    if ((ENTITY->status_flags & 0x01) != 0) {
-                        entCount = entCount - 1;
-                        EntityComputeJointWorldMatrices(*(unsigned short*)&ENTITY->pad_ca);
-                        EntityApplyLookAtRotation();
-                        if (g_dwEntityRenderEnabled != 0) {
-                            render_entity(ENTITY);
-                        }
+                    // 0x00480ed4: Draw the room's own 3D objects (omodels + item models)
+                    if (g_dwRoomObjectRenderEnabled != 0) {
+                        render_room_objects();
                     }
-                    ENTITY++;
-                }
 
-                // 0x00480f54-0x00480f89: Player entity rendering
-                ENTITY = (Entity*)&g_playerEntity;
-                EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
-                EntityApplyLookAtRotation();
-                if (g_dwEntityRenderEnabled != 0) {
-                    render_entity((Entity*)&g_playerEntity);
-                }
+                    // 0x00480ee5-0x00480f52: Entity rendering loop (enemies).
+                    // EntityComputeJointWorldMatrices, EntityApplyLookAtRotation and
+                    // render_entity all operate on the GLOBAL ENTITY pointer,
+                    // so the loop has to advance that global — walking a local copy
+                    // leaves every helper transforming whichever entity was set last.
+                    ENTITY = g_EnemiesList;
+                    int entCount = g_enemy_count;
+                    while (entCount != 0) {
+                        if ((ENTITY->status_flags & 0x01) != 0) {
+                            entCount = entCount - 1;
+                            EntityComputeJointWorldMatrices(*(unsigned short*)&ENTITY->pad_ca);
+                            EntityApplyLookAtRotation();
+                            if (g_dwEntityRenderEnabled != 0) {
+                                render_entity(ENTITY);
+                            }
+                        }
+                        ENTITY++;
+                    }
 
-                // 0x00480f6e-0x00480f70: 2D effects and room sprites
-                update_2d_effects();
-                DrawRoomSpr();
+                    // 0x00480f54-0x00480f89: Player entity rendering
+                    ENTITY = (Entity*)&g_playerEntity;
+                    EntityComputeJointWorldMatrices(g_playerEntity.unk_ca);
+                    EntityApplyLookAtRotation();
+                    if (g_dwEntityRenderEnabled != 0) {
+                        render_entity((Entity*)&g_playerEntity);
+                    }
+
+                    // 0x00480f6e-0x00480f70: 2D effects and room sprites
+                    update_2d_effects();
+                    DrawRoomSpr();
+                }
 
                 // 0x00480f70-0x00480f90: Debug save menu
                 if (g_displayDebugSaveMenu == 0) {
@@ -479,6 +509,11 @@ switchD_00480ff4_caseD_2:
         } else {
             // First load or room transition: restore room state
             room_transition_load();
+            // Debug menu room change: place the player at the destination
+            // room's first door once the room is loaded (DebugMenu.cpp). No-op
+            // for normal door transitions (and always a no-op while debug
+            // features are disabled: the arming flag is never set).
+            DebugRoomChange_ApplyPendingPlacement();
             g_short_message_flags = 0xFFFF;
         }
 
