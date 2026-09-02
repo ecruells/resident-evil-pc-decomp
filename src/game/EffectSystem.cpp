@@ -2468,37 +2468,6 @@ static const unsigned char g_EffectBlendStart[32] = {
 // `texVHack` enables the stage-6 room-0xc tint remap and `stage4Special` the
 // stage-4 room-0x13 camera-5 fixed-depth draw; both are in-game-path only.
 // ============================================================================
-// DIAGNOSTIC: log the cull stage and submit values of the first effect that
-// reaches effect_submit_sprite per unique (stage, slot, screen) key. The
-// effect system renders nothing at the moment; this shows where the submit
-// stops and what reaches SubmitEffectSprite. Remove once verified.
-static void effect_submit_diag(int stage, Effect* eff, int sheetSlot,
-                               short screenX, short screenY, int depth,
-                               int scale, unsigned char srvNull)
-{
-    // Keyed PER EFFECT TYPE. A single last-value key hid the fact that only one
-    // type was ever reaching this function: a second type culled at a different
-    // stage would overwrite the key and then be suppressed on the next frame
-    // when the first type reported again. Per-type makes "type 9 never appears
-    // here at all" readable instead of ambiguous.
-    static int lastStage[256];
-    static int lastSlotT[256];
-    static int inited = 0;
-    if (!inited) {
-        inited = 1;
-        for (int i = 0; i < 256; i++) { lastStage[i] = -1; lastSlotT[i] = -1; }
-    }
-    unsigned char t = eff->effectType;
-    if (stage == lastStage[t] && sheetSlot == lastSlotT[t]) return;
-    lastStage[t] = stage; lastSlotT[t] = sheetSlot;
-    // dbg_printf("[effect] submit stage=%d type=%u slot=%d srvNull=%u"
-    //            " scr=(%d,%d) depth=%d scale=%d u=%u v=%u w=%u h=%u\n",
-    //            stage, (unsigned int)eff->effectType, sheetSlot, (unsigned int)srvNull,
-    //            (int)screenX, (int)screenY, depth, scale,
-    //            (unsigned int)g_TextureDesc.texU, (unsigned int)g_TextureDesc.texV,
-    //            (unsigned int)g_TextureDesc.width, (unsigned int)g_TextureDesc.height);
-}
-
 static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
                                  int scaleDivisor, unsigned int depth,
                                  int texVHack, int stage4Special)
@@ -2564,14 +2533,12 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
 
     // ---- distance cull ----
     if ((depth & 0xfffffff0u) > 0x3fff) {
-        effect_submit_diag(1, eff, -1, screenX, screenY, (int)depth, scale, 1);
         return;
     }
 
     // ---- sprite-depth slot (the room effect sprite table, see above) ----
     unsigned int rec = effect_depth_record();
     if (rec == 0xFF) {
-        effect_submit_diag(2, eff, -1, screenX, screenY, (int)depth, scale, 1);
         return;
     }
     if (rec >= 32) return;   // port-only: the original would read past the table
@@ -2689,7 +2656,6 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     // (Effect_CreateBillboard rejects unloaded sprite types).
     unsigned char sheetSlot = g_effectSpriteSheetSlot[eff->effectType];
     if (sheetSlot == 0xFF) {
-        effect_submit_diag(3, eff, -1, screenX, screenY, (int)depth, scale, 1);
         return;
     }
     int texSlot = 3 + (int)sheetSlot;
@@ -2760,9 +2726,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     int submitted = SubmitEffectSprite(&g_TextureDesc, (int)depthArg, texSlot,
                                        color[0], color[1], color[2],
                                        scaleXadd, scaleYadd, (int)blendMode, (short)brightness);
-    effect_submit_diag(4 + submitted, eff, texSlot, screenX, screenY,
-                       (int)depth, scale,
-                       (unsigned char)(g_TexturePageSRV[texSlot] == MARNI_NULL_HANDLE));
+    (void)submitted;
 
     unsigned int depthSort = depth >> 4;
     if (depthSort < (unsigned int)g_MaxHealthDisplayFlag) {
@@ -2874,40 +2838,6 @@ void EffectActor_UpdateAndRender(void)
         Effect_AnimateSprite();
     }
 
-    // DIAGNOSTIC: why did this slot not draw?
-    //
-    // ROOM1000's opcode-0x2A effects (type 9) spawn and expire without ever
-    // reaching effect_submit_sprite, and none of the cull stages inside that
-    // function fire - so the rejection is one of the two gates below, or the
-    // slot never gets here at all. Static analysis cleared both header bits
-    // (type 9 depth 7 is hdr10=0x03 hdr11=0x70) and the zone quad (the effect's
-    // world XZ 4420,3800 is inside the first switch zone of every ROOM1000
-    // camera), so this reports what the values actually are at runtime.
-    //
-    // Keyed per effectType so each type reports once per changed outcome
-    // instead of once per frame. Remove once the effects render.
-    {
-        static unsigned char lastReason[256] = {};
-        unsigned char reason = 1;                        // 1 = drew
-        if ((eff->animHeader[11] & 0x80) != 0) reason = 2;
-        else if (is_entity_in_switch_zone(&local_10, g_CurrentRdtDataTypePtr) == 0) reason = 3;
-        if (lastReason[eff->effectType] != reason) {
-            lastReason[eff->effectType] = reason;
-            const char* why = (reason == 2) ? "hdr11 bit7 set"
-                            : (reason == 3) ? "outside switch zone"
-                            : "DREW";
-            dbg_printf("[effect] slot %u type=%u anim=%u upd=%u hdr10=%02X hdr11=%02X"
-                       " world=(%d,%d,%d) scr=(%d,%d) projDepth=%u zonePtr=%p -> %s\n",
-                       (unsigned int)g_activeEffectIndex,
-                       (unsigned int)eff->effectType,
-                       (unsigned int)eff->animId, (unsigned int)eff->updateId,
-                       (unsigned int)eff->animHeader[10], (unsigned int)eff->animHeader[11],
-                       (int)local_10.x, (int)local_10.y, (int)local_10.z,
-                       (int)local_1c.x, (int)local_1c.y,
-                       (unsigned int)eff->projDepth, g_CurrentRdtDataTypePtr, why);
-        }
-    }
-
     if ((eff->animHeader[11] & 0x80) != 0) return;
 
     if (is_entity_in_switch_zone(&local_10, g_CurrentRdtDataTypePtr) == 0) return;
@@ -2986,25 +2916,6 @@ void update_2d_effects(void)
 {
     MATRIX tempMatrix;
     static const int g_EffectPoolFlag = 1;   // 0x004c59bc
-
-    // DIAGNOSTIC: log the active-slot count once per change. The whole
-    // billboard system was recently ported; this is the one seam that cannot be
-    // checked statically. If muzzle flashes / blood / fire never appear, this
-    // line tells whether effects are being spawned at all. Remove once verified.
-    {
-        static int lastActive = -1;
-        int active = 0;
-        for (int i = 0; i < MAX_EFFECTS; i++) {
-            if (g_effectPool[i].animId != 0) active++;
-        }
-        if (active != lastActive) {
-            lastActive = active;
-            // dbg_printf("[effect] update_2d_effects: %d/%d slots active"
-            //            " (free=%u flags=%u)\n",
-            //            active, MAX_EFFECTS,
-            //            (unsigned int)g_freeEffectSlots, (unsigned int)g_message_flags);
-        }
-    }
 
     if (g_EffectPoolFlag != 0) {
         g_activeEffectIndex = 64;
