@@ -735,8 +735,19 @@ extern const unsigned char DAT_004b92f0[] = {
     0x00, 0x03, 0x02, 0x01, 0x02, 0x03, 0x00, 0x00
 };
 
-extern const unsigned char DAT_004b92f8[] = {
-    0x00, 0x02, 0x01, 0x02, 0x00, 0x02, 0x01, 0x02
+// DAT_004b92f8 - danger/poison word flash variants, indexed by the EKG sweep
+// position (FUN_004387e0 over DAT_004b92e0). The scan's maximum index is 8
+// (entry [8] = 0x50 is never consumed), and menu_draw_health_bar indexes this
+// table with it. The original image keeps 16 zero bytes at 0x004b9300 right
+// after the 8 entries, so index 8 reads 0 = "don't draw the word" (part of
+// the blink pattern). Without the tail the index-8 read picks up the first
+// byte of ekg_wave_00 (0x1C) and the word tile wraps to the wrong row:
+// danger drew a "Fine" tile (texV 0x10) and poison a caution/danger flash
+// tile (texV 0x20) for the last two frames of every EKG sweep.
+extern const unsigned char DAT_004b92f8[24] = {
+    0x00, 0x02, 0x01, 0x02, 0x00, 0x02, 0x01, 0x02,
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,   // 0x004b9300
+    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00    // 0x004b9308
 };
 
 // ============================================================================

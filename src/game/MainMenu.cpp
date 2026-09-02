@@ -4962,21 +4962,20 @@ static int menu_itembox_interaction(void)
 // backwards from the end of each table.
 // ============================================================================
 
-// 0x004d4430 - frame textures, 7 entries of {screenX, screenY, width, height,
-// texU, texV} + 2 pad bytes (drawn 7th..1st in memory order):
+// 0x004d4430 - frame textures, 5 entries of {screenX, screenY, width, height,
+// texU, texV} + 2 pad bytes (drawn 5th..1st in memory order):
 //   preview border (42x32 at 0x10,0x30), down arrow (8x7), up arrow (8x7),
-//   then the green item-list frame. The original's table carries only the
-//   top/bottom lines at (0x41, 0x33/0x50) - offset 23px right and one name
-//   height below the 3-name list (x=0x2a, y=0x23..0x50) - and no side pieces.
-//   The panel texture (itemboxn.tim rows 0-47) has green edges on all four
-//   sides (row 0, row 47, column 0, column 127), so the frame is built from
-//   it: top at the first name's row, bottom at the last name's row, and 1px
-//   side columns at the panel's edges.
-static const unsigned char s_itemboxFramePartsA[84] = {
-    0x2a,0x00,0x23,0x00,0x80,0x00,0x01,0x00,0x00,0x00,0x00,0x00, // drawn 7th: top line (42, 35)
-    0x2a,0x00,0x50,0x00,0x80,0x00,0x01,0x00,0x00,0x00,0x2f,0x00, // drawn 6th: bottom line (42, 80)
-    0x2a,0x00,0x23,0x00,0x01,0x00,0x2e,0x00,0x00,0x00,0x00,0x00, // drawn 5th: left side (42, 35) 1x46
-    0xaa,0x00,0x23,0x00,0x01,0x00,0x2e,0x00,0x7f,0x00,0x00,0x00, // drawn 4th: right side (170, 35) 1x46
+//   and the green item-list frame's top/bottom 1px lines at (41,33)/(41,80)
+//   - DECIMAL (the port once read them as hex 0x41/0x33 and "corrected" them
+//   to (42,35), which parked the top line inside the top shadow rect
+//   y=34..48: the 50% shadow blended the bright green (48,216,16) into dark
+//   green, and the 2px strip y=33..34 the line used to cover let sliding
+//   names peek above the border). The lines sample the itemboxn panel's
+//   green edge rows (row 0 / row 47). The frame's side borders and the blue
+//   list background come from the table C panel piece below, not from here.
+static const unsigned char s_itemboxFramePartsA[60] = {
+    0x29,0x00,0x21,0x00,0x80,0x00,0x01,0x00,0x00,0x00,0x00,0x00, // drawn 5th: top line (41, 33) panel row 0
+    0x29,0x00,0x50,0x00,0x80,0x00,0x01,0x00,0x00,0x00,0x2f,0x00, // drawn 4th: bottom line (41, 80) panel row 47
     0xaf,0x00,0x18,0x00,0x08,0x00,0x07,0x00,0x48,0x00,0x38,0x00, // drawn 3rd: up arrow
     0xaf,0x00,0x53,0x00,0x08,0x00,0x07,0x00,0x48,0x00,0x40,0x00, // drawn 2nd: down arrow
     0x5b,0x00,0x57,0x00,0x2a,0x00,0x20,0x00,0x10,0x00,0x30,0x00, // drawn 1st: preview border
@@ -4993,12 +4992,20 @@ static const unsigned char s_itemboxMaskRects[40] = {
 };
 
 // 0x004d4470 - trailing frame textures, 3 entries (drawn 3rd..1st in memory
-// order): bottom half-arrow, top arrow, box-full corner piece (dead draw:
-// its texU 0x80 samples past the 128px-wide page and never resolves)
+// order): the item-list box interior piece, the bottom half-arrow, the top
+// arrow. Entry 1 is the heart of the list box look: the itemboxn panel's
+// rows 1..46 (128x46) drawn at (41,34) - its blue interior texels fill the
+// list background and its green edge columns (panel col 0 / col 127) are the
+// frame's side borders, closing the rectangle against the table A lines at
+// y=33/80. The two 50% shadow rects dim its first/third name rows, which is
+// what makes the selected (middle) row read lighter. The port once stored
+// this entry 4 bytes early (straddling the 0x004d446c padding), producing
+// (0,0,65,34,u=0x80,v=0x2e) - a draw that samples past the texture page and
+// renders nothing, leaving the list box black with fabricated 1px sides.
 static const unsigned char s_itemboxFramePartsC[36] = {
-    0x00,0x00,0x00,0x00,0x41,0x00,0x22,0x00,0x80,0x00,0x2e,0x00, // drawn 3rd
-    0xaf,0x00,0x20,0x00,0x08,0x00,0x20,0x00,0x00,0x00,0x30,0x00, // drawn 2nd
-    0xaf,0x00,0x40,0x00,0x08,0x00,0x12,0x00,0x08,0x00,0x30,0x00, // drawn 1st
+    0x29,0x00,0x22,0x00,0x80,0x00,0x2e,0x00,0x00,0x00,0x01,0x00, // drawn 3rd: list box interior + side borders (41, 34) 128x46
+    0xaf,0x00,0x20,0x00,0x08,0x00,0x20,0x00,0x00,0x00,0x30,0x00, // drawn 2nd: bottom half-arrow
+    0xaf,0x00,0x40,0x00,0x08,0x00,0x12,0x00,0x08,0x00,0x30,0x00, // drawn 1st: top arrow
 };
 
 // (0x00494730) - Load item box menu textures
@@ -5039,11 +5046,17 @@ static void draw_itembox_menu(void)
 
     // 0x004948d5-0x004949ad: Shadow rects above the item list and cursor
     // highlight rects while the box is in cursor mode (DAT_00ae9f20 < 2).
-    // These rects are drawn with blend=50 (depth 500) instead of the original
-    // blend=0 (depth 450): the port's renderer draws pending sprites with
-    // depth < 500 AFTER the sprite command buffer, so at 450 the shadows
-    // covered the item-list frame and the names. Depth 500 puts them in the
-    // background pass - shading behind the list content, as intended.
+    // These rects are drawn with blend=51 (pending depth 501) instead of the
+    // original blend=0 (450): pending rects and command sprites interleave in
+    // one far-to-near walk, and a depth-500 rect is drawn AFTER the
+    // FlushSpriteCommandsRange(500, ...) that emits the green frame lines
+    // (command depthSort = depth*16+500 = 500) - the 50% shadow landed on top
+    // of the frame and blended the bright green into dark green. At 501 the
+    // walk emits the shadow first and the frame lines after it, which is the
+    // original layering: the shadow dims the list content (top name row,
+    // table C panel piece) while the frame stays bright. The masks (450)
+    // still draw over everything in the final pass, clipping the sliding
+    // names to the list box.
     g_rect.r = 112;
     g_rect.g = 112;
     g_rect.y = 34;
@@ -5052,19 +5065,19 @@ static void draw_itembox_menu(void)
     g_rect.x = 42;
     g_rect.w = 126;
     g_rect.h = 15;
-    draw_rect(&g_rect, 50, 0);
+    draw_rect(&g_rect, 51, 0);
     g_rect.y = 0x40;
     g_rect.h = 0x10;
-    draw_rect(&g_rect, 50, 0);
+    draw_rect(&g_rect, 51, 0);
     if (DAT_00ae9f20 < 2) {
         g_rect.y = 34;
         g_rect.h = 0x2e;
-        draw_rect(&g_rect, 50, 0);
+        draw_rect(&g_rect, 51, 0);
         g_rect.x = 0x5c;
         g_rect.y = 0x58;
         g_rect.w = 0x28;
         g_rect.h = 0x1e;
-        draw_rect(&g_rect, 50, 0);
+        draw_rect(&g_rect, 51, 0);
     }
 
     // 0x004949ad-0x00494a01: Small rects (scrollbar track on the right)
@@ -5078,16 +5091,15 @@ static void draw_itembox_menu(void)
     draw_rect(&g_rect, 0, 0);
 
     // Draw the box frame textures (preview border, arrows, item-list frame).
-    // The original draws these before the shadow rects, which was harmless at
-    // its line positions (y=51/80); with the frame moved up to enclose the
-    // name list (y=35..80) the shadow rects (y=34..49 and y=64..80) would
-    // darken the top/bottom borders, so the frame is drawn after them.
+    // Submission order does not decide the result here - the interleaved
+    // render walk orders by depth (shadows 501, frame commands 500, masks
+    // 450) - so the pieces are submitted in the original's order.
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.printClutTint = 0x1fc;
     g_TextureDesc.depth = 0x15;
     g_CurrentMenuFramesDataPtr = (unsigned short*)(s_itemboxFramePartsA + sizeof(s_itemboxFramePartsA));
     g_TextureDesc.unk10 = 0;
-    for (int i = 0; i < 7; i++) {
+    for (int i = 0; i < 5; i++) {
         load_main_menu_frame_part_tex_area();
         draw_texture(&g_TextureDesc, 0);
     }
