@@ -1798,24 +1798,150 @@ static void player_update_shadow_sprite(int posPtr, int sprPtr, int height, int 
 }
 
 // ----------------------------------------------------------------------------
-// FUN_00429d50 (0x00429d50) — DEFERRED body, faithful gate.
-// Applies falling physics to joint 15 and draws it through the function table at
-// 0x004ba950 (indexed by that joint's rotDeltaX). The whole body is gated on
-// jointsStructs[15].velZ != 0, which is zero for a normally initialized player,
-// so this is behaviourally identical to the original until a limb detaches.
-// The 0x004ba950 table has not been extracted yet.
+// The ejected magazine - FUN_00429d50 (0x00429d50) plus the three-state table
+// at 0x004ba950.
+//
+// LoadEntityModel bumps jointCount by one across a single SetupJointStructures
+// call, so the player skeleton owns a SIXTEENTH joint (index 15) that no
+// animation drives: it carries the empty clip's own TMD. The beretta's reload
+// routine (0x00458ff0, frame 0xa) arms it through 0x0042a000, and this runs its
+// physics and draws it every frame while jointsStructs[15].velZ != 0. That
+// joint's spare shorts are the entire state:
+//
+//   velX      (0x70) vertical velocity   rotDeltaX (0x76) state index (0-2)
+//   velY      (0x72) Y position tracker  rotDeltaY (0x78) bounce/dust latch
+//   velZ      (0x74) active flag         rotDeltaZ (0x7A) floor Y at eject time
+//
+// Y grows DOWNWARD, so gravity adds to velX and "hit the floor" is velY passing
+// rotDeltaZ. ClearAnimTiming (0x00429d30) zeroes velZ/rotDeltaX, which is why a
+// normally initialised player never enters any of this.
+//
+// The port had the gate but a deferred body, so the beretta armed the clip and
+// then nothing ever integrated or drew it - the magazine never fell out.
 // ----------------------------------------------------------------------------
-static void player_update_detached_joint(void)
+
+extern void update_entity_lighting(VECTOR* entityPos);   // 0x00481660 (TmdRenderer.cpp)
+
+// 0x00429e60 - state 0: spawn. Seats the clip on the weapon joint's world pose
+// and gives it a fixed z-rotation of 0x400; the copies from the hand joint's
+// rotation are immediately overwritten, which the original does too.
+static void player_clip_state_0_spawn(JointStruct* clip)
+{
+    JointStruct* hand = &g_playerEntity.jointsStructs[0xe];   // jointsStructs + 0x6c8
+
+    clip->rotDeltaX++;                       // -> state 1
+    clip->world = hand->world;               // REP MOVSD, 8 dwords
+
+    clip->transform.t[0] = 0;
+    clip->transform.t[1] = 0;
+    clip->transform.t[2] = 0;
+
+    clip->rotation   = hand->rotation;
+    clip->velX       = 0x50;
+    clip->velY       = (short)clip->world.t[1];
+    clip->rotation.z = 0x400;
+    clip->rotation.x = 0;
+    clip->rotation.y = 0;
+    clip->rotDeltaY  = 0;
+    clip->rotDeltaZ  = (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
+}
+
+// 0x00429ed0 - state 1: the fall. Gravity plus a tumble on X, one dust puff the
+// first time the clip drops past the room's reference height (the same
+// g_omodel_table[0]+0x38 the knife swing tests), then the floor hit: bounce the
+// velocity, snap Y to the floor and play the impact.
+static void player_clip_state_1_fall(JointStruct* clip)
+{
+    const short bounced = clip->rotDeltaY;
+
+    clip->velX       = (short)(clip->velX + (short)((1 - bounced) * 0x14));
+    clip->rotation.x = (short)(clip->rotation.x + (short)((bounced + 1) * 0x10));
+
+    if (bounced == 0 && (g_main_state_flags2 & 1) != 0
+        && *(int*)((char*)g_omodel_table[0] + 0x38) < (int)clip->velY) {
+        g_playerPosScratch.x   = *(int*)((char*)g_deadMoveValue + 0x14);
+        g_playerPosScratch.y   = *(int*)((char*)g_deadMoveValue + 0x18);
+        g_playerPosScratch.z   = *(int*)((char*)g_deadMoveValue + 0x1c);
+        g_playerPosScratch.pad = *(int*)((char*)g_deadMoveValue + 0x20);
+        Effect_CreateBillboard(0x17, 8, 0, (void*)g_deadMoveValue, clip->world.t, 0);
+        clip->rotDeltaY = 1;
+        return;
+    }
+
+    const short floorY = clip->rotDeltaZ;
+    if (clip->velY > floorY) {
+        clip->velX = -0x50;
+        clip->rotDeltaX++;                   // -> state 2
+        clip->velY = floorY;
+        clip->world.t[1] = (int)floorY - clip->transform.t[1];
+
+        g_playerPosScratch.x = clip->world.t[0] + clip->transform.t[0];
+        g_playerPosScratch.y = clip->transform.t[1] + clip->world.t[1];
+        g_playerPosScratch.z = clip->world.t[2] + clip->transform.t[2];
+        Play3DSnd(2, 0x15, 0, (int)&g_playerPosScratch);
+    }
+}
+
+// 0x00429fb0 - state 2: the bounce. Skitters away on X/Z while tumbling on both
+// axes; once it drops back past the floor the clip switches itself off.
+static void player_clip_state_2_bounce(JointStruct* clip)
+{
+    const short bounced = clip->rotDeltaY;
+    const short swing   = (short)(2 - bounced);
+
+    clip->world.t[2] += 0xa;
+    clip->world.t[0] += 0x14;
+
+    clip->rotation.x = (short)(clip->rotation.x + (short)(swing << 7));
+    const short y    = clip->velY;
+    clip->rotation.y = (short)(clip->rotation.y + (short)(swing << 6));
+    clip->velX       = (short)(clip->velX + (short)((bounced + 1) * 0xf));
+
+    if (clip->rotDeltaZ < y) {
+        clip->velZ = 0;
+    }
+}
+
+static void player_update_detached_joint(void)   // 0x00429d50
 {
     JointStruct* joints = g_playerEntity.jointsStructs;
     if (joints == NULL) return;
-    if (((g_playerEntity.zoneFlags & 0x7f) != 0) && (joints[0xf].velZ != 0)) {
-        static bool reported = false;
-        if (!reported) {
-            reported = true;
-            dbg_printf("[player] detached-joint physics hit (FUN_00429d50 body missing)\n");
-        }
+    if ((g_playerEntity.zoneFlags & 0x7f) == 0) return;
+
+    JointStruct* clip = &joints[0xf];
+    if (clip->velZ == 0) return;
+
+    // 0x00429d7a: the caller integrates; the state routines only set velocities.
+    clip->world.t[1] += (int)clip->velX;
+    clip->velY = (short)(clip->velY + clip->velX);
+
+    // 0x00429d8e: CALL [rotDeltaX*4 + 0x004ba950]. Only 0/1/2 are ever stored.
+    switch (clip->rotDeltaX) {
+    case 0: player_clip_state_0_spawn(clip);  break;
+    case 1: player_clip_state_1_fall(clip);   break;
+    case 2: player_clip_state_2_bounce(clip); break;
+    default: break;
     }
+
+    // The clip is then drawn as its own TMD off joint 15's slot, exactly the way
+    // tyrant_draw_heart draws the detached heart.
+    if (clip->anim_slot_ptr == 0) return;   // the original dereferences this unchecked
+
+    update_entity_lighting((VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t);
+
+    MATRIX local;
+    RotMatrix(&clip->rotation, &clip->transform);
+    ApplyLVAndMul0Matrix(&clip->world, &clip->transform, &local);
+    CompMatrix((MATRIX*)g_RoomCameraDataCopy, &local, &g_matrixScratch);
+    MulMatrix0((MATRIX*)g_lightMatrixPtr, &clip->world, &local);
+
+    g_entityJointPosX = clip->anim_slot_ptr;
+    SetLightMatrix(&local);
+    SetRotAndTransMatrix(&g_matrixScratch);
+
+    const int* slot = (const int*)clip->anim_slot_ptr;
+    FUN_00483250(slot[4], slot[0], slot[2], (int)clip->anim_object, slot[5], 4,
+                 (char*)&g_spriteAnimSlots[2] + (unsigned int)g_spriteAnimActive * 0x14);
 }
 
 // ----------------------------------------------------------------------------
@@ -5065,16 +5191,28 @@ static void fire_consume_ammo_stack(void)
     rearrange_item_slots();
 }
 
-// Per-weapon fire-FX routine, dispatched from the table at 0x004c0fa0
-// (entries 0x00458ff0 / 0x00459040 / 0x00459090 x2 / 0x00459120 x4). Each
-// fires its effects on specific frames of the fire motion while unk_bf == 1.
+// Per-weapon reload-FX routine. The original is a function-pointer dispatch -
+// 0x00458f2f: `call dword ptr [equippedWeaponId*4 + 0x004c0f98]` - and the table
+// is indexed by the RAW item id, so its first live slot is index 2:
+//
+//   [2] 0x00458ff0  beretta        [4] 0x00459090  colt python (dum-dum)
+//   [3] 0x00459040  shotgun        [5] 0x00459090  colt python (magnum)
+//   [6..9] 0x00459120              (unreachable: 0x00457fba gates b18 on id < 6)
+//
+// The port took 0x004c0fa0 - two entries in - as the base and switched on
+// equippedWeaponId as though it were a 0-based weapon index, so every weapon ran
+// the routine belonging to the weapon two slots up: the beretta AND the shotgun
+// both got the python's (whose frame-0xc branch spawns the ejected-case
+// billboard the shotgun's reload has no animation for) and the python got the
+// bazooka/flamethrower stub. Each routine fires its effects on specific frames
+// of the reload motion (EMW motion 0xe) while unk_bf == 1.
 static void fire_weapon_fx(void)
 {
     const int frame = (int)g_playerEntity.animation_frame_id;
     int* muzzlePos = g_playerEntity.jointsStructs[0xe].world.t;   // [0xbe637c]+0x6c8+0x58
 
     switch (g_playerEntity.equippedWeaponId) {
-    case 0: {   // 0x00458ff0
+    case ITEM_BERETTA: {   // 0x00458ff0
         if (frame == 0xa && g_playerEntity.unk_bf == 1) {
             if (fire_ammo_volley_gate() != 0) {
                 fire_reset_joint15_recoil();
@@ -5086,7 +5224,7 @@ static void fire_weapon_fx(void)
         }
         break;
     }
-    case 1: {   // 0x00459040
+    case ITEM_SHOTGUN: {   // 0x00459040
         if ((frame == 0xf || frame == 0x19 || frame == 0x23)
             && g_playerEntity.unk_bf == 1) {
             Play3DSnd(1, 9, 5, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
@@ -5096,8 +5234,8 @@ static void fire_weapon_fx(void)
         }
         break;
     }
-    case 2:
-    case 3: {   // 0x00459090
+    case ITEM_COLT_PYTHON_DUM:
+    case ITEM_COLT_PYTHON_MAG: {   // 0x00459090
         if (frame == 0xc && g_playerEntity.unk_bf == 1) {
             if (fire_ammo_volley_gate() != 0) {
                 Effect_CreateBillboard(5, 4, 0, NULL, muzzlePos, 5);
@@ -5109,7 +5247,7 @@ static void fire_weapon_fx(void)
         }
         break;
     }
-    default: {  // 0x00459120 (weapons 4..7)
+    default: {  // 0x00459120 (item ids 6..9)
         if (frame == 0x12 && g_playerEntity.unk_bf == 1) {
             fire_consume_ammo_stack();
             Play3DSnd(1, 5, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
