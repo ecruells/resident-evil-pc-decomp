@@ -116,7 +116,8 @@ static const char g_emdPathTable[106][17] = {
     "enemy/em102d.emd", // Barry, cutscene anim variant (texture identical to em1022)
     "enemy/em102e.emd", // Wesker, cutscene anim variant (texture identical to em1024)
     "enemy/em1030.emd", // Chris, alternative outfit 1
-    
+    "enemy/em1032.emd", // Chris, alternative outfit 2
+
     // Jill offset
     "enemy/char10.emd",
     "enemy/char11.emd",
