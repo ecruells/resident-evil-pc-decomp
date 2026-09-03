@@ -749,7 +749,7 @@ static void ending_epilogue_update(void)
         s_stepTimer = 0;
         play_sfx(1, 2, 0);
         play_sfx(1, 3, 0);
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
     } else if (s_step != 1) {
         if ((s_step == 2) && ((short)g_fading_state > 0x7680)) {
             s_stepDone++;
@@ -790,7 +790,7 @@ void ending_state(void)
 {
     g_loadSaveStateFlag = 1;
     g_blockF9Flag = 1;    // 0x004b3870 - F9 return-to-title is inert for the whole ending
-    g_main_state_flags |= 0x80000;
+    g_main_state_flags |= MSF_PANNING_RESET;
     Task_sleep(1);
 
     sounds_reset();
@@ -855,7 +855,7 @@ void ending_state(void)
     // ------------------------------------------------------------------
     if (g_bIsSoftwareRendering == 0) {
         g_selectedFmvId = 14;
-        g_main_state_flags |= 0x40000;
+        g_main_state_flags |= MSF_FMV_REQUEST;
         Task_sleep(1);
     } else {
         QueueVideoPlayback(0xE, 0);
@@ -863,7 +863,7 @@ void ending_state(void)
 
     g_selectedFmvId = (unsigned char)(s_endingId + 14);
     if (g_bIsSoftwareRendering == 0) {
-        g_main_state_flags |= 0x40000;
+        g_main_state_flags |= MSF_FMV_REQUEST;
         Task_sleep(1);
     } else {
         QueueVideoPlayback(g_selectedFmvId, 0);
@@ -897,7 +897,7 @@ void ending_state(void)
     }
 
     if (g_bIsSoftwareRendering == 0) {
-        g_main_state_flags |= 0x40000;
+        g_main_state_flags |= MSF_FMV_REQUEST;
         Task_sleep(1);
     }
 
@@ -908,10 +908,10 @@ void ending_state(void)
             QueueVideoPlayback(g_selectedFmvId, 0);
         }
         g_selectedFmvId = 22;                 // STAFF ROLL
-        g_main_state_flags |= 0x40000;
+        g_main_state_flags |= MSF_FMV_REQUEST;
         Task_sleep(1);
     } else if (g_bIsSoftwareRendering != 0) {
-        g_main_state_flags |= 0x40000;
+        g_main_state_flags |= MSF_FMV_REQUEST;
         Task_sleep(1);
     }
 
@@ -921,9 +921,9 @@ void ending_state(void)
     s_stepDone = 0;
     s_step = 0;
     if (s_endingId < 4) {
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
     } else {
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
     }
 
     do {
@@ -1017,7 +1017,7 @@ void ending_state(void)
     g_SpecialRoomLightState = (short)0xFFFF;
     LoadSaveGameState(0, (int)s_saveScratch, 0, 1, 1);
 
-    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
     cleanup_texture_slot(0xC);
     FUN_004844b0();
     g_bGameActive = 2;

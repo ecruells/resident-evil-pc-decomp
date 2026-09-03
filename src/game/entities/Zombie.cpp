@@ -344,7 +344,7 @@ void zombie_init(void)
         unsigned short health_variance;
         unsigned int randVal;
 
-        if ((*((unsigned char*)&g_main_state_flags2 + 3) & 0x10) == 0) {
+        if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
             randVal = rand();
             health_base = zombie_health_tbl[randVal & 0xF];
             randVal = rand();
@@ -1256,7 +1256,7 @@ void zombie_dead_animation(void)
             && ENTITY->animationId == 8
             && g_playerDisplacement == 0
             && (g_RandSeed & 3) == 0
-            && (*((unsigned char*)&g_main_state_flags + 2) & 1) == 0)
+            && (g_main_state_flags & MSF_INTENSITY_RAMP) == 0)
         {
             ENTITY->behavior_flags = 3;
             ENTITY->health = 1;

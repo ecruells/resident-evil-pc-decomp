@@ -49,7 +49,7 @@ int main_loop(void)
         g_menu_choice_id = 0;
     }
 
-    if ((g_main_state_flags2 & 0x10000000) == 0) {
+    if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
         if (g_isSideWinderConnected) {
             g_PlayerPadHeld |= 0x800;
             g_button_pressed_id |= 0x800;
@@ -66,9 +66,9 @@ int main_loop(void)
         g_isPaused = FALSE;
     }
 
-    if ((g_main_state_flags & 0x40000) != 0) {
+    if ((g_main_state_flags & MSF_FMV_REQUEST) != 0) {
         g_window_rect.h = 240;
-        g_main_state_flags &= ~0x40000;
+        g_main_state_flags &= ~MSF_FMV_REQUEST;
         g_window_rect.w = 320;
         g_CurrentFMVID = (int)g_selectedFmvId;
         g_bMCINotifyEnabled = TRUE;
@@ -85,7 +85,7 @@ int main_loop(void)
         goto _post;
     }
 
-    if ((g_AttractModeIdleTimer == 0) && ((g_main_state_flags & 0x20000) == 0) &&
+    if ((g_AttractModeIdleTimer == 0) && ((g_main_state_flags & MSF_VOICE_PLAYING) == 0) &&
         (g_displayReturnToTitleScreen_Flag != 0)) {
 
         sprintf(PRINT_TEXT_BUFFER, "Press F9 to abort game and return to");
@@ -159,7 +159,7 @@ int main_loop(void)
 
     UpdateDemoTimer();
 
-    if ((g_main_state_flags & 0x80000) != 0) {
+    if ((g_main_state_flags & MSF_PANNING_RESET) != 0) {
         ResetScreenPanning();
     }
     if (g_SndFadeType != 0) {
@@ -176,8 +176,8 @@ int main_loop(void)
     // `(g_main_state_flags >> 8) & 0xFF` folded in bits 16-31, which always hold
     // the "game loop active"/"game initialized" bits during play, so the shake
     // never ran once.
-    const bool shakeActive = ((g_main_state_flags2 & 0x02) != 0) &&
-                             (((g_main_state_flags >> 8) & 0xFF) == 0);
+    const bool shakeActive = ((g_main_state_flags2 & MSF2_SCREEN_SHAKE) != 0) &&
+                             ((g_main_state_flags & MSF_MENU_BYTE) == 0);
 
     // The offsets have to be rolled BEFORE TaskScheduler_Update, not at the end
     // of the frame where the original rolls them (0x004297f6). The original
@@ -193,7 +193,7 @@ int main_loop(void)
         ApplyScreenShake();
     }
 
-    if ((g_main_state_flags & 0x20000000) != 0) {
+    if ((g_main_state_flags & MSF_FADE_ACTIVE) != 0) {
         // Fade transition in progress
         if (g_fading_state < 0) {
             g_fading_007d9048 = 0;
@@ -229,7 +229,7 @@ int main_loop(void)
 
         if (g_fading_state < 0) {
             g_fading_counter = 0;
-            g_main_state_flags &= ~0x20000000;
+            g_main_state_flags &= ~MSF_FADE_ACTIVE;
             g_fading_state = 0;
             if (g_fading_007d904c == 0) {
                 Task_Resume(0);
@@ -267,7 +267,7 @@ _fade_done:
     }
 
     // 0x004297e0: Sprite animation intensity
-    if ((g_main_state_flags & 0x10000) != 0) {
+    if ((g_main_state_flags & MSF_INTENSITY_RAMP) != 0) {
         if ((unsigned __int8)g_spriteAnimIntensity < 0xF0) {
             g_spriteAnimIntensity += 16;
         }
@@ -304,7 +304,7 @@ _fade_done:
         g_LetterboxBarBottom.b = 0xFF;
     }
 
-    if ((g_main_state_flags & 0x4008000) == 0) {
+    if ((g_main_state_flags & (MSF_ROOM_TRANSITION | MSF_MENU_ACTIVE)) == 0) {
         if (g_spriteAnimIntensity != 0) {
             if ((g_stageId == STAGE_LABORATORY) && (g_roomId == ROOM_MAIN_LAB) && (g_roomCameraId == 5)) {
                 draw_rect(&g_LetterboxBarTop, 0, 0);
@@ -387,7 +387,7 @@ _fade_done:
     }
 
     // 0x00429dc0: Screen state flags
-    if ((g_main_state_flags & 0x40000000) != 0) {
+    if ((g_main_state_flags & MSF_SCREEN_STANDALONE) != 0) {
         g_window_rect.w = 320;
         g_window_rect.textureId = 0;
         g_window_rect.r = g_spriteAnimR;
@@ -397,8 +397,8 @@ _fade_done:
         g_window_rect.y = -g_ScreenOffsetY;
         g_window_rect.b = g_spriteAnimB;
         SetScreenReadyWithDebugColor(g_spriteAnimR, g_spriteAnimG, g_spriteAnimB);
-    } else if ((g_main_state_flags & 0x80000000) != 0) {
-        if ((g_main_state_flags2 & 0x04) == 0) {
+    } else if ((g_main_state_flags & MSF_SCREEN_REBUILD) != 0) {
+        if ((g_main_state_flags2 & MSF2_SCREEN_BORDER) == 0) {
             ResetScreenAndRebuildSprites(g_spriteAnimActive == 0 ? 0xF0 : 0);
 
             if (shakeActive) {
@@ -438,7 +438,7 @@ _fade_done:
 
 _post:
     // 0x0042a060: FMV cleanup on state change
-    if ((g_main_state_flags & 0x40000) != 0) {
+    if ((g_main_state_flags & MSF_FMV_REQUEST) != 0) {
         ResetFmvRenderState();
         g_window_rect.x = -g_ScreenOffsetX;
         g_window_rect.textureId = 0;

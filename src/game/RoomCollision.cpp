@@ -1115,13 +1115,13 @@ void update_room_objects(void)
     }
 
     if (pushStarted) {
-        g_main_state_flags |= 0x40;
+        g_main_state_flags |= MSF_OBJECT_PUSH;
         return;
     }
-    if ((g_main_state_flags & 0x40) != 0) {
+    if ((g_main_state_flags & MSF_OBJECT_PUSH) != 0) {
         // The push just ended: behavior_10_push watches this bit drop to run
         // its release state, and the menu bit comes back with it.
-        g_main_state_flags &= ~0x40u;
+        g_main_state_flags &= ~MSF_OBJECT_PUSH;
         g_message_flags |= 0x40;
     }
 }

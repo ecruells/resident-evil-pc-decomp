@@ -147,7 +147,7 @@ void play_sfx(int bank, int soundId)
         break;
 
     case 1:
-        if ((g_main_state_flags2 & 0x200000) != 0) {
+        if ((g_main_state_flags2 & MSF2_SFX_BANK1_HALF) != 0) {
             if (soundId > 15) return;
         } else {
             if (soundId > 31) return;
@@ -301,7 +301,7 @@ void UpdateMusicWaitState(void)
     if (g_BgmSoundBank != 0 && getSndStat(g_BgmSoundBank) == 1) {
         return;
     }
-    g_main_state_flags &= 0xFFFDFFFF;
+    g_main_state_flags &= ~MSF_VOICE_PLAYING;
     g_WaitForMusicTimer = 0;
 }
 
@@ -860,7 +860,7 @@ void update_room_bgm(void)
             bgm_fade_out_all();
             g_BGM_STATE = 0xFF;
         }
-        g_main_state_flags2 &= 0xFF7FFFFF;
+        g_main_state_flags2 &= ~MSF2_SND_BUSY;
         return;
     }
 
@@ -876,7 +876,7 @@ void update_room_bgm(void)
     // because a 0xFF prev makes the old index (& 7 == 7) run off the end of the row.
     if (g_prevBgmState != 0xFF && (g_prevBgmState & 0x38) != 0 && newGroup != oldGroup) {
         bgm_fade_out_all();
-        g_main_state_flags2 &= 0xFF7FFFFF;
+        g_main_state_flags2 &= ~MSF2_SND_BUSY;
     }
 
     bool startSecondary = false;
@@ -885,18 +885,18 @@ void update_room_bgm(void)
     if (bgmType == 0) {
         if (g_prevBgmState == 0xFF) {
             // nothing was playing: straight load
-            g_main_state_flags2 &= 0xFF7FFFFF;
+            g_main_state_flags2 &= ~MSF2_SND_BUSY;
             bgm_load_and_start(g_targetBgmState);
             startSecondary = true;
         } else if (newGroup != oldGroup) {
             bgm_fade_out_all();
-            g_main_state_flags2 &= 0xFF7FFFFF;
+            g_main_state_flags2 &= ~MSF2_SND_BUSY;
             bgm_load_and_start(g_targetBgmState);
             startSecondary = true;
         } else {
             // Same track continues across the transition - keep the loaded banks
             // and only toggle the channels whose enable bit changed.
-            g_main_state_flags2 &= 0xFF7FFFFF;
+            g_main_state_flags2 &= ~MSF2_SND_BUSY;
             unsigned char changed = g_targetBgmState ^ g_prevBgmState;
             for (int i = 0; i < 3; i++) {
                 unsigned char bit = (unsigned char)(8 << i);
@@ -912,14 +912,14 @@ void update_room_bgm(void)
     } else if (bgmType == 1) {
         // always reload, never auto-start (0x0047f8ae falls through to done)
         bgm_fade_out_all();
-        g_main_state_flags2 &= 0xFF7FFFFF;
+        g_main_state_flags2 &= ~MSF2_SND_BUSY;
         bgm_load_and_start(g_targetBgmState);
     } else if (bgmType == 2) {
         // force restart: bit 7 is consumed here, so the (& 0xC0) test below always
         // passes and the channels are started immediately
         g_targetBgmState &= 0x7F;
         bgm_fade_out_all();
-        g_main_state_flags2 &= 0xFF7FFFFF;
+        g_main_state_flags2 &= ~MSF2_SND_BUSY;
         bgm_load_and_start(g_targetBgmState);
         startSecondary = (g_targetBgmState & 0xC0) == 0;
     }
@@ -930,7 +930,7 @@ void update_room_bgm(void)
     }
 
     g_BGM_STATE = g_targetBgmState;
-    g_main_state_flags2 &= 0xFF7FFFFF;
+    g_main_state_flags2 &= ~MSF2_SND_BUSY;
 }
 
 // ============================================================================
@@ -1097,7 +1097,7 @@ void Play3DSnd(int bank, int soundId, int vol, int pos) // 0x0047f9c0
         break;
 
     case 1:
-        if ((g_main_state_flags2 & 0x200000) == 0) {
+        if ((g_main_state_flags2 & MSF2_SFX_BANK1_HALF) == 0) {
             if (soundId > 0x2F) return;
         } else {
             if (soundId > 0x0F) return;
@@ -1299,7 +1299,7 @@ void play_sound_and_voice_effect(int type, int id)
     voice_set_pan(0);
     voice_mixer_reset();
     g_voiceFinished = 0;
-    g_main_state_flags &= 0xFFFDFFFF;
+    g_main_state_flags &= ~MSF_VOICE_PLAYING;
 }
 
 // ============================================================================
@@ -1353,7 +1353,7 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
 {
     if (soundType >= 3) return;
 
-    if ((((unsigned char)g_main_state_flags & 0x80) == 0) ||
+    if (((g_main_state_flags & MSF_DOOR_TRANSITION) == 0) ||
         (g_playerEntity.posY != (unsigned short)0xF8F8)) {
         // Normal path: look up zone-based sound offset
         unsigned short zoneData = LookupFootstepZone(
@@ -1361,7 +1361,7 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
         char zoneOffset = (char)(zoneData & 0xFF);
 
         // Add input modifier: if g_main_state_flags2 bit 0 is set, add 0xFD (suppresses/wraps sound)
-        unsigned int inputMod = (((g_main_state_flags2 & 1) == 0) - 1U) & 0xFD;
+        unsigned int inputMod = (((g_main_state_flags2 & MSF2_EFFECT_ZONE) == 0) - 1U) & 0xFD;
         soundType = (unsigned char)((int)soundType + (int)zoneOffset + (int)inputMod);
     } else {
         // Special state: fixed offset 0x23

@@ -303,44 +303,137 @@ extern int           init_game_flag;                   // 0x004ba7b0
 // ============================================================================
 
 // ============================================================================
-// g_main_state_flags - Global game state bit flags (0x00be41c0)
+// g_main_state_flags - bank 5 of the SCD flag banks (0x00be41c0)
 //
-// This 32-bit flag word controls global game state, rendering behavior, and
-// scene transitions. Bits are tested/set across the entire codebase.
+// The runtime state word: what the frame is currently doing. Zeroed by
+// GameInit and game_start; never saved. Every bit is documented, with its
+// writers and readers, in docs/SCENARIO_FLAGS.md - keep that table as the
+// source of truth rather than duplicating it here. The shape, in brief:
 //
-// Bit   Mask          Description
-// ----  ------------  ----------------------------------------------------------
-//   0   0x00000001    Entity joint animation flag (tested in room_set, PlayerAnimations)
-//   7   0x00000080    Special entity sound state (tested in SoundSystem)
-//   8   0x00000100    Message display Y-position (byte 1, test in set_message_display)
-//   9   0x00000200    Room events wait condition (byte 1 bit 1, RoomEvents)
-//  10   0x00000400    "Got item" active (set by cmd_got_item)
-//  11   0x00000800    "Got item" toggle flag (toggled by cmd_got_item)
-//  13   0x00002000    Key item depleted / drop message (SaveLoadScreen)
-//  16   0x00010000    Screen intensity animation direction (main_loop)
-//  17   0x00020000    SFX playback active / music wait done (sfx_set, SoundSystem)
-//  18   0x00040000    FMV playback active (logos_state, cmd_fmv_set, main_loop)
-//  19   0x00080000    Screen panning reset / ending state (ResetScreenPanning, ending_state)
-//  20   0x00100000    Camera changes disabled during cutscene (cut_set, cmd_cut_lock_toggle)
-//  23   0x00800000    Room RDT variant: 0=Chris, 1=Jill/Rebecca (LoadRoomRdt, char select)
-//  25   0x02000000    Game loop active flag (game_loop)
-//  26   0x04000000    Game initialized / loading complete (InitializeGame, room_set)
-//  27   0x08000000    (tested alongside bit 26 in main_loop 0x4008000 combo)
-//  28   0x10000000    New game (0) vs continue/load game (1) (InitializeGame)
-//  29   0x20000000    Screen fade transition in progress (main_loop, title, char select)
-//  30   0x40000000    Debug overlay mode / exit-to-title transition (rendering, main_loop)
-//  31   0x80000000    Save/load screen active / title screen overlay (title, save/load)
+//   bits 0-7    per-frame gameplay state (mirror pass + axis, deferred camera
+//               redisplay, ladder latch, object push, door transition)
+//   bits 8-15   the MENU MODE byte. Not eight flags: main_menu priority-encodes
+//               bits 9-13 into modes 5..1 (0x200 mode 5 ... 0x2000 mode 1, none
+//               = mode 0), bit 8 short-circuits to the pickup screen, bit 15 is
+//               the re-entry lock. `msf & 0x7F00` means "a menu or message mode
+//               is pending" and is the standard interaction gate;
+//               menu_restore_game_state clears the byte with &= 0xFFFF00FF.
+//   bits 16-29  subsystem state (screen intensity ramp, voice playing, FMV
+//               requested, panning reset, camera lock, options requested,
+//               Chris/Jill RDT variant, player dead, gameplay active, room
+//               transition running, continue-vs-new-game, fade running)
+//   bits 30-31  a two-bit SCREEN MODE, never set independently: every writer
+//               does (msf & 0x3FFFFFFF) | 0x40000000 or | 0x80000000. Bit 30 =
+//               standalone screen (flat colour present, background quad and
+//               world sprites suppressed), bit 31 = full sprite rebuild.
 //
-// The lower 2 bits (0-1) are also used as a 2-bit SCD script parameter
-// (cmd_mirror_set writes g_ScdOpcodes[1] into bits 0-1).
+// Bits 3, 14, 21 have no reader or writer; bit 27 appears only inside clear
+// masks. Note that main_loop's 0x4008000 test is bits 26 AND 15, not 27 and 26.
 //
-// The lower nibble is cleared by room_set: g_main_state_flags &= 0xfffffff0.
-//
-// Byte 3 bit 0x10 is tested in display_game_loading_message for input check.
-// Byte 7 bit 0x10 is tested in the same function.
+// SCD bank 5 SPILLS INTO g_main_state_flags2: a script `sel` of 0x20 or more
+// resolves to byte offset 4, i.e. the adjacent dword below. The boulder-tunnel
+// screen shake is bank 5 bit 0x21 = msf2 bit 1.
 // ============================================================================
-extern DWORD         g_main_state_flags;               // 0x00be41c0
-extern DWORD         g_main_state_flags2;              // 0x00be41c4
+// Bit constants. Names follow docs/SCENARIO_FLAGS.md; use these instead of
+// raw masks so a mask can be traced back to a meaning.
+#define MSF_MIRROR_ENABLE            0x00000001u  // mirror pass on (cmd_mirror_set writes bits 0-1)
+#define MSF_MIRROR_PLANE_X           0x00000002u  // mirror plane axis: 0 = Z, 1 = X
+#define MSF_CAMERA_DEFER             0x00000004u  // camera switch raises MSF_CAMERA_REDRAW instead of redrawing now
+#define MSF_SCRIPT_ONLY_03           0x00000008u  // no reader in ported code; 18 room scripts SET it (bank 5 sel 0x1C)
+#define MSF_LADDER_DOWN              0x00000010u  // ladder/stairs latch: behaviour 0x0B instead of 0x11
+#define MSF_CAMERA_REDRAW            0x00000020u  // pending background redisplay, consumed once by game_loop
+#define MSF_OBJECT_PUSH              0x00000040u  // object push running; forces behaviour 0x10
+#define MSF_DOOR_TRANSITION          0x00000080u  // door transition in progress
+
+// Byte 1 is the MENU MODE field, not eight flags - main_menu priority-encodes
+// bits 9-13 into modes 5..1 and falls out at mode 0. See docs/SCENARIO_FLAGS.md.
+#define MSF_PICKUP_SCREEN            0x00000100u  // -> main_menu state 8, tested before the mode scan
+#define MSF_MENU_MODE_5              0x00000200u  // mode 5 - no C writer, but 7 room scripts set it (bank 5 sel 0x16)
+#define MSF_MENU_MODE_GOT_ITEM       0x00000400u  // mode 4 - cmd_got_item
+#define MSF_MENU_MODE_ITEM_VIEW      0x00000800u  // mode 3 - item viewer / examine
+#define MSF_MENU_MODE_ITEMBOX        0x00001000u  // mode 2 - item box
+#define MSF_MENU_MODE_KEY_DEPLETED   0x00002000u  // mode 1 - key item used up, "drop it" prompt
+#define MSF_SCRIPT_ONLY_14           0x00004000u  // outside the mode ladder; 14 stage-3 event scripts SET it (bank 5 sel 0x11)
+#define MSF_MENU_ACTIVE              0x00008000u  // menu task re-entry lock
+#define MSF_MENU_BYTE                0x0000FF00u  // the whole field; cleared on menu close
+#define MSF_MENU_PENDING             0x00007F00u  // bits 8-14: "a menu or message mode is pending"
+#define MSF_MENU_MODE_SHIFT_BASE     0x00004000u  // main_menu scans (BASE >> n) for n = 5..1
+
+#define MSF_INTENSITY_RAMP           0x00010000u  // ramp g_spriteAnimIntensity up while set
+#define MSF_VOICE_PLAYING            0x00020000u  // voice/SFX line playing; polled as "wait for it"
+#define MSF_FMV_REQUEST              0x00040000u  // main_loop consumes it and plays g_selectedFmvId
+#define MSF_PANNING_RESET            0x00080000u  // ResetScreenPanning every frame (ending)
+#define MSF_CAMERA_LOCK              0x00100000u  // camera zone switching disabled (cutscene)
+#define MSF_UNUSED_21                0x00200000u  // no reader or writer, in code or in any RDT script
+#define MSF_OPTIONS_REQUEST          0x00400000u  // open options_menu instead of main_menu
+#define MSF_CHAR_VARIANT             0x00800000u  // room RDT variant: 0 = Chris, 1 = Jill
+#define MSF_PLAYER_DEAD              0x01000000u  // player dead / ending fade running
+#define MSF_GAMEPLAY_ACTIVE          0x02000000u  // game_loop is running
+#define MSF_ROOM_TRANSITION          0x04000000u  // room/door transition animation running
+#define MSF_UNUSED_27                0x08000000u  // no writer in code or scripts; only ever cleared
+#define MSF_CONTINUE_GAME            0x10000000u  // continue/load (set) vs new game (clear)
+#define MSF_FADE_ACTIVE              0x20000000u  // fade transition in progress
+
+// Bits 30-31 are a two-bit SCREEN MODE, never set independently: every writer
+// clears both and selects one. Bit 30 is tested first.
+#define MSF_SCREEN_STANDALONE        0x40000000u  // flat colour present; bg quad and world sprites suppressed
+#define MSF_SCREEN_REBUILD           0x80000000u  // full sprite rebuild present
+#define MSF_SCREEN_MODE_MASK         0xC0000000u
+
+// Wholesale reset masks, kept as values because they are not a union of
+// meanings - each is "what this screen chooses to preserve".
+#define MSF_ROOM_RESET_MASK          0x0000000Fu  // room_set clears the low nibble
+#define MSF_DEATH_KEEP_MASK          0xD1FD003Fu  // death_state keeps these
+#define MSF_GAMESTART_KEEP_MASK      0xD4E900F0u  // game_start keeps these
+
+// Bank 5 storage. The two names below are the two dwords of ONE array, because
+// that is what the original has: cmd_bit_test / cmd_bit_op resolve bank 5 to a
+// single base (0x00be41c0) and then add (sel & 0xE0) >> 3 as a byte offset, so
+// selector 0x20+ addresses the second dword. Keeping them as separate globals
+// made that offset run off the end of a 4-byte object and land wherever the
+// linker happened to put the other one.
+extern DWORD         g_MainStateFlagBank[2];           // 0x00be41c0
+#define g_main_state_flags   (g_MainStateFlagBank[0])  // 0x00be41c0
+#define g_main_state_flags2  (g_MainStateFlagBank[1])  // 0x00be41c4
+// ============================================================================
+// g_main_state_flags2 - the second half of SCD flag bank 5 (0x00be41c4)
+//
+// Adjacent to g_main_state_flags, and scripts reach it through the SAME bank:
+// a bank-5 selector of 0x20 or more resolves to byte offset 4. Selector
+// id = 0x20 + (31 - bit), so e.g. the screen-shake bit 1 is script selector
+// 0x3E. Zeroed by GameInit and game_start; never saved.
+//
+// Bits 4-18, 20 and 30 have no reader or writer in code, and no RDT script
+// writes them either.
+// ============================================================================
+#define MSF2_EFFECT_ZONE             0x00000001u  // room_action_effect (room action 0x0B) is running this frame:
+                                                  // dust billboard under a moving player, health forced to 1
+                                                  // (cannot die), footstep sound type shifted, projectile
+                                                  // effects change. game_loop clears it after update_player_anim
+#define MSF2_SCREEN_SHAKE            0x00000002u  // screen shake enable (boulder tunnels); main_loop also
+                                                  // requires MSF_MENU_BYTE to be clear. 64 script writers
+#define MSF2_SCREEN_BORDER           0x00000004u  // backgrounds load as 316x236 instead of 320x240 and
+                                                  // ResetScreenAndRebuildSprites is skipped. Parked in
+                                                  // g_controllerConfig bit 0x10 while the options menu is open
+#define MSF2_FADE_NO_DEPTH_CLAMP     0x00000008u  // FadeSprite skips its depth clamp (> 0xFEF -> 0xFF0)
+#define MSF2_PRESERVED_19            0x00080000u  // no reader or writer found; only ever PRESERVED, by
+                                                  // MSF2_RESET_KEEP_MASK. Kept named so the mask stays readable
+#define MSF2_SFX_BANK1_HALF          0x00200000u  // sound bank 1 holds 16 entries instead of 32
+#define MSF2_DOOR_TURN_PENDING       0x00400000u  // check_door / check_door_side asked for a turn; the door
+                                                  // animation consumes it to pick the turn direction
+#define MSF2_SND_BUSY                0x00800000u  // sound/BGM busy - the .dor script's play_sfx op waits for it
+#define MSF2_DOOR_ANGLE_STEP         0x01000000u  // door animation is stepping the player's facing angle
+#define MSF2_ROOM_SPRITES_OFF        0x02000000u  // DrawRoomSpr returns early
+#define MSF2_COSTUME_VARIANT         0x04000000u  // alternate costume model selection (EntityModelLoader)
+#define MSF2_COUNTDOWN_ACTIVE        0x08000000u  // self-destruct countdown running (game_loop's timer path)
+#define MSF2_ATTRACT_DEMO            0x10000000u  // attract-mode demo playback
+#define MSF2_PLAYER_INITIALISED      0x20000000u  // raised by InitPlayerData; survives the reset mask
+#define MSF2_DEATH_VARIANT           0x80000000u  // picks the death fade length and whether game_loop's die
+                                                  // path reports "continue"
+
+#define MSF2_ROOM_RESET_MASK         0x0000000Fu  // room_set clears the low nibble, same as msf
+#define MSF2_RESET_KEEP_MASK         0x20080000u  // what game_start / char select / F9 preserve
+
 extern WORD          g_message_flags;                  // 0x00bebcc0
 
 // Message display system

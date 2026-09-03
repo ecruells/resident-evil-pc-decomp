@@ -1139,7 +1139,7 @@ void JointApplyColorTint(JointStruct* joint, int param2, int param3, void* data)
     g_playerDisplacement = *(int*)(joint->anim_slot_ptr + 0x14) * 2;
     JointSetColorTint((int)joint->anim_object, (unsigned int)param2);
 
-    if (((unsigned char)g_main_state_flags & 1) != 0) {
+    if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
         int offset = ENTITY->weaponJointsPtr - (int)ENTITY->jointsStructs;
         JointStruct* weaponJoint = (JointStruct*)((unsigned char*)joint + offset);
         g_tempVar = weaponJoint;
@@ -1857,7 +1857,7 @@ static void player_clip_state_1_fall(JointStruct* clip)
     clip->velX       = (short)(clip->velX + (short)((1 - bounced) * 0x14));
     clip->rotation.x = (short)(clip->rotation.x + (short)((bounced + 1) * 0x10));
 
-    if (bounced == 0 && (g_main_state_flags2 & 1) != 0
+    if (bounced == 0 && (g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0
         && *(int*)((char*)g_omodel_table[0] + 0x38) < (int)clip->velY) {
         g_playerPosScratch.x   = *(int*)((char*)g_deadMoveValue + 0x14);
         g_playerPosScratch.y   = *(int*)((char*)g_deadMoveValue + 0x18);
@@ -2024,7 +2024,7 @@ static void player_dispatch_anim_fn(unsigned int index)
 static void player_state_anim_window0(void) // 0x00495290
 {
     if (g_playerEntity.action_state == 0) {
-        if (((g_main_state_flags & 0x40) != 0) ||
+        if (((g_main_state_flags & MSF_OBJECT_PUSH) != 0) ||
             ((g_playerEntity.healthStatusFlags & 0x80) != 0)) {
             g_message_flags = (unsigned short)(g_message_flags | 0x40);
         }
@@ -2036,7 +2036,7 @@ static void player_state_anim_window0(void) // 0x00495290
 static void player_state_anim_window1(void) // 0x004952d0
 {
     if (g_playerEntity.action_state == 0) {
-        if (((g_main_state_flags & 0x40) != 0) ||
+        if (((g_main_state_flags & MSF_OBJECT_PUSH) != 0) ||
             ((g_playerEntity.healthStatusFlags & 0x80) != 0)) {
             g_message_flags = (unsigned short)(g_message_flags | 0x40);
         }
@@ -2128,7 +2128,7 @@ static void player_state_02(void)         // 0x00495250
 
     // 0x004955f0
     if (g_playerEntity.action_state == 0) {
-        if (((unsigned char)g_main_state_flags & 0x40) != 0 ||
+        if ((g_main_state_flags & MSF_OBJECT_PUSH) != 0 ||
             (g_playerEntity.healthStatusFlags & 0x80) != 0) {
             g_message_flags = (unsigned short)((g_message_flags & 0xff00) |
                                                (((unsigned char)g_message_flags) | 0x40));
@@ -2283,7 +2283,7 @@ static void player_state_01_control(void)
         g_playerEntity.action_behavior = 200;
         g_playerEntity.isBeingAttackedFlag = 1;
         // 0x004951b4: msf2 bit 0 is the "cannot die" debug/scripted guard.
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             g_playerEntity.health = 1;
         }
         return;
@@ -2406,7 +2406,7 @@ static int is_point_in_action_zone(VECTOR* pos, unsigned short* zone); // 0x0041
 // ============================================================================
 int check_climb_object(void)
 {
-    if ((g_main_state_flags & 0x80) == 0) {
+    if ((g_main_state_flags & MSF_DOOR_TRANSITION) == 0) {
         void** p = &g_omodel_table[(unsigned char)g_omodelCount];
         unsigned char* obj;
         do {
@@ -2426,7 +2426,7 @@ int check_climb_object(void)
             unsigned short diff = abs16(angleDiff);
             if (299 < diff && diff < 0xed5) continue;
 
-            g_main_state_flags |= 0x80;
+            g_main_state_flags |= MSF_DOOR_TRANSITION;
             g_playerEntity.zoneFlags &= 0xef;
             DAT_00ae9ef0 = (unsigned int)obj;
             break;
@@ -2439,7 +2439,7 @@ int check_climb_object(void)
         if (299 < diff && diff < 0xed5) {
             return 0;
         }
-        g_main_state_flags &= ~0x80;
+        g_main_state_flags &= ~MSF_DOOR_TRANSITION;
         g_playerEntity.zoneFlags |= 0x10;
     }
 
@@ -2570,7 +2570,7 @@ static void player_ctrl_behavior_walk(void)
         g_playerEntity.attackDirection    = 0;
         g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf             = 0;
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             player_footstep_snd(0);
         }
     } else if (g_playerEntity.action_state != 1) {
@@ -2615,7 +2615,7 @@ static void player_ctrl_behavior_walk(void)
 
     // msf2 bit 0 halves the speed and advances the animation only every other
     // frame - the slow-motion variant.
-    if ((g_main_state_flags2 & 1) == 0) {
+    if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) == 0) {
         Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
         g_playerEntity.attackDirection = 0;
     } else {
@@ -2654,7 +2654,7 @@ static void player_ctrl_behavior_back(void)
         g_playerEntity.attackAnim          = 2;
         g_playerEntity.unk_8c              = 3;
         g_playerEntity.isBeingAttackedFlag = 0;
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             player_footstep_snd(0);
         }
     } else if (g_playerEntity.action_state != 1) {
@@ -2697,7 +2697,7 @@ static void player_ctrl_behavior_run(void)
         g_playerEntity.animation_frame_id = 0;
         g_playerEntity.unk_bf             = 0;
         g_playerEntity.isBeingAttackedFlag = 0;
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             player_footstep_snd(0);
         }
     } else if (g_playerEntity.action_state != 1) {
@@ -2771,7 +2771,7 @@ static void player_ctrl_behavior_run(void)
     }
 
     short prevCounter = (short)g_playerEntity.attackDirection;
-    if ((g_main_state_flags2 & 1) == 0) {
+    if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) == 0) {
         Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
     } else {
         g_playerEntity.move_speed_current /= 2;
@@ -2846,7 +2846,7 @@ static void player_door_open_sequence(void)      // 0x00457390
         Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
 
         // 0x004573ed: the climb/vault entry turns the player using his own facing.
-        if ((g_main_state_flags & 0x80) != 0) {
+        if ((g_main_state_flags & MSF_DOOR_TRANSITION) != 0) {
             unsigned short a    = (unsigned short)g_playerEntity.directionAngle;
             unsigned short step = (unsigned short)((a & 0x3fc) >> 2);
             if ((a & 0x200) != 0) {
@@ -2854,13 +2854,13 @@ static void player_door_open_sequence(void)      // 0x00457390
             } else {
                 g_playerEntity.directionAngle = (short)(unsigned short)(a - step);
             }
-            g_main_state_flags2 |= 0x1000000;
+            g_main_state_flags2 |= MSF2_DOOR_ANGLE_STEP;
         }
 
         // 0x0045742f: check_door set 0x400000; consume it to pick the turn
         // direction. Bit 0x40 of zoneFlags and bit 0x400 of the angle together decide
         // whether to add or subtract - the two branches are exact mirrors.
-        if ((g_main_state_flags2 & 0x400000) != 0) {
+        if ((g_main_state_flags2 & MSF2_DOOR_TURN_PENDING) != 0) {
             short*         pAngle = (short*)((unsigned char*)ENTITY + 0x74);
             unsigned short a      = (unsigned short)*pAngle;
             unsigned short step   = (unsigned short)((a & 0x3fc) >> 2);
@@ -2900,7 +2900,7 @@ static void player_door_open_sequence(void)      // 0x00457390
         int frameDelta = (int)(short)g_playerEntity.move_speed_current * 15
                        - (int)g_playerEntity.animation_frame_id;
 
-        if ((g_main_state_flags & 0x80) == 0) {
+        if ((g_main_state_flags & MSF_DOOR_TRANSITION) == 0) {
             // 0x004577f6: plain door - one latch sound.
             if (frameDelta == -0xc) {
                 Play3DSnd(2, 0x2d, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
@@ -2951,7 +2951,7 @@ static void player_door_open_sequence(void)      // 0x00457390
                 g_svecScratch.y = 0x24;
             }
         }
-        if ((g_main_state_flags & 0x80) != 0) {
+        if ((g_main_state_flags & MSF_DOOR_TRANSITION) != 0) {
             g_playerEntity.unk_e0 |= 0x40;
         }
 
@@ -3017,7 +3017,7 @@ static void player_door_open_sequence(void)      // 0x00457390
 
         // 0x004576d4: the climb/vault case. Note the X displacement is negated
         // while the Z one is not - that asymmetry is in the original.
-        if ((g_main_state_flags & 0x80) != 0) {
+        if ((g_main_state_flags & MSF_DOOR_TRANSITION) != 0) {
             g_playerDisplacement = -(dir * 0x73a);
             g_scaled_down_dist   = 0;
             if (sideways != 0) {
@@ -3026,11 +3026,11 @@ static void player_door_open_sequence(void)      // 0x00457390
             }
             player_distance_z = -0x708;
             if (otherWay != 0) {
-                g_main_state_flags   &= 0xffffff7f;
+                g_main_state_flags   &= ~MSF_DOOR_TRANSITION;
                 g_playerEntity.unk_e0 = (unsigned short)(g_playerEntity.unk_e0 & 0xffbf);
                 player_distance_z     = 0x708;
             }
-            g_main_state_flags2 &= 0xfeffffff;
+            g_main_state_flags2 &= ~MSF2_DOOR_ANGLE_STEP;
         }
 
         g_playerEntity.scaMatrixData.localMatrix.t[0] += g_playerDisplacement;
@@ -3049,7 +3049,7 @@ static void player_door_open_sequence(void)      // 0x00457390
         g_playerEntity.pushVelocity.x = 0;
         g_playerEntity.posY =
             (unsigned short)(short)g_playerEntity.scaMatrixData.localMatrix.t[1];
-        g_main_state_flags2 &= 0xffbfffff;   // consume check_door's 0x400000
+        g_main_state_flags2 &= ~MSF2_DOOR_TURN_PENDING;   // consume what check_door raised
         g_playerEntity.pushVelocity.z = 0;
 
         // 0x004577e5: one dword store back to normal control.
@@ -3087,7 +3087,7 @@ static void player_input_to_behavior(void)
         // 0x004956c9: is there a door in front of the player? Sets msf bit 7,
         // which the door animation reads to pick its variant.
         if (check_climb_object() != 0) {
-            g_main_state_flags |= 0x80;
+            g_main_state_flags |= MSF_DOOR_TRANSITION;
             g_message_flags &= 0xffbf;
             g_playerEntity.action_behavior = 10;
             g_playerEntity.action_state    = 0;
@@ -3111,7 +3111,7 @@ static void player_input_to_behavior(void)
             g_playerEntity.isBeingAttackedFlag = 0x80;
             g_playerEntity.animFrameId = 1;
             g_message_flags &= 0xffbf;
-            if ((g_main_state_flags & 0x10) == 0) {
+            if ((g_main_state_flags & MSF_LADDER_DOWN) == 0) {
                 g_playerEntity.action_behavior = 0x11;
                 g_playerEntity.action_state    = 0;
                 g_playerEntity.isBeingAttackedFlag = 0x80;
@@ -3124,13 +3124,13 @@ static void player_input_to_behavior(void)
     }
 
     // 0x0049578d: already inside a door transition
-    if ((g_main_state_flags & 0x80) != 0) {
+    if ((g_main_state_flags & MSF_DOOR_TRANSITION) != 0) {
         door_transition_update();
         return;
     }
 
     // 0x0049579d: msf bit 6 forces the climb/vault behaviour
-    if ((g_main_state_flags & 0x40) != 0) {
+    if ((g_main_state_flags & MSF_OBJECT_PUSH) != 0) {
         g_playerEntity.animFrameId = 1;
         g_message_flags &= 0xffbf;
         g_playerEntity.action_behavior = 0x10;
@@ -3144,7 +3144,7 @@ static void player_input_to_behavior(void)
         g_message_flags &= 0xffbf;
         g_playerEntity.action_behavior = 0x11;
         g_playerEntity.action_state    = 0;
-        if ((g_main_state_flags & 0x10) != 0) {
+        if ((g_main_state_flags & MSF_LADDER_DOWN) != 0) {
             g_playerEntity.action_behavior = 0xb;
             g_playerEntity.action_state    = 0;
         }
@@ -3296,7 +3296,7 @@ static void player_ctrl_frame0(void)
 static void player_behavior_0d_run(void)
 {
     // 0x00496110: the climb/vault flag wins over running.
-    if ((g_main_state_flags & 0x40) != 0) {
+    if ((g_main_state_flags & MSF_OBJECT_PUSH) != 0) {
         g_playerEntity.animFrameId     = 1;
         g_playerEntity.action_behavior = 0x10;
         g_playerEntity.action_state    = 0;
@@ -3307,7 +3307,7 @@ static void player_behavior_0d_run(void)
     if ((g_PlayerDpadPressed & 0x80) != 0) {
         if (check_climb_object() != 0) {
             g_playerEntity.isBeingAttackedFlag = 0x80;
-            g_main_state_flags |= 0x80;
+            g_main_state_flags |= MSF_DOOR_TRANSITION;
             g_message_flags &= 0xffbf;
             g_playerEntity.action_behavior = 10;
             g_playerEntity.action_state    = 0;
@@ -3325,7 +3325,7 @@ static void player_behavior_0d_run(void)
             g_playerEntity.isBeingAttackedFlag = 0x80;
             g_playerEntity.animFrameId = 1;
             g_message_flags &= 0xffbf;
-            if ((g_main_state_flags & 0x10) == 0) {
+            if ((g_main_state_flags & MSF_LADDER_DOWN) == 0) {
                 g_playerEntity.action_behavior = 0x11;
                 g_playerEntity.action_state    = 0;
                 g_playerEntity.isBeingAttackedFlag = 0x80;
@@ -3372,7 +3372,7 @@ static void player_behavior_0d_run(void)
             g_playerEntity.animation_frame_id = 0xc;
         }
         g_playerEntity.attackDirection = 0;
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             PlayEntitySnd(1);
         }
         // fall through
@@ -3383,7 +3383,7 @@ static void player_behavior_0d_run(void)
         }
         short prevCounter = (short)g_playerEntity.attackDirection;
         g_playerEntity.move_speed_current = 0xd2;
-        if ((g_main_state_flags2 & 1) == 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) == 0) {
             Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x400);
             g_playerEntity.attackDirection = 0;
         } else {
@@ -3497,9 +3497,9 @@ static void player_behavior_0c_interact(void)
         if (Joint_move(0, g_playerEntity.jointMoveData0,
                        g_playerEntity.jointMoveData1, 0x400) != 0) {
             if (*(char*)g_room_event_index == 0x0d) {
-                g_main_state_flags |= 0x100;
+                g_main_state_flags |= MSF_PICKUP_SCREEN;
             } else {
-                g_main_state_flags |= 0x800;
+                g_main_state_flags |= MSF_MENU_MODE_ITEM_VIEW;
             }
             g_playerEntity.action_state = 2;
             g_playerEntity.animation_frame_id = 0;
@@ -3549,7 +3549,7 @@ static void player_behavior_10_push(void)
             g_playerEntity.move_speed_current = 0x32;
             Add_speedXZ(0);
         }
-        if (((unsigned char)g_main_state_flags & 0x40) == 0) {
+        if ((g_main_state_flags & MSF_OBJECT_PUSH) == 0) {
             g_playerEntity.animation_frame_id = 0;
             g_playerEntity.unk_bf = 0;
             g_playerEntity.move_speed_current = 0;
@@ -3749,7 +3749,7 @@ ladder_step_done:
         break;
     case 8:
         g_playerEntity.zoneFlags &= 0xef;
-        g_main_state_flags &= ~0x10;
+        g_main_state_flags &= ~MSF_LADDER_DOWN;
         ((unsigned char*)&g_message_flags)[0] |= 0x40;
         g_playerEntity.isBeingAttackedFlag = 0;
         g_playerEntity.animationId = 1;
@@ -4249,7 +4249,7 @@ static void player_behavior_12_gun_aim(void)
         g_playerEntity.attackAnim = 5;
         g_playerEntity.unk_8c = 3;
         g_playerEntity.weaponAimFlags = 0;
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             PlayEntitySnd(0);
         }
         if (g_aimReticleEnabled != 0) {
@@ -4385,7 +4385,7 @@ static void player_behavior_13_gun_raise(void)
                 g_playerEntity.animation_frame_id = 0xf;
                 weapon_special_frame_update(0, 0);
             }
-            if ((g_main_state_flags2 & 1) != 0) {
+            if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
                 PlayEntitySnd(0);
             }
         } else {
@@ -4545,7 +4545,7 @@ static void player_behavior_14_autoaim_raise(void)
     g_playerEntity.attackAnim = (unsigned char)
         ((((g_playerEntity.weaponAimFlags & 0x20) >> 4) + (g_playerEntity.weaponAimFlags >> 7) + 2) * 3);
     weapon_lockon_effect();
-    if ((g_main_state_flags2 & 1) != 0) {
+    if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
         PlayEntitySnd(1);
     }
     player_behavior_14_autoaim_fire();
@@ -5003,7 +5003,7 @@ static void player_behavior_15_gun_fire(void)
             g_playerEntity.animation_frame_id = 0xf;
             g_weaponSpecialFireCountdown = 0xf;
         }
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             PlayEntitySnd(0);
         }
         break;
@@ -5058,7 +5058,7 @@ static void player_behavior_17_holster(void)
         if (g_playerEntity.equippedWeaponId > 0x6e) {
             g_playerEntity.animation_frame_id = 0x1c;
         }
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             PlayEntitySnd(0);
         }
     }
@@ -5212,7 +5212,7 @@ static void player_behavior_18_hold_fire(void)
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = 0xe;
         g_playerEntity.unk_8c = 3;
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             PlayEntitySnd(0);
         }
     } else if (g_playerEntity.action_state == 1) {
@@ -5261,7 +5261,7 @@ static void player_behavior_19_fire_click(void)
         g_playerEntity.action_state = 1;
         g_playerEntity.attackDirection = 0xf;
         Play3DSnd(1, 9, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             PlayEntitySnd(0);
         }
     }
@@ -5323,7 +5323,7 @@ state1_body:
         g_playerEntity.unk_8c = 7;
         g_playerEntity.attackAnim =
             (unsigned char)(up + dir + g_playerEntity.equippedWeaponId * 3 + 2);
-        if ((g_main_state_flags2 & 1) != 0) {
+        if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
             PlayEntitySnd(0);
         }
         return;
@@ -5427,7 +5427,7 @@ static void player_behavior_13_knife_hold(void)
             g_playerEntity.animation_frame_id = 0;
             g_playerEntity.unk_bf = 0;
             g_playerEntity.unk_8c = 0xf;
-            if ((g_main_state_flags2 & 1) != 0) {
+            if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
                 PlayEntitySnd(0);
             }
         }
@@ -5503,7 +5503,7 @@ static void player_behavior_14_knife_swing(void)
     }
 
     // Flash + sound effects, only above the covers-table height
-    if ((g_main_state_flags2 & 1) != 0
+    if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0
         && 1000 < g_playerEntity.scaMatrixData.localMatrix.t[1]
                   - *(int*)((char*)g_omodel_table[0] + 0x38)) {
         if (g_playerEntity.attackAnim == 7) {
@@ -5621,7 +5621,7 @@ static void player_behavior_16_knife_turn(void)
             g_playerEntity.unk_8c             = 0xf;
             g_playerEntity.attackAnim         = (unsigned char)
                 (((g_playerEntity.flags & 0xbf) >> 6) + ((g_playerEntity.flags & 0x20) >> 3) + 10);
-            if ((g_main_state_flags2 & 1) != 0) {
+            if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) != 0) {
                 PlayEntitySnd(0);
             }
         }
@@ -6542,10 +6542,10 @@ void update_player_anim(void)
     // 0x00494e73: the mirror pass - see entity_draw_mirror_reflection in EntityCommon.cpp. Only
     // a room script (SCD opcode 0x0F) raises bit 0, so this is inert everywhere
     // except the rooms that actually have a mirror.
-    if ((g_main_state_flags & 1) != 0) {
+    if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
         unsigned char lit = mirror_point_visible(
             (void*)((int)g_RdtPointer[1].lights + (unsigned int)g_roomCameraId * 0x2c - 4),
-            (unsigned char)((g_main_state_flags >> 1) & 1),
+            (unsigned char)((g_main_state_flags & MSF_MIRROR_PLANE_X) != 0),
             (int)g_playerEntity.scaMatrixData.localMatrix.t);
         if (lit != 0) {
             entity_draw_mirror_reflection();
@@ -6615,7 +6615,7 @@ static void door_locked_message(unsigned int msgIndex)
 static void door_begin_transition(unsigned char* record)
 {
     g_pendingDoorRecord = (int)record;          // the room the transition will load
-    g_main_state_flags |= 0x2000000;
+    g_main_state_flags |= MSF_GAMEPLAY_ACTIVE;
     g_message_flags = 0;
 
     g_rect.textureId = 0;
@@ -6642,7 +6642,7 @@ static void door_begin_transition(unsigned char* record)
 int door_try_enter(unsigned char* entry)
 {
     // 0x0041b400: already mid-transition (climb/door), do nothing.
-    if ((g_main_state_flags & 0x80) != 0) {
+    if ((g_main_state_flags & MSF_DOOR_TRANSITION) != 0) {
         return 0;
     }
 
@@ -6770,7 +6770,7 @@ int check_door(unsigned char* entry)
     }
 
     ENTITY->has_enter_switch_zone |= 0x20;
-    g_main_state_flags2 |= 0x400000;
+    g_main_state_flags2 |= MSF2_DOOR_TURN_PENDING;
     return 0;
 }
 
@@ -6829,7 +6829,7 @@ int set_key_flag(unsigned char* entry)
 {
     g_room_event_index = entry;
     if (*(unsigned short*)(entry + 2) == 0) {
-        g_main_state_flags |= 0x800;
+        g_main_state_flags |= MSF_MENU_MODE_ITEM_VIEW;
         return 0;
     }
     return 1;
@@ -6877,7 +6877,7 @@ int check_door_side(unsigned char* entry)
     }
 
     ENTITY->has_enter_switch_zone |= 0x60;
-    g_main_state_flags2 |= 0x400000;
+    g_main_state_flags2 |= MSF2_DOOR_TURN_PENDING;
     return 0;
 }
 
@@ -6897,7 +6897,11 @@ int flag_bank_set(unsigned char* entry)
     case 2:  pFlags = (unsigned int*)&g_LocksFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 3:  pFlags = (unsigned int*)&g_EnemiesFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 4:  pFlags = (unsigned int*)((char*)g_SysFlags + ((*(unsigned short*)(entry + 4) >> 3) & ~3u)); break;
-    case 5:  pFlags = (unsigned int*)&g_main_state_flags; break;
+    // Banks 5 and 6 do NOT add the byte offset here - the original's arms are a
+    // bare `mov edx, 0xbe41c0` / `mov edx, 0xbebcc0` (0x0041b8e4 / 0x0041b8eb),
+    // so this room action can only reach each bank's FIRST dword. cmd_bit_op has
+    // no such limit, which is how scripts reach msf2 (selector 0x20+).
+    case 5:  pFlags = (unsigned int*)g_MainStateFlagBank; break;   // first dword only
     case 6:  pFlags = (unsigned int*)&g_message_flags; break;
     case 7:  pFlags = (unsigned int*)&g_roomItemsFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
     case 8:  pFlags = (unsigned int*)&g_RoomFlags[(*(unsigned short*)(entry + 4) >> 3) & ~3u]; break;
@@ -6924,7 +6928,7 @@ int open_itembox(unsigned char* entry)
 {
     if ((g_itembox_state == 0) &&
         (g_playerEntity.isBeingAttackedFlag == 0) &&
-        (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
+        ((g_main_state_flags & MSF_MENU_PENDING) == 0) &&
         ((unsigned short)g_message_flags & 0x40) != 0) {
         g_itembox_state = 1;
         g_message_flags = (unsigned short)g_message_flags & 0xffba;
@@ -6968,7 +6972,7 @@ int room_action_effect(unsigned char* entry)
     static const int g_roomActionEffectX[6] = {0, -346, -346, 0, 346, 346};
     static const int g_roomActionEffectZ[6] = {-400, 346, -346, 346, 200, 346};
 
-    g_main_state_flags2 |= 1;
+    g_main_state_flags2 |= MSF2_EFFECT_ZONE;
     if ((0 < g_playerEntity.move_speed_current) && (g_spriteAnimActive != 0)) {
         VECTOR pos;
         pos.x = g_roomActionEffectX[g_roomActionEffectIndex];
@@ -6998,7 +7002,7 @@ int set_stairs_zone(unsigned char* entry)
     g_playerEntity.unk_c6 = *(unsigned short*)(entry + 4);
     g_playerEntity.unk_c8 = *(unsigned short*)(entry + 6);
     *(unsigned char*)(entry + 2) ^= 1;
-    g_main_state_flags |= 0x10;
+    g_main_state_flags |= MSF_LADDER_DOWN;
     return 0;
 }
 
@@ -7012,7 +7016,7 @@ int set_room_event_flag(unsigned char* entry)
 {
     g_room_event_index = entry;
     if (*(unsigned short*)(entry + 2) == 0) {
-        g_main_state_flags |= 0x100;
+        g_main_state_flags |= MSF_PICKUP_SCREEN;
         return 0;
     }
     return 1;
@@ -7036,7 +7040,7 @@ int check_desk(unsigned char* entry)
 {
     if ((g_desk_check_state == 0) &&
         (g_playerEntity.isBeingAttackedFlag == 0) &&
-        (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
+        ((g_main_state_flags & MSF_MENU_PENDING) == 0) &&
         ((unsigned short)g_message_flags & 0x40) != 0) {
         unsigned short eventIdx = *(unsigned short*)(entry + 4);
         // The flag index and item-model slot index live in the +6/+4
@@ -7081,10 +7085,11 @@ int check_desk(unsigned char* entry)
     return 0;
 }
 
-// 0x004885a0 - mark an item id "seen" in the RoomFlags bank.
-static void set_room_item_seen_flag(int itemIdMinus4e)
+// 0x004885a0 - mark a map "owned" in the RoomFlags bank. The argument is the
+// MAP INDEX (itemId - ITEM_MAP_FIRST); map_area_known reads the bits back.
+static void set_room_item_seen_flag(int mapIndex)
 {
-    Flg_on((int)g_RoomFlags, itemIdMinus4e + 0x7c);
+    Flg_on((int)g_RoomFlags, mapIndex + ROOM_FLAG_MAP_BASE);
 }
 
 // ============================================================================
@@ -7099,7 +7104,7 @@ int pickup_key_event(unsigned char* entry)
     *entry = 0;
     ((unsigned char*)g_item_model_table[*(unsigned short*)(entry + 4)])[0] = 0;
     FUN_00473f10((int*)&g_roomItemsFlags, *(unsigned char*)(*(unsigned char**)(entry + 8) + 0x14));
-    set_room_item_seen_flag(*(unsigned char*)(*(unsigned char**)(entry + 8) + 8) - 0x4e);
+    set_room_item_seen_flag(ITEM_TO_MAP_INDEX(*(unsigned char*)(*(unsigned char**)(entry + 8) + 8)));
     g_pickedItemId = *(unsigned char*)(*(unsigned char**)(entry + 8) + 8);
     return 0;
 }
@@ -7115,7 +7120,7 @@ int pickup_key_event(unsigned char* entry)
 int check_typewriter(unsigned char* entry)
 {
     if ((g_typewriter_state == 0) &&
-        (((unsigned char*)&g_main_state_flags)[1] & 0x7f) == 0 &&
+        ((g_main_state_flags & MSF_MENU_PENDING) == 0) &&
         ((unsigned short)g_message_flags & 0x40) != 0) {
         int ribbonSlot = get_item_slot(ITEM_INK_RIBBONS);
         if (ribbonSlot >= 0) {

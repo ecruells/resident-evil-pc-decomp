@@ -1,8 +1,9 @@
 // ComputerLab.cpp - The lab computer terminal (room 5060, stage 5).
 //
 // This is the third of the three "interactive screens" dispatched by
-// check_and_display_interactive_screen (0x0042a030). PlayerFlags bit 0x20 is
-// the "a screen is up" gate; the SysFlags bit picks which one:
+// check_and_display_interactive_screen (0x0042a030). g_ScenarioFlags bit 0x20
+// (SCENARIO_FLAG_INTERACTIVE_SCREEN) is the "a screen is up" gate; the SysFlags
+// bit picks which one:
 //
 //   SysFlags 0x1d -> display_passcode_panel  (InteractiveScreen.cpp)
 //   SysFlags 0x1e -> display_computer_lab    (0x00412390)   <- this file
@@ -963,7 +964,7 @@ static void cl_logo_behaviour_wordmark(ClLogoSlot* s)
         // play_sound_and_voice_effect type 2 / UpdateMusicWaitState, so the hold
         // is however long the sting actually runs, not a fixed count.
         if (s->counter > 0) s->counter--;
-        if (s->counter < 1 && (g_main_state_flags & 0x20000) == 0) {
+        if (s->counter < 1 && (g_main_state_flags & MSF_VOICE_PLAYING) == 0) {
             s->sub++;
             s->x       = 0x20000;    // 2.0
             s->y      += 0xc0000;    // +12.0
@@ -1244,7 +1245,7 @@ static void cl_intro_logo_update(void)
 
         play_sound_and_voice_effect(1, 0xb7);
         s_introLogoState++;
-        g_main_state_flags |= 0x20000;
+        g_main_state_flags |= MSF_VOICE_PLAYING;
     }
 
     for (int i = 0; i < CL_LOGO_SLOTS; i++) {
@@ -2543,8 +2544,11 @@ static void cl_cmd_unlock(void)
     s_doorSel      |= 0x80;
     ST_TIMER_A      = 0x5a;
 
-    // 0x004885a0 inlined: mark item id 5 seen in the RoomFlags bank.
-    Flg_on((int)g_RoomFlags, 5 + 0x7c);
+    // set_room_item_seen_flag(0x004885a0) inlined - the original pushes the bare
+    // constant 5, which is the MAP INDEX of the lab map (item ITEM_MAP_LABORATORY,
+    // 0x53 - ITEM_MAP_FIRST). The lab map has no item model anywhere in the RDTs,
+    // so this terminal unlock is the only thing that ever raises its bit.
+    Flg_on((int)g_RoomFlags, ROOM_FLAG_MAP_BASE + MAP_INDEX_LABORATORY);
 
     const int lockBit = 0x26 - (((s_doorSel & 0x7f) == 0) ? 1 : 0);
     if (Flg_ck((int)g_LocksFlags, lockBit) != 0) {

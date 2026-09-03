@@ -156,12 +156,12 @@
 
     <h2>Flags</h2>
     <div class="grid">
-      <div class="field"><label>Player flags (0x2A0, 16 bytes hex)</label><input id="f_playerFlags" type="text" class="hexedit"></div>
+      <div class="field"><label>Scenario flags (0x2A0, 16 bytes hex)</label><input id="f_scenarioFlags" type="text" class="hexedit"></div>
       <div class="field"><label>Room flags (0x2B0, 20 bytes hex)</label><input id="f_roomFlags" type="text" class="hexedit"></div>
       <div class="field"><label>Locks flags (0x254, 8 bytes hex)</label><input id="f_locksFlags" type="text" class="hexedit"></div>
-      <div class="field"><label>Room event flags (0x25C, 32 bytes hex)</label><input id="f_roomEventFlags" type="text" class="hexedit"></div>
+      <div class="field"><label>Enemies flags (0x25C, 32 bytes hex)</label><input id="f_enemiesFlags" type="text" class="hexedit"></div>
       <div class="field"><label>Room items flags (0x27C, 32 bytes hex)</label><input id="f_roomItemsFlags" type="text" class="hexedit"></div>
-      <div class="field"><label>Player flags 3 (0x234, 32 bytes hex)</label><input id="f_playerFlags3" type="text" class="hexedit"></div>
+      <div class="field"><label>Scenario flags 2 (0x234, 32 bytes hex)</label><input id="f_scenarioFlags2" type="text" class="hexedit"></div>
     </div>
 
     <h2>Input</h2>
@@ -363,12 +363,12 @@ function loadFields() {
   buildItemRows($("boxRows"), 0x2C4, 48, "Box");
   buildItemRows($("rebRows"), 0x330, 6, "Reb");
 
-  $("f_playerFlags").value = hexBytes(0x2A0, 16);
+  $("f_scenarioFlags").value = hexBytes(0x2A0, 16);
   $("f_roomFlags").value = hexBytes(0x2B0, 20);
   $("f_locksFlags").value = hexBytes(0x254, 8);
-  $("f_roomEventFlags").value = hexBytes(0x25C, 32);
+  $("f_enemiesFlags").value = hexBytes(0x25C, 32);
   $("f_roomItemsFlags").value = hexBytes(0x27C, 32);
-  $("f_playerFlags3").value = hexBytes(0x234, 32);
+  $("f_scenarioFlags2").value = hexBytes(0x234, 32);
   $("f_keyBinds").value = hexBytes(0x800, 32);
 
   renderHex();
@@ -515,12 +515,12 @@ function hexField(id, off, n) {
     catch (e) { $("status").textContent = e.message; $("status").className = "err"; }
   });
 }
-hexField("f_playerFlags", 0x2A0, 16);
+hexField("f_scenarioFlags", 0x2A0, 16);
 hexField("f_roomFlags", 0x2B0, 20);
 hexField("f_locksFlags", 0x254, 8);
-hexField("f_roomEventFlags", 0x25C, 32);
+hexField("f_enemiesFlags", 0x25C, 32);
 hexField("f_roomItemsFlags", 0x27C, 32);
-hexField("f_playerFlags3", 0x234, 32);
+hexField("f_scenarioFlags2", 0x234, 32);
 hexField("f_keyBinds", 0x800, 32);
 
 // --- download ---

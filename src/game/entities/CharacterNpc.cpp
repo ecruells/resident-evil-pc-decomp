@@ -448,7 +448,7 @@ static void npc_idle_walk_01(void)
         if (g_playerDisplacement != 0) {
             ENTITY->action_state = (unsigned char)(ENTITY->action_state + 1);
             play_sound_and_voice_effect(1, 0xA9);
-            g_main_state_flags |= 0x20000;
+            g_main_state_flags |= MSF_VOICE_PLAYING;
             return;
         }
         break;

@@ -142,41 +142,80 @@ static_assert(sizeof(BioCardLayout) == 0x41C, "BioCardLayout size mismatch");
 // no constant yet - add one here (and a row in the doc) when a bit is traced.
 // ============================================================================
 // --- g_ScenarioFlags (bank 0, 0x00be98c0) ---
-#define SCENARIO_FLAG_STAGE_VARIANT        0x00  // character room variant flag (0: chris, 1: jill)
-#define SCENARIO_FLAG_YAWN_BITE            0x10  // Yawn bite event (set by the Yawn attack entry)
-#define SCENARIO_FLAG_ITEM13_USE_LOCK      0x13  // item 0x13 use rejected while set (progression gate)
-#define SCENARIO_FLAG_CHEMICAL_COMBINE     0x16  // chemical combine performed (combine effect 4)
-#define SCENARIO_FLAG_PANEL_VARIANT_A      0x1E  // passcode-panel initial-state variant selector
-#define SCENARIO_FLAG_PANEL_VARIANT_B      0x1F  // passcode-panel initial-state variant selector
-#define SCENARIO_FLAG_INTERACTIVE_SCREEN   0x20  // interactive screen active gate
-#define SCENARIO_FLAG_PANEL_SOLVED         0x21  // lab passcode panel solved
-#define SCENARIO_FLAG_PLANT42_DEAD         0x29  // Plant 42 defeated
-#define SCENARIO_FLAG_ALTERNATE_OUTFIT     0x2A  // alternate outfit (model id + 8)
-#define SCENARIO_FLAG_WESKER_VARIANT       0x37  // Wesker later-animation variant
-#define SCENARIO_FLAG_YAWN_SERUM           0x47  // Yawn serum marker - first Yawn poisons only while clear
-#define SCENARIO_FLAG_PROGRESS_48          0x48  // map variant gate (bank 0; MainMenu map modes)
-#define SCENARIO_FLAG_PROGRESS_49          0x49  // map display variant gate
-#define SCENARIO_FLAG_PROGRESS_4A          0x4A  // map display variant gate
-#define SCENARIO_FLAG_MONSTER_PLANT_PROG   0x5B  // monster plant combat progression (3+ hits)
-#define SCENARIO_FLAG_SECOND_PLAYTHROUGH   0x7B  // second playthrough ("hard mode") - set after clearing
-#define SCENARIO_FLAG_HAS_LOCKPICK         0x7C  // has the lockpick (Jill)
-#define SCENARIO_FLAG_MENU_FADE_LATCH      0x7D  // fade-in latch, cleared when the menu closes
-#define SCENARIO_FLAG_INF_R_LAUNCHER       0x7E  // infinite rocket launcher flag
-#define SCENARIO_FLAG_HAS_RADIO            0x7F  // has the radio (item 0x4D)
+#define SCENARIO_FLAG_STAGE_VARIANT       0x00  // character room variant flag (0: chris, 1: jill)
+#define SCENARIO_FLAG_YAWN_BITE           0x10  // Yawn bite event (set by the Yawn attack entry)
+#define SCENARIO_FLAG_ITEM13_USE_LOCK     0x13  // item 0x13 use rejected while set (progression gate)
+#define SCENARIO_FLAG_CHEMICAL_COMBINE    0x16  // chemical combine performed (combine effect 4)
+#define SCENARIO_FLAG_PANEL_VARIANT_A     0x1E  // passcode-panel initial-state variant selector
+#define SCENARIO_FLAG_PANEL_VARIANT_B     0x1F  // passcode-panel initial-state variant selector
+#define SCENARIO_FLAG_INTERACTIVE_SCREEN  0x20  // interactive screen active gate
+#define SCENARIO_FLAG_PANEL_SOLVED        0x21  // lab passcode panel solved
+#define SCENARIO_FLAG_PLANT42_DEAD        0x29  // Plant 42 defeated
+#define SCENARIO_FLAG_ALTERNATE_OUTFIT    0x2A  // alternate outfit (model id + 8)
+#define SCENARIO_FLAG_WESKER_VARIANT      0x37  // Wesker later-animation variant
+#define SCENARIO_FLAG_YAWN_SERUM          0x47  // Yawn serum marker - first Yawn poisons only while clear
+// 0x48/0x49/0x4A acknowledge an objective for the map highlight (see
+// docs/SCENARIO_FLAGS.md), but each has other setters and readers, so they
+// keep generic names.
+#define SCENARIO_FLAG_PROGRESS_48         0x48  // acks SCENARIO2_FLAG_PLANT42_OBJ (the BGM condition is bank 1's 0x48, not this one)
+#define SCENARIO_FLAG_PROGRESS_49         0x49  // acks serum objective 1 - set by the serum room's init script
+#define SCENARIO_FLAG_PROGRESS_4A         0x4A  // acks serum objective 2 - set by the serum room's init script
+#define SCENARIO_FLAG_MONSTER_PLANT_PROG  0x5B  // monster plant combat progression (3+ hits)
+#define SCENARIO_FLAG_SECOND_PLAYTHROUGH  0x7B  // second playthrough ("hard mode") - set after clearing
+#define SCENARIO_FLAG_HAS_LOCKPICK        0x7C  // has the lockpick (Jill)
+#define SCENARIO_FLAG_MENU_FADE_LATCH     0x7D  // fade-in latch, cleared when the menu closes
+#define SCENARIO_FLAG_INF_R_LAUNCHER      0x7E  // infinite rocket launcher flag
+#define SCENARIO_FLAG_HAS_RADIO           0x7F  // has the radio (item 0x4D)
 
 // --- g_ScenarioFlags2 (bank 1, 0x00be9854) ---
-#define SCENARIO2_FLAG_JILL_FIRST_RUN      0x0B  // Jill first-playthrough marker (with roomItemsFlags 0x34)
-#define SCENARIO2_FLAG_PROGRESS_22         0x22  // radio-tab availability gate (character id & 3 == 3)
-#define SCENARIO2_FLAG_PROGRESS_23         0x23  // map display variant gate
-#define SCENARIO2_FLAG_PROGRESS_2D         0x2D  // map display variant gate
-#define SCENARIO2_FLAG_PROGRESS_2E         0x2E  // map display variant gate
-#define SCENARIO2_FLAG_PROGRESS_38         0x38  // map variant gate + radio-tab availability gate
-#define SCENARIO2_FLAG_YAWN_POISONED       0x43  // poisoned by Yawn (cleared by the serum)
-#define SCENARIO2_FLAG_PROGRESS_48         0x48  // stage 2 room 7 keeps 2 BGM channels when set
-#define SCENARIO2_FLAG_SECOND_SURVIVOR     0x4B  // ending "second survivor" bit
-#define SCENARIO2_FLAG_PROGRESS_55         0x55  // stage 2 room 7 Barry/Hunter cutscene already played
-#define SCENARIO2_FLAG_PROGRESS_5C         0x5C  // stage 2 room 7 third BGM channel condition (Jill)
-#define SCENARIO2_FLAG_PARTNER_ALIVE       0xC0  // ending "partner survived" bit
+#define SCENARIO2_FLAG_JILL_FIRST_RUN     0x0B  // Jill first-playthrough marker (with roomItemsFlags 0x34)
+#define SCENARIO2_FLAG_PROGRESS_22        0x22  // radio-tab availability gate (character id & 3 == 3)
+// 0x23/0x24 do Jill's two serum objectives in ROOM1001 the way 0x2D/0x2E do
+// Chris's, but they are NOT dedicated to that: ROOM3070 (a Chris file) sets
+// 0x23 in a block with 0x30/0x33/0xC0, and ROOM3030 clears 0x22/0x23/0x24
+// together with audio side effects. Reused bits - left generic on purpose.
+#define SCENARIO2_FLAG_PROGRESS_23        0x23  // Jill serum objective 1 in ROOM1001; reused in stages 3/6
+#define SCENARIO2_FLAG_PROGRESS_24        0x24  // Jill serum objective 2 in ROOM1001; reused in stages 3/6
+#define SCENARIO2_FLAG_SERUM_OBJ1_CHRIS   0x2D  // Chris: serum objective 1 outstanding (pillar-passage cutscene)
+#define SCENARIO2_FLAG_SERUM_OBJ2_CHRIS   0x2E  // Chris: serum objective 2 outstanding (front-of-attic cutscene)
+#define SCENARIO2_FLAG_PLANT42_OBJ        0x38  // Plant 42 objective outstanding (V-JOLT hunt); cleared with SCENARIO_FLAG_PLANT42_DEAD. Also gates Rebecca's radio tab
+#define SCENARIO2_FLAG_YAWN_POISONED      0x43  // poisoned by Yawn (cleared by the serum)
+#define SCENARIO2_FLAG_PROGRESS_48        0x48  // stage 2 room 7 keeps 2 BGM channels when set
+#define SCENARIO2_FLAG_SECOND_SURVIVOR    0x4B  // ending "second survivor" bit
+#define SCENARIO2_FLAG_PROGRESS_55        0x55  // stage 2 room 7 Barry/Hunter cutscene already played
+#define SCENARIO2_FLAG_PROGRESS_5C        0x5C  // stage 2 room 7 third BGM channel condition (Jill)
+#define SCENARIO2_FLAG_PARTNER_ALIVE      0xC0  // ending "partner survived" bit
+
+// --- g_RoomFlags (bank 8, 0x00be98d0, 20 bytes = 160 bits) ---
+// Three separate bit blocks share this bank, each indexed off its own base.
+// Every accessor is a two-line wrapper around Flg_on/Flg_ck, so the base IS the
+// only thing that distinguishes them:
+//
+//   0x00..0x7B  rooms VISITED, g_StageRoomFlagOffset[stageId % 5] + roomId
+//               (room_set_visited_flag 0x00488570; read by the map screen).
+//               Per map group: 1F 0..31, 2F 32..62, courtyard+underground
+//               63..81, guardhouse 82..99, laboratory 100..123 - the bases are
+//               the running sum of g_MapRoomCounts, so the block ends exactly
+//               where the map block begins.
+//   0x7C..0x81  MAP owned, ROOM_FLAG_MAP_BASE + map index
+//               (set_room_item_seen_flag 0x004885a0, read by map_area_known
+//               0x004885c0). See ITEM_MAP_* / MAP_INDEX_* in Types.h.
+//   0x82..0x91  FILE collected, ROOM_FLAG_FILE_BASE + (itemId - 0x5F), the 16
+//               documents (0x00488660, read by pickup_item_seen 0x00488680).
+//   0x92..0x9F  unused.
+//
+// NOTE: the numeric overlap is a coincidence of the two bases - decimal 82 is
+// the guardhouse VISITED base, hex 0x82 is the FILE base. They are different
+// blocks. 0x00488660 takes a file index, not a room id - it was named
+// map_set_room_flag; both Ghidra and the port now call it
+// file_set_collected_flag.
+//
+// Room SCD scripts reach the whole bank as flag bank 8 (cmd_bit_test/cmd_bit_op
+// and the flag_bank_set room action at 0x0041b918), so scripts can touch bits in
+// any of these blocks.
+#define ROOM_FLAG_MAP_BASE                 0x7C  // + MAP_INDEX_* -> that map is owned
+#define ROOM_FLAG_FILE_BASE                0x82  // + (itemId - 0x5F) -> that file has been collected
+
 
 
 

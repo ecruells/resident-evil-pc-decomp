@@ -1526,7 +1526,7 @@ void tyrant_behavior_erupt(void)
         Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x200);
         ty_ticks() = 0x3c;
         play_sound_and_voice_effect(1, 0x2d);
-        g_main_state_flags |= 0x20000;
+        g_main_state_flags |= MSF_VOICE_PLAYING;
         Play3DSnd(2, 0x1c, 0, (int)&ei(ENTITY, 0x34));
         srand(0xb23);
         // fallthrough
@@ -2316,7 +2316,7 @@ void em_scd_behavior_break_glass(void)
         g_playerPosScratch.y = -0x1004;
         g_playerPosScratch.z = 5000;
         play_sound_and_voice_effect(1, 0xb3);
-        g_main_state_flags |= 0x20000;
+        g_main_state_flags |= MSF_VOICE_PLAYING;
         Play3DSnd(2, 0x1a, 0, (int)&g_playerPosScratch);
         Play3DSnd(2, 0x1b, 0, (int)&g_playerPosScratch);
     }

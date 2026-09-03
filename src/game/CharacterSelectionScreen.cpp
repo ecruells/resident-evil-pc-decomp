@@ -25,7 +25,7 @@ static void DisplayIntroAndStartGame(void)
 {
     sounds_reset();
     g_selectedFmvId = 1;
-    g_main_state_flags |= (0x00040000 | 0x00080000);
+    g_main_state_flags |= (MSF_FMV_REQUEST | MSF_PANNING_RESET);
     nullsub_0047eb80();
     Task_sleep(1);
     Task_chain((void*)game_start);
@@ -37,7 +37,7 @@ static void DisplayIntroAndStartGame(void)
 static void SetFading(unsigned char fade_type, short fade_counter)
 {
     if (g_fading_state < 1) {
-        g_main_state_flags |= 0x20000000;
+        g_main_state_flags |= MSF_FADE_ACTIVE;
         g_fading_counter = fade_counter;
         g_fade_type_id = fade_type;
     }
@@ -173,7 +173,7 @@ static void CharSelectRenderSprite(unsigned char texU, unsigned char texV,
                                    int slot)
 {
     if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return;
-    if ((g_main_state_flags & 0x40000000) != 0) return;
+    if ((g_main_state_flags & MSF_SCREEN_STANDALONE) != 0) return;
 
     int shiftedSlot = slot + 0xF;
     if (shiftedSlot < 0 || shiftedSlot >= 256) return;
@@ -462,7 +462,7 @@ void characterSelectionScreen(void)
     g_char1PosY = 0x68;
     g_char1Scale = 0x110;
     g_fading_counter = 0xF800;
-    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
     fade_update();
 
     // Main loop
@@ -471,8 +471,8 @@ void characterSelectionScreen(void)
         if (g_bSelResetGameFlag != 0) {
             g_bSelResetGameFlag = 0;
             StMask(0, 3);
-            g_main_state_flags2 = g_main_state_flags2 & 0x20080000;
-            g_main_state_flags = (g_main_state_flags & 0x2FFFFFFF) | 0x40000000;
+            g_main_state_flags2 = g_main_state_flags2 & MSF2_RESET_KEEP_MASK;
+            g_main_state_flags = (g_main_state_flags & ~(MSF_SCREEN_MODE_MASK | MSF_CONTINUE_GAME)) | MSF_SCREEN_STANDALONE;
             Task_chain((void*)title_state);
         }
 
@@ -547,7 +547,7 @@ void characterSelectionScreen(void)
                     fade_update();
                 }
             } else {
-                g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+                g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
                 g_selSubState = 0;
                 g_selState = 7;
                 SetFading(2, 0xC00);
@@ -673,7 +673,7 @@ sub_5:
                 g_fade_type_id = 1;
                 g_fading_counter = 0xFF00;
                 fade_update();
-                g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+                g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
             }
             break;
 
@@ -698,7 +698,7 @@ case_6:
             // Set selected player and transition to game.
             g_SelectedCharactedId = g_selSelected;
             if (g_selSelected != 0) {
-                g_main_state_flags |= 0x800000;
+                g_main_state_flags |= MSF_CHAR_VARIANT;
             }
             g_bGameActive = 2;
             nullsub_0047eb80();
@@ -710,7 +710,7 @@ case_6:
 
         case 7:
             // Return to title screen
-            if ((g_main_state_flags & 0x20000000) == 0) {
+            if ((g_main_state_flags & MSF_FADE_ACTIVE) == 0) {
                 g_bGameActive = 2;
                 nullsub_0047eb80();
                 cleanup_texture_slot(0x0C);

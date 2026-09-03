@@ -567,7 +567,7 @@ void options_menu_exit(void)
     s_optMainState = 4; // 0x00ac9e70
     StMask(0, 3);
     set_fading(2, 0x800);
-    g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x40000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
 }
 
 
@@ -2561,9 +2561,9 @@ void options_menu(void)
     s_optCursorPos = 0; // 0x00ac9e73
 
     // Check if controller flag needs to be set
-    if ((g_main_state_flags2 & 4) != 0) {
+    if ((g_main_state_flags2 & MSF2_SCREEN_BORDER) != 0) {
         g_controllerConfig = g_controllerConfig | 0x10;
-        g_main_state_flags2 = g_main_state_flags2 & ~4;
+        g_main_state_flags2 = g_main_state_flags2 & ~MSF2_SCREEN_BORDER;
     }
 
     // Set up 3 light sources for options background
@@ -2601,7 +2601,7 @@ void options_menu(void)
     g_fading_counter = 0xf800;
     fade_update();
 
-    g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x80000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
 
     // Load options background texture
     LoadFile(s_optBgKeyConfig, &g_TimImageBuffer, 0x20);
@@ -2830,7 +2830,7 @@ afterKeyConfig:
 
         case 4:
             // Exit state
-            if ((g_main_state_flags & 0x20000000) == 0) {
+            if ((g_main_state_flags & MSF_FADE_ACTIVE) == 0) {
                 // Restore player entity
                 memcpy(&g_playerEntity, savedEntityData, 0x180);
                 g_EquippedItemId = savedEquippedItemId;
@@ -2847,11 +2847,11 @@ afterKeyConfig:
                 g_playerEntity.action_behavior = 0;
                 g_playerEntity.action_state = 0;
                 Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
-                g_main_state_flags = g_main_state_flags & 0xffff00ff;
+                g_main_state_flags = g_main_state_flags & ~MSF_MENU_BYTE;
 
                 // Restore controller config flag
                 if ((g_controllerConfig & 0x10) != 0) {
-                    g_main_state_flags2 = g_main_state_flags2 | 4;
+                    g_main_state_flags2 = g_main_state_flags2 | MSF2_SCREEN_BORDER;
                     g_controllerConfig = g_controllerConfig & 0xef;
                 }
 

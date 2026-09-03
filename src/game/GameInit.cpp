@@ -131,7 +131,7 @@ void init_and_start_game(void)
     g_imageBufferPtr = g_imageBufferDataA;               // 0x00bebce8
     g_imageBufferPtr2 = g_imageBufferDataB;              // 0x00bee268
 
-    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
 
     TaskScheduler_Reset();
 

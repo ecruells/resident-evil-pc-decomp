@@ -173,7 +173,7 @@ void image_update(int param_1)
 void set_fading(int fade_type_id, int fading_counter)
 {
     if ((short)g_fading_state < 1) {
-        g_main_state_flags |= 0x20000000;
+        g_main_state_flags |= MSF_FADE_ACTIVE;
         g_fading_counter = (short)fading_counter;
         g_fade_type_id   = (unsigned char)fade_type_id;
     }
@@ -194,7 +194,7 @@ void set_fading(int fade_type_id, int fading_counter)
 // ============================================================================
 void TimeoutDeathFadeOut(void)
 {
-    g_main_state_flags = g_main_state_flags & 0xD1FD003F;
+    g_main_state_flags = g_main_state_flags & MSF_DEATH_KEEP_MASK;
     g_message_flags    = (WORD)(g_message_flags & 0xFEFF);
     g_menu_choice_id   = 0;
     g_openMenuFlag     = 0;
@@ -204,16 +204,16 @@ void TimeoutDeathFadeOut(void)
         play_sound_and_voice_effect(2, 0);
         Task_sleep(1);
         g_fading_state = 0xFFFF;
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
         return;
     }
-    if ((g_main_state_flags2 & 0x10000000) != 0) {
+    if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) != 0) {
         g_fade_type_id   = 2;
         g_fading_counter = 0x800;
         fade_update();
         return;
     }
-    if ((g_main_state_flags2 & 0x80000000) != 0) {
+    if ((g_main_state_flags2 & MSF2_DEATH_VARIANT) != 0) {
         g_fade_type_id   = 2;
         g_fading_counter = 0x100;
         fade_update();
@@ -442,10 +442,10 @@ void die_state(void)
     g_SpecialRoomLightState = 0xFFFF;
     g_menu_choice_id        = 0;
     g_spriteAnimIntensity   = 0;
-    g_main_state_flags      = (g_main_state_flags & 0x3FFEFFFF) | 0x40000000;
+    g_main_state_flags      = (g_main_state_flags & ~(MSF_SCREEN_MODE_MASK | MSF_INTENSITY_RAMP)) | MSF_SCREEN_STANDALONE;
 
     // Skip the death screen entirely in attract/demo mode (0x90000000).
-    if ((g_main_state_flags2 & 0x90000000) == 0) {
+    if ((g_main_state_flags2 & (MSF2_DEATH_VARIANT | MSF2_ATTRACT_DEMO)) == 0) {
         display_die_screen();
     }
 

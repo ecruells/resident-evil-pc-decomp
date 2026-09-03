@@ -884,7 +884,7 @@ void joint_setup_attack_effect(int joint, unsigned char effectType, unsigned sho
     *(unsigned short*)(joint + 0x72) = frameMatch;
 
     // Also apply to weapon-part joint if active
-    if (((unsigned char)g_main_state_flags & 1) != 0) {
+    if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
         int weaponJoint = (*(int*)((char*)ENTITY + 0xAC) - *(int*)&ENTITY->jointsStructs) + joint;
         joint_enable_special_effect(weaponJoint, sizeB, sizeVal, sizeC);
         *(unsigned char*)(weaponJoint + 3) = effectType;
@@ -1610,7 +1610,7 @@ void entity_build_mirror_joints(void)
             unsigned char visible = mirror_point_visible(
                 (void*)((char*)g_RdtPointer + 0x9c
                         + (unsigned int)g_roomCameraId * 0x2c),
-                (unsigned char)((g_main_state_flags >> 1) & 1),
+                (unsigned char)((g_main_state_flags & MSF_MIRROR_PLANE_X) != 0),
                 (int)d->world.t);
 
             if (visible != 0) {
@@ -1666,7 +1666,7 @@ void entity_draw_mirror_reflection(void)
 
     // 0x0048bdcf-0x0048be1d: reflect the camera and install it.
     FlipSprite(camera, &mirrorCam,
-               (unsigned char)((g_main_state_flags >> 1) & 1),
+               (unsigned char)((g_main_state_flags & MSF_MIRROR_PLANE_X) != 0),
                g_mirrorPlaneCoord);
     MatrixToCamera(&mirrorCam);
 
@@ -1780,10 +1780,10 @@ void update_entities(void)
             // entity's origin crosses the mirror rectangle; if it does,
             // entity_draw_mirror_reflection submits the entity again through
             // the reflected camera.
-            if ((g_main_state_flags & 0x00000001) != 0) {
+            if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
                 unsigned char lightCheck = mirror_point_visible(
                     (void*)((int)g_RdtPointer[1].lights + (unsigned int)g_roomCameraId * 44 - 4),
-                    ((unsigned char)(g_main_state_flags >> 1)) & 1,
+                    (unsigned char)((g_main_state_flags & MSF_MIRROR_PLANE_X) != 0),
                     (int)ENTITY->scaMatrixData.localMatrix.t);
                 if (lightCheck != 0) {
                     entity_draw_mirror_reflection();

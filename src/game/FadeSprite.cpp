@@ -331,7 +331,7 @@ void entity_add_fade_sprite(VECTOR* pos, short* quad, short yOffset, short angle
     // The original duplicates the store block across the two branches of
     // g_main_state_flags2 bit 3; the only difference is that the depth clamp is
     // skipped when the bit is set. Folded together here.
-    if ((g_main_state_flags2 & 8) == 0) {
+    if ((g_main_state_flags2 & MSF2_FADE_NO_DEPTH_CLAMP) == 0) {
         if (depth > 0xFEF) {
             depth = 0xFF0;
         }
@@ -531,7 +531,7 @@ void DrawFadeSpr(void)
         // SET takes the forceAlpha path too (0x00456fc7 jne). Bit 3 is clear
         // throughout normal play, which is why reading it as an AND behaved.
         unsigned short alpha;
-        if ((prm->flag != 0) != ((g_main_state_flags2 & 8) != 0)) {
+        if ((prm->flag != 0) != ((g_main_state_flags2 & MSF2_FADE_NO_DEPTH_CLAMP) != 0)) {
             alpha = (unsigned short)(forceAlpha + 1);
         } else {
             if (depth > 0xFEF) {

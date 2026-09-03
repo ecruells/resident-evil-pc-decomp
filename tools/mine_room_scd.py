@@ -98,9 +98,10 @@ CMDS = {
     0x50: ('cmd_0x51', 1, ""),
 }
 
-BANKS = {0: "PlayerFlags", 1: "PlayerFlags3", 2: "locksFlags", 3: "RoomEventFlags",
+# cmd_bit_test / cmd_bit_op bank switch - see docs/SCENARIO_FLAGS.md
+BANKS = {0: "ScenarioFlags", 1: "ScenarioFlags2", 2: "LocksFlags", 3: "EnemiesFlags",
          4: "SysFlags", 5: "main_state_flags", 6: "message_flags",
-         7: "roomItemsFlags", 8: "RoomFlags", 9: "DAT_00d213a0"}
+         7: "roomItemsFlags", 8: "RoomFlags", 9: "itemUseFlags"}
 
 
 def u16(data, off):
@@ -137,10 +138,16 @@ def decode(data, off, length, label):
             # Report the LSB bit number, with the raw index alongside.
             bank, sel, cond = body[0], body[1], body[2]
             raw = sel & 0x1F
+            # Where the bit lands in memory: the dword offset + MSB-first index
+            # map to byte[off + 3 - raw/8], bit 7 - raw%8 (little-endian dword),
+            # e.g. bank 1 flag 0x40 is byte[11] bit 7 (scenarioFlags2[11]=0x80).
+            byte_idx = ((sel & 0xE0) >> 3) + (3 - (raw >> 3))
+            bit_in_byte = 7 - (raw & 7)
             opname = {0: 'set', 1: 'clear', 2: 'toggle'}.get(cond, f'op{cond:#x}')
             detail = (f"bank={bank:#x}({BANKS.get(bank, '?')}) "
                       f"off={(sel & 0xE0) >> 3} bit={31 - raw}(msbidx {raw}) "
                       f"mask={0x80000000 >> raw:#010x} "
+                      f"mem=byte[{byte_idx}] bit{bit_in_byte}({0x80 >> (raw & 7):#04x}) "
                       + (opname if op == 0x05 else f"cond={cond:#x}"))
         elif op == 0x0B:
             detail = f"msg={u16(body, 0) >> 8:#x} pause={u16(body, 2):#x}"

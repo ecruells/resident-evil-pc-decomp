@@ -312,7 +312,7 @@ void main_menu(void)
     fade_update();
 
     // 0x00463768-0x0046377d: Check if opening for message display (bit 8)
-    if ((g_main_state_flags & 0x100) != 0) {
+    if ((g_main_state_flags & MSF_PICKUP_SCREEN) != 0) {
         g_MainMenuState = 8;
         goto LAB_00463966;
     }
@@ -320,7 +320,7 @@ void main_menu(void)
     // 0x0046377d-0x004637ae: Determine initial menu mode
     DAT_00ae9f10 = 5;
     do {
-        if ((g_main_state_flags & (0x4000U >> (DAT_00ae9f10 & 0x1f))) != 0) break;
+        if ((g_main_state_flags & (MSF_MENU_MODE_SHIFT_BASE >> (DAT_00ae9f10 & 0x1f))) != 0) break;
         DAT_00ae9f10 = DAT_00ae9f10 - 1;
     } while (DAT_00ae9f10 != 0);
 
@@ -363,7 +363,7 @@ LAB_0046381c:
         DAT_00ae9f1f = 0;
         int hasFlag = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_RADIO);
         if ((hasFlag == 0) &&
-            (hasFlag = Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_38), hasFlag != 0) &&
+            (hasFlag = Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PLANT42_OBJ), hasFlag != 0) &&
             (hasFlag = Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_22), hasFlag == 0))
         {
             DAT_00ae9f1f = 1;
@@ -470,7 +470,7 @@ LAB_00463a53:
                 // inventory toggle ('Z' in g_keyBindingData). This deliberately
                 // has NO mode check - START closes the whole menu from any
                 // submenu, which is why a "cancel closes everything" report is
-                // usually the user pressing Z rather than a cancel key
+                // usually the player pressing Z rather than a cancel key
                 // (V / Left Ctrl / Esc).
                 bool cond1 = (((g_PlayerDpadPressed >> 8) & 0x80) == 0) || (DAT_00ae9f20 != 1);
                 bool cond2 = (((g_PlayerPadHeld >> 8) & 8) == 0) || (g_bItemViewerActionIndex != 0) || (DAT_00ae9f12 != 0);
@@ -614,12 +614,12 @@ LAB_00463a53:
                                             (unsigned int)g_animObjectBuffer);
             }
 
-            if ((g_main_state_flags & 1) != 0) {
+            if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
                 FUN_0048c020(0xE);
             }
 
             // Wait for fade transitions
-            while (((g_main_state_flags & 0x20000000) != 0) || (g_spriteAnimActive != 0)) {
+            while (((g_main_state_flags & MSF_FADE_ACTIVE) != 0) || (g_spriteAnimActive != 0)) {
                 Task_sleep(1);
             }
 
@@ -691,7 +691,7 @@ static void menu_restore_game_state(void)
                  (unsigned short)g_RdtPointer->ambient_light_g,
                  (unsigned short)g_RdtPointer->ambient_light_b);
     empty_40ae40(0);
-    g_main_state_flags &= 0xFFFF00FF;
+    g_main_state_flags &= ~MSF_MENU_BYTE;
     g_bGameActive = 2;
     Task_Resume(0);
     StMask(0, 2);
@@ -2746,19 +2746,19 @@ static int map_area_known(unsigned char area)
     //   6 -> 4   7 -> ret 0   8 -> 5   9 -> 5   10 -> ret 0
     int idx;
     switch (area) {
-    case 0: idx = 0; break;
-    case 1: idx = 1; break;
+    case 0: idx = MAP_INDEX_MANSION_1F; break;
+    case 1: idx = MAP_INDEX_MANSION_2F; break;
     case 2: return 0;
-    case 3: idx = 2; break;
-    case 4: idx = 3; break;
+    case 3: idx = MAP_INDEX_COURTYARD; break;
+    case 4: idx = MAP_INDEX_UNDERGROUND; break;
     case 5:
-    case 6: idx = 4; break;
+    case 6: idx = MAP_INDEX_GUARDHOUSE; break;
     case 7: return 0;
     case 8:
-    case 9: idx = 5; break;
+    case 9: idx = MAP_INDEX_LABORATORY; break;
     default: return 0;      // area 10 returns 0; >10 is out of the table
     }
-    return Flg_ck((int)g_RoomFlags, idx + 0x7c);
+    return Flg_ck((int)g_RoomFlags, idx + ROOM_FLAG_MAP_BASE);
 }
 
 // (0x00487540) - Map tab: draw the base map, markers, dot and floor glyph
@@ -3383,23 +3383,29 @@ static void map_build_area_mask(unsigned char* state)
     }
 }
 
-// (0x00488950) - Update the map variant flag (MAP_MODE)
-static void map_update_variant(void)
+// (0x00488950) - Compute MAP_MODE: the map screen's OBJECTIVE HIGHLIGHT.
+// Not a map-data variant selector despite the old name - MAP_MODE's only real
+// consumer is map_display_animate, which blinks one area with a label sprite
+// (mode 1/2 -> area 0 Mansion 1F, mode 3/4 -> area 6 guardhouse). Inputs come
+// in pairs: an "objective outstanding" bit in g_ScenarioFlags2 and an
+// "acknowledged" bit in g_ScenarioFlags; the highlight runs while the first is
+// set and the second still clear. Full trace in docs/SCENARIO_FLAGS.md.
+static void map_update_objective_highlight(void)
 {
-    if ((g_main_state_flags & 0x00800000) != 0) {
+    if ((g_main_state_flags & MSF_CHAR_VARIANT) != 0) {
         if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_23) != 0) {
             if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_49) == 0) { MAP_MODE = 1; return; }
         }
         MAP_MODE = 0;
         return;
     }
-    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_2D) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_SERUM_OBJ1_CHRIS) != 0) {
         if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_49) == 0) { MAP_MODE = 1; return; }
     }
-    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_2E) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_SERUM_OBJ2_CHRIS) != 0) {
         if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_4A) == 0) {
             if ((g_stageId != STAGE_MANSION_1F) && (g_stageId != STAGE_MANSION_2F)) {
-                if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_38) != 0) { MAP_MODE = 1; return; }
+                if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PLANT42_OBJ) != 0) { MAP_MODE = 1; return; }
                 MAP_MODE = 0;
                 return;
             }
@@ -3407,16 +3413,20 @@ static void map_update_variant(void)
             return;
         }
     }
-    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_38) != 0) {
+    if (Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PLANT42_OBJ) != 0) {
         if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_PROGRESS_48) == 0) { MAP_MODE = 3; return; }
     }
     MAP_MODE = 0;
 }
 
-// (0x00488660) - Mark a room as explored (flag 0x82 + roomId)
-static void map_set_room_flag(int roomId)
+// (0x00488660) - Mark a FILE as collected (RoomFlags bit 0x82 + file index).
+// The file index is itemId - 0x5F; pickup_item_seen reads these bits back for
+// the FILE tab. This was named map_set_room_flag, which was a misnomer - the
+// rooms-visited bits are a different block (0x00..0x7B, written by
+// room_set_visited_flag 0x00488570). See BioCard.h.
+static void file_set_collected_flag(int fileIndex)
 {
-    Flg_on((int)g_RoomFlags, roomId + 0x82);
+    Flg_on((int)g_RoomFlags, fileIndex + ROOM_FLAG_FILE_BASE);
 }
 
 // (0x00488160) - Initialize map screen with room data (menu open, modes 0/6)
@@ -3499,7 +3509,7 @@ static void menu_init_map_screen(void)
             }
         }
     }
-    map_update_variant();
+    map_update_objective_highlight();
     if (MAP_MODE != 0) MAP_MODE = MAP_MODE + 1;
     MAP_LAYOUT = g_MapAreaLayouts[MAP_AREA];
     MAP_HL_STATE = 0;
@@ -3585,7 +3595,7 @@ static int menu_update_map_animation(void)
 // (0x00488880) - Initialize map display (menu mode 5 - map item)
 static void menu_init_map_display(void)
 {
-    map_update_variant();
+    map_update_objective_highlight();
     *(unsigned int*)&DAT_00ac9890[0] = 0;
     if (MAP_MODE != 1) {
         MAP_LAYOUT = g_MapAreaLayouts[6];   // DAT_004d3206: layout 2 (lab map)
@@ -3820,13 +3830,14 @@ static void pickup_screen_init_table(void)
     for (int i = 0; i < 32; i++) g_pickupKeyItemList[i] = g_keyItemListInit[i];
 }
 
-// 0x00488680 - has the room-item flag for this list entry been raised?
-// 0xfe/0xff entries are "not applicable" and report 0.
+// 0x00488680 - has this file been collected? The entry is a file index into the
+// 0x82 block, not a room id. 0xfe/0xff list entries are "not applicable" and
+// report 0.
 static int pickup_item_seen(unsigned char entry)
 {
     if (entry == 0xff) return 0;
     if (entry == 0xfe) return 0;
-    return Flg_ck((int)g_RoomFlags, entry + 0x82);
+    return Flg_ck((int)g_RoomFlags, entry + ROOM_FLAG_FILE_BASE);
 }
 
 // 0x00482800 - pickup fade ramp: steps the overlay brightness by 0x20 per
@@ -4065,10 +4076,10 @@ static int menu_update_status_screen(void)
     if (state[0] == 0) {
         if ((state[1] == 0) && (pickup_fade_update(0) != 0)) {
             state[0] = 1;
-            state[7] = (((unsigned char*)&g_main_state_flags)[2] & 0x80) != 0;
+            state[7] = (g_main_state_flags & MSF_CHAR_VARIANT) != 0;
             unsigned char itemId = *(unsigned char*)(*(unsigned char**)((int)g_room_event_index + 8) + 8);
             unsigned char uVar3 = itemId - 0x5f;
-            map_set_room_flag(uVar3);
+            file_set_collected_flag(uVar3);
             pickup_mark_seen(state);
             play_sfx(3, 6, 0);
             for (unsigned int i = 0; i < 0x10; i++) {
@@ -4574,7 +4585,7 @@ static void FUN_00481ae0(unsigned char* state)
     state[4] = 0;
     *(short*)(state + 0xa) = 0x80;
     *(short*)(state + 0xe) = 0xff81;
-    state[7] = (((unsigned char*)&g_main_state_flags)[2] & 0x80) != 0;
+    state[7] = (g_main_state_flags & MSF_CHAR_VARIANT) != 0;
     pickup_mark_seen(state);
 
     // First seen file slot of book 1 (0xff = none found yet)

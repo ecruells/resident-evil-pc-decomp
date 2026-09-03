@@ -645,7 +645,7 @@ event_dispatch:
                     g_pScdEventCurrent->scriptPtr++;
                     // fall through
                 case 0xF7: // Wait condition
-                    if (((((unsigned char*)&g_main_state_flags)[1] & 2) == 0) &&
+                    if (((g_main_state_flags & MSF_MENU_MODE_5) == 0) &&
                         ((g_menu_choice_id & 0x80) == 0)) {
                         g_pScdEventCurrent->scriptPtr++;
                         g_pScdEventCurrent->stackDepth--;
@@ -1025,7 +1025,7 @@ void check_itembox_state(void)
         g_short_itembox_open_timer = (unsigned short)(g_short_itembox_open_timer + g_counter_increase);
         if (g_short_itembox_open_timer < 1) {
             // Lid settled: the box menu may open.
-            g_main_state_flags |= 0x1000;
+            g_main_state_flags |= MSF_MENU_MODE_ITEMBOX;
             g_message_flags = 0xffff;
             g_itembox_state = 4;
             return;
@@ -1092,7 +1092,7 @@ void check_desk_state(void)
         return;
     case 5:
         // Open the take-item menu; the entry re-arms to the desk's item entry.
-        g_main_state_flags |= 0x800;
+        g_main_state_flags |= MSF_MENU_MODE_ITEM_VIEW;
         ((unsigned char*)&g_message_flags)[0] |= 0x45;
         g_desk_check_state = 4;
         g_roomCameraId = g_cutId;
@@ -1151,7 +1151,7 @@ void check_typewriter_state(void)
             LoadSaveGameState(0, (int)g_loadDataDestPointer, (int)g_typewriter_id + 1, 2, 0);
             g_loadSaveStateFlag = 0;
             cut_set();
-            g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x80000000;
+            g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
             StMask(1, 0);
             g_fade_type_id = 2;
             g_fading_counter = 0xf000;

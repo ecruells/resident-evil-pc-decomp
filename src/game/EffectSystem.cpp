@@ -1001,7 +1001,7 @@ static void effect_behavior_projectile(void)
 {
     Effect* eff = &g_effectPool[g_activeEffectIndex];
 
-    if ((g_main_state_flags2 & 1) == 0) {
+    if ((g_main_state_flags2 & MSF2_EFFECT_ZONE) == 0) {
         if ((int)g_playerEntity.posY < (int)eff->posY + (int)AH_SHORT(eff, 0xe)) {
             AH_USHORT(eff, 10) |= 0x400b;
             eff->animDataFrame += 0x18;
@@ -2885,7 +2885,7 @@ static void effect_draw_mirror_reflection(void)
     if ((eff->animHeader[11] & 0x80) != 0) return;
 
     int* camera = (int*)((char*)g_RdtPointer + 0x9c + (int)g_roomCameraId * 0x2c);
-    if (mirror_point_visible((void*)camera, (unsigned char)((g_main_state_flags >> 1) & 1),
+    if (mirror_point_visible((void*)camera, (unsigned char)((g_main_state_flags & MSF_MIRROR_PLANE_X) != 0),
                      (int)&local_10) == 0) return;
 
     if (is_entity_in_switch_zone(&local_10, g_CurrentRdtDataTypePtr) == 0) return;
@@ -2926,11 +2926,11 @@ void update_2d_effects(void)
                 g_matrixScratch = g_identityMatrixData;
                 EffectActor_UpdateAndRender();
 
-                if ((g_main_state_flags & 1) != 0) {
+                if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
                     int* camera = (int*)((char*)g_RdtPointer + 0x9c
                                          + (int)g_roomCameraId * 0x2c);
                     FlipSprite(camera, &tempMatrix,
-                               (unsigned char)((g_main_state_flags >> 1) & 1),
+                               (unsigned char)((g_main_state_flags & MSF_MIRROR_PLANE_X) != 0),
                                g_mirrorPlaneCoord);
                     MatrixToCamera(&tempMatrix);
 
@@ -2956,11 +2956,11 @@ void update_2d_effects(void)
             g_matrixScratch = g_identityMatrixData;
             EffectActor_UpdateAndRender();
 
-            if ((g_main_state_flags & 1) != 0) {
+            if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
                 int* camera = (int*)((char*)g_RdtPointer + 0x9c
                                      + (int)g_roomCameraId * 0x2c);
                 FlipSprite(camera, &tempMatrix,
-                           (unsigned char)((g_main_state_flags >> 1) & 1),
+                           (unsigned char)((g_main_state_flags & MSF_MIRROR_PLANE_X) != 0),
                            g_mirrorPlaneCoord);
                 MatrixToCamera(&tempMatrix);
 

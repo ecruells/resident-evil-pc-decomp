@@ -211,11 +211,31 @@ static_assert(sizeof(ScaMatrixData) == 0x50, "ScaMatrixData size mismatch");
 #define ITEM_MIX_3GREEN         0x4A
 #define ITEM_MIX_2GREEN_RED     0x4B
 
-// Misc (0x4C-0x4F)
+// Misc (0x4C-0x4D)
 #define ITEM_PICK_AXE           0x4C
 #define ITEM_COMM_RADIO         0x4D
-#define ITEM_BOTTLE_WATER2      0x4E
-#define ITEM_EAGLE_WOLF_BOOK    0x4F
+
+// ============================================================================
+// Maps (0x4E-0x53)
+//
+// The six map pick-ups. cmd_item_model_set (0x00461220) special-cases this id
+// range: an item model whose id is in [ITEM_MAP_FIRST, ITEM_MAP_LAST] gets room
+// check action 0x0F (pickup_key_event) instead of the ordinary 4, and the pickup
+// then calls set_room_item_seen_flag (0x004885a0) with the item's MAP INDEX -
+// itemId - ITEM_MAP_FIRST - which raises g_RoomFlags bit
+// ROOM_FLAG_MAP_BASE + index. map_area_known (0x004885c0) reads those bits back
+// to decide which map areas the map screen may show.
+//
+// Only four of the six are actually placed as item models; the other two raise
+// their bit directly (see the per-id comments). Full trace in
+// docs/SCENARIO_FLAGS.md.
+// ============================================================================
+#define ITEM_MAP_MANSION_1F     0x4E    // room 107, item model slot 2
+#define ITEM_MAP_MANSION_2F     0x4F    // room 20B - no item model; the event script sets the bit
+#define ITEM_MAP_COURTYARD      0x50    // room 300, item model slot 4
+#define ITEM_MAP_UNDERGROUND    0x51    // room 30F, item model slot 4
+#define ITEM_MAP_GUARDHOUSE     0x52    // room 406, item model slot 8
+#define ITEM_MAP_LABORATORY     0x53    // room 506 - no item model; cl_cmd_unlock sets the bit
 
 // Highest non infinite item id
 #define ITEM_NON_INFINITE_MAX   0x6E
@@ -223,6 +243,29 @@ static_assert(sizeof(ScaMatrixData) == 0x50, "ScaMatrixData size mismatch");
 // PC exclusive weapons (rewards for finishing the game under 4 hours)
 #define ITEM_INGRAM             0x6F    // Jill's exclusive sub machinegun
 #define ITEM_MINIMI             0x70    // Chris' exclusive machinegun
+
+
+// ============================================================================
+// Maps
+// ============================================================================
+
+// Map indexes: the argument set_room_item_seen_flag takes, i.e. itemId minus
+// ITEM_MAP_FIRST. Also the index map_area_known derives from a map area.
+#define MAP_INDEX_MANSION_1F    0       // map area 0
+#define MAP_INDEX_MANSION_2F    1       // map area 1
+#define MAP_INDEX_COURTYARD     2       // map area 3
+#define MAP_INDEX_UNDERGROUND   3       // map area 4
+#define MAP_INDEX_GUARDHOUSE    4       // map areas 5 and 6
+#define MAP_INDEX_LABORATORY    5       // map areas 8 and 9
+#define MAP_INDEX_COUNT         6
+
+#define ITEM_MAP_FIRST          ITEM_MAP_MANSION_1F
+#define ITEM_MAP_LAST           ITEM_MAP_LABORATORY
+
+// Item id <-> map index
+#define ITEM_IS_MAP(itemId)       ((itemId) >= ITEM_MAP_FIRST && (itemId) <= ITEM_MAP_LAST)
+#define ITEM_TO_MAP_INDEX(itemId) ((itemId) - ITEM_MAP_FIRST)
+#define MAP_INDEX_TO_ITEM(index)  ((index) + ITEM_MAP_FIRST)
 
 
 // ============================================================================
@@ -300,7 +343,7 @@ static_assert(sizeof(ScaMatrixData) == 0x50, "ScaMatrixData size mismatch");
 #define ROOM_MANSION_2F_BEDROOM         0x09
 #define ROOM_STUDY_2F                   0x0a                 
 #define ROOM_FRONT_LESSON_ROOM          0x0b
-#define ROOM_LESSON_ROOM                0x0c // Yawn2 room
+#define ROOM_LESSON_ROOM                0x0c // Yawn2 room (stage 7 only)
 #define ROOM_PILLAR_PASSAGE             0x0d // Richard's room
 #define ROOM_FRONT_OF_ATTIC             0x0e
 #define ROOM_SMALL_DINING               0x0f // small dining room near attic

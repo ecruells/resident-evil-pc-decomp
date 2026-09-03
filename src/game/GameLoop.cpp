@@ -50,14 +50,14 @@ int game_loop(void)
     }
 
     // 0x00480b53: Mark gameplay active
-    g_main_state_flags |= 0x2000000;
+    g_main_state_flags |= MSF_GAMEPLAY_ACTIVE;
 
     // 0x00480b66: Initialize message backup and saved light state
     g_short_message_flags = 0xFFFF;
     g_int_008f8898 = -1;
 
     // 0x00480b70: Seed RNG for attract mode demo playback
-    if ((g_main_state_flags2 & 0x10000000) != 0) {
+    if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) != 0) {
         srand(0);
     }
 
@@ -70,7 +70,7 @@ int game_loop(void)
     do {
         // 0x00480b8f-0x00480bd4: Set up fade-in for room
         g_fade_type_id = 2;
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
 
         int hasFlag = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_MENU_FADE_LATCH);
         g_fading_counter = 0xFF5D;
@@ -85,13 +85,13 @@ int game_loop(void)
 
         // 0x00480bf2-0x00480c2e: Set message flags and reset input/menu state
         g_message_flags = 0xFD3F;
-        if ((g_main_state_flags & 0x2000000) == 0) {
+        if ((g_main_state_flags & MSF_GAMEPLAY_ACTIVE) == 0) {
             g_message_flags = 1;
         }
 
         g_PlayerDpadPressed = 0;
         g_openMenuFlag = 2;
-        g_main_state_flags &= 0xF5FFFFFF;
+        g_main_state_flags &= ~(MSF_GAMEPLAY_ACTIVE | MSF_UNUSED_27);
         g_PlayerDpadHeld = 0;
 
         // ====================================================================
@@ -121,7 +121,7 @@ LAB_00480c33:
             if (g_debugOpenLoadScreenFlag != 0) {
                 g_debugOpenLoadScreenFlag = 0;
                 if ((g_openMenuFlag == 0) && (g_loadSaveStateFlag == 0) &&
-                    ((g_main_state_flags & 0x8000) == 0)) {
+                    ((g_main_state_flags & MSF_MENU_ACTIVE) == 0)) {
                     g_debugLoadScreenState = 1;
                 }
             }
@@ -140,7 +140,7 @@ LAB_00480c33:
                     DebugQuick_LoadSlot(g_debugLoadSlot);
                     g_loadSaveStateFlag = 0;
                     Game_timer = g_gameTimerSnapshot;
-                    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+                    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
                     g_debugLoadScreenState = 0;     // not reached: Task_chain swaps the task
                     Task_chain((void*)game_start);
                 }
@@ -151,7 +151,7 @@ LAB_00480c33:
             if ((DAT_004d2294 > 29) || (g_CountdownTimer == 0x7FFF)) {
                 DAT_004d2294 = 0;
                 if (g_CountdownTimer < 0x7FFE) {
-                    if ((g_main_state_flags & 0x1000000) == 0) {
+                    if ((g_main_state_flags & MSF_PLAYER_DEAD) == 0) {
                         g_CountdownTimer = g_CountdownTimer + 1;
                     }
                 } else {
@@ -160,11 +160,11 @@ LAB_00480c33:
             }
 
             // 0x00480ca7: Check if countdown timer active (self-destruct sequence)
-            if ((g_main_state_flags2 & 0x8000000) == 0) {
+            if ((g_main_state_flags2 & MSF2_COUNTDOWN_ACTIVE) == 0) {
                 // ----- Normal gameplay path -----
 LAB_00480d7c:
                 // 0x00480d7c-0x00480d85: Increment frame counter (unless dead)
-                if ((g_main_state_flags & 0x1000000) == 0) {
+                if ((g_main_state_flags & MSF_PLAYER_DEAD) == 0) {
                     DAT_004d2294 = DAT_004d2294 + 1;
                 }
 
@@ -194,16 +194,16 @@ LAB_00480d7c:
                 if (g_resetGameFlag != 0) {
                     g_resetGameFlag = 0;
                     StMask(0, 3);
-                    g_main_state_flags2 &= 0x20080000;
-                    g_main_state_flags = (g_main_state_flags & 0x2FFFFFFF) | 0x40000000;
+                    g_main_state_flags2 &= MSF2_RESET_KEEP_MASK;
+                    g_main_state_flags = (g_main_state_flags & ~(MSF_SCREEN_MODE_MASK | MSF_CONTINUE_GAME)) | MSF_SCREEN_STANDALONE;
                     Task_chain((void*)title_state);
                 }
 
                 // 0x00480dcd-0x00480de8: Camera zone switching
-                if ((g_main_state_flags & 0x20) == 0) {
+                if ((g_main_state_flags & MSF_CAMERA_REDRAW) == 0) {
                     check_camera_switch(0);
                 } else {
-                    g_main_state_flags &= ~0x20;
+                    g_main_state_flags &= ~MSF_CAMERA_REDRAW;
                     display_room_camera_bg();
                 }
 
@@ -220,8 +220,8 @@ LAB_00480d7c:
                 if (g_debugOpenItemboxFlag != 0) {
                     g_debugOpenItemboxFlag = 0;
                     if ((g_openMenuFlag == 0) && (g_loadSaveStateFlag == 0) &&
-                        ((g_main_state_flags & 0x8000) == 0)) {
-                        g_main_state_flags |= 0x1000;
+                        ((g_main_state_flags & MSF_MENU_ACTIVE) == 0)) {
+                        g_main_state_flags |= MSF_MENU_MODE_ITEMBOX;
                         g_openMenuFlag = 1;
                         g_message_flags &= 0xFF7A;
                         g_short_message_flags = savedMsgFlags;
@@ -258,17 +258,17 @@ LAB_00480d7c:
                 if (((g_playerEntity.isBeingAttackedFlag == 0) &&
                      ((g_message_flags & 0x100) != 0) &&
                      ((g_message_flags & 0x40) != 0) &&
-                     ((g_main_state_flags & 0x8000) == 0)))
+                     ((g_main_state_flags & MSF_MENU_ACTIVE) == 0)))
                 {
                     // Check START+bit8 combo (Option Mode)
                     if ((((g_button_pressed_id >> 8) & 0xFF) & 9) == 9 &&
-                        ((g_main_state_flags & 0x7F00) == 0))
+                        ((g_main_state_flags & MSF_MENU_PENDING) == 0))
                     {
                         // Enable Option Mode menu
-                        g_main_state_flags |= 0x400000;
+                        g_main_state_flags |= MSF_OPTIONS_REQUEST;
                     }
                     else if (((g_PlayerPadHeld >> 8) & 8) == 0 &&
-                             ((g_main_state_flags & 0x7F00) == 0))
+                             ((g_main_state_flags & MSF_MENU_PENDING) == 0))
                     {
                         goto LAB_00480e89;
                     }
@@ -296,7 +296,7 @@ LAB_00480e89:
 
                 // 0x00480ebd-0x00480ecf: Player animation and position update
                 update_player_anim();
-                g_main_state_flags2 &= ~1;
+                g_main_state_flags2 &= ~MSF2_EFFECT_ZONE;
                 update_player_position(&g_playerEntity, 1);
 
                 // 0x00480ecf-0x00480f70: Screen effects, room objects, entity
@@ -358,10 +358,10 @@ LAB_00480e89:
                 }
 
                 // 0x00480f90-0x00480fae: Check player death
-                if (((g_main_state_flags2 & 0x10000000) == 0) &&
+                if (((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) &&
                     (g_playerEntity.health < 0))
                 {
-                    g_main_state_flags |= 0x1000000;
+                    g_main_state_flags |= MSF_PLAYER_DEAD;
                 }
             }
             else {
@@ -379,19 +379,19 @@ LAB_00480e89:
                 // 0x00480cbd-0x00480cee: Timer expired - trigger explosion FMV
                 g_fmvDataPointer = g_loadDataDestPointer;
                 g_playerEntity.flags = 0;
-                g_main_state_flags |= 0x1040000;
-                g_main_state_flags2 &= ~0x8000000;
+                g_main_state_flags |= (MSF_PLAYER_DEAD | MSF_FMV_REQUEST);
+                g_main_state_flags2 &= ~MSF2_COUNTDOWN_ACTIVE;
                 g_selectedFmvId = 2;
             }
 
             // ====================================================================
             // Death state machine (0x00480ff4)
             // ====================================================================
-            if ((g_main_state_flags & 0x1000000) != 0) {
+            if ((g_main_state_flags & MSF_PLAYER_DEAD) != 0) {
                 switch (DAT_00be9614) {
                 case 0:
                     // 0x00480ff4-0x004810c5: Death trigger - check room-specific behavior
-                    if (((g_main_state_flags2 & 0x90000000) == 0) &&
+                    if (((g_main_state_flags2 & (MSF2_DEATH_VARIANT | MSF2_ATTRACT_DEMO)) == 0) &&
                         (g_CountdownTimer != 180))
                     {
                         if ((g_stageId == STAGE_MANSION_2F) && (g_roomId == ROOM_ATTIC)) {
@@ -444,7 +444,7 @@ switchD_00480ff4_caseD_2:
                     // 0x004810f4-0x00481118: Wait for fade to complete, then die
                     if ((short)g_fading_state < 0) {
                         die_state();
-                        return (g_main_state_flags2 & 0x80000000) == 0;
+                        return (g_main_state_flags2 & MSF2_DEATH_VARIANT) == 0;
                     }
                     break;
                 }
@@ -479,7 +479,7 @@ switchD_00480ff4_caseD_2:
         // ====================================================================
 
         // 0x00481176-0x004811a5: Save light state and start menu fade
-        if ((g_main_state_flags & 0x2000000) == 0) {
+        if ((g_main_state_flags & MSF_GAMEPLAY_ACTIVE) == 0) {
             g_int_008f8898 = (int)(short)g_SpecialRoomLightState;
             set_fading(2, 0xC00);
         } else {
@@ -499,11 +499,11 @@ switchD_00480ff4_caseD_2:
         g_rect.h = 0xF0;
 
         // 0x004811e3-0x004811ee: Transition to menu rendering mode
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
         StMask(0, 1);
 
         // 0x004811ee-0x0048123d: Execute appropriate menu handler
-        if ((g_main_state_flags & 0x2000000) == 0) {
+        if ((g_main_state_flags & MSF_GAMEPLAY_ACTIVE) == 0) {
             // Normal gameplay: open in-game menu (status/inventory/map)
             check_menus_state();
         } else {
@@ -544,9 +544,9 @@ void check_menus_state(void)
     DAT_004d228c = 1;
 
     // 0x00481604-0x00481626: Determine which menu to open
-    if ((g_main_state_flags & 0x400000) != 0) {
+    if ((g_main_state_flags & MSF_OPTIONS_REQUEST) != 0) {
         // Option Mode requested (START+bit8 combo detected in game_loop)
-        g_main_state_flags &= ~0x400000;
+        g_main_state_flags &= ~MSF_OPTIONS_REQUEST;
         g_loadSaveStateFlag = 1;
         // 0x00481621: PUSH 0x4761b0 (options_menu)
         Task_execute(1, (void*)options_menu);
@@ -556,7 +556,7 @@ void check_menus_state(void)
     }
 
     // 0x00481637: Set menu active flag
-    g_main_state_flags |= 0x8000;
+    g_main_state_flags |= MSF_MENU_ACTIVE;
 
     // 0x00481641: Wait for menu task to complete
     Task_sleep(1);
@@ -570,7 +570,7 @@ void check_menus_state(void)
 
 // UpdateDemoTimer (0x00429ce0) - increments demo idle timer and resets when threshold reached
 void UpdateDemoTimer(void) {
-  if ((g_main_state_flags2 & 0x10000000) != 0 &&
+  if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) != 0 &&
       (g_message_flags & 0x200) != 0 &&
       g_DemoTimerCur != 0) {
     g_DemoTimerCur++;
@@ -590,7 +590,7 @@ void UpdateDemoTimer(void) {
 void StartAttractDemo(void)
 {
     // 0x004818b0: only active during attract demo playback
-    if ((g_main_state_flags2 & 0x10000000) == 0) {
+    if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
         return;
     }
 
@@ -602,7 +602,7 @@ void StartAttractDemo(void)
     }
 
     // 0x004818e2: don't restart the ending fade if one is already running
-    if ((g_main_state_flags & 0x1000000) != 0) {
+    if ((g_main_state_flags & MSF_PLAYER_DEAD) != 0) {
         return;
     }
 
@@ -612,7 +612,7 @@ void StartAttractDemo(void)
     g_DemoTimerCur = 1;
     *(WORD*)&DAT_00ac98f8 = 0;              // 0x00ac98f8 (word write in original)
     BuildSndFadeTbl((char)0xFD, 0x2B);
-    g_main_state_flags |= 0x1000000;
+    g_main_state_flags |= MSF_PLAYER_DEAD;
     g_message_flags &= 0xFE70;
     g_controllerConfig = (unsigned char)g_AttractMode_ControllerConfig;
 }

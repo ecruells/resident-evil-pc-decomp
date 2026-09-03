@@ -214,10 +214,14 @@ __declspec(allocate(".sched")) MasterInputState g_pMasterInputState = {};
 
 // --- Main state flags ---
 // 0x00be41c0
-DWORD g_main_state_flags = 0;
+// SCD flag bank 5 in one piece, the way the original stores it at 0x00be41c0:
+// cmd_bit_test / cmd_bit_op take ONE base for the bank and index it by a byte
+// offset, so a script selector of 0x20+ walks from the first dword into the
+// second. Two separate globals would make that walk depend on link order.
+DWORD g_MainStateFlagBank[2] = { 0, 0 };
 
 // 0x00be41c4
-DWORD g_main_state_flags2 = 0;
+
 
 // 0x00bebcca
 short g_fading_counter = 0;

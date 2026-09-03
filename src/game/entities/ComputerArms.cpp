@@ -174,7 +174,7 @@ static void arm_step_login(Entity* e)
     } else {
         play_sound_and_voice_effect(1, 0xb9);
     }
-    g_main_state_flags |= 0x20000;
+    g_main_state_flags |= MSF_VOICE_PLAYING;
 }
 
 // Forward declarations for the two steps chain[7] re-dispatches into.
@@ -188,7 +188,7 @@ static void arm_step_typing(Entity* e)
     if (arm_is_jill()) {
         if (ARM_STEP(e) == 0) {
             if (arm_joint_move(e, 0x200) != 0) ARM_STEP(e)++;
-        } else if ((g_main_state_flags & 0x20000) == 0) {
+        } else if ((g_main_state_flags & MSF_VOICE_PLAYING) == 0) {
             arm_command_done(e);
         }
         return;
@@ -215,7 +215,7 @@ static void arm_step_press(Entity* e)
 // chain[9] (0x004278e0)
 static void arm_step_wait_voice(Entity* e)
 {
-    if ((g_main_state_flags & 0x20000) == 0) arm_command_done(e);
+    if ((g_main_state_flags & MSF_VOICE_PLAYING) == 0) arm_command_done(e);
 }
 
 // chain[10] (0x00427980)

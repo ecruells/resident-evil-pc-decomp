@@ -332,7 +332,7 @@ void use_room_action_item(void)
             // Item depleted
             if (g_selectedItemId > ITEM_OIL && g_selectedItemId < ITEM_DESK_KEY) { // is door key
                 // Key item depleted — display drop message
-                g_main_state_flags |= 0x2000;
+                g_main_state_flags |= MSF_MENU_MODE_KEY_DEPLETED;
                 return;
             }
             slots[index * 2] = 0;
@@ -480,7 +480,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
     g_loadSaveStateFlag = 1;
 
     LoadFile(GAME_DATA_ROOT "data\\type00.tim", g_TimImageBuffer, 0x20);
-    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
     display_image(8, g_TimImageBuffer__bitmap, 320, 240);
     title_setup_texture_pages(8, 1);
     // empty_00470960(8): empty in the original - call dropped
@@ -565,7 +565,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
                         // In-game: return to gameplay
                         if (!cutsceneReset) {
                             cut_set();
-                            g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+                            g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
                             StMask(1, 0);
                         }
                         g_loadSaveStateFlag = 0;
@@ -591,7 +591,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
                     // In-game: return to gameplay
                     if (!cutsceneReset) {
                         cut_set();
-                        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+                        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
                         StMask(1, 0);
                     }
                     g_loadSaveStateFlag = 0;
@@ -661,10 +661,10 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
                 int fileSize = ReadSaveFile(g_saveFileName, fileBuffer);
                 RestoreSaveBlock(fileBuffer, fileSize);
 
-                g_main_state_flags |= 0x10000000;
+                g_main_state_flags |= MSF_CONTINUE_GAME;
                 g_playerEntityPointer.id = g_SelectedCharactedId;
                 if ((g_SelectedCharactedId & 3) != 0) {
-                    g_main_state_flags |= 0x800000;
+                    g_main_state_flags |= MSF_CHAR_VARIANT;
                 }
                 g_loadSaveStateFlag = 0;
                 return;
@@ -826,7 +826,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
                 // Animation finished
                 if (!cutsceneReset) {
                     cut_set();
-                    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+                    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
                     StMask(1, 0);
                 }
                 g_loadSaveStateFlag = 0;
@@ -1073,7 +1073,7 @@ void DebugQuick_LoadSlot(int slot)
         return;
     }
     RestoreSaveBlock(fileBuffer, fileSize);
-    g_main_state_flags |= 0x10000000;   // InitializeGame continue branch
+    g_main_state_flags |= MSF_CONTINUE_GAME;   // InitializeGame continue branch
     dbg_printf("[debugmenu] quick load: slot %d restored from '%s' (%d bytes)\n",
                slot + 1, g_saveFileName, fileSize);
 }

@@ -52,7 +52,6 @@ extern void ScdEventEntry_Create(unsigned int slot, int scriptIndex);  // RoomEv
 // Externs for globals used by cmd functions
 extern void*          g_RoomInitScd;
 // g_message_flags already declared in Globals.h
-extern DWORD          g_main_state_flags;
 // g_menu_choice_id is now a macro to g_BioCard.menu_choice_id (see BioCard.h)
 // DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
 extern unsigned int   g_itemUseFlags[2];
@@ -146,7 +145,7 @@ int cmd_bit_test(void)
     case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
     case 3: flagBank = (unsigned int*)g_EnemiesFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
-    case 5: flagBank = (unsigned int*)&g_main_state_flags; break;
+    case 5: flagBank = (unsigned int*)g_MainStateFlagBank; break;   // both dwords: sel 0x20+ is msf2
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
     case 7: flagBank = (unsigned int*)&g_roomItemsFlags; break;
     case 8: flagBank = (unsigned int*)&g_RoomFlags; break;
@@ -181,7 +180,7 @@ int cmd_bit_op(void)
     case 2: flagBank = (unsigned int*)g_LocksFlags; break;   // 0x00be9874 - bank 2 IS the door/desk lock flags (g_BioCard.locksFlags); door_try_enter checks the same array
     case 3: flagBank = (unsigned int*)g_EnemiesFlags; break;
     case 4: flagBank = (unsigned int*)g_SysFlags; break;
-    case 5: flagBank = (unsigned int*)&g_main_state_flags; break;
+    case 5: flagBank = (unsigned int*)g_MainStateFlagBank; break;   // both dwords: sel 0x20+ is msf2
     case 6: flagBank = (unsigned int*)&g_message_flags; break;
     case 7: flagBank = (unsigned int*)&g_roomItemsFlags; break;
     case 8: flagBank = (unsigned int*)&g_RoomFlags; break;
@@ -293,7 +292,7 @@ int cmd_cut_lock_set(void)
     g_CurrentRdtDataTypePtr = (void*)zonePtr;
     cut_set();
     g_ScdOpcodes++;
-    g_main_state_flags |= 0x100000;
+    g_main_state_flags |= MSF_CAMERA_LOCK;
     return 1;
 }
 
@@ -313,7 +312,7 @@ int cmd_current_cut_set(void)
     }
     g_CurrentRdtDataTypePtr = (void*)zonePtr;
     cut_set();
-    g_main_state_flags &= ~0x100000;
+    g_main_state_flags &= ~MSF_CAMERA_LOCK;
     g_ScdOpcodes += 2;
     return 1;
 }
@@ -395,7 +394,8 @@ int cmd_skip_2bytes_opcode(void)
 int cmd_mirror_set(void)
 {
     Entity* entityBkp = ENTITY;
-    g_main_state_flags = (g_main_state_flags & ~3u) | g_ScdOpcodes[1];
+    g_main_state_flags = (g_main_state_flags & ~(MSF_MIRROR_ENABLE | MSF_MIRROR_PLANE_X)) |
+                         g_ScdOpcodes[1];
     *(unsigned short*)&g_mirrorExtentMin = *(unsigned short*)(g_ScdOpcodes + 2);
     *(unsigned short*)&g_mirrorExtentMax = *(unsigned short*)(g_ScdOpcodes + 4);
     *(unsigned short*)&g_mirrorPlaneCoord = *(unsigned short*)(g_ScdOpcodes + 6);
@@ -588,10 +588,15 @@ int cmd_item_model_set(void)
     unsigned char* entry = &g_RoomItemEventTable[tableOffset];
     unsigned char itemType = g_ScdOpcodes[10];
 
-    // Determine entry visibility based on flag check and item type
+    // Determine entry visibility based on flag check and item type. entry[0] is
+    // the room_check_actions index, so the id range picks the pickup handler:
+    // a map (ITEM_MAP_FIRST..ITEM_MAP_LAST) gets 0x0F = pickup_key_event, which
+    // raises the map's ROOM_FLAG_MAP_BASE bit; ordinary items get 4 and
+    // documents (> ITEM_MAP_LAST) get 0xD. A clear roomItems flag zeroes it,
+    // i.e. the item is already taken and the entry is inactive.
     unsigned char visFlag;
-    if (itemType < 0x54) {
-        if (itemType < 0x4e) {
+    if (itemType <= ITEM_MAP_LAST) {
+        if (itemType < ITEM_MAP_FIRST) {
             visFlag = (Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]) == 0) - 1;
             visFlag &= 4;
         } else {
@@ -903,7 +908,7 @@ int cmd_sfx_set(void)
     unsigned short param = scd_read_u16(0);
     g_ScdOpcodes += 2;
     play_sound_and_voice_effect(sndId >> 8, param);
-    g_main_state_flags |= 0x20000;
+    g_main_state_flags |= MSF_VOICE_PLAYING;
     return 1;
 }
 
@@ -1263,9 +1268,9 @@ int cmd_item_count_test(void)
 int cmd_cut_lock_toggle(void)
 {
     if ((char)g_ScdOpcodes[1] == 0) {
-        g_main_state_flags &= ~0x100000;
+        g_main_state_flags &= ~MSF_CAMERA_LOCK;
     } else {
-        g_main_state_flags |= 0x100000;
+        g_main_state_flags |= MSF_CAMERA_LOCK;
     }
     g_ScdOpcodes += 2;
     return 1;
@@ -1422,7 +1427,7 @@ int cmd_enemy_prop_set(void)
 // ============================================================================
 int cmd_fmv_set(void)
 {
-    g_main_state_flags |= 0x40000;
+    g_main_state_flags |= MSF_FMV_REQUEST;
     *(unsigned char*)&g_selectedFmvId = (unsigned char)(scd_read_u16(0) >> 8);
     g_fmvDataPointer = g_loadDataDestPointer;
     g_ScdOpcodes += 2;
@@ -1535,8 +1540,8 @@ int cmd_item_remove(void)
 int cmd_got_item(void)
 {
     cmd_room_action();
-    g_main_state_flags |= 0x400;
-    g_main_state_flags ^= 0x800;
+    g_main_state_flags |= MSF_MENU_MODE_GOT_ITEM;
+    g_main_state_flags ^= MSF_MENU_MODE_ITEM_VIEW;
     return 0;
 }
 
@@ -2894,7 +2899,7 @@ void FUN_0048a190(void* param1, int param2, int param3, int param4)
     g_playerDisplacement = *(int*)(*(int*)(joint + 0x14) + 0x14) * 2;
     JointSetColorTint(*(int*)(joint + 0x18), (unsigned int)param2);
 
-    if ((g_main_state_flags & 1) != 0) {
+    if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
         joint += (*(int*)((unsigned char*)ENTITY + 0xac) -
                   *(int*)((unsigned char*)ENTITY + 0x98));
         g_tempVar = joint;

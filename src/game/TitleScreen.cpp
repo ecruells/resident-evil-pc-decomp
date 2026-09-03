@@ -114,11 +114,11 @@ void init_title_screen(void)
 
     if (check_save_files_exist()) {
         g_titleSelectionId = 2;
-        g_main_state_flags &= ~0xC0000000;
+        g_main_state_flags &= ~MSF_SCREEN_MODE_MASK;
         return;
     }
     g_titleSelectionId = 1;
-    g_main_state_flags &= ~0xC0000000;
+    g_main_state_flags &= ~MSF_SCREEN_MODE_MASK;
 }
 
 // ============================================================================
@@ -135,7 +135,7 @@ void set_scene_render_param(int value)
 void title_exit_loop(void)
 {
     g_titleLoopFlag = 0;
-    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
 }
 
 // ============================================================================
@@ -232,7 +232,7 @@ void update_title_options(void)
             g_titleOptionsFading = 1;
             g_fade_type_id = 2;
             g_fading_counter = 0xFC00;
-            g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+            g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
             fade_update();
             return;
 
@@ -300,7 +300,7 @@ void update_title_options(void)
         case 4:
             if (g_fading_state < 0) {
                 title_exit_loop();
-                g_main_state_flags &= 0xC0000000;
+                g_main_state_flags &= MSF_SCREEN_MODE_MASK;
                 return;
             }
             UpdateTitleTextSprite(128, g_titleSelectionId);
@@ -393,7 +393,7 @@ void update_title_options(void)
                 g_fading_state = 0x7FFF;
                 g_fading_counter = 0;
                 g_titleSelectionId = 0;
-                g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+                g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
                 title_exit_loop();
             }
             if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
@@ -411,7 +411,7 @@ void update_title_options(void)
                 g_titleOptionsFading = 0;
                 g_fading_state = 0x7FFF;
                 g_fading_counter = 0;
-                g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+                g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
             }
             break;
     }
@@ -426,7 +426,7 @@ void title_state(void)
 {
     int i;
 
-	g_main_state_flags &= 0xFFFEFFFF;
+	g_main_state_flags &= ~MSF_INTENSITY_RAMP;
 	g_PlayerPadHeldPrev = 0;
 	g_PlayerPadHeld = 0;
 	g_RawPadHeld = 0;
@@ -454,7 +454,7 @@ void title_state(void)
     // empty_00497c10(0);
     // empty_0040abb0((void*)0, 0, 0, 0);
 
-    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
     // 0x0047b950 call site: the original calls 0x00483510 here, a stub that
     // just returns 0 - call dropped
 
@@ -465,11 +465,11 @@ void title_state(void)
         g_selectedFmvId = 0;
         g_fmvDataPointer = g_loadDataDestPointer;
         g_fmvPlayCount = 0x10;
-        g_main_state_flags = g_main_state_flags | 0x40000;
+        g_main_state_flags = g_main_state_flags | MSF_FMV_REQUEST;
         Task_sleep(1);
     }
 
-    g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x80000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
     Task_sleep(1);
 
     do {
@@ -486,14 +486,10 @@ void title_state(void)
 
     cleanup_texture_slot(12);
 
-    char dbg[128];
-    sprintf(dbg, "[TITLE] Title selected option id: %d\n", g_titleSelectionId);
-    OutputDebugStringA(dbg);
-
     switch (g_titleSelectionId) {
     case 0:
         nullsub_0047eb80();
-        g_main_state_flags2 |= 0x10000000;
+        g_main_state_flags2 |= MSF2_ATTRACT_DEMO;
         Task_chain((void*)game_start);
         Task_chain((void*)logos_state);
         return;
@@ -504,11 +500,11 @@ void title_state(void)
 
     case 2:
     case 3:
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
         LoadSaveGameState(1, 0x80180000, 0, 1, 0);
         g_loadSaveStateFlag = 0;
         Game_timer = g_gameTimerSnapshot;
-        g_main_state_flags = (g_main_state_flags & 0x3FFFFFFF) | 0x40000000;
+        g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
         nullsub_0047eb80();
         Task_chain((void*)game_start);
 

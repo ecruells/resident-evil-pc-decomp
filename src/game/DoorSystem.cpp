@@ -481,7 +481,7 @@ static void DoorAnimInit(void)
     g_imageBufferPtr2 = (void*)0;           // (0x00acd710); no port code reads them, see note below
     g_bGameActive = 0;
     g_doorByteVar5 = 0;
-    g_main_state_flags |= 0x4000000;        // "door animation running" - polled by room_transition_load
+    g_main_state_flags |= MSF_ROOM_TRANSITION;        // "door animation running" - polled by room_transition_load
 
     g_doorState = 3;                        // bit 0 running, bit 1 dispatch enabled
 
@@ -970,7 +970,7 @@ static int door_op_message(void)
 // 0x20: play_sfx - waits for the BGM-ready flag (flags2 bit 0x800000) to clear
 static int door_op_sfx(void)
 {
-    if ((g_main_state_flags2 & 0x800000) != 0) {
+    if ((g_main_state_flags2 & MSF2_SND_BUSY) != 0) {
         g_doorState &= ~2u;             // suspend dispatch until the flag clears
         return 0;
     }
@@ -1024,7 +1024,7 @@ static int door_op_disable_dispatch(void)
 // 0x25: clear flags2 bit 0x800000 (BGM-ready wait flag)
 static int door_op_clear_flags2(void)
 {
-    g_main_state_flags2 &= 0xFF7FFFFF;
+    g_main_state_flags2 &= ~MSF2_SND_BUSY;
     DATA += 2;
     return 1;
 }
@@ -1130,7 +1130,7 @@ static void DoorAnimLoop(void)
                 }
                 g_doorCmdCur++;
             }
-        } else if ((g_main_state_flags2 & 0x800000) == 0) {
+        } else if ((g_main_state_flags2 & MSF2_SND_BUSY) == 0) {
             g_doorState |= 2;
         }
 
@@ -1213,12 +1213,12 @@ static void DoorAsyncTeardown(void)
 static void DoorAnimTeardown(void)
 {
     ExecAsync((void*)DoorAsyncTeardown);
-    g_main_state_flags2 &= 0xFF7FFFFF;
+    g_main_state_flags2 &= ~MSF2_SND_BUSY;
     g_fading_state = (short)0xFFFF;     // fade inactive (0x00444500)
     g_bGameActive = 2;
     g_imageBufferPtr = g_imageBufferDataA;
     g_imageBufferPtr2 = g_imageBufferDataB;
-    g_main_state_flags ^= 0x4000000;    // clear the "animation running" bit
+    g_main_state_flags ^= MSF_ROOM_TRANSITION;    // clear the "animation running" bit
 }
 
 // ============================================================================
@@ -1530,7 +1530,7 @@ void room_transition_load(void)
     g_AttractModeIdleTimer = 1;
     // Waits for the door-animation task to clear bit 0x4000000. That task is not
     // spawned yet, so nothing sets the bit and this falls straight through.
-    while ((g_main_state_flags & 0x4000000) != 0) {
+    while ((g_main_state_flags & MSF_ROOM_TRANSITION) != 0) {
         Task_sleep(1);
     }
 

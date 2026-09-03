@@ -469,7 +469,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     unsigned char bVar5 = g_TextureBankID;
     unsigned char bVar6 = g_TextureDepthByte;
 
-    if ((g_main_state_flags2 & 0x4000000) != 0 && entity_id < 2) {
+    if ((g_main_state_flags2 & MSF2_COSTUME_VARIANT) != 0 && entity_id < 2) {
         entity_id = (unsigned char)g_bCostumeVariant + 0x33;
     }
 
@@ -481,7 +481,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     unsigned int fileSize = LoadFile(FILE_PATH, g_loadDataDestPointer, 32);
     int data_pointer = (int)g_loadDataDestPointer;
 
-    if ((g_main_state_flags2 & 0x4000000) != 0 && (unsigned int)g_bCostumeVariant - entity_id == -51) {
+    if ((g_main_state_flags2 & MSF2_COSTUME_VARIANT) != 0 && (unsigned int)g_bCostumeVariant - entity_id == -51) {
         entity_id = g_playerEntity.id & 1;
     }
 

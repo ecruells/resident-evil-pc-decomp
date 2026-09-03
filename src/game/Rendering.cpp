@@ -571,7 +571,7 @@ void OT_InsertPrimitive(void* prim, unsigned int depth)
     // so don't drop the bg while it is open - its flag editor can set this
     // very bit (g_main_state_flags is flag bank 5), which blacked the screen.
     // g_debugMenuOpen stays 0 while debug features are disabled.
-    if ((g_main_state_flags & 0x40000000) != 0 && g_debugMenuOpen == 0) {
+    if ((g_main_state_flags & MSF_SCREEN_STANDALONE) != 0 && g_debugMenuOpen == 0) {
         return;
     }
     if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return;
@@ -1042,7 +1042,7 @@ void SetFrameRateMode(int bActive) {
 void ResetScreenPanning(void) {
     CenterScreenOrigin();
     // Dummy_00429a30()
-    g_main_state_flags = g_main_state_flags & 0xfff7ffff;
+    g_main_state_flags = g_main_state_flags & ~MSF_PANNING_RESET;
 }
 
 // ============================================================================
@@ -1104,7 +1104,7 @@ void ApplyScreenShake(void)
 
 // 0x0045ab60
 void ApplyShakeAndRebuildSprites() {
-    if ( (g_main_state_flags2 & 2) == 0 || ((g_main_state_flags >> 8) & 0xFF) != 0 )
+    if ( (g_main_state_flags2 & MSF2_SCREEN_SHAKE) == 0 || (g_main_state_flags & MSF_MENU_BYTE) != 0 )
     Display_SetParams(2, 2);
     else
     Display_SetParams(g_ScreenShakeOffsetX + 2, g_ScreenShakeOffsetY + 2);
@@ -1314,7 +1314,7 @@ static void handle_message_post_action(void)
                     slots[(unsigned int)bVar4 * 2 + 1] = bVar1 - 1;
                     if (slots[(unsigned int)bVar4 * 2 + 1] == 0) {
                         if ((ITEM_OIL < g_selectedItemId) && (g_selectedItemId < ITEM_DESK_KEY)) { // is door key
-                            g_main_state_flags = g_main_state_flags | 0x2000;
+                            g_main_state_flags = g_main_state_flags | MSF_MENU_MODE_KEY_DEPLETED;
                             return;
                         }
                         slots[(unsigned int)bVar4 * 2] = 0;

@@ -82,7 +82,7 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
 
     g_MessageStateCounter = 0;
 
-    if ((*(((BYTE*)&g_main_state_flags) + 1) == 0)) {
+    if ((g_main_state_flags & MSF_MENU_BYTE) == 0) {
         screenY = 181;
     } else {
         screenY = 186;
@@ -149,11 +149,11 @@ unsigned int set_item_description_message(unsigned short descIndex, unsigned sho
 // ============================================================================
 void display_game_loading_message(void)
 {
-    if ( (g_main_state_flags2 & 0x10000000) != 0 ) {
+    if ( (g_main_state_flags2 & MSF2_ATTRACT_DEMO) != 0 ) {
         set_message_display(0x5d, 0);
         Task_exit();
     }
-    if ( (g_main_state_flags & 0x10000000) != 0 ) {
+    if ( (g_main_state_flags & MSF_CONTINUE_GAME) != 0 ) {
         set_message_display(0x5c, 0);
         Task_exit();
     }
@@ -179,7 +179,7 @@ void init_room(void)
 
     g_RdtLoadDataBackup = g_loadDataDestPointer;
 
-    if ( (g_main_state_flags2 & 0x10000000) != 0 ){
+    if ( (g_main_state_flags2 & MSF2_ATTRACT_DEMO) != 0 ){
         // 0x004099f6: Force silence for this room's BGM (0xFF = no BGM)
         g_RoomBgmStatePtr[g_roomId] = 0xFF;
     }
@@ -279,8 +279,8 @@ void room_set(void)
     printf("object delete end\n");
 
     // 0x0047780d: Clear lower nibble of main state flags and input flags
-    g_main_state_flags &= 0xFFFFFFF0;
-    g_main_state_flags2 &= 0xFFFFFFF0;
+    g_main_state_flags &= ~MSF_ROOM_RESET_MASK;
+    g_main_state_flags2 &= ~MSF2_ROOM_RESET_MASK;
 
     // 0x0047782e: Restore g_loadDataDestPointer from backup
     g_loadDataDestPointer = g_RdtLoadDataBackup;
@@ -301,7 +301,7 @@ void room_set(void)
     }
 
     // 0x00477879: Clear bit 0x100000 of g_main_state_flags
-    g_main_state_flags &= 0xffefffff;
+    g_main_state_flags &= ~MSF_CAMERA_LOCK;
 
     // 0x0047788d: Reset player entity fields
     g_playerEntity.unk_e0 = 0;
@@ -350,7 +350,7 @@ void room_set(void)
                 }
             }
         } else {
-            g_main_state_flags2 |= 0x4000000;
+            g_main_state_flags2 |= MSF2_COSTUME_VARIANT;
             g_CharacterModelId &= 7;
         }
 
@@ -497,7 +497,7 @@ void room_set(void)
                 InitAnimStructure((void*)ENTITY->modelLoadBuffer);
                 g_loadDataDestPointer = (void*)SetupJointStructures((unsigned int)g_loadDataDestPointer);
                 pPrevEntity = ENTITY;
-                if ((g_main_state_flags & 1) != 0) {
+                if ((g_main_state_flags & MSF_MIRROR_ENABLE) != 0) {
                     SetupEntityJointAnimation();
                 }
                 i++;
@@ -534,7 +534,7 @@ void room_set(void)
     object_delete_00442170(0xc);
 
     // 0x00477ef6: Camera setup
-    if ((g_main_state_flags & 0x100000) == 0) {
+    if ((g_main_state_flags & MSF_CAMERA_LOCK) == 0) {
         g_roomCameraId = 0;
         check_camera_switch(1);
     } else {
@@ -580,7 +580,7 @@ void LoadRoomRdt(void)
             hexDigits[g_stageId + 1],
             hexDigits[g_roomId >> 4],
             hexDigits[g_roomId & 0xF],
-            hexDigits[(g_main_state_flags & 0x800000) ? 1 : 0]);
+            hexDigits[(g_main_state_flags & MSF_CHAR_VARIANT) ? 1 : 0]);
 
     SetSpriteBufferFlag();
 

@@ -47,7 +47,7 @@ void logos_state(void)
         g_selectedFmvId = 23;
         // g_CurrentFMVID = 23;
         g_FmvCharacterId = 0;
-        g_main_state_flags |= 0x40000;
+        g_main_state_flags |= MSF_FMV_REQUEST;
     // } else {
     //     QueueVideoPlayback(29, 0);
     // }

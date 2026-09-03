@@ -193,7 +193,7 @@ void InitPlayerData(void)
 {
     SetInitialItems();
     g_playerEntity.position.x = 17000;
-    g_main_state_flags2 = g_main_state_flags2 | 0x20000000;
+    g_main_state_flags2 = g_main_state_flags2 | MSF2_PLAYER_INITIALISED;
     g_playerEntity.position.z = 5000;
     g_playerEntity.directionAngle = 3072;
 }
@@ -256,13 +256,13 @@ void InitializeGame(void)
     // vram_clr(0, 0, 320, 480): PS1 leftover, returns immediately in this
     // build (0x00412370) - call dropped
 
-    g_main_state_flags = (g_main_state_flags & 0x3fffffff) | 0x40000000;
+    g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_STANDALONE;
 
     Task_sleep(1);
     g_bGameActive = 2;
 
-    g_main_state_flags = g_main_state_flags & 0xd4e900f0;
-    g_main_state_flags = g_main_state_flags | 0x4000000;
+    g_main_state_flags = g_main_state_flags & MSF_GAMESTART_KEEP_MASK;
+    g_main_state_flags = g_main_state_flags | MSF_ROOM_TRANSITION;
 
     // 0x00412380: empty in the original - call dropped
 
@@ -276,7 +276,7 @@ void InitializeGame(void)
 
     LoadFile(GAME_DATA_ROOT "data\\bio_card.dat", g_loadDataDestPointer, 32);
 
-    if ((g_main_state_flags & 0x10000000) == 0) {
+    if ((g_main_state_flags & MSF_CONTINUE_GAME) == 0) {
         g_gameSessionInitFlag = 0;
         Game_timer = 0;
 
@@ -288,7 +288,7 @@ void InitializeGame(void)
         g_SpecialRoomLightState = (short)0xFFFF;
         g_CharacterModelId = g_playerEntity.id;
 
-        if ((g_main_state_flags2 & 0x10000000) == 0) {
+        if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
             InitPlayerData();
             /*
             * chris: 140hp
@@ -367,7 +367,7 @@ void InitializeGame(void)
 
     LoadSoundBank(g_playerEntity.equippedWeaponId, g_DataBuffer);
 
-    g_main_state_flags = g_main_state_flags & 0xfbffffff;
+    g_main_state_flags = g_main_state_flags & ~MSF_ROOM_TRANSITION;
 
     init_room();
 
@@ -379,7 +379,7 @@ void InitializeGame(void)
         // On a FIRST Jill playthrough, arm the first-run-only room item flag
         int is_second_playthrough = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH);
         if (is_second_playthrough == 0) {
-            Flg_on((int)g_roomItemsFlags, 0x34);
+            Flg_on((int)g_roomItemsFlags, 0x34); // disable ink-ribbon from main hall
             Flg_on((int)g_ScenarioFlags2, SCENARIO2_FLAG_JILL_FIRST_RUN);
         }
     }
@@ -412,11 +412,11 @@ void game_start(void)
     g_main_state_flags = 0;
 
     if (end_game_status == 1) {
-        g_main_state_flags2 = g_main_state_flags2 & 0x20080000;
+        g_main_state_flags2 = g_main_state_flags2 & MSF2_RESET_KEEP_MASK;
         Task_chain((void*)title_state);
     }
 
-    g_main_state_flags2 = g_main_state_flags2 & 0x20080000;
+    g_main_state_flags2 = g_main_state_flags2 & MSF2_RESET_KEEP_MASK;
 
     if (end_game_status == 0) {
         g_gameTimerSnapshot = Game_timer;
@@ -477,7 +477,7 @@ void LoadAttractModePlayerData(void)
     g_controllerConfig = g_controllerConfig & 0xfc;
     g_CharacterModelId = g_AttractDemoData.characterId;
     if (g_AttractDemoData.characterId != 0) {
-        g_main_state_flags = g_main_state_flags | 0x800000;
+        g_main_state_flags = g_main_state_flags | MSF_CHAR_VARIANT;
     }
 
     // 0x004817d8-0x00481816: apply the recorded room / camera / items

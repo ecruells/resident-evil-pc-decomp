@@ -202,7 +202,7 @@ void lab_slides_finish(void)
     lab_slides_stop_snd(2);
     lab_slides_set_snd_slot(0);
     g_message_flags = (unsigned short)(g_message_flags | 0x100);
-    g_main_state_flags &= 0xfffeffff;
+    g_main_state_flags &= ~MSF_INTENSITY_RAMP;
     g_bGameActive = 2;
 }
 

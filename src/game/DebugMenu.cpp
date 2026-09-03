@@ -162,8 +162,8 @@ static int           s_dbgRoom = 0;
 static int           s_dbgInvSlot = 0;          // inventory editor: selected slot
 static int           s_dbgInvPick = 0;          // inventory editor: 1 = item-id picker submode
 static int           s_dbgPickId = 0;           // inventory editor: id being picked
-static int           s_dbgFlagBank = 4;         // flag editor: selected SCD flag bank (4 = g_SysFlags)
-static int           s_dbgFlagBit = 0;          // flag editor: selected bit within the bank
+static int           s_dbgFlagView = 4;         // flag editor: selected view (4 = g_SysFlags)
+static int           s_dbgFlagBit = 0;          // flag editor: selected bit, ABSOLUTE within the bank
 static int           s_dbgPrevKeys = 0;         // edge-detect sample of the previous frame
 static int           s_dbgPrevF1 = 0;           // edge-detect sample of F1 across open/close
 static int           s_dbgRoomChangeArmed = 0;  // set on confirm, consumed by the game_loop hook
@@ -366,7 +366,7 @@ static void DebugRoomChange_Trigger(void)
                stage, s_dbgRoom, (stage + 1) * 0x100 + s_dbgRoom);
 
     g_pendingDoorRecord = (int)s_dbgDoorRecord;
-    g_main_state_flags |= 0x2000000;
+    g_main_state_flags |= MSF_GAMEPLAY_ACTIVE;
     g_message_flags = 0;
 
     g_rect.textureId = 0;
@@ -781,15 +781,20 @@ static void DebugInv_DrawPick(void)
 //
 // Edits the raw flag bitfields read by cmd_bit_test (0x00460570) and written
 // by cmd_bit_op (0x00460650): the ten SCD flag banks of their switch.
-// Addressing matches Flg_on (0x00473ef0) / Flg_ck (0x00473f40): bit N of a
-// bank lives at byte (N >> 3), bit (N & 7) MSB-first.
 //
-// Each row renders 2 bytes as 16 '0'/'1' glyphs with a hex byte offset
-// prefix ("00 00000000 00000000"), the selected bit drawn in green, like the
-// PS1 debug menu's FLAG EDITOR screen.
+// Addressing is Flg_on's (0x00473ef0) / Flg_ck's (0x00473f40), which is NOT
+// byte-linear: a flag id picks a DWORD (id >> 5) and then a bit counted from
+// that dword's MSB (mask 0x80000000 >> (id & 0x1F)). Little-endian puts ids
+// 0-7 in the dword's LAST byte, so the memory byte is
+//     (id >> 5) * 4 + 3 - ((id >> 3) & 3)
+// and the bit within it is 0x80 >> (id & 7). See DebugFlag_BitAddr - editing
+// with the obvious byte-linear formula writes a different byte of the same
+// dword, which is what this editor used to do.
+//
+// Each row renders 16 consecutive flag ids as '0'/'1' glyphs with the row's
+// first id as a hex prefix ("00 00000000 00000000"), the selected bit drawn in
+// green, like the PS1 debug menu's FLAG EDITOR screen.
 // ============================================================================
-
-#define DBGFLAG_BANKS 10
 
 // cmd_bit_test's bank switch (case 0..9). Banks 0/1/2/3/7/8 live inside the
 // BioCard block (BioCard.h), 4/5/6/9 are standalone globals.
@@ -801,7 +806,7 @@ static void DebugFlag_GetBank(int bank, const char** name, unsigned char** data,
     case 2:  *name = "LOCKS";      *data = (unsigned char*)g_LocksFlags;        *bytes = 8;  break;
     case 3:  *name = "ENEMIES";    *data = (unsigned char*)g_EnemiesFlags;      *bytes = 32; break;
     case 4:  *name = "SYSTEM";     *data = (unsigned char*)g_SysFlags;          *bytes = 8;  break;
-    case 5:  *name = "STATE";      *data = (unsigned char*)&g_main_state_flags; *bytes = 4;  break;
+    case 5:  *name = "STATE";      *data = (unsigned char*)g_MainStateFlagBank;  *bytes = 8;  break;
     case 6:  *name = "MESSAGE";    *data = (unsigned char*)&g_message_flags;    *bytes = 2;  break;
     case 7:  *name = "ROOM ITEMS"; *data = (unsigned char*)g_roomItemsFlags;    *bytes = 32; break;
     case 8:  *name = "ROOM";       *data = (unsigned char*)g_RoomFlags;         *bytes = 20; break;
@@ -809,13 +814,142 @@ static void DebugFlag_GetBank(int bank, const char** name, unsigned char** data,
     }
 }
 
-static int DebugFlag_BitCount(int bank)
+// Flag id -> memory byte + mask, exactly as Flg_on / Flg_ck compute it.
+static void DebugFlag_BitAddr(int id, int* byteIdx, unsigned char* mask)
 {
-    const char* name;
-    unsigned char* data;
+    *byteIdx = (id >> 5) * 4 + 3 - ((id >> 3) & 3);
+    *mask    = (unsigned char)(0x80 >> (id & 7));
+}
+
+// The 16 documents live at ROOM_FLAG_FILE_BASE + (itemId - 0x5F).
+#define DBGFLAG_FILE_COUNT      16
+#define DBGFLAG_FILE_FIRST_ITEM 0x5F
+
+// Per-bit labels for the two g_RoomFlags blocks that have them. The visited
+// groups are indexed by (stageId % 5), the same index g_StageRoomFlagOffset
+// takes; the map names are indexed by MAP_INDEX_*.
+static const char* const s_dbgVisitedGroups[5] = {
+    "MANSION 1F", "MANSION 2F", "COURTYARD", "GUARDHOUSE", "LABORATORY",
+};
+// g_main_state_flags / g_main_state_flags2 bit names, indexed by FLAG ID
+// (id = 31 - bitNumber, so these read high bit first). Empty = no constant.
+static const char* const s_dbgMsfNames[32] = {
+    "SCREEN_REBUILD",     "SCREEN_STANDALONE", "FADE_ACTIVE",      "CONTINUE_GAME",
+    "UNUSED_27",          "ROOM_TRANSITION",   "GAMEPLAY_ACTIVE",  "PLAYER_DEAD",
+    "CHAR_VARIANT",       "OPTIONS_REQUEST",   "UNUSED_21",        "CAMERA_LOCK",
+    "PANNING_RESET",      "FMV_REQUEST",       "VOICE_PLAYING",    "INTENSITY_RAMP",
+    "MENU_ACTIVE",        "SCRIPT_ONLY_14",    "MODE1_KEY_DEPLET", "MODE2_ITEMBOX",
+    "MODE3_ITEM_VIEW",    "MODE4_GOT_ITEM",    "MODE5_MAP_ITEM",   "PICKUP_SCREEN",
+    "DOOR_TRANSITION",    "OBJECT_PUSH",       "CAMERA_REDRAW",    "LADDER_DOWN",
+    "SCRIPT_ONLY_03",     "CAMERA_DEFER",      "MIRROR_PLANE_X",   "MIRROR_ENABLE",
+};
+static const char* const s_dbgMsf2Names[32] = {
+    "DEATH_VARIANT",      "",                  "PLAYER_INITIALISED", "ATTRACT_DEMO",
+    "COUNTDOWN_ACTIVE",   "COSTUME_VARIANT",   "ROOM_SPRITES_OFF", "DOOR_ANGLE_STEP",
+    "SND_BUSY",           "DOOR_TURN_PENDING", "SFX_BANK1_HALF",   "",
+    "PRESERVED_19",       "",                  "",                 "",
+    "",                   "",                  "",                 "",
+    "",                   "",                  "",                 "",
+    "",                   "",                  "",                 "",
+    "FADE_NO_DEPTH_CLMP", "SCREEN_BORDER",     "SCREEN_SHAKE",     "EFFECT_ZONE",
+};
+
+static const char* const s_dbgMapNames[MAP_INDEX_COUNT] = {
+    "MANSION 1F", "MANSION 2F", "COURTYARD", "UNDERGROUND", "GUARDHOUSE", "LABORATORY",
+};
+
+// ----------------------------------------------------------------------------
+// Views
+//
+// A view is a bit WINDOW into a bank, so one bank can be edited as several
+// independent blocks. Only g_RoomFlags needs it: bank 8 is three unrelated bit
+// blocks packed into one 20-byte array (see BioCard.h), and editing it as a
+// single 160-bit run makes it far too easy to flip a room-visited bit while
+// aiming for a map bit - the block boundaries are mid-byte (0x7C and 0x82).
+//
+// Bits outside the active window are still drawn, dimmed, so the neighbouring
+// block stays visible for context; the cursor cannot reach them.
+//
+// s_dbgFlagBit stays ABSOLUTE within the bank, so the "BIT" readout is the
+// number an SCD script would pass to cmd_bit_op.
+// ----------------------------------------------------------------------------
+typedef struct {
+    int         bank;       // cmd_bit_test bank id
+    const char* label;
+    int         firstBit;   // first editable bit
+    int         bitCount;   // 0 = the whole bank
+} DebugFlagView;
+
+static const DebugFlagView s_dbgFlagViews[] = {
+    { 0, "SCENARIO",      0,                    0  },
+    { 1, "SCENARIO2",     0,                    0  },
+    { 2, "LOCKS",         0,                    0  },
+    { 3, "ENEMIES",       0,                    0  },
+    { 4, "SYSTEM",        0,                    0  },
+    { 5, "STATE (msf)",   0,                    32 },
+    { 5, "STATE2 (msf2)", 32,                   32 },
+    { 6, "MESSAGE",       0,                    0  },
+    { 7, "ROOM ITEMS",    0,                    0  },
+    // Bank 8's three blocks, split out. Bases and sizes from BioCard.h.
+    { 8, "ROOM VISITED",  0,                    ROOM_FLAG_MAP_BASE          },
+    { 8, "ROOM MAPS",     ROOM_FLAG_MAP_BASE,   MAP_INDEX_COUNT             },
+    { 8, "ROOM FILES",    ROOM_FLAG_FILE_BASE,  DBGFLAG_FILE_COUNT          },
+    { 8, "ROOM UNUSED",   ROOM_FLAG_FILE_BASE + DBGFLAG_FILE_COUNT,
+                          160 - (ROOM_FLAG_FILE_BASE + DBGFLAG_FILE_COUNT)  },
+    { 9, "ITEM USE",      0,                    0  },
+};
+
+#define DBGFLAG_VIEWS ((int)(sizeof(s_dbgFlagViews) / sizeof(s_dbgFlagViews[0])))
+
+// Resolve a view to its bank storage and bit window.
+static void DebugFlag_GetView(int view, const DebugFlagView** outView,
+                              unsigned char** data, int* firstBit, int* bitCount)
+{
+    const DebugFlagView* v = &s_dbgFlagViews[view];
+    const char* bankName;
     int bytes;
-    DebugFlag_GetBank(bank, &name, &data, &bytes);
-    return bytes * 8;
+    DebugFlag_GetBank(v->bank, &bankName, data, &bytes);
+    *outView   = v;
+    *firstBit  = v->firstBit;
+    *bitCount  = (v->bitCount != 0) ? v->bitCount : bytes * 8;
+}
+
+// Name the bit under the cursor where the block has a known per-bit meaning.
+// Everything else (and every bank but 8) gets an empty string.
+static void DebugFlag_DescribeBit(const DebugFlagView* v, int bit, char* out)
+{
+    out[0] = 0;
+
+    if (v->bank == 5) {
+        // ids 0x00-0x1F are msf, 0x20-0x3F are msf2 (the bank's second dword)
+        const int second = (bit >= 32);
+        const char* n = second ? s_dbgMsf2Names[bit & 0x1f] : s_dbgMsfNames[bit & 0x1f];
+        if (n[0] != 0) {
+            sprintf(out, "%s%s", second ? "MSF2_" : "MSF_", n);
+        } else {
+            sprintf(out, "%sbit %d - no constant", second ? "msf2 " : "msf ",
+                    31 - (bit & 0x1f));
+        }
+        return;
+    }
+
+    if (v->bank != 8) return;
+
+    if (bit >= ROOM_FLAG_FILE_BASE && bit < ROOM_FLAG_FILE_BASE + DBGFLAG_FILE_COUNT) {
+        sprintf(out, "FILE %02X  ITEM %02X", bit - ROOM_FLAG_FILE_BASE,
+                bit - ROOM_FLAG_FILE_BASE + DBGFLAG_FILE_FIRST_ITEM);
+    } else if (bit >= ROOM_FLAG_MAP_BASE && bit < ROOM_FLAG_MAP_BASE + MAP_INDEX_COUNT) {
+        sprintf(out, "MAP  %s", s_dbgMapNames[bit - ROOM_FLAG_MAP_BASE]);
+    } else if (bit < ROOM_FLAG_MAP_BASE) {
+        // Rooms visited: the group is the last g_StageRoomFlagOffset base at or
+        // below the bit (the bases are the running sum of g_MapRoomCounts).
+        int group = 0;
+        for (int i = 0; i < 5; i++) {
+            if (bit >= (int)g_StageRoomFlagOffset[i]) group = i;
+        }
+        sprintf(out, "%s ROOM %02X", s_dbgVisitedGroups[group],
+                bit - (int)g_StageRoomFlagOffset[group]);
+    }
 }
 
 // Read the aim action's bound key from the "Key Def" binding table
@@ -826,38 +960,49 @@ static int DebugFlag_AimKeyHeld(void)
     return (g_keyBindingData[10] != 0 && (GetAsyncKeyState(g_keyBindingData[10]) & 0x8000)) ? 1 : 0;
 }
 
-// One row: hex byte offset + 16 bits as '0'/'1'. The bit under the cursor is
-// drawn as a separate green glyph, the rest white.
-static void DebugFlag_DrawRow(short y, unsigned char* data, int base, int cursor)
+// One row: hex byte offset + 16 bits as '0'/'1'. Each glyph gets a colour -
+// green for the cursor, dim for bits outside the active view's window, white
+// otherwise - and the row is emitted as maximal same-colour runs, so a row
+// still costs one or two PrintText8x8 calls in the common case.
+static void DebugFlag_DrawRow(short y, unsigned char* data, int base, int cursor,
+                              int firstBit, int lastBit)
 {
     char text[24];
-    sprintf(text, "%02X ", base / 8);
-    char* p = text + 3;
+    unsigned char col[24];
+
+    sprintf(text, "%02X ", base);          // the row's first FLAG ID, not a byte
+    int n = 3;
+    for (int i = 0; i < n; i++) col[i] = DBGCOL_TEXT;
+
     for (int i = 0; i < 16; i++) {
         if (i == 8) {
-            *p++ = ' ';
+            text[n] = ' ';
+            col[n] = DBGCOL_TEXT;
+            n++;
         }
         int bit = base + i;
-        *p++ = (data[bit >> 3] & (0x80 >> (bit & 7))) ? '1' : '0';
+        int byteIdx; unsigned char bmask;
+        DebugFlag_BitAddr(bit, &byteIdx, &bmask);
+        text[n] = (data[byteIdx] & bmask) ? '1' : '0';
+        col[n] = (bit == cursor)                        ? DBGCOL_GREEN
+               : (bit < firstBit || bit > lastBit)      ? DBGCOL_HINT
+                                                        : DBGCOL_TEXT;
+        n++;
     }
-    *p = 0;
+    text[n] = 0;
 
     const int x = 80;                   // game-space column of the row
-    if (cursor < base || cursor >= base + 16) {
-        sprintf(PRINT_TEXT_BUFFER, "%s", text);
-        PrintText8x8(x, y, DBGCOL_TEXT, 0);
-        return;
+    int i = 0;
+    while (i < n) {
+        int j = i;
+        while (j < n && col[j] == col[i]) j++;
+        char saved = text[j];
+        text[j] = 0;
+        sprintf(PRINT_TEXT_BUFFER, "%s", text + i);
+        PrintText8x8((short)(x + i * 8), y, col[i], 0);
+        text[j] = saved;
+        i = j;
     }
-
-    int ci = 3 + (cursor - base) + ((cursor - base) >= 8 ? 1 : 0);
-    char saved = text[ci];
-    text[ci] = 0;
-    sprintf(PRINT_TEXT_BUFFER, "%s", text);
-    PrintText8x8(x, y, DBGCOL_TEXT, 0);
-    sprintf(PRINT_TEXT_BUFFER, "%c", saved);
-    PrintText8x8((short)(x + ci * 8), y, DBGCOL_GREEN, 0);
-    sprintf(PRINT_TEXT_BUFFER, "%s", text + ci + 1);
-    PrintText8x8((short)(x + (ci + 1) * 8), y, DBGCOL_TEXT, 0);
 }
 
 static void DebugFlag_Draw(void)
@@ -867,29 +1012,38 @@ static void DebugFlag_Draw(void)
 
     DebugMenu_PrintCentered(40, "- FLAG EDITOR -", DBGCOL_TEXT);
 
-    const char* name;
+    const DebugFlagView* v;
     unsigned char* data;
-    int bytes;
-    DebugFlag_GetBank(s_dbgFlagBank, &name, &data, &bytes);
-    int bits = bytes * 8;
+    int firstBit, bitCount;
+    DebugFlag_GetView(s_dbgFlagView, &v, &data, &firstBit, &bitCount);
+    const int lastBit = firstBit + bitCount - 1;
 
-    sprintf(PRINT_TEXT_BUFFER, "%s", name);
+    sprintf(PRINT_TEXT_BUFFER, "%s", v->label);
     PrintText8x8(80, 54, DBGCOL_TEXT, 0);
 
-    char line[16];
+    char line[32];
     sprintf(line, "BIT %02X", s_dbgFlagBit);
     sprintf(PRINT_TEXT_BUFFER, "%s", line);
     PrintText8x8((short)(288 - (int)strlen(line) * 8), 54, DBGCOL_HINT, 0);
 
+    // Rows stay aligned to the 16-bit grid so the byte-offset prefix keeps
+    // meaning even when a window starts mid-byte (0x7C, 0x82).
     short y = 68;
-    for (int base = 0; base < bits; base += 16) {
-        DebugFlag_DrawRow(y, data, base, s_dbgFlagBit);
+    for (int base = firstBit & ~15; base <= (lastBit | 15); base += 16) {
+        DebugFlag_DrawRow(y, data, base, s_dbgFlagBit, firstBit, lastBit);
         y += 8;
+    }
+
+    // What the selected bit means, where the block has per-bit labels.
+    DebugFlag_DescribeBit(v, s_dbgFlagBit, line);
+    if (line[0] != 0) {
+        sprintf(PRINT_TEXT_BUFFER, "%s", line);
+        PrintText8x8(80, (short)(y + 4), DBGCOL_GREEN, 0);
     }
 
     DebugMenu_PrintCentered(202, "LEFT/RIGHT: BIT  UP/DOWN: +16", DBGCOL_TEXT);
     DebugMenu_PrintCentered(210, "AIM+LEFT/RIGHT: CLEAR/SET BIT", DBGCOL_TEXT);
-    DebugMenu_PrintCentered(218, "AIM+UP/DOWN: BANK  ESC: BACK", DBGCOL_TEXT);
+    DebugMenu_PrintCentered(218, "AIM+UP/DOWN: VIEW  ESC: BACK", DBGCOL_TEXT);
 }
 
 // ============================================================================
@@ -1131,7 +1285,7 @@ int debug_menu_overlay(void)
                     s_dbgInvPick = 0;
                 } else if (s_dbgCursor == 6) {
                     s_dbgContext = 3;       // flag editor
-                    s_dbgFlagBank = 4;      // SYSTEM, like the PS1 debug menu's opening page
+                    s_dbgFlagView = 4;      // SYSTEM, like the PS1 debug menu's opening page
                     s_dbgFlagBit = 0;
                 } else if (s_dbgCursor == 7) {
                     s_dbgContext = 4;       // quick access
@@ -1242,57 +1396,55 @@ int debug_menu_overlay(void)
 
     // --- Flag editor ---
     if (s_dbgContext == 3) {
-        int bits = DebugFlag_BitCount(s_dbgFlagBank);
-        if (s_dbgFlagBit >= bits) s_dbgFlagBit = bits - 1;
-        if (s_dbgFlagBit < 0)     s_dbgFlagBit = 0;
-
-        const char* name;
+        const DebugFlagView* v;
         unsigned char* data;
-        int bytes;
-        DebugFlag_GetBank(s_dbgFlagBank, &name, &data, &bytes);
+        int firstBit, bits;
+        DebugFlag_GetView(s_dbgFlagView, &v, &data, &firstBit, &bits);
+        if (s_dbgFlagBit >= firstBit + bits) s_dbgFlagBit = firstBit + bits - 1;
+        if (s_dbgFlagBit < firstBit)         s_dbgFlagBit = firstBit;
+        const char* name = v->label;
 
         if (DebugFlag_AimKeyHeld()) {
-            // AIM + UP/DOWN: previous / next flag bank (cursor reset)
-            if (newKeys & DBGKEY_UP) {
-                s_dbgFlagBank = (s_dbgFlagBank + DBGFLAG_BANKS - 1) % DBGFLAG_BANKS;
-                s_dbgFlagBit = 0;
-            }
-            if (newKeys & DBGKEY_DOWN) {
-                s_dbgFlagBank = (s_dbgFlagBank + 1) % DBGFLAG_BANKS;
-                s_dbgFlagBit = 0;
+            // AIM + UP/DOWN: previous / next view (cursor to the window start)
+            if (newKeys & (DBGKEY_UP | DBGKEY_DOWN)) {
+                s_dbgFlagView = (newKeys & DBGKEY_UP)
+                              ? (s_dbgFlagView + DBGFLAG_VIEWS - 1) % DBGFLAG_VIEWS
+                              : (s_dbgFlagView + 1) % DBGFLAG_VIEWS;
+                DebugFlag_GetView(s_dbgFlagView, &v, &data, &firstBit, &bits);
+                s_dbgFlagBit = firstBit;
+                name = v->label;
             }
             // AIM + LEFT/RIGHT: clear / set the bit under the cursor, then
             // step one bit in that direction so a held sweep edits a run.
             if (newKeys & (DBGKEY_LEFT | DBGKEY_RIGHT)) {
                 int set = (newKeys & DBGKEY_RIGHT) ? 1 : 0;
-                unsigned char mask = (unsigned char)(0x80 >> (s_dbgFlagBit & 7));
+                int byteIdx; unsigned char mask;
+                DebugFlag_BitAddr(s_dbgFlagBit, &byteIdx, &mask);
                 if (set) {
-                    data[s_dbgFlagBit >> 3] |= mask;
+                    data[byteIdx] |= mask;
                 } else {
-                    data[s_dbgFlagBit >> 3] &= (unsigned char)~mask;
+                    data[byteIdx] &= (unsigned char)~mask;
                 }
                 dbg_printf("[debugmenu] flag editor: bank %d (%s) bit %02X = %d\n",
-                           s_dbgFlagBank, name, s_dbgFlagBit, set);
-                s_dbgFlagBit = (s_dbgFlagBit + (set ? 1 : bits - 1)) % bits;
+                           v->bank, name, s_dbgFlagBit, set);
+                s_dbgFlagBit = firstBit + (s_dbgFlagBit - firstBit + (set ? 1 : bits - 1)) % bits;
             }
         } else {
-            if (newKeys & DBGKEY_LEFT) {
-                s_dbgFlagBit = (s_dbgFlagBit + bits - 1) % bits;
-            }
-            if (newKeys & DBGKEY_RIGHT) {
-                s_dbgFlagBit = (s_dbgFlagBit + 1) % bits;
-            }
-            if (newKeys & DBGKEY_UP) {
-                s_dbgFlagBit = (s_dbgFlagBit + bits - 16) % bits;
-            }
-            if (newKeys & DBGKEY_DOWN) {
-                s_dbgFlagBit = (s_dbgFlagBit + 16) % bits;
-            }
+            // Cursor movement wraps inside the view's window, never into the
+            // neighbouring block.
+            int rel = s_dbgFlagBit - firstBit;
+            if (newKeys & DBGKEY_LEFT)  rel = (rel + bits - 1) % bits;
+            if (newKeys & DBGKEY_RIGHT) rel = (rel + 1) % bits;
+            if (newKeys & DBGKEY_UP)    rel = (rel + bits - 16) % bits;
+            if (newKeys & DBGKEY_DOWN)  rel = (rel + 16) % bits;
+            s_dbgFlagBit = firstBit + rel;
             if (newKeys & DBGKEY_CONFIRM) {
-                data[s_dbgFlagBit >> 3] ^= (unsigned char)(0x80 >> (s_dbgFlagBit & 7));
+                int byteIdx; unsigned char mask;
+                DebugFlag_BitAddr(s_dbgFlagBit, &byteIdx, &mask);
+                data[byteIdx] ^= mask;
                 dbg_printf("[debugmenu] flag editor: bank %d (%s) bit %02X toggled to %d\n",
-                           s_dbgFlagBank, name, s_dbgFlagBit,
-                           (data[s_dbgFlagBit >> 3] & (0x80 >> (s_dbgFlagBit & 7))) ? 1 : 0);
+                           v->bank, name, s_dbgFlagBit,
+                           (data[byteIdx] & mask) ? 1 : 0);
             }
         }
 

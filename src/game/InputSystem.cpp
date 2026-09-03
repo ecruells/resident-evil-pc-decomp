@@ -162,7 +162,7 @@ DWORD PlayerPad_Update(void)
 	g_PlayerPadHeldPrev = g_RawPadState;
 
 	// Part 3: Read new input into the raw held variable (0x00bf0a04)
-	if ((g_main_state_flags2 & 0x10000000) == 0) {
+	if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
 		newHeldRaw = ReadPadBoth();
 		g_RawPadHeld = newHeldRaw;
 	} else {

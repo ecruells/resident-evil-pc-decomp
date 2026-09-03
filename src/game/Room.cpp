@@ -31,7 +31,7 @@ void cut_set(void) // 0x004628c0
 
         Room_LoadCameraSprites();
 
-        if ((g_main_state_flags & 0x04000000) != 0) {
+        if ((g_main_state_flags & MSF_ROOM_TRANSITION) != 0) {
             return;
         }
 
@@ -54,7 +54,7 @@ void RestoreRoomCamera(void) // 0x00462940
 {
     if ((unsigned char)g_SavedTextureBankID != 0) {
         *(unsigned short*)&g_TextureBankID = g_SavedTextureBankID;
-        if ((g_main_state_flags & 0x04000000) == 0) {
+        if ((g_main_state_flags & MSF_ROOM_TRANSITION) == 0) {
             Room_SetupCamera();
         }
     }
@@ -173,7 +173,7 @@ void check_camera_switch(int param_1) // 0x00462cc0
     CAM_SWITCH_ZONE* zone = (CAM_SWITCH_ZONE*)g_CurrentRdtDataTypePtr + 1;
 
     // 0x00462cca: camera changes disabled during cutscenes
-    if ((g_main_state_flags & 0x100000) != 0) {
+    if ((g_main_state_flags & MSF_CAMERA_LOCK) != 0) {
         return;
     }
 
@@ -185,9 +185,9 @@ void check_camera_switch(int param_1) // 0x00462cc0
             // 0x00462d1b: enter the new camera
             g_roomCameraId = (unsigned char)zone->camTo;
 
-            if ((g_main_state_flags & 4) != 0) {
+            if ((g_main_state_flags & MSF_CAMERA_DEFER) != 0) {
                 // 0x00462d24: defer the redisplay to game_loop (bit 0x20)
-                g_main_state_flags |= 0x20;
+                g_main_state_flags |= MSF_CAMERA_REDRAW;
                 StMask(0, 5);
                 return;
             }
@@ -522,7 +522,7 @@ void DrawRoomSpr(void)
 {
     // 0x00475b83: skip room sprites while the corresponding render-state bit is
     // active or before the room has populated its camera sprite table.
-    if ((g_main_state_flags2 & 0x02000000) != 0 ||
+    if ((g_main_state_flags2 & MSF2_ROOM_SPRITES_OFF) != 0 ||
         g_RdtPointer == NULL || g_RdtPointer->sprites_count == 0) {
         return;
     }
@@ -745,7 +745,7 @@ void load_room_bg(void) // 0x00462b00
                 unpack_pakfile_(g_bgPakLoadBuffer, g_TimImageBuffer);
 
                 int width, height;
-                if ((g_main_state_flags2 & 4) == 0) {
+                if ((g_main_state_flags2 & MSF2_SCREEN_BORDER) == 0) {
                     width = 320;
                     height = 240;
                 } else {
@@ -828,7 +828,7 @@ void load_room_bg_image(void) // 0x004629c0
     unpack_pakfile_(pakData, g_TimImageBuffer);
 
     int width, height;
-    if ((g_main_state_flags2 & 4) == 0) {
+    if ((g_main_state_flags2 & MSF2_SCREEN_BORDER) == 0) {
         width = 320;
         height = 240;
     } else {
