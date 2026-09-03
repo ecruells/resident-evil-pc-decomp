@@ -372,7 +372,7 @@ static_assert(sizeof(ScaMatrixData) == 0x50, "ScaMatrixData size mismatch");
 #define ROOM_UNDERGROUND_ENTRY          0x07
 #define ROOM_BRANCHED_PASSAGE           0x08 // underground branched passage
 #define ROOM_UNDERGROUND_GENERATOR      0x09
-#define ROOM_ENRICO_ROOM                0x0a // undergorund
+#define ROOM_ENRICO_ROOM                0x0a // underground
 #define ROOM_BOULDER_1_PASSAGE          0x0b
 #define ROOM_BLACK_TIGER_ROOM           0x0c // Black Tiger (giant spider) boss room
 #define ROOM_STRAIGHT_PASSAGE           0x0d // near underground save room

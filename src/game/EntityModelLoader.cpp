@@ -59,10 +59,12 @@ int __stdcall VideoDriver_ClearState348(void* obj, void* context);
 // through 88 are em110a and index 89 is em1020.
 // ============================================================================
 static const char g_emdPathTable[106][17] = {
+    //  Player
     "enemy/char10.emd", // chris
     "enemy/char11.emd", // jill
     "enemy/char12.emd", // barry
     "enemy/char13.emd", // rebecca
+    // Enemies
     "enemy/em1000.emd", // zombie (white coat)
     "enemy/em1001.emd", // naked zombie
     "enemy/em1002.emd", // cerberus
@@ -83,6 +85,7 @@ static const char g_emdPathTable[106][17] = {
     "enemy/em1011.emd", // Zombie (green coat)
     "enemy/em1012.emd", // Yawn (second encounter)
     "enemy/em1013.emd", // Spider web
+    // NPCs
     "enemy/em1014.emd", // Chris's right arm (used for computer keyboard typing)
     "enemy/em1015.emd", // Chris's left arm (used for computer keyboard typing)
     "enemy/em100a.emd",
@@ -104,14 +107,16 @@ static const char g_emdPathTable[106][17] = {
     "enemy/em1026.emd", // Forest's corpse
     "enemy/em1027.emd", // Richard
     "enemy/em1028.emd", // Enrico
-    "enemy/em1029.emd", // Forest's corpse
-    "enemy/em102a.emd", // Barry's corpse
-    "enemy/em102b.emd", // barry (regular model)
-    "enemy/em102c.emd", // Rebecca (regular model)
-    "enemy/em102d.emd", // Barry (regular model)
-    "enemy/em102e.emd", // Wesker (regular model)
-    "enemy/em1030.emd", // Chris (alternative outfit 1)
-    "enemy/em1032.emd", // Chris (alternative outfit 2)
+    "enemy/em1029.emd", // Kenneth's corpse, devoured state - ROOM1041 intro swaps
+                        // slot 1 between ids 37/41/37 at the same X/Z; texture is
+                        // em1025's face with extra gore (hanging eye)
+    "enemy/em102a.emd", // Barry dying model (Lab exit cutscene)
+    "enemy/em102b.emd", // Barry, cutscene anim variant (texture identical to em1022)
+    "enemy/em102c.emd", // Rebecca, cutscene anim variant (texture identical to em1023)
+    "enemy/em102d.emd", // Barry, cutscene anim variant (texture identical to em1022)
+    "enemy/em102e.emd", // Wesker, cutscene anim variant (texture identical to em1024)
+    "enemy/em1030.emd", // Chris, alternative outfit 1
+    
     // Jill offset
     "enemy/char10.emd",
     "enemy/char11.emd",

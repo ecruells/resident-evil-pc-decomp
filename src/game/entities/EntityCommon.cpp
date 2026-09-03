@@ -88,16 +88,16 @@ void* enemies_update_functions_tbl[48] = {
     (void*)spiderweb_update,        // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)
     (void*)computer_arm_update,     // [20] em1014 - right forearm, lab terminal (0x00427330)
     (void*)computer_arm_update,     // [21] em1015 - left forearm, lab terminal (0x0040b760)
-    (void*)character_npc_update,    // [22]
-    (void*)character_npc_update,    // [23]
-    (void*)character_npc_update,    // [24]
-    (void*)character_npc_update,    // [25]
-    (void*)character_npc_update,    // [26]
-    (void*)character_npc_update,    // [27]
-    (void*)character_npc_update,    // [28]
-    (void*)character_npc_update,    // [29]
-    (void*)character_npc_update,    // [30]
-    (void*)character_npc_update,    // [31]
+    (void*)character_npc_update,    // [22] filler: resolves to em100a placeholder EMDs
+    (void*)character_npc_update,    // [23] filler
+    (void*)character_npc_update,    // [24] filler
+    (void*)character_npc_update,    // [25] filler
+    (void*)character_npc_update,    // [26] filler
+    (void*)character_npc_update,    // [27] filler
+    (void*)character_npc_update,    // [28] filler
+    (void*)character_npc_update,    // [29] filler
+    (void*)character_npc_update,    // [30] filler
+    (void*)character_npc_update,    // [31] filler
     (void*)character_npc_update,    // [32] chris (cutscene actor)
     (void*)character_npc_update,    // [33] jill
     (void*)character_npc_update,    // [34] barry
@@ -107,13 +107,14 @@ void* enemies_update_functions_tbl[48] = {
     (void*)character_npc_update,    // [38] Forest's corpse
     (void*)character_npc_update,    // [39] richard
     (void*)character_npc_update,    // [40] enrico
-    (void*)character_npc_update,    // [41]
-    (void*)character_npc_update,    // [42]
-    (void*)character_npc_update,    // [43]
-    (void*)character_npc_update,    // [44]
-    (void*)character_npc_update,    // [45]
-    (void*)character_npc_update,    // [46]
-    (void*)character_npc_update     // [47]
+    (void*)character_npc_update,    // [41] Kenneth's corpse, devoured state (em1029)
+    (void*)character_npc_update,    // [42] Barry's dying, cutscene variant (em102a)
+    (void*)character_npc_update,    // [43] Barry, cutscene variant (em102b)
+    (void*)character_npc_update,    // [44] Rebecca, cutscene variant (em102c)
+    (void*)character_npc_update,    // [45] Barry, cutscene variant (em102d)
+    (void*)character_npc_update,    // [46] Wesker, cutscene variant (em102e)
+    (void*)character_npc_update     // [47] unused by scripts; em1030 = Chris alt
+                                    //      outfit, only via costume swap
 };
 
 // ============================================================================
