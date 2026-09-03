@@ -1228,8 +1228,32 @@ extern int           g_FileOpenCount;
 extern int           g_FileRetryFlag;
 
 // Image processing/status variables
-extern unsigned char g_TextureBankID;                  // 0x00bebcc4
-extern unsigned char g_TextureDepthByte;               // 0x00bebcc5
+//
+// 0x00bebcc4 is ONE 16-bit cell and the original accesses it both ways: as two
+// bytes (bank id at +0, texture depth at +1 - see the byte writes all over
+// CmdFunctions/EntityModelLoader) and as a single word, which is how cut_set
+// and RestoreRoomCamera restore both halves at once:
+//     004628fa  MOV AX,[0x00bebcc6]      ; g_SavedTextureBankID
+//     00462903  MOV [0x00bebcc4],AX      ; bank AND depth
+// That is also why DoorSystem's "original writes word 0x1f15" and
+// TextureLoader's "_g_TextureBankID >> 8" comments exist - the high half is the
+// depth. Declaring the halves as two separate globals let the linker put 15
+// bytes between them (0x1b33b and 0x1b34a in the Debug map), so
+// `*(unsigned short*)&g_TextureBankID` spilled its high byte onto whatever
+// followed the bank - g_MessageCurrentPtr - corrupting the live message pointer
+// on every camera cut, and the depth byte was never actually restored. Keep the
+// pair in one packed object so the word access addresses the bytes it means.
+#pragma pack(push, 1)
+struct TextureBankCell {
+    unsigned char bank;      // 0x00bebcc4
+    unsigned char depth;     // 0x00bebcc5
+};
+#pragma pack(pop)
+static_assert(sizeof(TextureBankCell) == 2, "TextureBankCell must be the 16-bit cell at 0x00bebcc4");
+
+extern TextureBankCell g_TextureBankCell;              // 0x00bebcc4
+#define g_TextureBankID    (g_TextureBankCell.bank)    // 0x00bebcc4
+#define g_TextureDepthByte (g_TextureBankCell.depth)   // 0x00bebcc5
 extern unsigned short g_SavedTextureBankID;            // 0x00bebcc6 - saved room texture bank ID (restored after cutscenes)
 
 // Texture/bank arrays

@@ -713,8 +713,9 @@ void* DAT_004b1a90[32] = {};   // jump table for player_anim_death_alt dispatch 
 // here, which froze a grabbed player with no animation and never released them.
 
 // Texture/room state
-unsigned char g_TextureBankID = 0;       // 0x00bebcc4
-unsigned char g_TextureDepthByte = 0;    // 0x00bebcc5
+// Bank id + depth as the single 16-bit cell the original word accesses expect
+// (see the TextureBankCell note in Globals.h).
+TextureBankCell g_TextureBankCell = {0, 0};  // 0x00bebcc4 / 0x00bebcc5
 unsigned short g_SavedTextureBankID = 0; // 0x00bebcc6
 
 

@@ -509,7 +509,7 @@ void room_set(void)
     // 0x00477c89: Setup texture bank data
     SetupTextureBankData((short)g_TextureDepthByte);
     // 0x00477ca0: Save current texture bank ID for cutscene restoration
-    g_SavedTextureBankID = *(unsigned short*)&g_TextureBankID;
+    g_SavedTextureBankID = *(unsigned short*)&g_TextureBankCell;
     g_CurrentRdtDataTypePtr = g_RdtPointer->cam_switch_zones;
 
     object_delete_00442170(10);

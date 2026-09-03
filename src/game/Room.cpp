@@ -27,7 +27,7 @@ void cut_set(void) // 0x004628c0
         }
         StMask(0, maskFrames);
 
-        *(unsigned short*)&g_TextureBankID = g_SavedTextureBankID;
+        *(unsigned short*)&g_TextureBankCell = g_SavedTextureBankID;
 
         Room_LoadCameraSprites();
 
@@ -53,7 +53,7 @@ void cut_set(void) // 0x004628c0
 void RestoreRoomCamera(void) // 0x00462940
 {
     if ((unsigned char)g_SavedTextureBankID != 0) {
-        *(unsigned short*)&g_TextureBankID = g_SavedTextureBankID;
+        *(unsigned short*)&g_TextureBankCell = g_SavedTextureBankID;
         if ((g_main_state_flags & MSF_ROOM_TRANSITION) == 0) {
             Room_SetupCamera();
         }
