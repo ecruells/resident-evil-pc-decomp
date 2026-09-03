@@ -66,54 +66,54 @@ void*        _ENTITY_SAVE = NULL;
 //
 // ============================================================================
 void* enemies_update_functions_tbl[48] = {
-    (void*)zombie_update,  // [0]  zombie (white coat)
-    (void*)zombie_update,  // [1]  zombie (naked)
-    (void*)cerberus_update, // [2] cerberus (zombie dog) (0x00497fb0)
-    (void*)web_spinner_update, // [3] web spinner / big spider (0x00478310)
-    (void*)black_tiger_update, // [4] black tiger (Giant spider boss)  (0x0044f300)
-    (void*)crow_update,    // [5]  crow  (0x0042e520)
-    (void*)hunter_update,  // [6]  hunter (0x004161f0) - Hunter.cpp
-    (void*)wasp_update,    // [7]  wasp / bee  (0x0048daf0)
-    (void*)plant42_update, // [8]  plant 42  (0x00464d10)
-    (void*)chimera_update, // [9]  chimera  (0x00438a70)
-    (void*)adder_update,   // [10] adder (regular size snakes) (0x004727f0)
-    (void*)neptune_update, // [11] neptune (shark) (0x0043d8d0)
-    (void*)tyrant_update,  // [12] tyrant 1 - em100C, the lab slab (0x00421990)
-    (void*)yawn_update,    // [13] yawn 1 (Giant snake) (0x004051e0)
-    (void*)plant42_roots_update, // [14] plant 42 roots (0x0047e1c0)
-    (void*)monster_plant_update, // [15] monster plant (0x0045abb0)
-    (void*)tyrant_update,  // [16] tyrant 2 - em1010, final battle (0x00421990)
-    (void*)zombie_update,  // [17] zombie variant 3
-    (void*)yawn_update,    // [18] yawn 2 (0x004051e0)
-    (void*)spiderweb_update, // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)
-    (void*)computer_arm_update,  // [20] em1014 - right forearm, lab terminal (0x00427330)
-    (void*)computer_arm_update,  // [21] em1015 - left forearm, lab terminal (0x0040b760)
-    (void*)character_npc_update,  // [22]
-    (void*)character_npc_update,  // [23]
-    (void*)character_npc_update,  // [24]
-    (void*)character_npc_update,  // [25]
-    (void*)character_npc_update,  // [26]
-    (void*)character_npc_update,  // [27]
-    (void*)character_npc_update,  // [28]
-    (void*)character_npc_update,  // [29]
-    (void*)character_npc_update,  // [30]
-    (void*)character_npc_update,  // [31]
-    (void*)character_npc_update,  // [32] chris (cutscene actor)
-    (void*)character_npc_update,  // [33] jill
-    (void*)character_npc_update,  // [34] barry
-    (void*)character_npc_update,  // [35] rebecca
-    (void*)character_npc_update,  // [36] wesker
-    (void*)character_npc_update,  // [37] Kenneth's corpse
-    (void*)character_npc_update,  // [38] Forest's corpse
-    (void*)character_npc_update,  // [39] richard
-    (void*)character_npc_update,  // [40] enrico
-    (void*)character_npc_update,  // [41]
-    (void*)character_npc_update,  // [42]
-    (void*)character_npc_update,  // [43]
-    (void*)character_npc_update,  // [44]
-    (void*)character_npc_update,  // [45]
-    (void*)character_npc_update,  // [46]
-    (void*)character_npc_update   // [47]
+    (void*)zombie_update,           // [0]  zombie (white coat)
+    (void*)zombie_update,           // [1]  zombie (naked)
+    (void*)cerberus_update,         // [2]  cerberus (zombie dog) (0x00497fb0)
+    (void*)web_spinner_update,      // [3]  web spinner / big spider (0x00478310)
+    (void*)black_tiger_update,      // [4]  black tiger (Giant spider boss)  (0x0044f300)
+    (void*)crow_update,             // [5]  crow  (0x0042e520)
+    (void*)hunter_update,           // [6]  hunter (0x004161f0) - Hunter.cpp
+    (void*)wasp_update,             // [7]  wasp / bee  (0x0048daf0)
+    (void*)plant42_update,          // [8]  plant 42  (0x00464d10)
+    (void*)chimera_update,          // [9]  chimera  (0x00438a70)
+    (void*)adder_update,            // [10] adder (regular size snakes) (0x004727f0)
+    (void*)neptune_update,          // [11] neptune (shark) (0x0043d8d0)
+    (void*)tyrant_update,           // [12] tyrant 1 - em100C, the lab slab (0x00421990)
+    (void*)yawn_update,             // [13] yawn 1 (Giant snake) (0x004051e0)
+    (void*)plant42_roots_update,    // [14] plant 42 roots (0x0047e1c0)
+    (void*)monster_plant_update,    // [15] monster plant (0x0045abb0)
+    (void*)tyrant_update,           // [16] tyrant 2 - em1010 (0x00421990)
+    (void*)zombie_update,           // [17] zombie (green coat variant)
+    (void*)yawn_update,             // [18] yawn 2 (0x004051e0)
+    (void*)spiderweb_update,        // [19] spider web (not an enemy, but a spider web that blocks a door in room30Cx) (0x00443640)
+    (void*)computer_arm_update,     // [20] em1014 - right forearm, lab terminal (0x00427330)
+    (void*)computer_arm_update,     // [21] em1015 - left forearm, lab terminal (0x0040b760)
+    (void*)character_npc_update,    // [22]
+    (void*)character_npc_update,    // [23]
+    (void*)character_npc_update,    // [24]
+    (void*)character_npc_update,    // [25]
+    (void*)character_npc_update,    // [26]
+    (void*)character_npc_update,    // [27]
+    (void*)character_npc_update,    // [28]
+    (void*)character_npc_update,    // [29]
+    (void*)character_npc_update,    // [30]
+    (void*)character_npc_update,    // [31]
+    (void*)character_npc_update,    // [32] chris (cutscene actor)
+    (void*)character_npc_update,    // [33] jill
+    (void*)character_npc_update,    // [34] barry
+    (void*)character_npc_update,    // [35] rebecca
+    (void*)character_npc_update,    // [36] wesker
+    (void*)character_npc_update,    // [37] Kenneth's corpse
+    (void*)character_npc_update,    // [38] Forest's corpse
+    (void*)character_npc_update,    // [39] richard
+    (void*)character_npc_update,    // [40] enrico
+    (void*)character_npc_update,    // [41]
+    (void*)character_npc_update,    // [42]
+    (void*)character_npc_update,    // [43]
+    (void*)character_npc_update,    // [44]
+    (void*)character_npc_update,    // [45]
+    (void*)character_npc_update,    // [46]
+    (void*)character_npc_update     // [47]
 };
 
 // ============================================================================

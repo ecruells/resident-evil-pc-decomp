@@ -1365,7 +1365,11 @@ extern void*         g_playerAnimFunctions[52];        // 0x00bebbd8
 // ----------------------------------------------------------------------------
 // Player aim/fire data tables (ROM .data, dumped from the original exe)
 // ----------------------------------------------------------------------------
-// 0x004c0d68 - per-weapon fire data, 8 bytes each, weapons 2..11
+// 0x004c0d68 - per-weapon fire data, 8 bytes each, 14 entries.
+// Indexing: normal weapons = equippedWeaponId - 2 (entries 0..9 = weapons
+// 2..11); special weapons (ITEM_INGRAM 0x6F / ITEM_MINIMI 0x70) =
+// equippedWeaponId - 99 (entries 12/13). Both specials carry weaponId 2, so
+// they deal the handgun's damage (see the table comment in Globals.cpp).
 typedef struct {
     unsigned int  weaponId;    // +0x00: weapon id passed to apply_weapon_damage
     unsigned char fireFrame;   // +0x04: animation frame the damage + sound fire on
@@ -1375,12 +1379,17 @@ typedef struct {
 } WeaponFireData;
 
 // 0x004c0dd8 / 0x004c0e68 / 0x004c0ef8 - billboard entries, 10 bytes each,
-// weapons 2..11. The three tables share the same layout.
+// 14 entries each, same indexing as WeaponFireData. The three tables share
+// the same layout: b0 is the spawn frame (in g_weaponFireBillboard it also
+// decrements the ammo; 99 = never), type/data feed Effect_CreateBillboard,
+// and x/y/z are the billboard offset from the weapon joint (joint 0xe).
+// The rocket launcher path reads entries 8..11 as 8 + (ammo & 3), but the
+// shipped rocket launcher has no round variants - likely scrapped data.
 typedef struct {
-    unsigned char b0;          // +0x00: ammo-decrement / first frame (0x004c0dd8 only)
+    unsigned char b0;          // +0x00: spawn frame (ammo-decrement frame in 0x004c0dd8)
     unsigned char type;        // +0x01: billboard type
     unsigned char data;        // +0x02: billboard data
-    unsigned char b3;          // +0x03: 0x00
+    unsigned char b3;          // +0x03: always 0
     short         x;           // +0x04: billboard position offset
     short         y;           // +0x06
     short         z;           // +0x08

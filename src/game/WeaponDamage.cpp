@@ -5,6 +5,7 @@
 // projectile distance) to find the closest target in range+FOV, then
 // subtracts damage from the enemy's health and sets the hit reaction state.
 #include "../Globals.h"
+#include "entities/EntityCommon.h"   // ENEMY_* / NPC_* type ids
 
 // ---- Global scratch variable (set by apply_weapon_damage before hit detection) ----
 extern int g_scaled_down_dist;  // holds weapon_id - 1 during hit detection
@@ -62,7 +63,7 @@ extern unsigned int weapons_ranges[20];
 
 // 0x004bb698 - first-playthrough hit records, 12 bytes each,
 // indexed (weaponAdj + enemyType * 10) * 12. The knockback vector (kx/ky/kz)
-// is used for BOTH difficulties; damage/hit-state come from these on the
+// is used for BOTH playthroughs; damage/hit-state come from these on the
 // first playthrough, or from the second-playthrough table below when
 // Flg_ck(g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) is set
 // (bit 0x7B = second playthrough, set by EndingScreen after clearing).
@@ -75,22 +76,26 @@ typedef struct {
     unsigned char data;    // +0x09: hit data for the post-hit billboard
     unsigned char hit;     // +0x0A: first-playthrough hit state
     unsigned char pad;     // +0x0B
-} WeaponHitRecord;
+} WeaponHitRecordFirstRun;
 
-// 0x004bbffe - normal difficulty records, 12 bytes each. apply_weapon_damage
-// reads the damage short at +0 and the hit-state byte at +4.
+// 0x004bbffe - second-playthrough records, 12 bytes each. apply_weapon_damage
+// reads the damage short at +0 and the hit-state byte at +4; nothing reads the
+// remaining fields. Note this table starts 6 bytes AFTER the first-playthrough
+// table ends (0x004bbff8), so the kx/ky/kz words at +6..+0x0B are physically
+// the NEXT first-playthrough record's knockback vector - that phase shift is in
+// the original data, not a transcription error.
 typedef struct {
-    short         dmg;     // +0x00: normal damage
+    short         dmg;     // +0x00: second-playthrough damage
     short         unk_02;  // +0x02
-    unsigned char hit;     // +0x04: normal hit state
+    unsigned char hit;     // +0x04: second-playthrough hit state
     unsigned char unk_05;  // +0x05
-    short         kx;      // +0x06
-    short         ky;      // +0x08
-    short         kz;      // +0x0A
-} WeaponHitRecordNormal;
+    short         kx;      // +0x06: unread (aliases the next first-run record)
+    short         ky;      // +0x08: unread
+    short         kz;      // +0x0A: unread
+} WeaponHitRecordSecondRun;
 
-extern WeaponHitRecord       g_weaponHitRecordsEasy[200];
-extern WeaponHitRecordNormal g_weaponHitRecordsNormal[200];
+extern WeaponHitRecordFirstRun       g_weaponHitRecordsFirstRun[200];
+extern WeaponHitRecordSecondRun  g_weaponHitRecordsSecondRun[200];
 
 // ============================================================================
 // checkEntityInRangeCone @ 0x0043d590
@@ -170,24 +175,25 @@ static unsigned char weapon_hit_detect_knife(short range, Entity* enemy)
     unsigned char enemyId = *(unsigned char*)((char*)enemy + 1);
 
     // Zombies — skip if player aiming down
-    if ((enemyId == 0 || enemyId == 1 || enemyId == 0x11)
+    if ((enemyId == ENEMY_ZOMBIE || enemyId == ENEMY_ZOMBIE_NAKED || enemyId == ENEMY_ZOMBIE_VARIANT)
         && (g_playerEntityPointer.flags & 0x80) != 0)
         return 0;
 
     // Cerberus / Web Spinner — skip if player aiming up and enemy on ground
-    if (((enemyId == 2 && *(int*)&enemy->scaMatrixData.localMatrix.t[1] > -400) || enemyId == 3)
+    if (((enemyId == ENEMY_CERBERUS && *(int*)&enemy->scaMatrixData.localMatrix.t[1] > -400)
+         || enemyId == ENEMY_WEB_SPINNER)
         && (g_playerEntityPointer.flags & 0x40) != 0)
         return 0;
 
     // Crow / Bee / Chimera on ceiling
-    if ((enemyId == 5 || enemyId == 7 || enemyId == 9)
+    if ((enemyId == ENEMY_CROW || enemyId == ENEMY_WASP || enemyId == ENEMY_CHIMERA)
         && *(int*)&enemy->scaMatrixData.localMatrix.t[1] < -4800)
         return 0;
 
     // Per-enemy range adjustments
-    if (enemyId == 4)              effectiveRange -= 800;   // black tiger
-    if (enemyId == 8)              effectiveRange += 2000;  // plant 42
-    if (enemyId == 7 || enemyId == 10) effectiveRange += 100;  // bee / adder
+    if (enemyId == ENEMY_BLACK_TIGER)                 effectiveRange -= 800;
+    if (enemyId == ENEMY_PLANT42)                     effectiveRange += 2000;
+    if (enemyId == ENEMY_WASP || enemyId == ENEMY_ADDER) effectiveRange += 100;
 
     unsigned int distance = SquareRoot0(dist_z * dist_z + dist_x * dist_x);
     if (distance < effectiveRange && distance < g_playerDisplacement) {
@@ -211,14 +217,14 @@ static unsigned char weapon_hit_detect_gun(short range, Entity* enemy)
     unsigned char enemyId = *(unsigned char*)((char*)enemy + 1);
 
     // Zombies — skip if aiming down and NOT shotgun (weapon index 2)
-    if ((enemyId == 0 || enemyId == 1 || enemyId == 0x11)
+    if ((enemyId == ENEMY_ZOMBIE || enemyId == ENEMY_ZOMBIE_NAKED || enemyId == ENEMY_ZOMBIE_VARIANT)
         && (g_playerEntityPointer.flags & 0x80) != 0
         && g_scaled_down_dist != 2)
         return 0;
 
     // Per-enemy range adjustments
-    if (enemyId == 4)  range -= 1000;   // black tiger
-    if (enemyId == 8)  range += 2000;   // plant 42
+    if (enemyId == ENEMY_BLACK_TIGER)  range -= 1000;
+    if (enemyId == ENEMY_PLANT42)      range += 2000;
 
     // Cone height: 50 normal, 0 when aiming up (headshot cone)
     g_svecScratch.x = 50;
@@ -282,7 +288,7 @@ static unsigned char weapon_hit_detect_projectile(short range, Entity* enemy)
     unsigned int effectiveRange =
         (unsigned int)*(unsigned short*)(*(int*)((char*)enemy + 4) + 10) + range;
 
-    if (*(unsigned char*)((char*)enemy + 1) == 4)   // black tiger
+    if (*(unsigned char*)((char*)enemy + 1) == ENEMY_BLACK_TIGER)
         effectiveRange -= 1000;
 
     unsigned int distance = SquareRoot0(dist_z * dist_z + dist_x * dist_x);
@@ -354,15 +360,15 @@ unsigned char apply_weapon_damage(unsigned int weapon_id)
     }
 
     unsigned char enemyType = enemy->id;
-    if (enemyType >= 0x14) return enemy->id;   // matches the original (returns the enemy id)
+    if (enemyType >= NPC_ENTITIES_IDS) return enemy->id;   // 0x14+ NPC ids: no damage (matches the original, returns the enemy id)
 
     unsigned int tableIdx = (unsigned int)weaponAdj + (unsigned int)enemyType * 10;
 
     // 12-byte hit record lookup. The knockback vector (kx/ky/kz) and the
-    // post-hit inputs (type/data) come from the easy records for BOTH
-    // difficulties - only damage and hit-state differ (verified against the
+    // post-hit inputs (type/data) come from the first-run records for BOTH
+    // playthroughs - only damage and hit-state differ (verified against the
     // original disassembly of 0x0043c020).
-    WeaponHitRecord* rec = &g_weaponHitRecordsEasy[tableIdx];
+    WeaponHitRecordFirstRun* rec = &g_weaponHitRecordsFirstRun[tableIdx];
     g_playerPosScratch.x = (int)rec->kx;                    // 0x00be11b0
     g_playerPosScratch.y = (int)rec->ky;
     g_playerPosScratch.z = (int)rec->kz;
@@ -377,8 +383,8 @@ unsigned char apply_weapon_damage(unsigned int weapon_id)
         hitState = rec->hit;                                // first-playthrough hit-state @ +10
         damage = rec->dmg;                                  // first-playthrough damage @ +6
     } else {
-        hitState = g_weaponHitRecordsNormal[tableIdx].hit;  // second-playthrough hit-state @ +4
-        damage = g_weaponHitRecordsNormal[tableIdx].dmg;    // second-playthrough damage @ +0
+        hitState = g_weaponHitRecordsSecondRun[tableIdx].hit;  // second-playthrough hit-state @ +4
+        damage = g_weaponHitRecordsSecondRun[tableIdx].dmg;    // second-playthrough damage @ +0
     }
 
     enemy->health -= damage;
@@ -412,298 +418,595 @@ unsigned char apply_weapon_damage(unsigned int weapon_id)
 // Weapon damage data tables (ROM .data, dumped byte-for-byte from the exe)
 // ============================================================================
 
+// Weapon index used by every per-weapon table below (weaponAdj = weapon_id - 1):
+//   0 knife          1 handgun         2 shotgun        3 python         4 magnum
+//   5 flamethrower   6 GL explosive    7 GL acid        8 GL flame       9 rocket launcher
+
 // 0x004bb530 - per-weapon hit detection callbacks (weaponAdj = weapon_id - 1)
 void* PTR_weapons_hit_detection_functions[10] = {
-    (void*)weapon_hit_detect_knife,     // 0x0043d690 - knife
-    (void*)weapon_hit_detect_gun,       // 0x0043d410 - handgun / shotgun / python / magnum
-    (void*)weapon_hit_detect_gun,
-    (void*)weapon_hit_detect_gun,
-    (void*)weapon_hit_detect_gun,
-    (void*)weapon_hit_detect_projectile,// 0x0043d810 - heavy weapons
-    (void*)weapon_hit_detect_projectile,
-    (void*)weapon_hit_detect_projectile,
-    (void*)weapon_hit_detect_projectile,
-    (void*)weapon_hit_detect_projectile,
+    (void*)weapon_hit_detect_knife,      // [0] 0x0043d690 - knife
+    (void*)weapon_hit_detect_gun,        // [1] 0x0043d410 - handgun
+    (void*)weapon_hit_detect_gun,        // [2] shotgun
+    (void*)weapon_hit_detect_gun,        // [3] python, regular rounds
+    (void*)weapon_hit_detect_gun,        // [4] python, magnum rounds
+    (void*)weapon_hit_detect_projectile, // [5] 0x0043d810 - flamethrower
+    (void*)weapon_hit_detect_projectile, // [6] GL explosive rounds
+    (void*)weapon_hit_detect_projectile, // [7] GL acid rounds
+    (void*)weapon_hit_detect_projectile, // [8] GL flame rounds
+    (void*)weapon_hit_detect_projectile, // [9] rocket launcher
 };
 
 // 0x004bb558 - post-hit callbacks (called with the hit enemy, no null check)
 void* PTR_post_hit_callbacks[10] = {
-    (void*)weapon_post_hit_knife,       // 0x0043c290
-    (void*)weapon_post_hit_reaction,    // 0x0043c350
-    (void*)weapon_post_hit_shotgun,     // 0x0043c370
-    (void*)weapon_post_hit_shotgun,
-    (void*)weapon_post_hit_shotgun,
-    (void*)weapon_post_hit_blood,       // 0x0043c3b0
-    (void*)weapon_post_hit_blood2,      // 0x0043c770
-    (void*)weapon_post_hit_sparks,      // 0x0043ca30
-    (void*)weapon_post_hit_blood,       // 0x0043c3b0
-    (void*)weapon_post_hit_blood3,      // 0x0043cc90
+    (void*)weapon_post_hit_knife,    // [0] 0x0043c290 - knife
+    (void*)weapon_post_hit_reaction, // [1] 0x0043c350 - handgun
+    (void*)weapon_post_hit_shotgun,  // [2] 0x0043c370 - shotgun
+    (void*)weapon_post_hit_shotgun,  // [3] python, regular rounds
+    (void*)weapon_post_hit_shotgun,  // [4] python, magnum rounds
+    (void*)weapon_post_hit_blood,    // [5] 0x0043c3b0 - flamethrower
+    (void*)weapon_post_hit_blood2,   // [6] 0x0043c770 - GL explosive rounds
+    (void*)weapon_post_hit_sparks,   // [7] 0x0043ca30 - GL acid rounds
+    (void*)weapon_post_hit_blood,    // [8] 0x0043c3b0 - GL flame rounds
+    (void*)weapon_post_hit_blood3,   // [9] 0x0043cc90 - rocket launcher
 };
 
-// 0x004bb580 - per-enemy-type hit reactions (indexed by enemy->id)
+// 0x004bb580 - per-enemy-type hit reactions (indexed by enemy->id, see
+// EntityCommon.h for the ENEMY_* ids)
 void* g_enemy_hit_reactions[20] = {
-    (void*)enemy_hit_reaction_zombie,   // 0x0043d060
-    (void*)enemy_hit_reaction_zombie,
-    (void*)enemy_hit_reaction_zombie,
-    (void*)enemy_hit_reaction_basic,    // 0x0043d2c0
-    (void*)enemy_hit_reaction_basic,
-    (void*)enemy_hit_reaction_basic,
-    (void*)enemy_hit_reaction_head,     // 0x0043d300
-    (void*)enemy_hit_reaction_basic,
-    (void*)enemy_hit_reaction_blood,    // 0x0043d3a0
-    (void*)enemy_hit_reaction_none,     // 0x0043d400
-    (void*)enemy_hit_reaction_basic,
-    (void*)enemy_hit_reaction_none,
-    (void*)enemy_hit_reaction_none,
-    (void*)enemy_hit_reaction_none,
-    (void*)enemy_hit_reaction_none,
-    (void*)enemy_hit_reaction_none,
-    (void*)enemy_hit_reaction_none,
-    (void*)enemy_hit_reaction_zombie,
-    (void*)enemy_hit_reaction_none,
-    (void*)enemy_hit_reaction_none,
+    (void*)enemy_hit_reaction_zombie,   // [0x00] ENEMY_ZOMBIE
+    (void*)enemy_hit_reaction_zombie,   // [0x01] ENEMY_ZOMBIE_NAKED
+    (void*)enemy_hit_reaction_zombie,   // [0x02] ENEMY_CERBERUS
+    (void*)enemy_hit_reaction_basic,    // [0x03] ENEMY_WEB_SPINNER
+    (void*)enemy_hit_reaction_basic,    // [0x04] ENEMY_BLACK_TIGER
+    (void*)enemy_hit_reaction_basic,    // [0x05] ENEMY_CROW
+    (void*)enemy_hit_reaction_head,     // [0x06] ENEMY_HUNTER
+    (void*)enemy_hit_reaction_basic,    // [0x07] ENEMY_WASP
+    (void*)enemy_hit_reaction_blood,    // [0x08] ENEMY_PLANT42
+    (void*)enemy_hit_reaction_none,     // [0x09] ENEMY_CHIMERA
+    (void*)enemy_hit_reaction_basic,    // [0x0A] ENEMY_ADDER
+    (void*)enemy_hit_reaction_none,     // [0x0B] ENEMY_NEPTUNE
+    (void*)enemy_hit_reaction_none,     // [0x0C] ENEMY_TYRANT_1
+    (void*)enemy_hit_reaction_none,     // [0x0D] ENEMY_YAWN_1
+    (void*)enemy_hit_reaction_none,     // [0x0E] ENEMY_PLANT42_ROOTS
+    (void*)enemy_hit_reaction_none,     // [0x0F] ENEMY_MONSTER_PLANT
+    (void*)enemy_hit_reaction_none,     // [0x10] ENEMY_TYRANT_2
+    (void*)enemy_hit_reaction_zombie,   // [0x11] ENEMY_ZOMBIE_VARIANT
+    (void*)enemy_hit_reaction_none,     // [0x12] ENEMY_YAWN_2
+    (void*)enemy_hit_reaction_none,     // [0x13] ENEMY_SPIDER_WEB
 };
 
 // 0x004bb5d0 - per-enemy-type joint index lists for the blood-spurt effects
-// (6 bytes each, read by weapon_post_hit_blood2)
+// (6 bytes each, read by weapon_post_hit_blood2; indexed by enemy->id)
 unsigned char g_enemyHitJointLists[20][6] = {
-    { 2, 3, 4, 5, 7, 8 },
-    { 3, 4, 5, 6, 7, 8 },
-    { 2, 3, 4, 5, 6, 8 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 1, 2, 4, 5, 8, 9 },
-    { 4, 5, 6, 7, 8, 9 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 8, 4, 5, 6, 9, 10 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 2, 4, 5, 6, 7, 8 },
-    { 0, 0, 0, 0, 0, 0 },
-    { 0, 0, 0, 0, 0, 0 },
+    { 2, 3, 4, 5, 7, 8 },  // [0x00] ENEMY_ZOMBIE
+    { 3, 4, 5, 6, 7, 8 },  // [0x01] ENEMY_ZOMBIE_NAKED
+    { 2, 3, 4, 5, 6, 8 },  // [0x02] ENEMY_CERBERUS
+    { 0, 0, 0, 0, 0, 0 },  // [0x03] ENEMY_WEB_SPINNER
+    { 0, 0, 0, 0, 0, 0 },  // [0x04] ENEMY_BLACK_TIGER
+    { 1, 2, 4, 5, 8, 9 },  // [0x05] ENEMY_CROW
+    { 4, 5, 6, 7, 8, 9 },  // [0x06] ENEMY_HUNTER
+    { 0, 0, 0, 0, 0, 0 },  // [0x07] ENEMY_WASP - none
+    { 0, 0, 0, 0, 0, 0 },  // [0x08] ENEMY_PLANT42 - none
+    { 8, 4, 5, 6, 9, 10 }, // [0x09] ENEMY_CHIMERA
+    { 0, 0, 0, 0, 0, 0 },  // [0x0A] ENEMY_ADDER - none
+    { 0, 0, 0, 0, 0, 0 },  // [0x0B] ENEMY_NEPTUNE - none
+    { 0, 0, 0, 0, 0, 0 },  // [0x0C] ENEMY_TYRANT_1 - none
+    { 0, 0, 0, 0, 0, 0 },  // [0x0D] ENEMY_YAWN_1 - none
+    { 0, 0, 0, 0, 0, 0 },  // [0x0E] ENEMY_PLANT42_ROOTS
+    { 0, 0, 0, 0, 0, 0 },  // [0x0F] ENEMY_MONSTER_PLANT
+    { 0, 0, 0, 0, 0, 0 },  // [0x10] ENEMY_TYRANT_2 - none
+    { 2, 4, 5, 6, 7, 8 },  // [0x11] ENEMY_ZOMBIE_VARIANT
+    { 0, 0, 0, 0, 0, 0 },  // [0x12] ENEMY_YAWN_2 - none
+    { 0, 0, 0, 0, 0, 0 },  // [0x13] ENEMY_SPIDER_WEB - none
 };
 
-// 0x004bb648 - per-weapon ranges, DWORDs. First 10 = Chris, second 10 = Jill
-// (weaponAdj + (player.id & 1) * 10)
+// 0x004bb648 - per-weapon hit ranges in world units, DWORDs. Indexed
+// weaponAdj + (player.id & 1) * 10, where weaponAdj = weapon_id - 1 and
+// weapon_id is the equipped weapon's ITEM_ id, so the ten slots line up 1:1
+// with ITEM_KNIFE (0x01) .. ITEM_ROCKET_LAUNCHER (0x0A). Confirmed by the two
+// hardcoded call sites in EffectSystem.cpp: apply_weapon_damage(6) from
+// effect_behavior_flamethrower and apply_weapon_damage(10) from the rocket
+// behavior, which land on slots 5 and 9.
+//
+// First block of 10 is Chris (CHAR_CHRIS == 0), second is Jill. The mask is
+// `& 1`, so Rebecca (CHAR_REBECCA == 3) reads Jill's block too.
+//
+// The value is never used raw - every detector adds the target's collision
+// radius (hitbox +0x0A) on top, and several apply per-enemy fudges:
+//   slots 0     weapon_hit_detect_knife      radial, measured from the knife
+//                                            joint (0x0E), not from the player
+//   slots 1-4   weapon_hit_detect_gun        depth of the FAR aim-cone tier in
+//                                            front of the player; the near tier
+//                                            is a fixed 200 and ignores this
+//   slots 5-9   weapon_hit_detect_projectile radial, measured from
+//                                            g_playerPosScratch - the caller
+//                                            parks the PROJECTILE there first
+//
+// Only the knife and the handgun differ between the two characters, and Jill
+// gets 100 units more reach on each; shotgun and below are shared.
 unsigned int weapons_ranges[20] = {
-    400, 1200, 2600, 800, 800,
-    400, 900, 900, 900, 1100,
-    500, 1300, 2600, 800, 800,
-    400, 900, 900, 900, 1100,
+    // ---- Chris (CHAR_CHRIS == 0) ----
+     400,  // [0] ITEM_KNIFE             - combat knife
+    1200,  // [1] ITEM_BERETTA           - handgun
+    2600,  // [2] ITEM_SHOTGUN           - shotgun
+     800,  // [3] ITEM_COLT_PYTHON_DUM   - Colt Python, regular rounds
+     800,  // [4] ITEM_COLT_PYTHON_MAG   - Colt Python, magnum rounds
+     400,  // [5] ITEM_FLAMETHROWER      - flamethrower (flame sprite radius)
+     900,  // [6] ITEM_BAZOOKA_EXPLOSIVE - grenade launcher, explosive rounds
+     900,  // [7] ITEM_BAZOOKA_ACID      - grenade launcher, acid rounds
+     900,  // [8] ITEM_BAZOOKA_FLAME     - grenade launcher, flame rounds
+    1100,  // [9] ITEM_ROCKET_LAUNCHER   - rocket launcher
+    // ---- Jill (CHAR_JILL == 1, and CHAR_REBECCA via `& 1`) ----
+     500,  // [0] ITEM_KNIFE             - combat knife      (+100 vs Chris)
+    1300,  // [1] ITEM_BERETTA           - handgun           (+100 vs Chris)
+    2600,  // [2] ITEM_SHOTGUN           - shotgun
+     800,  // [3] ITEM_COLT_PYTHON_DUM   - Colt Python, regular rounds
+     800,  // [4] ITEM_COLT_PYTHON_MAG   - Colt Python, magnum rounds
+     400,  // [5] ITEM_FLAMETHROWER      - flamethrower (flame sprite radius)
+     900,  // [6] ITEM_BAZOOKA_EXPLOSIVE - grenade launcher, explosive rounds
+     900,  // [7] ITEM_BAZOOKA_ACID      - grenade launcher, acid rounds
+     900,  // [8] ITEM_BAZOOKA_FLAME     - grenade launcher, flame rounds
+    1100,  // [9] ITEM_ROCKET_LAUNCHER   - rocket launcher
 };
 
-// 0x004bb698 - easy difficulty hit records (WeaponHitRecord, see top of file)
-WeaponHitRecord g_weaponHitRecordsEasy[200] = {
-    {   100,  -1800,   0,    8,   0,   0,   1, 0 }, {   100,  -2620,   0,    9,   0,   1,   1, 0 },
-    {   100,  -2500,   0,   53,   4,   0,   2, 0 }, {   100,  -2620,   0,   50,   4,   0,   2, 0 },
-    {   100,  -2620,   0,  130,   4,   0,   2, 0 }, {   150,  -1500,   0,   20,  14,   6,   1, 0 },
-    {   150,  -1620,   0,  201,   0,   0,   2, 0 }, {   150,  -1520,   0,   95,   9,   0,   1, 0 },
-    {   150,  -1500,   0,   95,  14,   6,   1, 0 }, {   150,  -1620,   0,  900,   0,   6,   2, 0 },
-    {   100,  -1800,   0,    8,   0,   0,   1, 0 }, {   100,  -2620,   0,    9,   0,   1,   1, 0 },
-    {   100,  -2500,   0,   53,   4,   0,   2, 0 }, {   100,  -2620,   0,   50,   4,   0,   2, 0 },
-    {   100,  -2620,   0,  130,   4,   0,   2, 0 }, {   150,  -1500,   0,   20,  14,   6,   1, 0 },
-    {   150,  -1620,   0,  201,   0,   0,   2, 0 }, {   150,  -1520,   0,   95,   9,   0,   1, 0 },
-    {   150,  -1500,   0,   95,  14,   6,   1, 0 }, {   150,  -1620,   0,  900,   0,   6,   2, 0 },
-    {   100,  -1200,   0,   30,   0,   0,   1, 0 }, {   100,  -1200,   0,   20,   0,   1,   1, 0 },
-    {   100,  -1200,   0,   40,   4,   0,   2, 0 }, {   100,  -1200,   0,   60,   4,   0,   2, 0 },
-    {   100,  -1200,   0,  130,   4,   0,   2, 0 }, {   100,      0,   0,   20,  14,   6,   1, 0 },
-    {   100,   -100,   0,  200,   0,   0,   2, 0 }, {   100,      0,   0,  100,   9,   0,   1, 0 },
-    {   100,      0,   0,  100,  14,   6,   1, 0 }, {   100,   -100,   0,  900,   0,   6,   2, 0 },
-    {     0,  -1200,   0,   10,   0,   8,   1, 0 }, {     0,  -1220,   0,   20,   0,   9,   1, 0 },
-    {     0,  -1100,   0,   40,   0,   8,   2, 0 }, {     0,  -1220,   0,   40,   0,   8,   2, 0 },
-    {     0,  -1220,   0,  130,   0,   8,   2, 0 }, {     0,  -1100,   0,   20,  14,   7,   1, 0 },
-    {     0,  -1120,   0,  100,   0,   0,   2, 0 }, {     0,  -1120,   0,  100,   9,   0,   1, 0 },
-    {     0,  -1100,   0,  200,  14,   7,   1, 0 }, {     0,  -1120,   0,  900,   0,   7,   2, 0 },
-    {     0,   -900,   0,   10,   0,   8,   1, 0 }, {     0,   -920,   0,   14,   0,   9,   1, 0 },
-    {     0,   -800,   0,   40,   0,   8,   2, 0 }, {     0,   -920,   0,   50,   0,   8,   2, 0 },
-    {     0,   -920,   0,   70,   0,   8,   2, 0 }, {     0,   -800,   0,   20,  14,   7,   1, 0 },
-    {     0,   -820,   0,   60,   0,   0,   2, 0 }, {     0,   -820,   0,   60,   9,   0,   1, 0 },
-    {     0,   -800,   0,  205,  14,   7,   1, 0 }, {     0,   -820,   0,  900,   0,   7,   2, 0 },
-    {     0,      0,   0,   50,   0,   0,   1, 0 }, {     0,      0,   0,   26,   0,   0,   1, 0 },
-    {     0,      0,   0,   50,   0,   0,   2, 0 }, {     0,      0,   0,   50,   0,   0,   2, 0 },
-    {     0,      0,   0,  130,   0,   0,   2, 0 }, {     0,      0,   0,   20,  14,   5,   1, 0 },
-    {     0,      0,   0,  200,   0,   0,   2, 0 }, {     0,      0,   0,   60,   9,   0,   1, 0 },
-    {     0,      0,   0,   60,  14,   5,   1, 0 }, {     0,      0,   0,  900,   0,   5,   2, 0 },
-    {     0,  -1500,   0,   16,   9,   6,   1, 0 }, {     0,  -1500,   0,   14,   9,   6,   1, 0 },
-    {     0,  -1500,   0,   32,   9,   6,   2, 0 }, {     0,  -1500,   0,   40,   9,   6,   2, 0 },
-    {     0,  -1500,   0,  130,   9,   6,   2, 0 }, {   150,  -1500,   0,   20,  14,   6,   1, 0 },
-    {   150,  -1500,   0,  100,   0,   0,   2, 0 }, {   150,  -1500,   0,  200,   9,   0,   1, 0 },
-    {   150,  -1500,   0,  100,  14,   6,   1, 0 }, {   150,  -1500,   0,  900,   0,   6,   2, 0 },
-    {     0,      0,   0,   20,   0,  16,   1, 0 }, {     0,      0,   0,   30,   0,  17,   1, 0 },
-    {     0,      0,   0,   60,   0,  16,   2, 0 }, {     0,      0,   0,   70,   0,  16,   2, 0 },
-    {     0,      0,   0,  130,   0,  16,   2, 0 }, {     0,      0,   0,   20,  14,   4,   1, 0 },
-    {     0,      0,   0,  200,   0,   0,   2, 0 }, {     0,      0,   0,   80,   9,   0,   1, 0 },
-    {     0,      0,   0,   80,  14,   4,   1, 0 }, {     0,      0,   0,  900,   0,   4,   2, 0 },
-    {     0,      0,   0,   15,   1,   0,   1, 0 }, {     0,   1000,   0,   15,   0,   0,   1, 0 },
-    {     0,   1500,   0,   20,   0,   0,   2, 0 }, {     0,   1000,   0,   38,   0,   0,   2, 0 },
-    {     0,   1000,   0,   74,   0,   0,   2, 0 }, {     0,   1500,   0,   20,  14,   6,   1, 0 },
-    {     0,   1500,   0,   50,   2,   0,   2, 0 }, {     0,   1500,   0,   40,   9,   0,   1, 0 },
-    {     0,   1500,   0,  150,  14,   6,   1, 0 }, {     0,   1500,   0,  900,   2,   6,   2, 0 },
-    {     0,      0,   0,   17,   0,   0,   1, 0 }, {     0,      0,   0,   20,   1,   0,   1, 0 },
-    {     0,      0,   0,   30,   1,   0,   2, 0 }, {     0,      0,   0,   40,   1,   0,   2, 0 },
-    {     0,      0,   0,  130,   1,   0,   2, 0 }, {   150,  -1500,   0,   20,  14,   6,   1, 0 },
-    {   150,  -1500,   0,  200,   0,   0,   2, 0 }, {   150,  -1500,   0,   60,   9,   0,   1, 0 },
-    {   150,  -1500,   0,   60,  14,   6,   1, 0 }, {   150,  -1500,   0,  900,   0,   6,   2, 0 },
-    {     0,      0,   0,   20,   0,   0,   1, 0 }, {     0,      0,   0,   20,   0,   0,   1, 0 },
-    {     0,      0,   0,   40,   0,   0,   2, 0 }, {     0,      0,   0,   50,   0,   0,   2, 0 },
-    {     0,      0,   0,  130,   0,   0,   2, 0 }, {     0,      0,   0,   30,  14,   3,   1, 0 },
-    {     0,      0,   0,  200,   0,   0,   2, 0 }, {     0,      0,   0,   60,   9,   0,   1, 0 },
-    {     0,      0,   0,   60,  14,   3,   1, 0 }, {     0,      0,   0,  900,   0,   3,   2, 0 },
-    {     0,      0,   0,    0,   1,   0,   1, 0 }, {     0,      0,   0,    0,   1,   0,   1, 0 },
-    {     0,      0,   0,    0,   1,   0,   1, 0 }, {     0,      0,   0,    0,   1,   0,   1, 0 },
-    {     0,      0,   0,    0,   1,   0,   1, 0 }, {     0,  -1500,   0,    0,  14,   7,   1, 0 },
-    {     0,  -1500,   0,    0,   0,   0,   2, 0 }, {     0,  -1500,   0,    0,   9,   0,   1, 0 },
-    {     0,  -1500,   0,    0,  14,   7,   1, 0 }, {     0,  -1500,   0,    0,   0,   7,   2, 0 },
-    {     0,      0,   0,   10,   0,   0,   1, 0 }, {     0,      0,   0,   20,   1,   0,   1, 0 },
-    {     0,      0,   0,   30,   1,   0,   2, 0 }, {     0,      0,   0,   50,   1,   0,   2, 0 },
-    {     0,      0,   0,   80,   1,   0,   2, 0 }, {   150,  -2000,   0,   20,   2,   6,   1, 0 },
-    {   150,  -2000,   0,  100,   2,   0,   2, 0 }, {   150,  -2000,   0,  100,   2,   0,   1, 0 },
-    {   150,  -2000,   0,  100,   2,   6,   1, 0 }, {   150,  -2000,   0,  900,   2,   6,   2, 0 },
-    {     0,      0,   0,   20,   0,   8,   1, 0 }, {     0,      0,   0,   30,   1,   0,   1, 0 },
-    {     0,      0,   0,   40,   1,   0,   2, 0 }, {     0,      0,   0,   40,   1,   0,   2, 0 },
-    {     0,      0,   0,   80,   1,   0,   2, 0 }, {     0,      0,   0,   20,   2,   7,   1, 0 },
-    {     0,      0,   0,   80,   2,   0,   2, 0 }, {     0,      0,   0,  130,   2,   0,   1, 0 },
-    {     0,      0,   0,   50,   2,   7,   1, 0 }, {     0,      0,   0,  900,   2,   7,   2, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,    0,   1,   0,   0, 0 }, {     0,      0,   0,    0,   1,   0,   0, 0 },
-    {     0,      0,   0,   10,   0,   0,   1, 0 }, {     0,      0,   0,   20,   1,   0,   1, 0 },
-    {     0,      0,   0,   30,   1,   0,   2, 0 }, {     0,      0,   0,   50,   1,   0,   2, 0 },
-    {     0,      0,   0,   80,   1,   0,   2, 0 }, {   150,  -2000,   0,   20,   2,   6,   1, 0 },
-    {   150,  -2000,   0,  100,   2,   0,   2, 0 }, {   150,  -2000,   0,  100,   2,   0,   1, 0 },
-    {   150,  -2000,   0,  100,   2,   6,   1, 0 }, {   150,  -2000,   0,  900,   2,   6,   2, 0 },
-    {   100,  -1800,   0,    8,   0,   0,   1, 0 }, {   100,  -2620,   0,    9,   0,   1,   1, 0 },
-    {   100,  -1500,   0,   53,   4,   0,   2, 0 }, {   100,  -2620,   0,   50,   4,   0,   2, 0 },
-    {   100,  -2620,   0,  130,   4,   0,   2, 0 }, {   150,  -2500,   0,   20,  14,   6,   1, 0 },
-    {   150,  -1620,   0,  201,   0,   0,   2, 0 }, {   150,  -1520,   0,   95,   9,   0,   1, 0 },
-    {   150,  -1500,   0,   95,  14,   6,   1, 0 }, {   150,  -1620,   0,  900,   0,   6,   2, 0 },
-    {     0,      0,   0,   20,   0,   8,   1, 0 }, {     0,      0,   0,   30,   1,   0,   1, 0 },
-    {     0,      0,   0,   40,   1,   0,   2, 0 }, {     0,      0,   0,   40,   1,   0,   2, 0 },
-    {     0,      0,   0,   80,   1,   0,   2, 0 }, {     0,      0,   0,   20,   2,   7,   1, 0 },
-    {     0,      0,   0,   80,   2,   0,   2, 0 }, {     0,      0,   0,  130,   2,   0,   1, 0 },
-    {     0,      0,   0,   50,   2,   7,   1, 0 }, {     0,      0,   0,  900,   2,   7,   2, 0 },
-    {     0,      0,   0,   10,   1,   0,   1, 0 }, {     0,      0,   0,    0,   1,   0,   1, 0 },
-    {     0,      0,   0,    0,   1,   0,   2, 0 }, {     0,      0,   0,    0,   1,   0,   2, 0 },
-    {     0,      0,   0,    0,   1,   0,   2, 0 }, {     0,      0,   0,    2,   2,   7,   1, 0 },
-    {     0,      0,   0,   30,   2,   0,   2, 0 }, {     0,      0,   0,   30,   2,   0,   1, 0 },
-    {     0,      0,   0,   30,   2,   7,   1, 0 }, {     0,      0,   0,  900,   2,   7,   2, 0 },
+// 0x004bb698 - first-playthrough hit records (WeaponHitRecordFirstRun = { kx, ky, kz,
+// dmg, type, data, hit, pad }, see top of file), 10 records per enemy,
+// indexed (weaponAdj + enemyType * 10). One record per weapon slot, same
+// order as weapons_ranges: knife, handgun, shotgun, python (regular rounds),
+// python (magnum rounds), flamethrower, GL explosive, GL acid, GL flame,
+// rocket launcher.
+WeaponHitRecordFirstRun g_weaponHitRecordsFirstRun[200] = {
+    // ---- 0x00 ENEMY_ZOMBIE ----
+//  {    kx,    ky,  kz, dmg, type, data, hit, pad }
+    {   100,  -1800,   0,    8,   0,   0,   1, 0 },  // knife
+    {   100,  -2620,   0,    9,   0,   1,   1, 0 },  // handgun
+    {   100,  -2500,   0,   53,   4,   0,   2, 0 },  // shotgun
+    {   100,  -2620,   0,   50,   4,   0,   2, 0 },  // python
+    {   100,  -2620,   0,  130,   4,   0,   2, 0 },  // magnum
+    {   150,  -1500,   0,   20,  14,   6,   1, 0 },  // flamethrower
+    {   150,  -1620,   0,  201,   0,   0,   2, 0 },  // GL explosive
+    {   150,  -1520,   0,   95,   9,   0,   1, 0 },  // GL acid
+    {   150,  -1500,   0,   95,  14,   6,   1, 0 },  // GL flame
+    {   150,  -1620,   0,  900,   0,   6,   2, 0 },  // rocket launcher
+    // ---- 0x01 ENEMY_ZOMBIE_NAKED ----
+    {   100,  -1800,   0,    8,   0,   0,   1, 0 },  // knife
+    {   100,  -2620,   0,    9,   0,   1,   1, 0 },  // handgun
+    {   100,  -2500,   0,   53,   4,   0,   2, 0 },  // shotgun
+    {   100,  -2620,   0,   50,   4,   0,   2, 0 },  // python
+    {   100,  -2620,   0,  130,   4,   0,   2, 0 },  // magnum
+    {   150,  -1500,   0,   20,  14,   6,   1, 0 },  // flamethrower
+    {   150,  -1620,   0,  201,   0,   0,   2, 0 },  // GL explosive
+    {   150,  -1520,   0,   95,   9,   0,   1, 0 },  // GL acid
+    {   150,  -1500,   0,   95,  14,   6,   1, 0 },  // GL flame
+    {   150,  -1620,   0,  900,   0,   6,   2, 0 },  // rocket launcher
+    // ---- 0x02 ENEMY_CERBERUS ----
+    {   100,  -1200,   0,   30,   0,   0,   1, 0 },  // knife
+    {   100,  -1200,   0,   20,   0,   1,   1, 0 },  // handgun
+    {   100,  -1200,   0,   40,   4,   0,   2, 0 },  // shotgun
+    {   100,  -1200,   0,   60,   4,   0,   2, 0 },  // python
+    {   100,  -1200,   0,  130,   4,   0,   2, 0 },  // magnum
+    {   100,      0,   0,   20,  14,   6,   1, 0 },  // flamethrower
+    {   100,   -100,   0,  200,   0,   0,   2, 0 },  // GL explosive
+    {   100,      0,   0,  100,   9,   0,   1, 0 },  // GL acid
+    {   100,      0,   0,  100,  14,   6,   1, 0 },  // GL flame
+    {   100,   -100,   0,  900,   0,   6,   2, 0 },  // rocket launcher
+    // ---- 0x03 ENEMY_WEB_SPINNER ----
+    {     0,  -1200,   0,   10,   0,   8,   1, 0 },  // knife
+    {     0,  -1220,   0,   20,   0,   9,   1, 0 },  // handgun
+    {     0,  -1100,   0,   40,   0,   8,   2, 0 },  // shotgun
+    {     0,  -1220,   0,   40,   0,   8,   2, 0 },  // python
+    {     0,  -1220,   0,  130,   0,   8,   2, 0 },  // magnum
+    {     0,  -1100,   0,   20,  14,   7,   1, 0 },  // flamethrower
+    {     0,  -1120,   0,  100,   0,   0,   2, 0 },  // GL explosive
+    {     0,  -1120,   0,  100,   9,   0,   1, 0 },  // GL acid
+    {     0,  -1100,   0,  200,  14,   7,   1, 0 },  // GL flame
+    {     0,  -1120,   0,  900,   0,   7,   2, 0 },  // rocket launcher
+    // ---- 0x04 ENEMY_BLACK_TIGER ----
+    {     0,   -900,   0,   10,   0,   8,   1, 0 },  // knife
+    {     0,   -920,   0,   14,   0,   9,   1, 0 },  // handgun
+    {     0,   -800,   0,   40,   0,   8,   2, 0 },  // shotgun
+    {     0,   -920,   0,   50,   0,   8,   2, 0 },  // python
+    {     0,   -920,   0,   70,   0,   8,   2, 0 },  // magnum
+    {     0,   -800,   0,   20,  14,   7,   1, 0 },  // flamethrower
+    {     0,   -820,   0,   60,   0,   0,   2, 0 },  // GL explosive
+    {     0,   -820,   0,   60,   9,   0,   1, 0 },  // GL acid
+    {     0,   -800,   0,  205,  14,   7,   1, 0 },  // GL flame
+    {     0,   -820,   0,  900,   0,   7,   2, 0 },  // rocket launcher
+    // ---- 0x05 ENEMY_CROW ----
+    {     0,      0,   0,   50,   0,   0,   1, 0 },  // knife
+    {     0,      0,   0,   26,   0,   0,   1, 0 },  // handgun
+    {     0,      0,   0,   50,   0,   0,   2, 0 },  // shotgun
+    {     0,      0,   0,   50,   0,   0,   2, 0 },  // python
+    {     0,      0,   0,  130,   0,   0,   2, 0 },  // magnum
+    {     0,      0,   0,   20,  14,   5,   1, 0 },  // flamethrower
+    {     0,      0,   0,  200,   0,   0,   2, 0 },  // GL explosive
+    {     0,      0,   0,   60,   9,   0,   1, 0 },  // GL acid
+    {     0,      0,   0,   60,  14,   5,   1, 0 },  // GL flame
+    {     0,      0,   0,  900,   0,   5,   2, 0 },  // rocket launcher
+    // ---- 0x06 ENEMY_HUNTER ----
+    {     0,  -1500,   0,   16,   9,   6,   1, 0 },  // knife
+    {     0,  -1500,   0,   14,   9,   6,   1, 0 },  // handgun
+    {     0,  -1500,   0,   32,   9,   6,   2, 0 },  // shotgun
+    {     0,  -1500,   0,   40,   9,   6,   2, 0 },  // python
+    {     0,  -1500,   0,  130,   9,   6,   2, 0 },  // magnum
+    {   150,  -1500,   0,   20,  14,   6,   1, 0 },  // flamethrower
+    {   150,  -1500,   0,  100,   0,   0,   2, 0 },  // GL explosive
+    {   150,  -1500,   0,  200,   9,   0,   1, 0 },  // GL acid
+    {   150,  -1500,   0,  100,  14,   6,   1, 0 },  // GL flame
+    {   150,  -1500,   0,  900,   0,   6,   2, 0 },  // rocket launcher
+    // ---- 0x07 ENEMY_WASP ----
+    {     0,      0,   0,   20,   0,  16,   1, 0 },  // knife
+    {     0,      0,   0,   30,   0,  17,   1, 0 },  // handgun
+    {     0,      0,   0,   60,   0,  16,   2, 0 },  // shotgun
+    {     0,      0,   0,   70,   0,  16,   2, 0 },  // python
+    {     0,      0,   0,  130,   0,  16,   2, 0 },  // magnum
+    {     0,      0,   0,   20,  14,   4,   1, 0 },  // flamethrower
+    {     0,      0,   0,  200,   0,   0,   2, 0 },  // GL explosive
+    {     0,      0,   0,   80,   9,   0,   1, 0 },  // GL acid
+    {     0,      0,   0,   80,  14,   4,   1, 0 },  // GL flame
+    {     0,      0,   0,  900,   0,   4,   2, 0 },  // rocket launcher
+    // ---- 0x08 ENEMY_PLANT42 ----
+    {     0,      0,   0,   15,   1,   0,   1, 0 },  // knife
+    {     0,   1000,   0,   15,   0,   0,   1, 0 },  // handgun
+    {     0,   1500,   0,   20,   0,   0,   2, 0 },  // shotgun
+    {     0,   1000,   0,   38,   0,   0,   2, 0 },  // python
+    {     0,   1000,   0,   74,   0,   0,   2, 0 },  // magnum
+    {     0,   1500,   0,   20,  14,   6,   1, 0 },  // flamethrower
+    {     0,   1500,   0,   50,   2,   0,   2, 0 },  // GL explosive
+    {     0,   1500,   0,   40,   9,   0,   1, 0 },  // GL acid
+    {     0,   1500,   0,  150,  14,   6,   1, 0 },  // GL flame
+    {     0,   1500,   0,  900,   2,   6,   2, 0 },  // rocket launcher
+    // ---- 0x09 ENEMY_CHIMERA ----
+    {     0,      0,   0,   17,   0,   0,   1, 0 },  // knife
+    {     0,      0,   0,   20,   1,   0,   1, 0 },  // handgun
+    {     0,      0,   0,   30,   1,   0,   2, 0 },  // shotgun
+    {     0,      0,   0,   40,   1,   0,   2, 0 },  // python
+    {     0,      0,   0,  130,   1,   0,   2, 0 },  // magnum
+    {   150,  -1500,   0,   20,  14,   6,   1, 0 },  // flamethrower
+    {   150,  -1500,   0,  200,   0,   0,   2, 0 },  // GL explosive
+    {   150,  -1500,   0,   60,   9,   0,   1, 0 },  // GL acid
+    {   150,  -1500,   0,   60,  14,   6,   1, 0 },  // GL flame
+    {   150,  -1500,   0,  900,   0,   6,   2, 0 },  // rocket launcher
+    // ---- 0x0A ENEMY_ADDER ----
+    {     0,      0,   0,   20,   0,   0,   1, 0 },  // knife
+    {     0,      0,   0,   20,   0,   0,   1, 0 },  // handgun
+    {     0,      0,   0,   40,   0,   0,   2, 0 },  // shotgun
+    {     0,      0,   0,   50,   0,   0,   2, 0 },  // python
+    {     0,      0,   0,  130,   0,   0,   2, 0 },  // magnum
+    {     0,      0,   0,   30,  14,   3,   1, 0 },  // flamethrower
+    {     0,      0,   0,  200,   0,   0,   2, 0 },  // GL explosive
+    {     0,      0,   0,   60,   9,   0,   1, 0 },  // GL acid
+    {     0,      0,   0,   60,  14,   3,   1, 0 },  // GL flame
+    {     0,      0,   0,  900,   0,   3,   2, 0 },  // rocket launcher
+    // ---- 0x0B ENEMY_NEPTUNE ----
+    {     0,      0,   0,    0,   1,   0,   1, 0 },  // knife (no damage)
+    {     0,      0,   0,    0,   1,   0,   1, 0 },  // handgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   1, 0 },  // shotgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   1, 0 },  // python (no damage)
+    {     0,      0,   0,    0,   1,   0,   1, 0 },  // magnum (no damage)
+    {     0,  -1500,   0,    0,  14,   7,   1, 0 },  // flamethrower (no damage)
+    {     0,  -1500,   0,    0,   0,   0,   2, 0 },  // GL explosive (no damage)
+    {     0,  -1500,   0,    0,   9,   0,   1, 0 },  // GL acid (no damage)
+    {     0,  -1500,   0,    0,  14,   7,   1, 0 },  // GL flame (no damage)
+    {     0,  -1500,   0,    0,   0,   7,   2, 0 },  // rocket launcher (no damage)
+    // ---- 0x0C ENEMY_TYRANT_1 ----
+    {     0,      0,   0,   10,   0,   0,   1, 0 },  // knife
+    {     0,      0,   0,   20,   1,   0,   1, 0 },  // handgun
+    {     0,      0,   0,   30,   1,   0,   2, 0 },  // shotgun
+    {     0,      0,   0,   50,   1,   0,   2, 0 },  // python
+    {     0,      0,   0,   80,   1,   0,   2, 0 },  // magnum
+    {   150,  -2000,   0,   20,   2,   6,   1, 0 },  // flamethrower
+    {   150,  -2000,   0,  100,   2,   0,   2, 0 },  // GL explosive
+    {   150,  -2000,   0,  100,   2,   0,   1, 0 },  // GL acid
+    {   150,  -2000,   0,  100,   2,   6,   1, 0 },  // GL flame
+    {   150,  -2000,   0,  900,   2,   6,   2, 0 },  // rocket launcher
+    // ---- 0x0D ENEMY_YAWN_1 ----
+    {     0,      0,   0,   20,   0,   8,   1, 0 },  // knife
+    {     0,      0,   0,   30,   1,   0,   1, 0 },  // handgun
+    {     0,      0,   0,   40,   1,   0,   2, 0 },  // shotgun
+    {     0,      0,   0,   40,   1,   0,   2, 0 },  // python
+    {     0,      0,   0,   80,   1,   0,   2, 0 },  // magnum
+    {     0,      0,   0,   20,   2,   7,   1, 0 },  // flamethrower
+    {     0,      0,   0,   80,   2,   0,   2, 0 },  // GL explosive
+    {     0,      0,   0,  130,   2,   0,   1, 0 },  // GL acid
+    {     0,      0,   0,   50,   2,   7,   1, 0 },  // GL flame
+    {     0,      0,   0,  900,   2,   7,   2, 0 },  // rocket launcher
+    // ---- 0x0E ENEMY_PLANT42_ROOTS ----
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // knife (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // handgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // shotgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // python (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // magnum (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // flamethrower (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // GL explosive (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // GL acid (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // GL flame (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // rocket launcher (no damage)
+    // ---- 0x0F ENEMY_MONSTER_PLANT ----
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // knife (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // handgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // shotgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // python (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // magnum (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // flamethrower (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // GL explosive (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // GL acid (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // GL flame (no damage)
+    {     0,      0,   0,    0,   1,   0,   0, 0 },  // rocket launcher (no damage)
+    // ---- 0x10 ENEMY_TYRANT_2 ----
+    {     0,      0,   0,   10,   0,   0,   1, 0 },  // knife
+    {     0,      0,   0,   20,   1,   0,   1, 0 },  // handgun
+    {     0,      0,   0,   30,   1,   0,   2, 0 },  // shotgun
+    {     0,      0,   0,   50,   1,   0,   2, 0 },  // python
+    {     0,      0,   0,   80,   1,   0,   2, 0 },  // magnum
+    {   150,  -2000,   0,   20,   2,   6,   1, 0 },  // flamethrower
+    {   150,  -2000,   0,  100,   2,   0,   2, 0 },  // GL explosive
+    {   150,  -2000,   0,  100,   2,   0,   1, 0 },  // GL acid
+    {   150,  -2000,   0,  100,   2,   6,   1, 0 },  // GL flame
+    {   150,  -2000,   0,  900,   2,   6,   2, 0 },  // rocket launcher
+    // ---- 0x11 ENEMY_ZOMBIE_VARIANT ----
+    {   100,  -1800,   0,    8,   0,   0,   1, 0 },  // knife
+    {   100,  -2620,   0,    9,   0,   1,   1, 0 },  // handgun
+    {   100,  -1500,   0,   53,   4,   0,   2, 0 },  // shotgun
+    {   100,  -2620,   0,   50,   4,   0,   2, 0 },  // python
+    {   100,  -2620,   0,  130,   4,   0,   2, 0 },  // magnum
+    {   150,  -2500,   0,   20,  14,   6,   1, 0 },  // flamethrower
+    {   150,  -1620,   0,  201,   0,   0,   2, 0 },  // GL explosive
+    {   150,  -1520,   0,   95,   9,   0,   1, 0 },  // GL acid
+    {   150,  -1500,   0,   95,  14,   6,   1, 0 },  // GL flame
+    {   150,  -1620,   0,  900,   0,   6,   2, 0 },  // rocket launcher
+    // ---- 0x12 ENEMY_YAWN_2 ----
+    {     0,      0,   0,   20,   0,   8,   1, 0 },  // knife
+    {     0,      0,   0,   30,   1,   0,   1, 0 },  // handgun
+    {     0,      0,   0,   40,   1,   0,   2, 0 },  // shotgun
+    {     0,      0,   0,   40,   1,   0,   2, 0 },  // python
+    {     0,      0,   0,   80,   1,   0,   2, 0 },  // magnum
+    {     0,      0,   0,   20,   2,   7,   1, 0 },  // flamethrower
+    {     0,      0,   0,   80,   2,   0,   2, 0 },  // GL explosive
+    {     0,      0,   0,  130,   2,   0,   1, 0 },  // GL acid
+    {     0,      0,   0,   50,   2,   7,   1, 0 },  // GL flame
+    {     0,      0,   0,  900,   2,   7,   2, 0 },  // rocket launcher
+    // ---- 0x13 ENEMY_SPIDER_WEB ----
+    {     0,      0,   0,   10,   1,   0,   1, 0 },  // knife (burns it)
+    {     0,      0,   0,    0,   1,   0,   1, 0 },  // handgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   2, 0 },  // shotgun (no damage)
+    {     0,      0,   0,    0,   1,   0,   2, 0 },  // python (no damage)
+    {     0,      0,   0,    0,   1,   0,   2, 0 },  // magnum (no damage)
+    {     0,      0,   0,    2,   2,   7,   1, 0 },  // flamethrower (burns it)
+    {     0,      0,   0,   30,   2,   0,   2, 0 },  // GL explosive (burns it)
+    {     0,      0,   0,   30,   2,   0,   1, 0 },  // GL acid (burns it)
+    {     0,      0,   0,   30,   2,   7,   1, 0 },  // GL flame (burns it)
+    {     0,      0,   0,  900,   2,   7,   2, 0 },  // rocket launcher (burns it)
 };
 
-// 0x004bbffe - normal difficulty records (WeaponHitRecordNormal, top of file)
-WeaponHitRecordNormal g_weaponHitRecordsNormal[200] = {
-    {    8,    0,   1, 0,   100,  -2620,   0 }, {    9,  256,   1, 0,   100,  -2500,   0 },
-    {   20,    4,   2, 0,   100,  -2620,   0 }, {   50,    4,   2, 0,   100,  -2620,   0 },
-    {   60,    4,   2, 0,   150,  -1500,   0 }, {   20, 1550,   1, 0,   150,  -1620,   0 },
-    {  201,    0,   2, 0,   150,  -1520,   0 }, {   70,    9,   1, 0,   150,  -1500,   0 },
-    {   70, 1550,   1, 0,   150,  -1620,   0 }, {  900, 1536,   2, 0,   100,  -1800,   0 },
-    {    8,    0,   1, 0,   100,  -2620,   0 }, {    9,  256,   1, 0,   100,  -2500,   0 },
-    {   20,    4,   2, 0,   100,  -2620,   0 }, {   50,    4,   2, 0,   100,  -2620,   0 },
-    {   60,    4,   2, 0,   150,  -1500,   0 }, {   20, 1550,   1, 0,   150,  -1620,   0 },
-    {  201,    0,   2, 0,   150,  -1520,   0 }, {   70,    9,   1, 0,   150,  -1500,   0 },
-    {   70, 1550,   1, 0,   150,  -1620,   0 }, {  900, 1536,   2, 0,   100,  -1200,   0 },
-    {   30,    0,   1, 0,   100,  -1200,   0 }, {   20,  256,   1, 0,   100,  -1200,   0 },
-    {   35,    4,   2, 0,   100,  -1200,   0 }, {   60,    4,   2, 0,   100,  -1200,   0 },
-    {   60,    4,   2, 0,   100,      0,   0 }, {   20, 1550,   1, 0,   100,   -100,   0 },
-    {  200,    0,   2, 0,   100,      0,   0 }, {   90,    9,   1, 0,   100,      0,   0 },
-    {   90, 1550,   1, 0,   100,   -100,   0 }, {  900, 1536,   2, 0,     0,  -1200,   0 },
-    {   10, 2048,   1, 0,     0,  -1220,   0 }, {   15, 2304,   1, 0,     0,  -1100,   0 },
-    {   24, 2048,   2, 0,     0,  -1220,   0 }, {   30, 2048,   2, 0,     0,  -1220,   0 },
-    {   40, 2048,   2, 0,     0,  -1100,   0 }, {   20, 1806,   1, 0,     0,  -1120,   0 },
-    {  100,    0,   2, 0,     0,  -1120,   0 }, {  100,    9,   1, 0,     0,  -1100,   0 },
-    {  200, 1806,   1, 0,     0,  -1120,   0 }, {  900, 1792,   2, 0,     0,   -900,   0 },
-    {   10, 2048,   1, 0,     0,   -920,   0 }, {   12, 2304,   1, 0,     0,   -800,   0 },
-    {   20, 2048,   2, 0,     0,   -920,   0 }, {   50, 2048,   2, 0,     0,   -920,   0 },
-    {   70, 2048,   2, 0,     0,   -800,   0 }, {   20, 1806,   1, 0,     0,   -820,   0 },
-    {   50,    0,   2, 0,     0,   -820,   0 }, {   50,    9,   1, 0,     0,   -800,   0 },
-    {  103, 1806,   1, 0,     0,   -820,   0 }, {  900, 1792,   2, 0,     0,      0,   0 },
-    {   50,    0,   1, 0,     0,      0,   0 }, {   26,    0,   1, 0,     0,      0,   0 },
-    {   50,    0,   2, 0,     0,      0,   0 }, {   50,    0,   2, 0,     0,      0,   0 },
-    {   50,    0,   2, 0,     0,      0,   0 }, {   20, 1294,   1, 0,     0,      0,   0 },
-    {  200,    0,   2, 0,     0,      0,   0 }, {   60,    9,   1, 0,     0,      0,   0 },
-    {   60, 1294,   1, 0,     0,      0,   0 }, {  900, 1280,   2, 0,     0,  -1500,   0 },
-    {   16, 1545,   1, 0,     0,  -1500,   0 }, {   14, 1545,   1, 0,     0,  -1500,   0 },
-    {   25, 1545,   2, 0,     0,  -1500,   0 }, {   40, 1545,   2, 0,     0,  -1500,   0 },
-    {   80, 1545,   2, 0,   150,  -1500,   0 }, {   20, 1550,   1, 0,   150,  -1500,   0 },
-    {   50,    0,   2, 0,   150,  -1500,   0 }, {   80,    9,   1, 0,   150,  -1500,   0 },
-    {   50, 1550,   1, 0,   150,  -1500,   0 }, {  900, 1536,   2, 0,     0,      0,   0 },
-    {   20, 4096,   1, 0,     0,      0,   0 }, {   30, 4352,   1, 0,     0,      0,   0 },
-    {   60, 4096,   2, 0,     0,      0,   0 }, {   70, 4096,   2, 0,     0,      0,   0 },
-    {   70, 4096,   2, 0,     0,      0,   0 }, {   20, 1038,   1, 0,     0,      0,   0 },
-    {  200,    0,   2, 0,     0,      0,   0 }, {   80,    9,   1, 0,     0,      0,   0 },
-    {   80, 1038,   1, 0,     0,      0,   0 }, {  900, 1024,   2, 0,     0,      0,   0 },
-    {   15,    1,   1, 0,     0,   1000,   0 }, {   10,    0,   1, 0,     0,   1500,   0 },
-    {   20,    0,   2, 0,     0,   1000,   0 }, {   38,    0,   2, 0,     0,   1000,   0 },
-    {   20,    0,   2, 0,     0,   1500,   0 }, {   20, 1550,   1, 0,     0,   1500,   0 },
-    {   40,    2,   2, 0,     0,   1500,   0 }, {   40,    9,   1, 0,     0,   1500,   0 },
-    {  150, 1550,   1, 0,     0,   1500,   0 }, {  900, 1538,   2, 0,     0,      0,   0 },
-    {   10,    0,   1, 0,     0,      0,   0 }, {   12,    1,   1, 0,     0,      0,   0 },
-    {   20,    1,   2, 0,     0,      0,   0 }, {   40,    1,   2, 0,     0,      0,   0 },
-    {   41,    1,   2, 0,   150,  -1500,   0 }, {   20, 1550,   1, 0,   150,  -1500,   0 },
-    {   60,    0,   2, 0,   150,  -1500,   0 }, {   60,    9,   1, 0,   150,  -1500,   0 },
-    {  100, 1550,   1, 0,   150,  -1500,   0 }, {  900, 1536,   2, 0,     0,      0,   0 },
-    {   20,    0,   1, 0,     0,      0,   0 }, {   20,    0,   1, 0,     0,      0,   0 },
-    {   40,    0,   2, 0,     0,      0,   0 }, {   50,    0,   2, 0,     0,      0,   0 },
-    {   50,    0,   2, 0,     0,      0,   0 }, {   30,  782,   1, 0,     0,      0,   0 },
-    {  200,    0,   2, 0,     0,      0,   0 }, {   60,    9,   1, 0,     0,      0,   0 },
-    {   60,  782,   1, 0,     0,      0,   0 }, {  900,  768,   2, 0,     0,      0,   0 },
-    {    0,    1,   1, 0,     0,      0,   0 }, {    0,    1,   1, 0,     0,      0,   0 },
-    {    0,    1,   1, 0,     0,      0,   0 }, {    0,    1,   1, 0,     0,      0,   0 },
-    {    0,    1,   1, 0,     0,  -1500,   0 }, {    0, 1806,   1, 0,     0,  -1500,   0 },
-    {    0,    0,   2, 0,     0,  -1500,   0 }, {    0,    9,   1, 0,     0,  -1500,   0 },
-    {    0, 1806,   1, 0,     0,  -1500,   0 }, {    0, 1792,   2, 0,     0,      0,   0 },
-    {   10,    0,   1, 0,     0,      0,   0 }, {   15,    1,   1, 0,     0,      0,   0 },
-    {   20,    1,   2, 0,     0,      0,   0 }, {   50,    1,   2, 0,     0,      0,   0 },
-    {   40,    1,   2, 0,   150,  -2000,   0 }, {   20, 1538,   1, 0,   150,  -2000,   0 },
-    {   35,    2,   2, 0,   150,  -2000,   0 }, {   35,    2,   1, 0,   150,  -2000,   0 },
-    {   35, 1538,   1, 0,   150,  -2000,   0 }, {  900, 1538,   2, 0,     0,      0,   0 },
-    {   15, 2048,   1, 0,     0,      0,   0 }, {   18,    1,   1, 0,     0,      0,   0 },
-    {    5,    1,   2, 0,     0,      0,   0 }, {   40,    1,   2, 0,     0,      0,   0 },
-    {   60,    1,   2, 0,     0,      0,   0 }, {   20, 1794,   1, 0,     0,      0,   0 },
-    {   60,    2,   2, 0,     0,      0,   0 }, {  120,    2,   1, 0,     0,      0,   0 },
-    {   60, 1794,   1, 0,     0,      0,   0 }, {  900, 1794,   2, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {    0,    1,   0, 0,     0,      0,   0 }, {    0,    1,   0, 0,     0,      0,   0 },
-    {   10,    0,   1, 0,     0,      0,   0 }, {   15,    1,   1, 0,     0,      0,   0 },
-    {   20,    1,   2, 0,     0,      0,   0 }, {   50,    1,   2, 0,     0,      0,   0 },
-    {   40,    1,   2, 0,   150,  -2000,   0 }, {   20, 1538,   1, 0,   150,  -2000,   0 },
-    {   35,    2,   2, 0,   150,  -2000,   0 }, {   35,    2,   1, 0,   150,  -2000,   0 },
-    {   35, 1538,   1, 0,   150,  -2000,   0 }, {  900, 1538,   2, 0,   100,  -1800,   0 },
-    {    8,    0,   1, 0,   100,  -2620,   0 }, {    9,  256,   1, 0,   100,  -1500,   0 },
-    {   20,    4,   2, 0,   100,  -2620,   0 }, {   50,    4,   2, 0,   100,  -2620,   0 },
-    {   60,    4,   2, 0,   150,  -2500,   0 }, {   20, 1550,   1, 0,   150,  -1620,   0 },
-    {  201,    0,   2, 0,   150,  -1520,   0 }, {   70,    9,   1, 0,   150,  -1500,   0 },
-    {   70, 1550,   1, 0,   150,  -1620,   0 }, {  900, 1536,   2, 0,     0,      0,   0 },
-    {   15, 2048,   1, 0,     0,      0,   0 }, {   18,    1,   1, 0,     0,      0,   0 },
-    {   15,    1,   2, 0,     0,      0,   0 }, {   40,    1,   2, 0,     0,      0,   0 },
-    {   60,    1,   2, 0,     0,      0,   0 }, {   20, 1794,   1, 0,     0,      0,   0 },
-    {   60,    2,   2, 0,     0,      0,   0 }, {  120,    2,   1, 0,     0,      0,   0 },
-    {   60, 1794,   1, 0,     0,      0,   0 }, {  900, 1794,   2, 0,     0,      0,   0 },
-    {    6,    1,   1, 0,     0,      0,   0 }, {    0,    1,   1, 0,     0,      0,   0 },
-    {    0,    1,   2, 0,     0,      0,   0 }, {    0,    1,   2, 0,     0,      0,   0 },
-    {    0,    1,   2, 0,     0,      0,   0 }, {    2, 1794,   1, 0,     0,      0,   0 },
-    {   10,    2,   2, 0,     0,      0,   0 }, {   20,    2,   1, 0,     0,      0,   0 },
-    {   30, 1794,   1, 0,     0,      0,   0 }, {  900, 1794,   2, 0,     0,    500, -800 },
+// 0x004bbffe - second-playthrough ("western" difficulty) records (WeaponHitRecordSecondRun = { dmg,
+// unk_02, hit, unk_05, kx, ky, kz }, see top of file), 10 records per enemy,
+// indexed (weaponAdj + enemyType * 10). One record per weapon slot, same
+// order as weapons_ranges: knife, handgun, shotgun, python (regular rounds),
+// python (magnum rounds), flamethrower, GL explosive, GL acid, GL flame,
+// rocket launcher.
+WeaponHitRecordSecondRun g_weaponHitRecordsSecondRun[200] = {
+    // ---- 0x00 ENEMY_ZOMBIE ----
+//  { dmg, unk_02, hit, unk_05,    kx,     ky,  kz }
+    {    8,    0,   1, 0,   100,  -2620,   0 },  // knife
+    {    9,  256,   1, 0,   100,  -2500,   0 },  // handgun
+    {   20,    4,   2, 0,   100,  -2620,   0 },  // shotgun
+    {   50,    4,   2, 0,   100,  -2620,   0 },  // python
+    {   60,    4,   2, 0,   150,  -1500,   0 },  // magnum
+    {   20, 1550,   1, 0,   150,  -1620,   0 },  // flamethrower
+    {  201,    0,   2, 0,   150,  -1520,   0 },  // GL explosive
+    {   70,    9,   1, 0,   150,  -1500,   0 },  // GL acid
+    {   70, 1550,   1, 0,   150,  -1620,   0 },  // GL flame
+    {  900, 1536,   2, 0,   100,  -1800,   0 },  // rocket launcher
+    // ---- 0x01 ENEMY_ZOMBIE_NAKED ----
+    {    8,    0,   1, 0,   100,  -2620,   0 },  // knife
+    {    9,  256,   1, 0,   100,  -2500,   0 },  // handgun
+    {   20,    4,   2, 0,   100,  -2620,   0 },  // shotgun
+    {   50,    4,   2, 0,   100,  -2620,   0 },  // python
+    {   60,    4,   2, 0,   150,  -1500,   0 },  // magnum
+    {   20, 1550,   1, 0,   150,  -1620,   0 },  // flamethrower
+    {  201,    0,   2, 0,   150,  -1520,   0 },  // GL explosive
+    {   70,    9,   1, 0,   150,  -1500,   0 },  // GL acid
+    {   70, 1550,   1, 0,   150,  -1620,   0 },  // GL flame
+    {  900, 1536,   2, 0,   100,  -1200,   0 },  // rocket launcher
+    // ---- 0x02 ENEMY_CERBERUS ----
+    {   30,    0,   1, 0,   100,  -1200,   0 },  // knife
+    {   20,  256,   1, 0,   100,  -1200,   0 },  // handgun
+    {   35,    4,   2, 0,   100,  -1200,   0 },  // shotgun
+    {   60,    4,   2, 0,   100,  -1200,   0 },  // python
+    {   60,    4,   2, 0,   100,      0,   0 },  // magnum
+    {   20, 1550,   1, 0,   100,   -100,   0 },  // flamethrower
+    {  200,    0,   2, 0,   100,      0,   0 },  // GL explosive
+    {   90,    9,   1, 0,   100,      0,   0 },  // GL acid
+    {   90, 1550,   1, 0,   100,   -100,   0 },  // GL flame
+    {  900, 1536,   2, 0,     0,  -1200,   0 },  // rocket launcher
+    // ---- 0x03 ENEMY_WEB_SPINNER ----
+    {   10, 2048,   1, 0,     0,  -1220,   0 },  // knife
+    {   15, 2304,   1, 0,     0,  -1100,   0 },  // handgun
+    {   24, 2048,   2, 0,     0,  -1220,   0 },  // shotgun
+    {   30, 2048,   2, 0,     0,  -1220,   0 },  // python
+    {   40, 2048,   2, 0,     0,  -1100,   0 },  // magnum
+    {   20, 1806,   1, 0,     0,  -1120,   0 },  // flamethrower
+    {  100,    0,   2, 0,     0,  -1120,   0 },  // GL explosive
+    {  100,    9,   1, 0,     0,  -1100,   0 },  // GL acid
+    {  200, 1806,   1, 0,     0,  -1120,   0 },  // GL flame
+    {  900, 1792,   2, 0,     0,   -900,   0 },  // rocket launcher
+    // ---- 0x04 ENEMY_BLACK_TIGER ----
+    {   10, 2048,   1, 0,     0,   -920,   0 },  // knife
+    {   12, 2304,   1, 0,     0,   -800,   0 },  // handgun
+    {   20, 2048,   2, 0,     0,   -920,   0 },  // shotgun
+    {   50, 2048,   2, 0,     0,   -920,   0 },  // python
+    {   70, 2048,   2, 0,     0,   -800,   0 },  // magnum
+    {   20, 1806,   1, 0,     0,   -820,   0 },  // flamethrower
+    {   50,    0,   2, 0,     0,   -820,   0 },  // GL explosive
+    {   50,    9,   1, 0,     0,   -800,   0 },  // GL acid
+    {  103, 1806,   1, 0,     0,   -820,   0 },  // GL flame
+    {  900, 1792,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x05 ENEMY_CROW ----
+    {   50,    0,   1, 0,     0,      0,   0 },  // knife
+    {   26,    0,   1, 0,     0,      0,   0 },  // handgun
+    {   50,    0,   2, 0,     0,      0,   0 },  // shotgun
+    {   50,    0,   2, 0,     0,      0,   0 },  // python
+    {   50,    0,   2, 0,     0,      0,   0 },  // magnum
+    {   20, 1294,   1, 0,     0,      0,   0 },  // flamethrower
+    {  200,    0,   2, 0,     0,      0,   0 },  // GL explosive
+    {   60,    9,   1, 0,     0,      0,   0 },  // GL acid
+    {   60, 1294,   1, 0,     0,      0,   0 },  // GL flame
+    {  900, 1280,   2, 0,     0,  -1500,   0 },  // rocket launcher
+    // ---- 0x06 ENEMY_HUNTER ----
+    {   16, 1545,   1, 0,     0,  -1500,   0 },  // knife
+    {   14, 1545,   1, 0,     0,  -1500,   0 },  // handgun
+    {   25, 1545,   2, 0,     0,  -1500,   0 },  // shotgun
+    {   40, 1545,   2, 0,     0,  -1500,   0 },  // python
+    {   80, 1545,   2, 0,   150,  -1500,   0 },  // magnum
+    {   20, 1550,   1, 0,   150,  -1500,   0 },  // flamethrower
+    {   50,    0,   2, 0,   150,  -1500,   0 },  // GL explosive
+    {   80,    9,   1, 0,   150,  -1500,   0 },  // GL acid
+    {   50, 1550,   1, 0,   150,  -1500,   0 },  // GL flame
+    {  900, 1536,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x07 ENEMY_WASP ----
+    {   20, 4096,   1, 0,     0,      0,   0 },  // knife
+    {   30, 4352,   1, 0,     0,      0,   0 },  // handgun
+    {   60, 4096,   2, 0,     0,      0,   0 },  // shotgun
+    {   70, 4096,   2, 0,     0,      0,   0 },  // python
+    {   70, 4096,   2, 0,     0,      0,   0 },  // magnum
+    {   20, 1038,   1, 0,     0,      0,   0 },  // flamethrower
+    {  200,    0,   2, 0,     0,      0,   0 },  // GL explosive
+    {   80,    9,   1, 0,     0,      0,   0 },  // GL acid
+    {   80, 1038,   1, 0,     0,      0,   0 },  // GL flame
+    {  900, 1024,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x08 ENEMY_PLANT42 ----
+    {   15,    1,   1, 0,     0,   1000,   0 },  // knife
+    {   10,    0,   1, 0,     0,   1500,   0 },  // handgun
+    {   20,    0,   2, 0,     0,   1000,   0 },  // shotgun
+    {   38,    0,   2, 0,     0,   1000,   0 },  // python
+    {   20,    0,   2, 0,     0,   1500,   0 },  // magnum
+    {   20, 1550,   1, 0,     0,   1500,   0 },  // flamethrower
+    {   40,    2,   2, 0,     0,   1500,   0 },  // GL explosive
+    {   40,    9,   1, 0,     0,   1500,   0 },  // GL acid
+    {  150, 1550,   1, 0,     0,   1500,   0 },  // GL flame
+    {  900, 1538,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x09 ENEMY_CHIMERA ----
+    {   10,    0,   1, 0,     0,      0,   0 },  // knife
+    {   12,    1,   1, 0,     0,      0,   0 },  // handgun
+    {   20,    1,   2, 0,     0,      0,   0 },  // shotgun
+    {   40,    1,   2, 0,     0,      0,   0 },  // python
+    {   41,    1,   2, 0,   150,  -1500,   0 },  // magnum
+    {   20, 1550,   1, 0,   150,  -1500,   0 },  // flamethrower
+    {   60,    0,   2, 0,   150,  -1500,   0 },  // GL explosive
+    {   60,    9,   1, 0,   150,  -1500,   0 },  // GL acid
+    {  100, 1550,   1, 0,   150,  -1500,   0 },  // GL flame
+    {  900, 1536,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x0A ENEMY_ADDER ----
+    {   20,    0,   1, 0,     0,      0,   0 },  // knife
+    {   20,    0,   1, 0,     0,      0,   0 },  // handgun
+    {   40,    0,   2, 0,     0,      0,   0 },  // shotgun
+    {   50,    0,   2, 0,     0,      0,   0 },  // python
+    {   50,    0,   2, 0,     0,      0,   0 },  // magnum
+    {   30,  782,   1, 0,     0,      0,   0 },  // flamethrower
+    {  200,    0,   2, 0,     0,      0,   0 },  // GL explosive
+    {   60,    9,   1, 0,     0,      0,   0 },  // GL acid
+    {   60,  782,   1, 0,     0,      0,   0 },  // GL flame
+    {  900,  768,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x0B ENEMY_NEPTUNE ----
+    {    0,    1,   1, 0,     0,      0,   0 },  // knife (no damage)
+    {    0,    1,   1, 0,     0,      0,   0 },  // handgun (no damage)
+    {    0,    1,   1, 0,     0,      0,   0 },  // shotgun (no damage)
+    {    0,    1,   1, 0,     0,      0,   0 },  // python (no damage)
+    {    0,    1,   1, 0,     0,  -1500,   0 },  // magnum (no damage)
+    {    0, 1806,   1, 0,     0,  -1500,   0 },  // flamethrower (no damage)
+    {    0,    0,   2, 0,     0,  -1500,   0 },  // GL explosive (no damage)
+    {    0,    9,   1, 0,     0,  -1500,   0 },  // GL acid (no damage)
+    {    0, 1806,   1, 0,     0,  -1500,   0 },  // GL flame (no damage)
+    {    0, 1792,   2, 0,     0,      0,   0 },  // rocket launcher (no damage)
+    // ---- 0x0C ENEMY_TYRANT_1 ----
+    {   10,    0,   1, 0,     0,      0,   0 },  // knife
+    {   15,    1,   1, 0,     0,      0,   0 },  // handgun
+    {   20,    1,   2, 0,     0,      0,   0 },  // shotgun
+    {   50,    1,   2, 0,     0,      0,   0 },  // python
+    {   40,    1,   2, 0,   150,  -2000,   0 },  // magnum
+    {   20, 1538,   1, 0,   150,  -2000,   0 },  // flamethrower
+    {   35,    2,   2, 0,   150,  -2000,   0 },  // GL explosive
+    {   35,    2,   1, 0,   150,  -2000,   0 },  // GL acid
+    {   35, 1538,   1, 0,   150,  -2000,   0 },  // GL flame
+    {  900, 1538,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x0D ENEMY_YAWN_1 ----
+    {   15, 2048,   1, 0,     0,      0,   0 },  // knife
+    {   18,    1,   1, 0,     0,      0,   0 },  // handgun
+    {    5,    1,   2, 0,     0,      0,   0 },  // shotgun
+    {   40,    1,   2, 0,     0,      0,   0 },  // python
+    {   60,    1,   2, 0,     0,      0,   0 },  // magnum
+    {   20, 1794,   1, 0,     0,      0,   0 },  // flamethrower
+    {   60,    2,   2, 0,     0,      0,   0 },  // GL explosive
+    {  120,    2,   1, 0,     0,      0,   0 },  // GL acid
+    {   60, 1794,   1, 0,     0,      0,   0 },  // GL flame
+    {  900, 1794,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x0E ENEMY_PLANT42_ROOTS ----
+    {    0,    1,   0, 0,     0,      0,   0 },  // knife (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // handgun (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // shotgun (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // python (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // magnum (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // flamethrower (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // GL explosive (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // GL acid (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // GL flame (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // rocket launcher (no damage)
+    // ---- 0x0F ENEMY_MONSTER_PLANT ----
+    {    0,    1,   0, 0,     0,      0,   0 },  // knife (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // handgun (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // shotgun (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // python (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // magnum (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // flamethrower (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // GL explosive (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // GL acid (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // GL flame (no damage)
+    {    0,    1,   0, 0,     0,      0,   0 },  // rocket launcher (no damage)
+    // ---- 0x10 ENEMY_TYRANT_2 ----
+    {   10,    0,   1, 0,     0,      0,   0 },  // knife
+    {   15,    1,   1, 0,     0,      0,   0 },  // handgun
+    {   20,    1,   2, 0,     0,      0,   0 },  // shotgun
+    {   50,    1,   2, 0,     0,      0,   0 },  // python
+    {   40,    1,   2, 0,   150,  -2000,   0 },  // magnum
+    {   20, 1538,   1, 0,   150,  -2000,   0 },  // flamethrower
+    {   35,    2,   2, 0,   150,  -2000,   0 },  // GL explosive
+    {   35,    2,   1, 0,   150,  -2000,   0 },  // GL acid
+    {   35, 1538,   1, 0,   150,  -2000,   0 },  // GL flame
+    {  900, 1538,   2, 0,   100,  -1800,   0 },  // rocket launcher
+    // ---- 0x11 ENEMY_ZOMBIE_VARIANT ----
+    {    8,    0,   1, 0,   100,  -2620,   0 },  // knife
+    {    9,  256,   1, 0,   100,  -1500,   0 },  // handgun
+    {   20,    4,   2, 0,   100,  -2620,   0 },  // shotgun
+    {   50,    4,   2, 0,   100,  -2620,   0 },  // python
+    {   60,    4,   2, 0,   150,  -2500,   0 },  // magnum
+    {   20, 1550,   1, 0,   150,  -1620,   0 },  // flamethrower
+    {  201,    0,   2, 0,   150,  -1520,   0 },  // GL explosive
+    {   70,    9,   1, 0,   150,  -1500,   0 },  // GL acid
+    {   70, 1550,   1, 0,   150,  -1620,   0 },  // GL flame
+    {  900, 1536,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x12 ENEMY_YAWN_2 ----
+    {   15, 2048,   1, 0,     0,      0,   0 },  // knife
+    {   18,    1,   1, 0,     0,      0,   0 },  // handgun
+    {   15,    1,   2, 0,     0,      0,   0 },  // shotgun
+    {   40,    1,   2, 0,     0,      0,   0 },  // python
+    {   60,    1,   2, 0,     0,      0,   0 },  // magnum
+    {   20, 1794,   1, 0,     0,      0,   0 },  // flamethrower
+    {   60,    2,   2, 0,     0,      0,   0 },  // GL explosive
+    {  120,    2,   1, 0,     0,      0,   0 },  // GL acid
+    {   60, 1794,   1, 0,     0,      0,   0 },  // GL flame
+    {  900, 1794,   2, 0,     0,      0,   0 },  // rocket launcher
+    // ---- 0x13 ENEMY_SPIDER_WEB ----
+    {    6,    1,   1, 0,     0,      0,   0 },  // knife (burns it)
+    {    0,    1,   1, 0,     0,      0,   0 },  // handgun (no damage)
+    {    0,    1,   2, 0,     0,      0,   0 },  // shotgun (no damage)
+    {    0,    1,   2, 0,     0,      0,   0 },  // python (no damage)
+    {    0,    1,   2, 0,     0,      0,   0 },  // magnum (no damage)
+    {    2, 1794,   1, 0,     0,      0,   0 },  // flamethrower (burns it)
+    {   10,    2,   2, 0,     0,      0,   0 },  // GL explosive (burns it)
+    {   20,    2,   1, 0,     0,      0,   0 },  // GL acid (burns it)
+    {   30, 1794,   1, 0,     0,      0,   0 },  // GL flame (burns it)
+    {  900, 1794,   2, 0,     0,    500, -800 },  // rocket launcher (burns it)
 };
 
 // ============================================================================
@@ -817,7 +1120,7 @@ static void enemy_hit_reaction_blood(Entity* enemy)
 // head off (instant kill + death event + head explosion effects)
 static void enemy_hit_reaction_zombie(Entity* enemy)
 {
-    if (g_weaponHitEnemyType != 2) {
+    if (g_weaponHitEnemyType != ENEMY_CERBERUS) {
         if (((g_scaled_down_dist == 2 && g_playerDisplacement < 3000)
              && (g_playerEntityPointer.flags & 0xC0) != 0)
             || ((g_scaled_down_dist == 3 || g_scaled_down_dist == 4)
@@ -844,9 +1147,9 @@ static void enemy_hit_reaction_zombie(Entity* enemy)
             Effect_CreateBillboard(0, 3, 0, (void*)((char*)enemy->jointsStructs + 0x44),
                                    &g_playerPosScratch, 0);
             unsigned int idx = g_weaponHitEnemyType * 10 + g_scaled_down_dist;
-            g_playerPosScratch.x = g_weaponHitRecordsEasy[idx].kx;
-            g_playerPosScratch.y = g_weaponHitRecordsEasy[idx].ky - 0x78;
-            g_playerPosScratch.z = g_weaponHitRecordsEasy[idx].kz;
+            g_playerPosScratch.x = g_weaponHitRecordsFirstRun[idx].kx;
+            g_playerPosScratch.y = g_weaponHitRecordsFirstRun[idx].ky - 0x78;
+            g_playerPosScratch.z = g_weaponHitRecordsFirstRun[idx].kz;
             Effect_CreateBillboard(3, 0, hit_billboard_rot(enemy),
                                    &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
             g_playerPosScratch.y += 0x78;
@@ -861,7 +1164,7 @@ static void enemy_hit_reaction_zombie(Entity* enemy)
     if ((g_playerEntityPointer.id & 1) != 0 && g_scaled_down_dist == 1) {
         short h = enemy->health;
         enemy->health = (short)(h - 3);
-        if (g_weaponHitEnemyType == 2) {
+        if (g_weaponHitEnemyType == ENEMY_CERBERUS) {
             enemy->health = (short)(h - 7);
         }
     }
@@ -925,7 +1228,7 @@ static void weapon_post_hit_blood(Entity* enemy)
 
     if (g_collPushDepthZHi != 1) {
         // Aim-up headshot: lift the blood to head height
-        if (g_weaponHitRecordsEasy[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
+        if (g_weaponHitRecordsFirstRun[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
             && (g_playerEntityPointer.flags & 0x20) != 0) {
             g_playerPosScratch.y += 1000;
             if (-1000 < joints[1].world.t[1]) {
@@ -936,7 +1239,7 @@ static void weapon_post_hit_blood(Entity* enemy)
                                &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         Effect_CreateBillboard(0x09, 0x0d, rot,
                                &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
-        if (g_weaponHitEnemyType != 7 && g_weaponHitEnemyType != 10 && g_weaponHitEnemyType != 8) {
+        if (g_weaponHitEnemyType != ENEMY_WASP && g_weaponHitEnemyType != ENEMY_ADDER && g_weaponHitEnemyType != ENEMY_PLANT42) {
             g_playerPosScratch.y -= 500;
             Effect_CreateBillboard(0x0e, 0x03, rot,
                                    &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
@@ -944,7 +1247,7 @@ static void weapon_post_hit_blood(Entity* enemy)
                                    &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         }
         if (enemy->health < 0 && g_collPushDepthZHi == 0x0e) {
-            if (g_weaponHitEnemyType != 5 && g_weaponHitEnemyType != 7 && g_weaponHitEnemyType != 10) {
+            if (g_weaponHitEnemyType != ENEMY_CROW && g_weaponHitEnemyType != ENEMY_WASP && g_weaponHitEnemyType != ENEMY_ADDER) {
                 g_playerPosScratch.y = 0;
                 g_playerPosScratch.x = -100;
                 g_playerPosScratch.z = -300;
@@ -954,7 +1257,7 @@ static void weapon_post_hit_blood(Entity* enemy)
                 g_playerPosScratch.z = 300;
                 Effect_CreateBillboard(0x0e, 0x06, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
                 Effect_CreateBillboard(0x09, 0x0d, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
-                if (g_weaponHitRecordsEasy[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96) {
+                if (g_weaponHitRecordsFirstRun[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96) {
                     g_playerPosScratch.y = -1000;
                     g_playerPosScratch.x = -100;
                     g_playerPosScratch.z = -300;
@@ -970,7 +1273,7 @@ static void weapon_post_hit_blood(Entity* enemy)
             ENTITY = enemy;
             for (int i = enemy->jointCount; i != 0; i--) {
                 JointApplyColorTint(joints + (i - 1), 0x202020, 0x101010, (void*)0x303030);
-                if (g_weaponHitEnemyType == 0) {
+                if (g_weaponHitEnemyType == ENEMY_ZOMBIE) {
                     JointApplyColorTint(joints + (i - 1), 0x202020, 0x101010, (void*)0x0a0a0a);
                 }
             }
@@ -988,7 +1291,7 @@ static void weapon_post_hit_blood2(Entity* enemy)
     short rot = hit_billboard_rot(enemy);
 
     if (g_collPushDepthZHi != 1) {
-        if (g_weaponHitRecordsEasy[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
+        if (g_weaponHitRecordsFirstRun[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
             && (g_playerEntityPointer.flags & 0x20) != 0) {
             g_playerPosScratch.y += 1000;
             if (-1000 < joints[1].world.t[1]) {
@@ -998,7 +1301,7 @@ static void weapon_post_hit_blood2(Entity* enemy)
         Effect_CreateBillboard(0x0e, 7, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         Effect_CreateBillboard(0x09, 0x0d, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         Effect_CreateBillboard(0x09, 0x0d, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
-        if (g_weaponHitEnemyType != 8) {
+        if (g_weaponHitEnemyType != ENEMY_PLANT42) {
             g_playerPosScratch.y -= 200;
             for (int i = 2; i != 0; i--) {
                 Effect_CreateBillboard(0x09, 0x0d, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
@@ -1010,7 +1313,7 @@ static void weapon_post_hit_blood2(Entity* enemy)
                     Effect_CreateBillboard(0x09, 0x0d, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
                 }
                 if ((g_playerEntityPointer.flags & 0x20) == 0
-                    || (g_weaponHitRecordsEasy[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx & 1)
+                    || (g_weaponHitRecordsFirstRun[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx & 1)
                        * (enemy->behavior_flags & 2)) {
                     // spurts from the per-type joint list (6 joints)
                     ENTITY = enemy;
@@ -1039,7 +1342,7 @@ static void weapon_post_hit_sparks(Entity* enemy)
     short rot = hit_billboard_rot(enemy);
 
     if (g_collPushDepthZHi != 1) {
-        if (g_weaponHitRecordsEasy[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
+        if (g_weaponHitRecordsFirstRun[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
             && (g_playerEntityPointer.flags & 0x20) != 0) {
             g_playerPosScratch.y += 1000;
             if (-1000 < joints[1].world.t[1]) {
@@ -1050,8 +1353,8 @@ static void weapon_post_hit_sparks(Entity* enemy)
             Effect_CreateBillboard(0x09, 0, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         }
         if (enemy->health < 0 && g_collPushDepthZHi == 9) {
-            if (g_weaponHitEnemyType != 5 && g_weaponHitEnemyType != 7
-                && g_weaponHitEnemyType != 10 && g_weaponHitEnemyType != 8) {
+            if (g_weaponHitEnemyType != ENEMY_CROW && g_weaponHitEnemyType != ENEMY_WASP
+                && g_weaponHitEnemyType != ENEMY_ADDER && g_weaponHitEnemyType != ENEMY_PLANT42) {
                 g_playerPosScratch.y = 0;
                 g_playerPosScratch.x = -100;
                 g_playerPosScratch.z = -300;
@@ -1065,7 +1368,7 @@ static void weapon_post_hit_sparks(Entity* enemy)
             ENTITY = enemy;
             for (int i = enemy->jointCount; i != 0; i--) {
                 JointApplyColorTint(joints + (i - 1), 0x4040, 0x1010, (void*)0x3030);
-                if (g_weaponHitEnemyType == 0) {
+                if (g_weaponHitEnemyType == ENEMY_ZOMBIE) {
                     JointApplyColorTint(joints + (i - 1), 0x2020, 0x1010, (void*)0x0a0a);
                 }
             }
@@ -1082,7 +1385,7 @@ static void weapon_post_hit_blood3(Entity* enemy)
     short rot = hit_billboard_rot(enemy);
 
     if (g_collPushDepthZHi != 1) {
-        if (g_weaponHitRecordsEasy[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
+        if (g_weaponHitRecordsFirstRun[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96
             && (g_playerEntityPointer.flags & 0x20) != 0) {
             g_playerPosScratch.y += 1000;
             if (-1000 < joints[1].world.t[1]) {
@@ -1093,7 +1396,7 @@ static void weapon_post_hit_blood3(Entity* enemy)
                                &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         Effect_CreateBillboard(0x09, 0x0d, rot,
                                &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
-        if (g_weaponHitEnemyType != 7 && g_weaponHitEnemyType != 10 && g_weaponHitEnemyType != 8) {
+        if (g_weaponHitEnemyType != ENEMY_WASP && g_weaponHitEnemyType != ENEMY_ADDER && g_weaponHitEnemyType != ENEMY_PLANT42) {
             g_playerPosScratch.y -= 500;
             Effect_CreateBillboard(0x0e, 0x03, rot,
                                    &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
@@ -1101,7 +1404,7 @@ static void weapon_post_hit_blood3(Entity* enemy)
                                    &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
         }
         if (enemy->health < 0 && g_collPushDepthZHi != 2) {
-            if (g_weaponHitEnemyType != 5 && g_weaponHitEnemyType != 7 && g_weaponHitEnemyType != 10) {
+            if (g_weaponHitEnemyType != ENEMY_CROW && g_weaponHitEnemyType != ENEMY_WASP && g_weaponHitEnemyType != ENEMY_ADDER) {
                 g_playerPosScratch.y = 0;
                 g_playerPosScratch.x = -100;
                 g_playerPosScratch.z = -300;
@@ -1111,7 +1414,7 @@ static void weapon_post_hit_blood3(Entity* enemy)
                 g_playerPosScratch.z = 300;
                 Effect_CreateBillboard(0x0e, 0x06, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
                 Effect_CreateBillboard(0x09, 0x0d, rot, &enemy->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
-                if (g_weaponHitRecordsEasy[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96) {
+                if (g_weaponHitRecordsFirstRun[g_weaponHitEnemyType * 10 + g_scaled_down_dist].kx == 0x96) {
                     g_playerPosScratch.y = -1000;
                     g_playerPosScratch.x = -100;
                     g_playerPosScratch.z = -300;
@@ -1126,7 +1429,7 @@ static void weapon_post_hit_blood3(Entity* enemy)
             ENTITY = enemy;
             for (int i = enemy->jointCount; i != 0; i--) {
                 JointApplyColorTint(joints + (i - 1), 0x202020, 0x101010, (void*)0x303030);
-                if (g_weaponHitEnemyType == 0) {
+                if (g_weaponHitEnemyType == ENEMY_ZOMBIE) {
                     JointApplyColorTint(joints + (i - 1), 0x202020, 0x101010, (void*)0x0a0a0a);
                 }
             }

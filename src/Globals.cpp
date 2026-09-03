@@ -1032,7 +1032,7 @@ int           g_playerDisplacement = 0;
 void*         g_tempVar = NULL;
 
 // 0x00be0de4 - Enemy type snapshot written by apply_weapon_damage for the
-// post-hit callbacks and hit reactions (Ghidra calls it player_distance_z).
+// post-hit callbacks and hit reactions.
 int           g_weaponHitEnemyType = 0;
 
 // ============================================================================
@@ -1055,78 +1055,102 @@ unsigned char g_weaponFireEndFrame[16] = {
     0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 };
 
-// 0x004c0d68 - Per-weapon auto-aim fire data, 8 bytes each, 14 entries
-// (weapons 2..11, then the special entries 12/13 indexed as [id - 99]).
+// 0x004c0d68 - Per-weapon auto-aim fire data, 8 bytes each, 14 entries.
+// Normal weapons are indexed equippedWeaponId - 2 (entries 0..9 = weapons
+// 2..11); the special weapons index equippedWeaponId - 99 (ITEM_INGRAM 0x6F
+// -> entry 12, ITEM_MINIMI 0x70 -> entry 13). Fields:
+//   weaponId  +0x00 - id passed to apply_weapon_damage (0 = no auto-aim
+//                     fire: the flamethrower damages via effect behavior 37)
+//   fireFrame +0x04 - animation frame that triggers damage + fire sounds
+//   sfx1      +0x05 - first fire sound id (Play3DSnd bank 1)
+//   sfx2      +0x06 - second fire sound id (Play3DSnd bank 1)
+//   pad       +0x07 - unused
 WeaponFireData g_weaponFireData[14] = {
-    {  2,   5,  7,  8, 0 },  // weapon 2: handgun
-    {  3,   5,  7,  8, 0 },  // weapon 3: shotgun
-    {  4,   5,  7,  8, 0 },  // weapon 4: python
-    {  5,   5,  7,  8, 0 },  // weapon 5: magnum
-    {  6,   0,  0,  0, 0 },  // weapon 6
-    {  7,   2,  7,  8, 0 },  // weapon 7: grenade launcher
-    {  8,   2,  7,  8, 0 },  // weapon 8
-    {  9,   2,  7,  8, 0 },  // weapon 9
-    { 10,   5,  7,  8, 0 },  // weapon 10: special
-    {  0,   0,  0,  0, 0 },  // weapon 11: unused
-    {  0,   0,  0,  0, 0 },
-    {  0,   0,  0,  0, 0 },
-    {  2,   5,  7,  8, 0 },  // special weapon 0x6f
-    {  2,   5,  7,  8, 0 },  // special weapon 0x70
+    {  2,   5,  7,  8, 0 },  // [ 0] weapon 2  handgun (Beretta)
+    {  3,   5,  7,  8, 0 },  // [ 1] weapon 3  shotgun
+    {  4,   5,  7,  8, 0 },  // [ 2] weapon 4  python
+    {  5,   5,  7,  8, 0 },  // [ 3] weapon 5  magnum
+    {  6,   0,  0,  0, 0 },  // [ 4] weapon 6  flamethrower (no auto-aim fire)
+    {  7,   2,  7,  8, 0 },  // [ 5] weapon 7  GL explosive rounds
+    {  8,   2,  7,  8, 0 },  // [ 6] weapon 8  GL acid rounds
+    {  9,   2,  7,  8, 0 },  // [ 7] weapon 9  GL flame rounds
+    { 10,   5,  7,  8, 0 },  // [ 8] weapon 10 rocket launcher
+    {  0,   0,  0,  0, 0 },  // [ 9] weapon 11 unused
+    {  0,   0,  0,  0, 0 },  // [10] unused
+    {  0,   0,  0,  0, 0 },  // [11] unused
+    {  2,   5,  7,  8, 0 },  // [12] special weapon 0x6f Ingram (weaponId 2 = handgun damage)
+    {  2,   5,  7,  8, 0 },  // [13] special weapon 0x70 Minimi (weaponId 2 = handgun damage)
 };
 
-// 0x004c0dd8 - Muzzle billboard params, 10 bytes each, 14 entries. The b0
-// byte is also the ammo-decrement / first billboard frame.
+// 0x004c0dd8 - Muzzle billboard params, 10 bytes each, 14 entries. Same
+// indexing as g_weaponFireData. Fields:
+//   b0   +0x00 - animation frame that decrements the ammo and spawns the
+//                  billboard on the normal fire path (0x004580f0)
+//   type +0x01 - Effect_CreateBillboard type
+//   data +0x02 - Effect_CreateBillboard data (first billboard frame)
+//   b3   +0x03 - always 0
+// x/y/z +0x04..+0x08 - billboard offset from the weapon joint (joint 0xe)
+// Entries 8..11 are read as 8 + (ammo & 3) by the rocket launcher path
+// (0x004580f0), but the shipped rocket launcher has no round variants -
+// likely scrapped multi-round data (the GL is the 3-round weapon).
 WeaponFxEntry g_weaponFireBillboard[14] = {
-    {  1, 17,  0, 0,   110,   540,     0 },  // weapon 2
-    {  1, 17,  1, 0,   640,  1110,     0 },  // weapon 3
-    {  1, 17,  2, 0,   160,   610,     0 },  // weapon 4
-    {  1, 17, 10, 0,   160,   610,     0 },  // weapon 5
-    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 6
-    {  2,  8,  7, 0,   400,   660,     0 },  // weapon 7
-    {  2,  8,  7, 0,   400,   660,     0 },  // weapon 8
-    {  2,  8,  7, 0,   400,   660,     0 },  // weapon 9
-    {  1, 11,  9, 0,  -190,  1020,    90 },  // weapon 10
-    {  1, 11,  9, 0,  -190,  1020,   -60 },  // weapon 11
-    {  1, 11,  9, 0,   -60,  1040,    90 },  // weapon 12
-    {  1, 11,  9, 0,   -60,  1040,   -60 },  // weapon 13
-    {  1, 17,  0, 0,   110,   540,     0 },  // special weapon 0x6f
-    {  1, 17,  0, 0,   600,  1370,     0 },  // special weapon 0x70
+    {  1, 17,  0, 0,   110,   540,     0 },  // [ 0] weapon 2  handgun (Beretta)
+    {  1, 17,  1, 0,   640,  1110,     0 },  // [ 1] weapon 3  shotgun
+    {  1, 17,  2, 0,   160,   610,     0 },  // [ 2] weapon 4  python
+    {  1, 17, 10, 0,   160,   610,     0 },  // [ 3] weapon 5  magnum
+    {  0,  0,  0, 0,     0,     0,     0 },  // [ 4] weapon 6  flamethrower (no billboard)
+    {  2,  8,  7, 0,   400,   660,     0 },  // [ 5] weapon 7  GL explosive rounds
+    {  2,  8,  7, 0,   400,   660,     0 },  // [ 6] weapon 8  GL acid rounds
+    {  2,  8,  7, 0,   400,   660,     0 },  // [ 7] weapon 9  GL flame rounds
+    {  1, 11,  9, 0,  -190,  1020,    90 },  // [ 8] weapon 10 rocket launcher
+    {  1, 11,  9, 0,  -190,  1020,   -60 },  // [ 9] rocket launcher "variant" (ammo & 3) - likely scrapped
+    {  1, 11,  9, 0,   -60,  1040,    90 },  // [10] rocket launcher "variant" (ammo & 3) - likely scrapped
+    {  1, 11,  9, 0,   -60,  1040,   -60 },  // [11] rocket launcher "variant" (ammo & 3) - likely scrapped
+    {  1, 17,  0, 0,   110,   540,     0 },  // [12] special weapon 0x6f Ingram
+    {  1, 17,  0, 0,   600,  1370,     0 },  // [13] special weapon 0x70 Minimi
 };
 
-// 0x004c0e68 - Big muzzle-flash billboard params, 14 entries
+// 0x004c0e68 - Big muzzle-flash billboard params, 14 entries. Same layout
+// and indexing as g_weaponFireBillboard; b0 here is only the spawn frame
+// (99 = never fires). The flash yaw is derived from the table index at
+// 0x0045837b, and the rocket launcher (index 8) sets the effect's
+// animHeader[0] to 8.
 WeaponFxEntry g_weaponMuzzleFlash[14] = {
-    {  3,  5,  0, 0,   370, -2870,  -220 },  // weapon 2
-    { 25,  5,  9, 0,   360, -2050,  -440 },  // weapon 3
-    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 4 (frame 99 = never)
-    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 5
-    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 6
-    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 7
-    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 8
-    { 99,  0,  0, 0,     0,     0,     0 },  // weapon 9
-    {  2,  9, 11, 0,  1400, -2800,  -300 },  // weapon 10
-    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 11
-    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 12
-    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 13
-    {  3,  5,  0, 0,   250, -1900,  -250 },  // special weapon 0x6f
-    {  3,  5,  0, 0,   250, -1900,  -250 },  // special weapon 0x70
+    {  3,  5,  0, 0,   370, -2870,  -220 },  // [ 0] weapon 2  handgun (Beretta)
+    { 25,  5,  9, 0,   360, -2050,  -440 },  // [ 1] weapon 3  shotgun
+    { 99,  0,  0, 0,     0,     0,     0 },  // [ 2] weapon 4  python (frame 99 = never)
+    { 99,  0,  0, 0,     0,     0,     0 },  // [ 3] weapon 5  magnum (frame 99 = never)
+    {  0,  0,  0, 0,     0,     0,     0 },  // [ 4] weapon 6  flamethrower (no flash)
+    { 99,  0,  0, 0,     0,     0,     0 },  // [ 5] weapon 7  GL explosive rounds (frame 99 = never)
+    { 99,  0,  0, 0,     0,     0,     0 },  // [ 6] weapon 8  GL acid rounds (frame 99 = never)
+    { 99,  0,  0, 0,     0,     0,     0 },  // [ 7] weapon 9  GL flame rounds (frame 99 = never)
+    {  2,  9, 11, 0,  1400, -2800,  -300 },  // [ 8] weapon 10 rocket launcher
+    {  0,  0,  0, 0,     0,     0,     0 },  // [ 9] unused (weapon 11)
+    {  0,  0,  0, 0,     0,     0,     0 },  // [10] unused
+    {  0,  0,  0, 0,     0,     0,     0 },  // [11] unused
+    {  3,  5,  0, 0,   250, -1900,  -250 },  // [12] special weapon 0x6f Ingram
+    {  3,  5,  0, 0,   250, -1900,  -250 },  // [13] special weapon 0x70 Minimi
 };
 
-// 0x004c0ef8 - Second muzzle-flash billboard params, 14 entries
+// 0x004c0ef8 - Second muzzle-flash billboard params, 14 entries. Same layout
+// and indexing as g_weaponFireBillboard; entries 8..11 are read as
+// 8 + (ammo & 3) by the rocket launcher path, but the shipped rocket launcher
+// has no round variants - likely scrapped multi-round data.
 WeaponFxEntry g_weaponFlash2[14] = {
-    {  2,  9, 11, 0,   110,   500,     0 },  // weapon 2
-    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 3
-    {  2,  9, 11, 0,   160,   610,     0 },  // weapon 4
-    {  2,  9, 11, 0,   160,   610,     0 },  // weapon 5
-    {  0,  0,  0, 0,     0,     0,     0 },  // weapon 6
-    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 7
-    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 8
-    {  2,  9, 11, 0,   640,  1060,     0 },  // weapon 9
-    {  2,  8,  2, 0,   430,  -830,    90 },  // weapon 10
-    {  2,  8,  2, 0,   430,  -830,   -60 },  // weapon 11
-    {  2,  8,  2, 0,   570,  -810,    90 },  // weapon 12
-    {  2,  8,  2, 0,   570,  -810,   -60 },  // weapon 13
-    {  2,  9, 11, 0,   110,   500,     0 },  // special weapon 0x6f
-    {  2,  9, 11, 0,   640,  1500,     0 },  // special weapon 0x70
+    {  2,  9, 11, 0,   110,   500,     0 },  // [ 0] weapon 2  handgun (Beretta)
+    {  2,  9, 11, 0,   640,  1060,     0 },  // [ 1] weapon 3  shotgun
+    {  2,  9, 11, 0,   160,   610,     0 },  // [ 2] weapon 4  python
+    {  2,  9, 11, 0,   160,   610,     0 },  // [ 3] weapon 5  magnum
+    {  0,  0,  0, 0,     0,     0,     0 },  // [ 4] weapon 6  flamethrower (no flash)
+    {  2,  9, 11, 0,   640,  1060,     0 },  // [ 5] weapon 7  GL explosive rounds
+    {  2,  9, 11, 0,   640,  1060,     0 },  // [ 6] weapon 8  GL acid rounds
+    {  2,  9, 11, 0,   640,  1060,     0 },  // [ 7] weapon 9  GL flame rounds
+    {  2,  8,  2, 0,   430,  -830,    90 },  // [ 8] weapon 10 rocket launcher
+    {  2,  8,  2, 0,   430,  -830,   -60 },  // [ 9] rocket launcher "variant" (ammo & 3) - likely scrapped
+    {  2,  8,  2, 0,   570,  -810,    90 },  // [10] rocket launcher "variant" (ammo & 3) - likely scrapped
+    {  2,  8,  2, 0,   570,  -810,   -60 },  // [11] rocket launcher "variant" (ammo & 3) - likely scrapped
+    {  2,  9, 11, 0,   110,   500,     0 },  // [12] special weapon 0x6f Ingram
+    {  2,  9, 11, 0,   640,  1500,     0 },  // [13] special weapon 0x70 Minimi
 };
 
 // 0x004c0f84 - Special-weapon fire intervals (frame % interval == 0 fires)

@@ -32,34 +32,48 @@
 // scripts. Ids 0-21 are the monsters; 22-47 are all handled by the shared
 // human-character driver in CharacterNpc.cpp.
 // ============================================================================
-enum EnemyType {
-    ENEMY_ZOMBIE           = 0,   // zombie_update
-    ENEMY_ZOMBIE_NAKED     = 1,   // zombie_update (naked variant)
-    ENEMY_CERBERUS         = 2,   // 0x00497fb0 - dog
-    ENEMY_WEB_SPINNER      = 3,   // 0x00478310 - web spinner (big spider)
-    ENEMY_BLACK_TIGER      = 4,   // 0x0044f300 - black tiger (giant spider boss)
-    ENEMY_CROW             = 5,   // crow_update - Crow.cpp
-    ENEMY_HUNTER           = 6,   // hunter_update
-    ENEMY_BEE              = 7,   // 0x0048daf0 - bee
-    ENEMY_PLANT42          = 8,   // 0x00464d10 - Plant 42 boss
-    ENEMY_CHIMERA          = 9,   // 0x00438a70 - chimera (Chimera.cpp)
-    ENEMY_ADDER            = 10,  // adder_update - snake
-    ENEMY_NEPTUNE          = 11,  // neptune_update - shark
-    ENEMY_TYRANT           = 12,  // tyrant_update
-    ENEMY_YAWN             = 13,  // yawn_update - giant snake
-    ENEMY_PLANT42_ROOTS    = 14,  // plant42_roots_update
-    ENEMY_MONSTER_PLANT    = 15,  // monster_plant_update
-    ENEMY_TYRANT_2         = 16,  // tyrant_update (variant)
-    ENEMY_17               = 17,  // zombie_update (variant)
-    ENEMY_YAWN_2           = 18,  // yawn_update (variant)
-    // Not an enemy: the web that blocks the door in room 30C0. Only the knife
-    // and the fire/explosive weapons can burn it away - see SpiderWeb.cpp.
-    ENEMY_SPIDER_WEB       = 19,  // 0x00443640 - spider web
-    ENEMY_20               = 20,  // 0x00427330
-    ENEMY_21               = 21,  // 0x0040b760 - computer arm (left forearm, lab terminal)
-    ENEMY_GENERIC          = 22,  // 0x0046acf0 - shared human character driver
-    ENEMY_COUNT            = 32
-};
+
+#define ENEMY_ZOMBIE                0x00 // white coat variant
+#define ENEMY_ZOMBIE_NAKED          0x01 // lab naked zombie variant
+#define ENEMY_CERBERUS              0x02 // zombie dog
+#define ENEMY_WEB_SPINNER           0x03 // big tarantula
+#define ENEMY_BLACK_TIGER           0x04 // giant tarantula (Underground Boss)
+#define ENEMY_CROW                  0x05
+#define ENEMY_HUNTER                0x06
+#define ENEMY_WASP                  0x07
+#define ENEMY_PLANT42               0x08 // Guardhouse boss
+#define ENEMY_CHIMERA               0x09 // Lab humanoid-ape like mutant
+#define ENEMY_ADDER                 0x0a // regular size venomous snake
+#define ENEMY_NEPTUNE               0x0b // shark
+#define ENEMY_TYRANT_1              0x0c // Main Lab Tyrant battle
+#define ENEMY_YAWN_1                0x0d // First battle
+#define ENEMY_PLANT42_ROOTS         0x0e // not an enemy, Plant42 is weakened if v-jolt is used on it. Cannot be damaged by weapons
+#define ENEMY_MONSTER_PLANT         0x0f // Plant tentacle, unkillable
+#define ENEMY_TYRANT_2              0x10 // Super Tyrant mode, Final boss
+#define ENEMY_ZOMBIE_VARIANT        0x11 // Green coat variant
+#define ENEMY_YAWN_2                0x12 // Second battle
+
+// Not an enemy: the web that blocks the door in room 30C0. Only the knife
+// and the fire/explosive weapons can burn it away - see SpiderWeb.cpp.
+#define ENEMY_SPIDER_WEB            0x13 // Second battle
+
+// NPCs
+
+#define NPC_CHRIS_LEFT_ARM          0x14 // chris's left arm used in lab computer mode
+#define NPC_CHRIS_RIGHT_ARM         0x15 // chris's right arm used in lab computer mode
+
+#define NPC_CHRIS                   0x20
+#define NPC_JILL                    0x21
+#define NPC_BARRY                   0x22
+#define NPC_REBECCA                 0x23
+#define NPC_WESKER                  0x24
+#define NPC_KENNETH_CORPSE          0x25
+#define NPC_FOREST_CORPSE           0x26
+#define NPC_RICHARD                 0x27
+#define NPC_ENRICO                  0x28
+
+
+#define NPC_ENTITIES_IDS            (ENEMY_SPIDER_WEB+1)
 
 // ============================================================================
 // enemies_update_functions_tbl @ 0x004d3c90 - entity type dispatch table

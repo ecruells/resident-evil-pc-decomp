@@ -24,7 +24,7 @@
 // rounds and the rocket launcher). Weapons 2-5 - handgun, shotgun, python,
 // magnum - fall through and are ignored.
 //
-// The damage table backs the same rule up: row 19 of g_weaponHitRecordsEasy
+// The damage table backs the same rule up: row 19 of g_weaponHitRecordsFirstRun
 // (WeaponDamage.cpp) is 10 damage for the knife, 0 for weapons 2-5, 2 for the
 // flamethrower and 30/30/30/900 for the launchers, against 0x37 = 55 health.
 // So the knife takes six hits, a grenade round two, a rocket one, and bullets
