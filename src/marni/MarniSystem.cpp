@@ -13,13 +13,13 @@
 #include "MarniSystem.h"
 #include "MarniBits.h"
 #include "MarniDX.h"
+#include "MarniInput.h"
+#include "MarniXInput.h"
 #include "Globals.h"
 #include "../game/TmdRenderer.h"
 #include <cstdio>
 #include <cstring>
 #include <new>
-#include <xinput.h>
-#pragma comment(lib, "xinput.lib")
 
 // Verify the struct size is exactly what the original binary expects.
 // operator_new(0x21DC) in InitializeMarniSystem must match sizeof.
@@ -509,8 +509,10 @@ void InitializeMarniSystem(void)
     }
 
     InitJoysticks();
-    int swResult = IsSideWinderPadConnected();
-    g_isSideWinderConnected = (swResult == 0);
+    // Capability flag only. g_isSideWinderConnected is the one-shot START
+    // injection main_loop consumes and must NOT be raised here - doing so pops
+    // the inventory open on the first frame after a pad is detected.
+    g_bPadConnected = MarniPadIsConnected();
     CreateLights(3);
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
@@ -573,14 +575,14 @@ const char* GetDirect3DDriverName(int index)
 }
 
 // InitJoysticks — 0x00420770
+// Enumerates the WinMM devices and brings up the XInput backend. This used to
+// be a stand-in that only probed XInput slot 0 and printed the result, which
+// left CMarniDirectInput::InitJoysticks (the real implementation) with no
+// caller at all - so joystickCount stayed 0, the per-frame poll loop never
+// ran, and no pad input could reach ReadPadBoth or read_sidewinder_pad.
 void InitJoysticks(void)
 {
-    XINPUT_STATE state;
-    DWORD result = XInputGetState(0, &state);
-    char dbg[128];
-    sprintf_s(dbg, "[Marni] XInput: controller 0 %s\n",
-              (result == ERROR_SUCCESS) ? "connected" : "not connected");
-    OutputDebugStringA(dbg);
+    CMarniDirectInput::InitJoysticks(&g_pMasterInputState);
 }
 
 // IsSideWinderPadConnected — 0x0040b610

@@ -503,7 +503,7 @@ void characterSelectionScreen(void)
             if (((g_RawPadHeld & 4) == 0) || ((g_RawPadHeld & 8) == 0)) {
                 // SideWinder check
                 DWORD sidewinderPress = 0;
-                if (g_isSideWinderConnected) {
+                if (g_bPadConnected) {
                     sidewinderPress = read_sidewinder_pad();
                     sidewinderPress &= 0x10000;
                 }

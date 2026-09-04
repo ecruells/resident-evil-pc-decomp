@@ -395,6 +395,25 @@ void rearrange_item_slots(void)
     }
 }
 
+// True when a joystick remap table carries no bindings at all. Save files
+// written before the port had working pad support store an all-zero table:
+// g_joyRemapBackupJoy was never refreshed (the sidewinder flag was hard-wired
+// false, so only the KEY backup was ever written), and the save assembly
+// writes that empty joy backup over the g_JoyRemapTbl[1] region of the file
+// (OFFSET_JOY_BACKUP == OFFSET_JOY_REMAP + 0x80). Restoring such a table
+// blanks every pad binding, and because it is a global the pad stays dead for
+// the rest of the session - including back on the title screen.
+static bool JoyRemapTableIsEmpty(const void* table)
+{
+    const DWORD* p = (const DWORD*)table;
+    for (int i = 0; i < 32; i++) {
+        if (p[i] != 0) {
+            return false;
+        }
+    }
+    return true;
+}
+
 // Restore a save file buffer into the bio card / input-config globals.
 // Shared by STATE_LOAD_SLOT_SELECTED and DebugQuick_LoadSlot. The block
 // restore always runs; the extra areas past 0x800 are size-gated so older
@@ -404,6 +423,11 @@ void rearrange_item_slots(void)
 // tail 0x43D..0x800 is discarded).
 static void RestoreSaveBlock(const char* fileBuffer, int fileSize)
 {
+    // Keep the live pad bindings; they are the last-resort fallback if the
+    // save turns out to carry nothing usable.
+    DWORD liveJoyRemap[32];
+    memcpy(liveJoyRemap, g_JoyRemapTbl[1], sizeof(liveJoyRemap));
+
     memcpy(g_BioCardData, fileBuffer, sizeof(BioCardLayout));
     memcpy(g_padRemapSubTable3, fileBuffer + OFFSET_PAD_REMAP,
            sizeof(g_padRemapSubTable3));
@@ -422,12 +446,32 @@ static void RestoreSaveBlock(const char* fileBuffer, int fileSize)
                     memcpy(g_joyRemapBackupKey, fileBuffer + OFFSET_KEY_BACKUP, 0x80);
                     memcpy(g_joyRemapBackupJoy, fileBuffer + OFFSET_JOY_BACKUP, 0x80);
                     memcpy(g_JoyRemapTbl[1],
-                           g_isSideWinderConnected
+                           g_bPadConnected
                                ? g_joyRemapBackupJoy : g_joyRemapBackupKey,
                            0x80);
                 }
             }
         }
+
+        // Compatibility guard for saves written before pad support: if the
+        // restore left the pad with no bindings at all, take the other backup,
+        // and failing that keep what was live before the load. Without this a
+        // pre-pad save silently disables the controller everywhere.
+        if (JoyRemapTableIsEmpty(g_JoyRemapTbl[1])) {
+            const void* pOther = g_bPadConnected
+                               ? (const void*)g_joyRemapBackupKey
+                               : (const void*)g_joyRemapBackupJoy;
+            if (!JoyRemapTableIsEmpty(pOther)) {
+                memcpy(g_JoyRemapTbl[1], pOther, 0x80);
+            } else {
+                memcpy(g_JoyRemapTbl[1], liveJoyRemap, 0x80);
+            }
+        }
+
+        // Saves predating pad support carry the original layout, which has no
+        // OPTIONS binding - swap in the port defaults. A configured table is
+        // recognised and left as it was saved.
+        InstallPadDefaultBindings();
     }
 }
 
@@ -552,7 +596,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
 
             // SideWinder pad check
             DWORD sidewinderBtn = 0;
-            if (g_isSideWinderConnected) {
+            if (g_bPadConnected) {
                 sidewinderBtn = read_sidewinder_pad() & 0x10000;
             }
 
@@ -754,7 +798,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
 
             // Refresh the joystick-remap backup; the file stores both tables,
             // and the sidewinder-dependent one receives the live bindings.
-            memcpy(g_isSideWinderConnected ? g_joyRemapBackupJoy : g_joyRemapBackupKey,
+            memcpy(g_bPadConnected ? g_joyRemapBackupJoy : g_joyRemapBackupKey,
                    g_JoyRemapTbl[1], 0x80);
 
             // Assemble the save file (2690 bytes). The 0x820..0x91F region is
@@ -770,7 +814,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             memcpy(fileBuffer + OFFSET_KEY_BINDINGS, g_keyBindingData, 0x20);
             memcpy(fileBuffer + OFFSET_JOY_REMAP, g_JoyRemapTbl, 0x100);
             memcpy(fileBuffer + OFFSET_ROOM_BGM, g_roomBgmState, 0xE0);
-            fileBuffer[OFFSET_SIDEWINDER] = (char)g_isSideWinderConnected;
+            fileBuffer[OFFSET_SIDEWINDER] = (char)g_bPadConnected;
             fileBuffer[OFFSET_COSTUME_VARIANT]   = (char)g_bCostumeVariant;
             memcpy(fileBuffer + OFFSET_JOY_BACKUP, g_joyRemapBackupJoy, 0x80);
             memcpy(fileBuffer + OFFSET_KEY_BACKUP, g_joyRemapBackupKey, 0x80);

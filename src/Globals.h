@@ -136,7 +136,16 @@ extern char          g_szCreateDir[260];
 // Registry loaded data
 extern BYTE          g_keyBindingData[32];             // 0x004d4730 - "Key Def" (VK code per PS1 button bit)
 extern BYTE          g_joystickBindingData[128];
-extern BOOL          g_isSideWinderConnected;          // 0x004d1f50
+// One-shot event: raised when the pad wants a START injection, consumed and
+// cleared by main_loop (0x00428f4a). This is the original 0x004d46b0 flag set
+// by the dispatch at 0x00497877 - NOT a capability flag. Do not test it to ask
+// "is a pad plugged in"; use g_bPadConnected for that.
+extern BOOL          g_isSideWinderConnected;          // 0x004d46b0
+// Persistent capability: a game pad is present. The original conflated this
+// with the one-shot above (see docs); the title screen, character select,
+// save/load screen and the joystick remap-table selection all mean this one.
+extern BOOL          g_bPadConnected;
+extern const DWORD   g_JoyRemapTblLegacyJoyDefault[32];
 extern BYTE          g_InstallFlagData;
 extern int           g_InstallFlagDataLoaded;
 // The registry pair. LoadInstallationConfiguration reads "Play Number" into
@@ -1554,6 +1563,9 @@ DWORD PlayerPad_Update(void);
 DWORD ReadPadBoth(void);
 DWORD JoyToPSX(DWORD pcMask, int player);
 void  InitInputKeyBindings(void);
+// Replaces g_JoyRemapTbl[1] with the port's pad defaults, but only when the
+// table is empty or still the untouched original layout. Safe to call often.
+void  InstallPadDefaultBindings(void);
 int   read_sidewinder_pad(void);
 void  OnKeyDown(HWND hwnd, WPARAM wparam);
 

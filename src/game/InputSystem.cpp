@@ -3,6 +3,95 @@
 // InputUpdate (0x00497c00)
 #include "../Globals.h"
 #include "../marni/MarniInput.h"
+#include "../marni/MarniXInput.h"
+#include <cstring>
+
+// ============================================================================
+// Pad default bindings (port addition)
+//
+// The original g_JoyRemapTbl[1] has no OPTIONS (0x900) entry at all, puts
+// INVENTORY (0x800) on a stick click, AIM (0x08) on button 8, leaves the POV
+// hat unmapped, and points five buttons at raw bits the game never acts on.
+// A pad player therefore cannot reach the options screen without rebinding.
+//
+// Index = bit position in the Marni pad mask: 0-3 stick/D-pad direction,
+// 4-7 POV hat, 8+ buttons. Value = the raw pad word JoyToPSX ORs in
+// (0x1000/0x4000/0x8000/0x2000 = up/down/left/right, 0x80 = action/confirm,
+// 0x40 = cancel/run, 0x08 = aim, 0x800 = inventory, 0x900 = options).
+// ============================================================================
+
+// XInput pads: buttons arrive in the fixed A/B/X/Y/LB/RB/Back/Start order.
+static const DWORD s_padDefaultXInput[32] = {
+    0x1000, 0x4000, 0x8000, 0x2000,   // stick   up / down / left / right
+    0x1000, 0x4000, 0x8000, 0x2000,   // POV hat up / down / left / right
+    0x0080,   // 8   A          action / confirm
+    0x0040,   // 9   B          cancel / run
+    0x0008,   // 10  X          aim
+    0x0800,   // 11  Y          inventory
+    0x0008,   // 12  LB         aim
+    0x0008,   // 13  RB         aim
+    0x0900,   // 14  Back       options
+    0x0800,   // 15  Start      inventory
+    0x0000,   // 16  LS click
+    0x0000,   // 17  RS click
+    0x0040,   // 18  LT         run
+    0x0008,   // 19  RT         aim
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+// WinMM / HID pads (a DualShock 4 plugged straight in lands here, not on
+// XInput). Button numbering follows the DualShock HID order; on an XInput-era
+// pad seen through WinMM the same slots read A/B/X/Y/LB/RB/LT/RT instead, so
+// every core action is still reachable - just shifted by one face button.
+static const DWORD s_padDefaultGeneric[32] = {
+    0x1000, 0x4000, 0x8000, 0x2000,   // stick   up / down / left / right
+    0x1000, 0x4000, 0x8000, 0x2000,   // POV hat up / down / left / right
+    0x0008,   // 8   button 1   square      aim
+    0x0080,   // 9   button 2   cross       action / confirm
+    0x0040,   // 10  button 3   circle      cancel / run
+    0x0800,   // 11  button 4   triangle    inventory
+    0x0008,   // 12  button 5   L1          aim
+    0x0008,   // 13  button 6   R1          aim
+    0x0040,   // 14  button 7   L2          run
+    0x0008,   // 15  button 8   R2          aim
+    0x0900,   // 16  button 9   share       options
+    0x0800,   // 17  button 10  options     inventory
+    0x0000,   // 18  button 11  L3
+    0x0000,   // 19  button 12  R3
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+};
+
+// ============================================================================
+// InstallPadDefaultBindings - give a pad a usable layout out of the box.
+//
+// Only ever overwrites a table that is empty or still byte-identical to the
+// original layout; anything the player configured (including what the
+// SideWinder config screen writes) is left alone, so this is safe to call on
+// every pad connect and after every save restore.
+// ============================================================================
+void InstallPadDefaultBindings(void)
+{
+	int i;
+	int isEmpty = 1;
+
+	for (i = 0; i < 32; i++) {
+		if (g_JoyRemapTbl[1][i] != 0) {
+			isEmpty = 0;
+			break;
+		}
+	}
+
+	if (!isEmpty &&
+	    memcmp(g_JoyRemapTbl[1], g_JoyRemapTblLegacyJoyDefault,
+	           sizeof(g_JoyRemapTblLegacyJoyDefault)) != 0) {
+		return;  // player-configured layout - do not touch
+	}
+
+	// Pick the layout matching whichever backend owns joystick slot 0.
+	memcpy(g_JoyRemapTbl[1],
+	       MarniXInput::IsConnected() ? s_padDefaultXInput : s_padDefaultGeneric,
+	       sizeof(s_padDefaultXInput));
+}
 
 // ============================================================================
 // JoyToPSX - Convert PC joystick bitmask to PSX button word (0x00404c90)
@@ -73,6 +162,28 @@ DWORD ReadPadBoth(void)
 void InputUpdate(void)
 {
 	CMarniDirectInput::UpdateAllInputStates(&g_pMasterInputState);
+
+	// Port addition: republish the pad capability every frame so hot-plugging
+	// a controller works without restarting. g_NumControllers is what gates
+	// the joystick merge in ReadPadBoth; the original left it at whatever the
+	// installer wrote, and the port hard-coded it to 1, which kept the pad
+	// path dead even once a device was enumerated.
+	BOOL padNow = MarniPadIsConnected() ? TRUE : FALSE;
+
+	// Seed a usable layout while a pad is present. This is NOT gated on a
+	// false->true transition of g_bPadConnected: InitializeMarniSystem already
+	// sets that flag from the startup probe, long before the first InputUpdate,
+	// so such a transition never happens and the defaults would only ever be
+	// installed by a save load - leaving the title and save screens on the
+	// original table, whose POV-hat entries are empty (stick worked, D-pad did
+	// not). InstallPadDefaultBindings returns immediately once the table is no
+	// longer the untouched original, so calling it per frame is free.
+	if (padNow) {
+		InstallPadDefaultBindings();
+	}
+
+	g_bPadConnected = padNow;
+	g_NumControllers = padNow ? 2 : 1;
 }
 
 // ============================================================================

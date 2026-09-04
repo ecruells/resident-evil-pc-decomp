@@ -46,12 +46,18 @@ struct MasterInputState {
     // Frame flag (0x1FC)
     DWORD      frameFlag;         // 0x1FC - set to 1 each frame
 
-    // Joystick array (0x200 - 0x3B27)
-    // 32 entries × 0x1D8 bytes each = 0x3B00 bytes
+    // Joystick array (0x200 onward), 32 entries x 0x1D8 bytes = 0x3B00 bytes.
+    // The original's array starts at 0x28 and is indexed from 1, so its
+    // entry[1] - the one every reader in the game uses - sits at 0x200. This
+    // array is re-based to 0x200, so joysticks[0] IS that entry and indexing
+    // here is 0-based: WinMM device i (or the XInput pad, for slot 0) lives in
+    // joysticks[i]. See the note at the top of MarniInput.cpp.
     JoystickEntry joysticks[MAX_JOYSTICKS];  // 0x200
 
-    // Joystick count (0x3B28)
-    DWORD      joystickCount;     // 0x3B28 - number of joysticks + 1
+    // Number of WinMM devices reported by joyGetNumDevs. The original stores
+    // count+1 here (0x3B28) to suit its 1-based indexing; the port stores the
+    // plain device count.
+    DWORD      joystickCount;
 };
 
 // Global master input state instance (0x00ac4030)
@@ -75,3 +81,9 @@ public:
     // Initialize joystick devices (0x00420770)
     static void InitJoysticks(MasterInputState* pState);
 };
+
+// Port addition: true when joystick slot 0 carries a usable pad - either an
+// XInput gamepad or a WinMM device that survived InitJoysticks' validation.
+// Slot 0 is the only entry the game reads (ReadPadBoth, read_sidewinder_pad),
+// so this is exactly "can a pad drive the game right now".
+bool MarniPadIsConnected(void);

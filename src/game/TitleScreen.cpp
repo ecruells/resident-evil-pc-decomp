@@ -86,7 +86,7 @@ void init_title_screen(void)
     //empty_00470960(0);
 
     const char* buttonTexPath;
-    if (!g_isSideWinderConnected) {
+    if (!g_bPadConnected) {
         buttonTexPath = GAME_DATA_ROOT "data\\t_press.tim";
     } else {
         buttonTexPath = GAME_DATA_ROOT "data\\t_start.tim";
@@ -218,7 +218,7 @@ void update_title_options(void)
 {
 	DWORD sidewinderPress = 0;
 	DWORD sidewinderState = 0;
-	if (g_isSideWinderConnected) {
+	if (g_bPadConnected) {
 		sidewinderState = read_sidewinder_pad();
 		sidewinderPress = sidewinderState & 0x10000 & ~g_PlayerPadHeldPrev;
 	}

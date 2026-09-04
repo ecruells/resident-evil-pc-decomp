@@ -179,6 +179,34 @@ static unsigned char s_dbgDoorRecord[0x18];     // synthetic door record (must o
 #define DBGKEY_ESC     0x040
 #define DBGKEY_F1      0x080
 
+// ---------------------------------------------------------------------------
+// Game pad support
+//
+// Navigation reads g_RawPadHeld, the FUNCTION-level word: it has already been
+// through g_JoyRemapTbl, so whatever the player bound to action / cancel / the
+// d-pad drives this menu without it having to know which physical button that
+// is, on either input backend. It stays live while the menu is open -
+// PlayerPad_Update blanks only the published gameplay words
+// (g_PlayerPadPressed and friends), never g_RawPadHeld. It also carries the
+// keyboard, so the GetAsyncKeyState samples are partly redundant; they set the
+// same bits, which is harmless.
+//
+// The open / close toggle cannot work that way: every bound function already
+// means something in gameplay. It reads the raw hardware mask instead
+// (read_sidewinder_pad = joysticks[0].currPress, bit 8 = pad button 1) and
+// wants BOTH shoulder buttons at once. Buttons 5 and 6 are L1/R1 (LB/RB) in
+// the XInput ordering AND in the WinMM/HID ordering, so bits 12|13 is the one
+// combo that means the same thing on both backends.
+#define DBGPAD_UP        0x1000    // g_RawPadHeld: raw pad-word direction bits
+#define DBGPAD_DOWN      0x4000
+#define DBGPAD_LEFT      0x8000
+#define DBGPAD_RIGHT     0x2000
+#define DBGPAD_ACTION    0x0080    // action / confirm
+#define DBGPAD_CANCEL    0x0040    // cancel / run
+#define DBGPAD_AIM       0x0008    // aim - the flag editor's modifier
+#define DBGPAD_TOGGLE  0x00003000u // HARDWARE mask (not the raw pad word):
+                                   // bits 12|13 = pad buttons 5+6 = L1+R1
+
 static int DebugMenu_SampleKeys(void)
 {
     int keys = 0;
@@ -190,6 +218,14 @@ static int DebugMenu_SampleKeys(void)
     if (GetAsyncKeyState(VK_SPACE)  & 0x8000) keys |= DBGKEY_CONFIRM;
     if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) keys |= DBGKEY_ESC;
     if (GetAsyncKeyState(VK_F1)     & 0x8000) keys |= DBGKEY_F1;
+
+    DWORD pad = g_RawPadHeld;
+    if (pad & DBGPAD_LEFT)   keys |= DBGKEY_LEFT;
+    if (pad & DBGPAD_RIGHT)  keys |= DBGKEY_RIGHT;
+    if (pad & DBGPAD_UP)     keys |= DBGKEY_UP;
+    if (pad & DBGPAD_DOWN)   keys |= DBGKEY_DOWN;
+    if (pad & DBGPAD_ACTION) keys |= DBGKEY_CONFIRM;
+    if (pad & DBGPAD_CANCEL) keys |= DBGKEY_ESC;
     return keys;
 }
 
@@ -954,10 +990,15 @@ static void DebugFlag_DescribeBit(const DebugFlagView* v, int bit, char* out)
 
 // Read the aim action's bound key from the "Key Def" binding table
 // (g_keyBindingData[10], 'X' by default - see Globals.cpp). The options menu
-// can rebind it (registry / save block), so it is read live.
+// can rebind it (registry / save block), so it is read live. The pad's aim
+// binding is the same modifier - g_RawPadHeld carries it whichever button it
+// sits on.
 static int DebugFlag_AimKeyHeld(void)
 {
-    return (g_keyBindingData[10] != 0 && (GetAsyncKeyState(g_keyBindingData[10]) & 0x8000)) ? 1 : 0;
+    if (g_keyBindingData[10] != 0 && (GetAsyncKeyState(g_keyBindingData[10]) & 0x8000)) {
+        return 1;
+    }
+    return (g_RawPadHeld & DBGPAD_AIM) ? 1 : 0;
 }
 
 // One row: hex byte offset + 16 bits as '0'/'1'. Each glyph gets a colour -
@@ -1206,7 +1247,7 @@ static void DebugMenu_DrawMain(void)
         PrintText8x8((short)(288 - (int)strlen(timer) * 8), 182, DBGCOL_RED, 0);
     }
 
-    DebugMenu_PrintCentered(192, "F1/ESC: CLOSE   ENTER: SELECT", DBGCOL_HINT);
+    DebugMenu_PrintCentered(192, "F1/L1+R1/ESC: CLOSE   ENTER/ACTION: SELECT", DBGCOL_HINT);
 }
 
 // ============================================================================
@@ -1216,7 +1257,16 @@ static void DebugMenu_DrawMain(void)
 // freezes the pad state and skips update_entities so the game is paused
 // underneath.
 //
-// Controls:
+// Controls (a game pad works throughout - the pad equivalents are listed
+// once here rather than repeated on every line below):
+//   F1, or pad L1+R1 together : open / close
+//   pad d-pad / stick         : the UP / DOWN / LEFT / RIGHT entries
+//   pad ACTION button         : the ENTER / SPACE entries
+//   pad CANCEL button         : the ESC entries
+//   pad AIM button            : the "AIM key" modifier
+// The pad reads its BOUND functions (g_RawPadHeld), so a rebind in the options
+// menu carries over here; only the open/close combo is a fixed hardware one.
+//
 //   F1              : open / close
 //   UP / DOWN       : move the cursor
 //   ENTER / SPACE   : confirm
@@ -1243,9 +1293,11 @@ static void DebugMenu_DrawMain(void)
 // ============================================================================
 int debug_menu_overlay(void)
 {
-    // F1 toggle: sampled every frame with edge detection so one press is one
-    // toggle, whether the menu is open or closed.
-    int f1 = (GetAsyncKeyState(VK_F1) & 0x8000) ? 1 : 0;
+    // F1 / L1+R1 toggle: sampled every frame with edge detection so one press
+    // is one toggle, whether the menu is open or closed. The pad combo is read
+    // from the raw hardware mask, not g_RawPadHeld - see DBGPAD_TOGGLE.
+    int padToggle = ((DWORD)read_sidewinder_pad() & DBGPAD_TOGGLE) == DBGPAD_TOGGLE;
+    int f1 = ((GetAsyncKeyState(VK_F1) & 0x8000) != 0 || padToggle) ? 1 : 0;
     int f1Edge = f1 && !s_dbgPrevF1;
     s_dbgPrevF1 = f1;
 

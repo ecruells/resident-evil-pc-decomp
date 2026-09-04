@@ -763,7 +763,7 @@ The game stores configuration in the Windows Registry:
 | `Play Number` | REG_DWORD | Play count |
 | `Clear Number` | REG_DWORD | Game completion count |
 | `Key Def` | REG_BINARY | Key bindings (32 bytes) |
-| `Side Def` | REG_BINARY | SideWinder bindings (128 bytes) |
+| `Side Def` | REG_BINARY | SideWinder bindings (128 bytes). Read into `g_joystickBindingData`, which nothing consumes; the live pad table is `g_JoyRemapTbl[1]` |
 | `Joy Def` | REG_BINARY | Joystick bindings (128 bytes) |
 | `Display Driver` | REG_DWORD | Selected display adapter |
 | `Install Flag` | REG_DWORD | Installation status |
@@ -822,14 +822,17 @@ static BYTE g_ItemsImageBuffer[86400];  // 86400 allocated bytes for items image
 
 ### Input Subsystem
 
+Full detail — pad mask bit contract, slot indexing, default bindings, the
+defects fixed in 2026-09 — is in **`docs/GAMEPAD_INPUT.md`**.
+
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                    Input Subsystem                           │
 ├─────────────────────────────────────────────────────────────┤
 │                                                              │
 │  ┌─────────────────┐    ┌─────────────────┐                │
-│  │ XInput          │    │ Keyboard        │                │
-│  │ (XInput 1.4)    │    │ State Array     │                │
+│  │ XInput + WinMM  │    │ Keyboard        │                │
+│  │ -> joysticks[0] │    │ State Array     │                │
 │  └────────┬────────┘    └────────▲────────┘                │
 │           │                      │                          │
 │           ▼                      │                          │

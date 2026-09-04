@@ -304,6 +304,15 @@ static const int s_optKeyLabelY[5] = {34, 75, 119, 161, 204}; // 0x004c43a8
 // Y positions for display config labels (10 entries, 0x004c4380)
 static const int s_optDisplayLabelY[10] = {25, 45, 65, 90, 110, 130, 150, 178, 204, 0}; // 0x004c4380
 
+// The button-scan state machines below treat any change in the pad word as a
+// button event, and search bits 8-15 for the button that was pressed. Bits 0-7
+// are stick and POV-hat DIRECTIONS, which on the original SideWinder layout
+// were unmapped and so never appeared here; now that the port binds the hat,
+// they would churn the scan every time the player moved the cursor - the row
+// would appear to react to the D-pad and the edit state would not settle.
+// Mask them out: every reader of s_optJoyButtonScan cares only about buttons.
+#define JOY_SCAN_BUTTON_MASK 0xFFFFFF00u
+
 // X/Y positions for the 8 sidewinder config rows (0x004c0580 / 0x004c05a0).
 // Rows 0-2 are the left label column, rows 3-7 the right one.
 static const short s_optJoyLabelX[8] = {238, 238, 238, 13, 13, 13, 13, 238}; // 0x004c0580
@@ -374,6 +383,14 @@ done:
 // ============================================================================
 // options_map_key_to_print_index (0x00453950)
 // Maps joystick button index to font character for display.
+//
+// Index is a bit position in the pad word: 0-3 stick directions, 4-7 POV hat
+// (both render as arrow glyphs), 8+ pad buttons. The original stops at index
+// 16 = button 9, because it spells the button number with a single digit and
+// runs out at '9'; every button past that showed as '_'. A modern pad has
+// more - a DualShock 4 on WinMM reports 14, and the pad word has room for 24 -
+// so the run continues with 'A'..'O' for buttons 10-24. One glyph per button
+// is all the fixed-width column can show, and the value is printed with "%c".
 // ============================================================================
 void options_map_key_to_print_index(int param_1)
 {
@@ -396,8 +413,15 @@ void options_map_key_to_print_index(int param_1)
     case 13: ch = 0x36; break;
     case 14: ch = 0x37; break;
     case 15: ch = 0x38; break;
-    case 16: ch = 0x39; break;
-    default: ch = 0x5f; break; // '_'
+    case 16: ch = 0x39; break;   // button 9
+    default:
+        // Port addition: buttons 10-24 (bit indices 17-31) as 'A'..'O'.
+        if (idx >= 17 && idx <= 31) {
+            ch = (unsigned char)('A' + (idx - 17));
+        } else {
+            ch = 0x5f; // '_' - unbound
+        }
+        break;
     }
     *(unsigned char*)(param_1 + 2) = ch;
     *(unsigned char*)(param_1 + 1) = ch;
@@ -649,11 +673,25 @@ void options_init_keybind_display(void)
         i--;
     } while (i >= 0);
 
-    // Scan joystick remap table (g_JoyRemapTbl[1], entries 32..1 descending)
-    const int* joyTbl = &g_JoyWarnPrinted; // at end of g_JoyRemapTbl data
-    i = 0x20;
-    do {
-        int joyVal = *joyTbl;
+    // Scan the joystick remap table, entries 31..1 descending (lower indices
+    // win, so a function bound to several buttons displays the lowest one).
+    // The original walks DOWN from &g_JoyWarnPrinted, which in the ORIGINAL
+    // binary IS g_JoyRemapTbl[1][32]: the table sits at 0x004b1858 and spans
+    // 0x100 bytes, so 0x004b1958 - g_JoyWarnPrinted - is exactly one past its
+    // end, and the walk covers indices 31..1 of the live table.
+    //
+    // The port cannot address it that way. g_JoyWarnPrinted is
+    // zero-initialised so the linker puts it in .bss, while g_JoyRemapTbl has
+    // non-zero initialisers and lands in .data (dumpbin: SECT4 vs SECT5), so
+    // the walk-down read 32 unrelated globals instead of the table and
+    // whatever happened to equal a function value decided what this screen
+    // showed. Index the table directly - see docs/MEMORY_LAYOUT.md on
+    // past-the-end addressing, and docs/GAMEPAD_INPUT.md.
+    //
+    // The dropped index-32 iteration only ever read the warning flag (0 or 1),
+    // which matches none of the values tested below.
+    for (i = 31; i > 0; i--) {
+        int joyVal = (int)g_JoyRemapTbl[1][i];
         if (joyVal == 0x80) {
             s_keyBindDisplay[9].vkCode = 0x80;    // 0x00ac9dc0
             s_keyBindDisplay[9].keyIndex = i;      // 0x00ac9db8
@@ -691,9 +729,7 @@ void options_init_keybind_display(void)
             s_keyBindDisplay[17].vkCode = 0x900;   // 0x00ac9e60
             s_keyBindDisplay[17].keyIndex = i;     // 0x00ac9e58
         }
-        joyTbl--;
-        i--;
-    } while (i > 0);
+    }
 }
 
 
@@ -999,17 +1035,27 @@ unsigned int options_display_config_handler(void)
     // entry (read_sidewinder_pad() is 0 with no pad connected), so use a
     // never-matching sentinel instead.
     int l1ButtonMask = -1;
-    const int* pJoy = &g_JoyWarnPrinted;
-    int i = 0x20;
-    int foundIdx;
-    do {
-        pJoy--;
-        foundIdx = i - 1;
-        if (i == 0) goto initDone;
-        i = foundIdx;
-    } while (*pJoy != 0x800);
-    l1ButtonMask = 1 << ((unsigned char)foundIdx & 0x1f);
-initDone:
+    int i;
+    // The original walks DOWN from &g_JoyWarnPrinted, which in the ORIGINAL
+    // binary IS g_JoyRemapTbl[1][32]: the table sits at 0x004b1858 and spans
+    // 0x100 bytes, so 0x004b1958 - g_JoyWarnPrinted - is exactly one past its
+    // end, and the walk covers indices 31..1 of the live table.
+    //
+    // The port cannot address it that way. g_JoyWarnPrinted is
+    // zero-initialised so the linker puts it in .bss, while g_JoyRemapTbl has
+    // non-zero initialisers and lands in .data (dumpbin: SECT4 vs SECT5), so
+    // the walk-down read 32 unrelated globals instead of the table and
+    // whatever happened to equal a function value decided what this screen
+    // showed. Index the table directly - see docs/MEMORY_LAYOUT.md on
+    // past-the-end addressing, and docs/GAMEPAD_INPUT.md.
+    // This site never read index 32 (it decrements before dereferencing), so
+    // it is a pure wrong-base bug: the original scans 31..0 for 0x800.
+    for (int idx = 31; idx >= 0; idx--) {
+        if ((int)g_JoyRemapTbl[1][idx] == 0x800) {
+            l1ButtonMask = 1 << (idx & 0x1f);
+            break;
+        }
+    }
 
     // Set up render state
     g_TextureDesc.flags = 0x01000040;
@@ -1242,7 +1288,7 @@ unsigned int options_display_config_input(void)
 
     case 2: {
         // Key capture
-        s_optJoyButtonScan = read_sidewinder_pad();
+        s_optJoyButtonScan = read_sidewinder_pad() & JOY_SCAN_BUTTON_MASK;
         if (s_optAcceptButtonMask == s_optJoyButtonScan) {
             // Cancel - same button pressed
             play_sfx(3, 5, 0);
@@ -1735,10 +1781,22 @@ unsigned int options_key_config_input(void)
         // Populate temp entries from g_JoyRemapTbl[1]
         s_optCursorIndex = 0;
         s_optCursorHighlight[0] = 2;
-        const int* pJoy = &g_JoyWarnPrinted;
-        i = 0x20;
-        do {
-            int joyVal = *pJoy;
+    // The original walks DOWN from &g_JoyWarnPrinted, which in the ORIGINAL
+    // binary IS g_JoyRemapTbl[1][32]: the table sits at 0x004b1858 and spans
+    // 0x100 bytes, so 0x004b1958 - g_JoyWarnPrinted - is exactly one past its
+    // end, and the walk covers indices 31..1 of the live table.
+    //
+    // The port cannot address it that way. g_JoyWarnPrinted is
+    // zero-initialised so the linker puts it in .bss, while g_JoyRemapTbl has
+    // non-zero initialisers and lands in .data (dumpbin: SECT4 vs SECT5), so
+    // the walk-down read 32 unrelated globals instead of the table and
+    // whatever happened to equal a function value decided what this screen
+    // showed. Index the table directly - see docs/MEMORY_LAYOUT.md on
+    // past-the-end addressing, and docs/GAMEPAD_INPUT.md.
+        //
+        // The dropped index-32 iteration only ever read the warning flag.
+        for (i = 31; i > 0; i--) {
+            int joyVal = (int)g_JoyRemapTbl[1][i];
             if (joyVal == 0x80) {
                 s_optTempEntries[0].pad2 = 0x80;
                 s_optTempEntries[0].keyIndex = i;
@@ -1759,9 +1817,7 @@ unsigned int options_key_config_input(void)
                 s_optTempEntries[4].pad2 = 0x900;
                 s_optTempEntries[4].keyIndex = i;
             }
-            pJoy--;
-            i--;
-        } while (i > 0);
+        }
         s_optSubSubState = 1;
     }
     else if (s_optSubSubState == 1) {
@@ -1811,14 +1867,16 @@ unsigned int options_key_config_input(void)
             }
             else {
                 // Check for joystick button press
-                s_optJoyButtonScan = read_sidewinder_pad();
+                s_optJoyButtonScan = read_sidewinder_pad() & JOY_SCAN_BUTTON_MASK;
                 i = s_optCursorIndex;
                 if (s_optPrevJoyButtonScan != s_optJoyButtonScan) {
                     if (s_optJoyButtonScan == 0) {
                         s_optPrevJoyButtonScan = 0;
                     }
                     else {
-                        // Find which bit is set
+                        // Find which bit is set. The original stops before
+                        // bit 31 (button 24); the scan word has room for it and
+                        // g_JoyRemapTbl[1] has an entry for it, so include it.
                         bool validBit = false;
                         int bitIdx = 4;
                         do {
@@ -1827,7 +1885,7 @@ unsigned int options_key_config_input(void)
                                 break;
                             }
                             bitIdx++;
-                        } while (bitIdx < 0x1f);
+                        } while (bitIdx < 0x20);
 
                         bool swapped = false;
                         s_optPrevJoyButtonScan = s_optJoyButtonScan;
@@ -2303,7 +2361,7 @@ unsigned int options_joystick_config_input(void)
             }
             if (!done) {
                 // Sidewinder buttons 8-15 jump straight to select (0x00454443)
-                s_optJoyButtonScan = read_sidewinder_pad();
+                s_optJoyButtonScan = read_sidewinder_pad() & JOY_SCAN_BUTTON_MASK;
                 if (s_optPrevJoyButtonScan != s_optJoyButtonScan) {
                     if (s_optJoyButtonScan == 0) {
                         s_optPrevJoyButtonScan = 0;
@@ -2373,7 +2431,7 @@ unsigned int options_joystick_config_input(void)
     case 2: {
         // Edit the highlighted row (0x00454578)
         s_optKeyScanResult = FUN_00497de0();
-        s_optJoyButtonScan = read_sidewinder_pad();
+        s_optJoyButtonScan = read_sidewinder_pad() & JOY_SCAN_BUTTON_MASK;
         if ((s_optPrevJoyButtonScan != s_optJoyButtonScan) ||
             (s_optKeyScanResult != s_optPrevKeyScan)) {
             bool commit = true;

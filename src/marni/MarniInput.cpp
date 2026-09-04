@@ -3,8 +3,29 @@
 // Original class: MarniSystem::DirectInput (debug string at 0x004ba154)
 
 #include "MarniInput.h"
+#include "MarniXInput.h"
 #include <cstdio>
 #include <cstring>
+
+// Port deviation, joystick indexing:
+// The original's entry array starts at object offset 0x28 and is walked with
+// `for (i = 1; i < joystickCount; i++) joyGetPosEx(i - 1, &entry[i])`, so
+// WinMM device 0 lands in entry[1] at offset 0x200 - which is the entry every
+// reader in the game uses (ReadPadBoth tests +0x200 / +0x3D4, and
+// read_sidewinder_pad reads +0x200). The port's MasterInputState declares the
+// array AT 0x200, so port joysticks[0] IS that entry. The indexing is
+// therefore 0-based here: device i -> joysticks[i], and joystickCount holds
+// the device count rather than the original's count+1. Keeping the original's
+// off-by-one on top of the re-based array wrote device 0 into joysticks[1],
+// where nothing ever read it.
+//
+// Slot 0 is also where the XInput backend publishes, so a modern gamepad
+// reaches JoyToPSX / g_JoyRemapTbl[1] through the same entry a SideWinder
+// used to. See MarniXInput.h.
+
+// True while an XInput pad owns joysticks[0]; the WinMM sweep skips that slot
+// so a pad that enumerates on both APIs is not polled twice.
+static bool s_xinputOwnsSlot0 = false;
 
 // ============================================================================
 // UpdateKeyboardInputState (0x004202f0)
@@ -83,11 +104,47 @@ void CMarniDirectInput::UpdateAllInputStates(MasterInputState* pState)
     pState->frameFlag       = 1;
     pState->keyboardNewPress = (~oldPrev) & pState->keyboardCurr;
 
-    // 0x004205b8-0x004206f4: Process each joystick (indices 1 to joystickCount-1, max 31)
-    int maxJoy = (int)pState->joystickCount;
-    if (maxJoy > 32) maxJoy = 32;
+    // --- Port addition: XInput pad publishes into joysticks[0] ---
+    // Poll before the WinMM sweep and synthesise the same currPress /
+    // newPress transitions the WinMM path produces, so downstream code cannot
+    // tell the two backends apart.
+    if (MarniXInput::IsEnabled()) {
+        DWORD xiMask = MarniXInput::Poll();
+        JoystickEntry* pXi = &pState->joysticks[0];
 
-    for (int i = 1; i < maxJoy; i++) {
+        if (MarniXInput::IsConnected()) {
+            s_xinputOwnsSlot0 = true;
+            pXi->enabled   = 1;
+            pXi->prevPress = pXi->currPress;
+            pXi->currPress = xiMask;
+            pXi->newPress  = (~pXi->prevPress) & xiMask;
+        } else if (s_xinputOwnsSlot0) {
+            // Pad unplugged mid-session: release the slot back to WinMM and
+            // clear the stale press state so nothing stays latched down.
+            s_xinputOwnsSlot0 = false;
+            pXi->enabled   = 0;
+            pXi->prevPress = 0;
+            pXi->currPress = 0;
+            pXi->newPress  = 0;
+        }
+    } else if (s_xinputOwnsSlot0) {
+        JoystickEntry* pXi = &pState->joysticks[0];
+        s_xinputOwnsSlot0 = false;
+        pXi->enabled   = 0;
+        pXi->prevPress = 0;
+        pXi->currPress = 0;
+        pXi->newPress  = 0;
+    }
+
+    // 0x004205b8-0x004206f4: Process each WinMM joystick (device i -> entry i)
+    int maxJoy = (int)pState->joystickCount;
+    if (maxJoy > MAX_JOYSTICKS) maxJoy = MAX_JOYSTICKS;
+
+    for (int i = 0; i < maxJoy; i++) {
+        if (i == 0 && s_xinputOwnsSlot0) {
+            continue;  // XInput already published this entry
+        }
+
         JoystickEntry* pJoy = &pState->joysticks[i];
 
         // 0x004205c3: If joystick is disabled, zero all press states
@@ -104,7 +161,7 @@ void CMarniDirectInput::UpdateAllInputStates(MasterInputState* pState)
         pJoy->info.dwFlags = JOY_RETURNALL;
 
         // 0x00420617: Poll the joystick
-        MMRESULT result = joyGetPosEx(i - 1, &pJoy->info);
+        MMRESULT result = joyGetPosEx(i, &pJoy->info);
 
         // 0x0042061f-0x00420637: Error handling
         const char* pErrorMsg = NULL;
@@ -171,15 +228,36 @@ void CMarniDirectInput::UpdateAllInputStates(MasterInputState* pState)
 }
 
 // ============================================================================
+// MarniPadIsConnected (port addition)
+// ============================================================================
+bool MarniPadIsConnected(void)
+{
+    if (MarniXInput::IsEnabled() && MarniXInput::IsConnected()) {
+        return true;
+    }
+    return g_pMasterInputState.joysticks[0].enabled != 0;
+}
+
+// ============================================================================
 // InitJoysticks (0x00420770)
 // Enumerates all joystick devices via WinMM, validates each with
 // joyGetDevCapsA + joyGetPosEx, and marks valid ones as enabled.
 // ============================================================================
 void CMarniDirectInput::InitJoysticks(MasterInputState* pState)
 {
-    // 0x0042077c: Get number of joystick devices
+    // Port addition: bring up the XInput backend first. It owns joysticks[0]
+    // whenever a pad answers, and it must survive the "too many devices"
+    // bail-out below.
+    s_xinputOwnsSlot0 = false;
+    MarniXInput::Init();
+
+    // 0x0042077c: Get number of joystick devices.
+    // joyGetNumDevs reports how many devices the driver SUPPORTS (16 on every
+    // modern Windows), not how many are plugged in - the per-device
+    // joyGetPosEx validation below is what actually prunes the list.
     UINT numDevs = joyGetNumDevs();
-    pState->joystickCount = numDevs + 1;
+    if (numDevs > MAX_JOYSTICKS) numDevs = MAX_JOYSTICKS;
+    pState->joystickCount = numDevs;
 
     // 0x00420788-0x0042079d: If > 32 joysticks, print warning and return
     if ((int)(numDevs + 1) > 0x1F) {
@@ -188,16 +266,20 @@ void CMarniDirectInput::InitJoysticks(MasterInputState* pState)
         return;
     }
 
-    // 0x004207a5-0x004207b5: Zero from +0x28 through +0x3B28
-    // This covers keyboardPrev/keyboardNewPress/keyboardRepeat, pad area,
-    // frameFlag, and all joystick entries (0xEC0 DWORDs = 0x3B00 bytes)
-    DWORD* pZero = (DWORD*)((BYTE*)pState + 0x28);
-    for (int i = 0xEC0; i != 0; i--) {
-        *pZero++ = 0;
-    }
+    // 0x004207a5-0x004207b5: Zero the frame/press state and every joystick
+    // entry. The original does this as one 0x3B00-byte sweep from +0x28
+    // (keyboardPrev) to +0x3B28 (joystickCount); the port's array sits at a
+    // different offset, so the same region is cleared field-wise instead - a
+    // literal +0x28 sweep here starts inside the keyboard block and stops
+    // partway through the joystick array.
+    pState->keyboardPrev     = 0;
+    pState->keyboardNewPress = 0;
+    pState->keyboardRepeat   = 0;
+    pState->frameFlag        = 0;
+    memset(pState->joysticks, 0, sizeof(pState->joysticks));
 
-    // 0x004207c0-0x0042087f: Validate each joystick device
-    for (int i = 1; i < (int)pState->joystickCount; i++) {
+    // 0x004207c0-0x0042087f: Validate each joystick device (device i -> entry i)
+    for (int i = 0; i < (int)pState->joystickCount; i++) {
         JoystickEntry* pJoy = &pState->joysticks[i];
 
         // 0x004207cb: Tentatively mark as enabled
@@ -206,7 +288,14 @@ void CMarniDirectInput::InitJoysticks(MasterInputState* pState)
         // 0x004207d3: Query device capabilities
         JOYCAPSA joyCaps;
         memset(&joyCaps, 0, sizeof(joyCaps));
-        joyGetDevCapsA(i - 1, &joyCaps, sizeof(JOYCAPSA));
+        joyGetDevCapsA(i, &joyCaps, sizeof(JOYCAPSA));
+
+        // Publish the caps word; UpdateAllInputStates gates the whole POV hat
+        // read on JOYCAPS_HASPOV (0x0010) in here. The port queried the caps
+        // and then dropped them on the floor, leaving povFlags permanently
+        // zero - so the D-pad of every WinMM pad (a DualShock plugged straight
+        // in reports its D-pad as a POV hat) produced no input at all.
+        pJoy->povFlags = joyCaps.wCaps;
 
         // 0x004207dd-0x004207ed: Clear JOYINFOEX and set up for validation
         memset(&pJoy->info, 0, sizeof(JOYINFOEX));
@@ -214,7 +303,7 @@ void CMarniDirectInput::InitJoysticks(MasterInputState* pState)
         pJoy->info.dwFlags = JOY_RETURNALL;
 
         // 0x004207f2: Validate by polling the device
-        MMRESULT result = joyGetPosEx(i - 1, &pJoy->info);
+        MMRESULT result = joyGetPosEx(i, &pJoy->info);
 
         // 0x004207fa-0x00420810: Disable if device is not available
         if (result == 6 || result == JOYERR_PARMS || result == JOYERR_UNPLUGGED) {

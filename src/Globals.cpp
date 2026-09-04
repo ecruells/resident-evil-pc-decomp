@@ -181,7 +181,8 @@ BYTE g_keyBindingData[32] = {
 BYTE g_joystickBindingData[128] = {};
 
 BOOL g_isPaused = FALSE;                   // 0_004d46ac
-BOOL g_isSideWinderConnected = FALSE;      // 0x004d46b0
+BOOL g_isSideWinderConnected = FALSE;      // 0x004d46b0 - one-shot START event
+BOOL g_bPadConnected = FALSE;              // capability: a game pad is present
 
 BYTE g_InstallFlagData = 0;
 
@@ -348,6 +349,22 @@ DWORD g_JoyRemapTbl[2][32] = {
         0x00000000, 0x00000000, 0x00000000, 0x00000000,
         0x00000000, 0x00000000, 0x00000000, 0x00000000
     }
+};
+
+// The original 1997 joystick ("Joy Def") layout, byte-identical to the
+// Player 2 initialiser above - keep the two in sync. InstallPadDefaultBindings
+// compares against this to decide whether a table is still the untouched
+// original (safe to replace with the port's pad defaults) or something the
+// player configured (never touched).
+const DWORD g_JoyRemapTblLegacyJoyDefault[32] = {
+    0x00001000, 0x00004000, 0x00008000, 0x00002000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000080, 0x00000040, 0x00000002, 0x00000010,
+    0x00000020, 0x00000001, 0x00000004, 0x00000008,
+    0x00000100, 0x00000800, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000,
+    0x00000000, 0x00000000, 0x00000000, 0x00000000
 };
 
 // 0x004d3f58 / 0x004d3fd8 - joystick remap backup tables.

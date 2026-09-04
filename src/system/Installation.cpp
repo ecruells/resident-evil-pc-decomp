@@ -137,7 +137,7 @@ BOOL LoadInstallationConfiguration(BYTE* pInstallPath)
     // 0x0040b1e0: Load joystick bindings (Side Def or Joy Def depending on SideWinder)
     int isSideWinder = IsSideWinderPadConnected();
     if (isSideWinder == 0) {
-        g_isSideWinderConnected = TRUE;
+        g_bPadConnected = TRUE;
         dataSize = 128;
         dataType = REG_BINARY;
         result = RegQueryValueExA(hKey, "Side Def", NULL, &dataType, g_joystickBindingData, &dataSize);
@@ -146,7 +146,7 @@ BOOL LoadInstallationConfiguration(BYTE* pInstallPath)
             return FALSE;
         }
     } else {
-        g_isSideWinderConnected = FALSE;
+        g_bPadConnected = FALSE;
         dataSize = 128;
         dataType = REG_BINARY;
         result = RegQueryValueExA(hKey, "Joy Def", NULL, &dataType, g_joystickBindingData, &dataSize);

@@ -157,8 +157,12 @@ void InitializeMarniSystem(
 **Dependencies:**
 - `CMarniDirect3D_Constructor()` - Create graphics object
 - `IsGraphicsSystemReadyForOperation()` - Verify init
-- `InitJoysticks()` - Initialize input
-- `IsSideWinderPadConnected()` - Check gamepad
+- `InitJoysticks()` - Enumerate WinMM devices + start the XInput backend
+  (forwards to `CMarniDirectInput::InitJoysticks`; see `docs/GAMEPAD_INPUT.md`)
+- `IsSideWinderPadConnected()` - Legacy SideWinder probe. The pad capability
+  flag is `g_bPadConnected`, set here from `MarniPadIsConnected()`. Do NOT set
+  `g_isSideWinderConnected`: that is the one-shot START injection `main_loop`
+  consumes
 - `CreateLights()` - Create lighting
 - `ShowMessageBox()` - Display errors
 
@@ -735,7 +739,9 @@ BOOL LoadInstallationConfiguration(
 | Display Mode | REG_DWORD | `g_dwSelectedDisplayModeID` |
 
 **Dependencies:**
-- `IsSideWinderPadConnected()` - Check for SideWinder
+- `IsSideWinderPadConnected()` - Check for SideWinder. Selects which binding
+  blob is read and sets `g_bPadConnected` (the capability), not the one-shot
+  `g_isSideWinderConnected`
 
 ---
 

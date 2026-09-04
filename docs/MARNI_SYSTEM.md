@@ -35,7 +35,7 @@ subsystems").
 |--------|-----------------|-------------|
 | Graphics | DirectX 5.0 (DirectDraw, Direct3D 5) | Direct3D 11 (`src/marni/MarniDX.*`) |
 | Audio | DirectSound | XAudio2 (`src/marni/MarniSound.*`) |
-| Input | DirectInput | XInput (`src/marni/MarniInput.*`) |
+| Input | Custom `GetAsyncKeyState` + WinMM wrapper (Capcom named it "DirectInput") | Same wrapper, plus an XInput backend (`src/marni/MarniInput.*`, `src/marni/MarniXInput.*`) |
 | Source Files | `src/marni/*`, `src/game/TextureLoader.cpp`, `src/game/SpriteRenderer.*` |
 
 ### Key Architectural Decisions
@@ -235,7 +235,7 @@ struct QuadVertex {
 | `IsGraphicsSystemReadyForOperation()` | Checks initialization state | — |
 | `EnumerateDisplayModes()` | Lists available display modes | — |
 | `EnumerateD3DRenderers()` | Lists available D3D renderers (HW/SW) | — |
-| `InitJoysticks()` | Initializes XInput gamepads | — |
+| `InitJoysticks()` | Enumerates WinMM devices and brings up the XInput backend; forwards to `CMarniDirectInput::InitJoysticks` | — |
 | `IsSideWinderPadConnected()` | Checks for Microsoft SideWinder pad | — |
 | `CreateLights(int numLights)` | Creates 3D scene lights | — |
 | `UpdateVideoPlayback()` | FMV playback state machine (state 0 init / state 1 start / state 2 play+skip / state 3 cleanup). State 1 and state 2 call `InputUpdate()` + `PlayerPad_Update()` themselves because `main_loop()` is bypassed during FMV playback | — |
@@ -646,12 +646,19 @@ Share the same memory layout as CDirect3DObject but with a different vtable and 
 
 NOT the real DirectInput API — Capcom's custom wrapper using Win32 `GetAsyncKeyState` for keyboard and WinMM `joyGetPosEx` for joysticks. Maps PS1 controller semantics to PC input.
 
+> **Pad support: see `docs/GAMEPAD_INPUT.md`.** The port adds an XInput backend
+> alongside the WinMM sweep, both publishing into joystick slot 0. That document
+> also covers the pad mask bit contract, the 0-based slot indexing deviation
+> described below, the default binding tables, and the save-file compatibility
+> guard. The whole pad path was dead before 2026-09-03.
+
 | Method | Address | Description |
 |--------|---------|-------------|
 | `UpdateKeyboardInputState(pState)` | 0x004202f0 | Polls 32 VK codes via `GetAsyncKeyState`, builds 32-bit button bitmask |
-| `UpdateAllInputStates(pState)` | 0x00420570 | Keyboard state transitions (prev→curr→repeat) + polls up to 31 joysticks with axis/POV/button parsing |
+| `UpdateAllInputStates(pState)` | 0x00420570 | Keyboard state transitions (prev→curr→repeat), then the XInput pad into slot 0, then the WinMM sweep (axis / POV / button parsing) over the remaining devices |
 | `SetDefaultKeyMapping(keyMap)` | 0x00420720 | Default PS1 layout: E/X/S/D + arrows + 0-9 |
-| `InitJoysticks(pState)` | 0x00420770 | `joyGetNumDevs()` → validate each with `joyGetDevCapsA` + `joyGetPosEx` |
+| `InitJoysticks(pState)` | 0x00420770 | `MarniXInput::Init()`, then `joyGetNumDevs()` → validate each with `joyGetDevCapsA` + `joyGetPosEx`. Publishes `joyCaps.wCaps` into `povFlags` (the POV hat read is gated on `JOYCAPS_HASPOV` in that field) |
+| `MarniPadIsConnected()` | port addition | True when slot 0 carries a usable pad — XInput, or a WinMM device that survived validation |
 
 ### MasterInputState Struct
 **Size:** ~0x3B2C bytes
@@ -663,8 +670,8 @@ NOT the real DirectInput API — Capcom's custom wrapper using Win32 `GetAsyncKe
 | 0x28 | DWORD | `keyboardPrev` | Previous frame pressed keys |
 | 0x2C | DWORD | `keyboardNewPress` | Newly pressed this frame (~prev & curr) |
 | 0x30 | DWORD | `keyboardRepeat` | Repeat latch |
-| 0x200 | JoystickEntry[32] | `joysticks` | Up to 32 joystick entries (0x1D8 bytes each) |
-| 0x3B28 | DWORD | `joystickCount` | Number of joysticks + 1 |
+| 0x200 | JoystickEntry[32] | `joysticks` | Up to 32 joystick entries (0x1D8 bytes each). **Re-based**: the original array starts at 0x28 and is indexed from 1, so its `entry[1]` — the only one the game reads — sits at 0x200. Here that entry is `joysticks[0]` and indexing is 0-based |
+| — | DWORD | `joystickCount` | WinMM device count. The original stores count + 1 at 0x3B28 to suit its 1-based indexing |
 
 ### Default Key Mapping
 | PS1 Button | VK Code | Key |
@@ -682,9 +689,11 @@ NOT the real DirectInput API — Capcom's custom wrapper using Win32 `GetAsyncKe
 ### Call Chain
 ```
 InputUpdate()  [0x00497c00]
-  └─ UpdateAllInputStates(&g_pMasterInputState)
-       ├─ UpdateKeyboardInputState()     [GetAsyncKeyState per VK]
-       └─ joyGetPosEx() per joystick     [WinMM polling]
+  ├─ UpdateAllInputStates(&g_pMasterInputState)
+  │    ├─ UpdateKeyboardInputState()     [GetAsyncKeyState per VK]
+  │    ├─ MarniXInput::Poll()            [slot 0, when an XInput pad is present]
+  │    └─ joyGetPosEx() per device       [WinMM sweep, skips slot 0 if XInput owns it]
+  └─ refresh g_bPadConnected / g_NumControllers, seed pad defaults
 ```
 
 ---

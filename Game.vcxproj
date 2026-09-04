@@ -177,6 +177,7 @@
     <ClCompile Include="src\marni\Marni3DObject.cpp" />
     <ClCompile Include="src\game\InputSystem.cpp" />
     <ClCompile Include="src\marni\MarniInput.cpp" />
+    <ClCompile Include="src\marni\MarniXInput.cpp" />
     <ClCompile Include="src\game\SoundSystem.cpp" />
     <ClCompile Include="src\game\TitleScreen.cpp" />
     <ClCompile Include="src\game\CharacterSelectionScreen.cpp" />
@@ -191,6 +192,7 @@
     <ClInclude Include="src\marni\MarniBits.h" />
     <ClInclude Include="src\marni\Marni3DObject.h" />
     <ClInclude Include="src\marni\MarniInput.h" />
+    <ClInclude Include="src\marni\MarniXInput.h" />
     <ClInclude Include="src\marni\MarniSound.h" />
     <ClInclude Include="src\game\SpriteRenderer.h" />
     <ClInclude Include="src\game\TmdRenderer.h" />
