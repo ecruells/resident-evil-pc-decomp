@@ -93,17 +93,17 @@ void init_title_screen(void)
     }
     LoadFile(buttonTexPath, g_TimImageBuffer__bitmap, 0x20);
 
-    g_titleTextureDepthData[4] = 26;
-    g_titleTextureDepthData[0] = 8;
-    g_TextureDepthByte = 26;
+    g_titleTexturePageData[4] = 26;
+    g_titleTexturePageData[0] = 8;
+    g_TextureCurrentPage = 26;
     g_TextureBankID = 8;
     LoadTexturePage(g_TimImageBuffer__bitmap, 8, 0, 12, 4, 0, 0, 0);
 
-    g_titleTextureDepthData[1] = g_TextureBankID;
+    g_titleTexturePageData[1] = g_TextureBankID;
     g_titleLoopFlag = 1;
-    g_titleTextureDepthData[5] = g_TextureDepthByte;
-    g_titleTextureDepthData[2] = g_titleTextureDepthData[1];
-    g_titleTextureDepthData[6] = g_titleTextureDepthData[5];
+    g_titleTexturePageData[5] = g_TextureCurrentPage;
+    g_titleTexturePageData[2] = g_titleTexturePageData[1];
+    g_titleTexturePageData[6] = g_titleTexturePageData[5];
 
     {
         char dbg[256];
@@ -192,7 +192,7 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
 
     td->texU = 0;
     td->screenX = -130;
-    td->depth = g_titleTextureDepthData[selectionId];
+    td->texturePage = g_titleTexturePageData[selectionId];
     td->width = 256;
     td->texV = (unsigned char)entry->vramY;
     td->height = entry->sprHeight;

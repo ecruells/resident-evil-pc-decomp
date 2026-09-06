@@ -260,7 +260,7 @@ void DrawSaveCursor(short x, short y, int mode)
     if (mode == 0) {
         g_TextureDesc.width = 8;
         g_TextureDesc.height = 14;
-        g_TextureDesc.depth = 0x1E;
+        g_TextureDesc.texturePage = 0x1E;
         g_TextureDesc.texU = 16;
         g_TextureDesc.texV = 28;
         g_TextureDesc.unk10 = 0x100;

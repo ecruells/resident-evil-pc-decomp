@@ -182,7 +182,8 @@ extern int           g_TexturePageHeight[256];
 extern int           g_TexturePageBpp[256];
 extern short         g_TexturePageOriginX[256];   // VRAM X origin (halfwords)
 extern short         g_TexturePageOriginY[256];   // VRAM Y origin (scanlines)
-extern short         g_TexturePageDepth[256];     // tpage code (for page-depth offset)
+extern short         g_TexturePageId[256];        // tpage code assigned to each slot;
+                                                  // what TextureDesc::texturePage is matched against
 extern short         g_TexturePageClutBase[256];  // base printClutTint (= pageOffset + 0x1E0)
 extern int           g_texturePageMode;
 extern int           g_texturePageHandle;
@@ -981,7 +982,7 @@ extern unsigned char g_titleMode;                      // 0x00d22775
 extern unsigned char g_titleOptionsFading;             // 0x00d22776
 extern unsigned char g_titleSelectionId;               // 0x00d22774
 extern short         g_titleDemoTime;                  // 0x00d22788
-extern short         g_titleTextureDepthData[8];       // 0x00d22778
+extern short         g_titleTexturePageData[8];       // 0x00d22778 - per-selection tpage
 extern int           g_sceneRenderParam;               // 0x004d6300
 extern DWORD         g_titlePrimType;                  // 0x004d6398
 extern DWORD         g_primParam;                      // 0x004d63e0
@@ -1248,30 +1249,31 @@ extern int           g_FileRetryFlag;
 // Image processing/status variables
 //
 // 0x00bebcc4 is ONE 16-bit cell and the original accesses it both ways: as two
-// bytes (bank id at +0, texture depth at +1 - see the byte writes all over
+// bytes (bank id at +0, the current tpage at +1 - see the byte writes all over
 // CmdFunctions/EntityModelLoader) and as a single word, which is how cut_set
 // and RestoreRoomCamera restore both halves at once:
 //     004628fa  MOV AX,[0x00bebcc6]      ; g_SavedTextureBankID
-//     00462903  MOV [0x00bebcc4],AX      ; bank AND depth
+//     00462903  MOV [0x00bebcc4],AX      ; bank AND page
 // That is also why DoorSystem's "original writes word 0x1f15" and
 // TextureLoader's "_g_TextureBankID >> 8" comments exist - the high half is the
-// depth. Declaring the halves as two separate globals let the linker put 15
+// page id (the PS1 tpage code).
+// Declaring the halves as two separate globals let the linker put 15
 // bytes between them (0x1b33b and 0x1b34a in the Debug map), so
 // `*(unsigned short*)&g_TextureBankID` spilled its high byte onto whatever
 // followed the bank - g_MessageCurrentPtr - corrupting the live message pointer
-// on every camera cut, and the depth byte was never actually restored. Keep the
+// on every camera cut, and the page byte was never actually restored. Keep the
 // pair in one packed object so the word access addresses the bytes it means.
 #pragma pack(push, 1)
 struct TextureBankCell {
     unsigned char bank;      // 0x00bebcc4
-    unsigned char depth;     // 0x00bebcc5
+    unsigned char page;      // 0x00bebcc5 - tpage id
 };
 #pragma pack(pop)
 static_assert(sizeof(TextureBankCell) == 2, "TextureBankCell must be the 16-bit cell at 0x00bebcc4");
 
 extern TextureBankCell g_TextureBankCell;              // 0x00bebcc4
-#define g_TextureBankID    (g_TextureBankCell.bank)    // 0x00bebcc4
-#define g_TextureDepthByte (g_TextureBankCell.depth)   // 0x00bebcc5
+#define g_TextureBankID      (g_TextureBankCell.bank)  // 0x00bebcc4
+#define g_TextureCurrentPage (g_TextureBankCell.page)  // 0x00bebcc5
 extern unsigned short g_SavedTextureBankID;            // 0x00bebcc6 - saved room texture bank ID (restored after cutscenes)
 
 // Texture/bank arrays

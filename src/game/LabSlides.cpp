@@ -181,7 +181,7 @@ void lab_slides_update(void)
             g_TextureDesc.printClutTint =
                 (short)(g_labSlidesSlideIndex + 0x1ed);
             // 0x00463651..0x00463689: depth = ((slide & ~1) * 0x60) >> 7 + 9.
-            g_TextureDesc.depth = (short)(
+            g_TextureDesc.texturePage = (short)(
                 (((unsigned int)g_labSlidesSlideIndex & 0xfffffffeu) * 0x60) >> 7) + 9;
             AddTintSprite_Ex(&g_TextureDesc, 4);
         }

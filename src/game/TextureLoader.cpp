@@ -734,7 +734,7 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                 g_TexturePageBpp[slotIndex] = bpp;
                 g_TexturePageOriginX[slotIndex] = posX;
                 g_TexturePageOriginY[slotIndex] = posY;
-                g_TexturePageDepth[slotIndex] = texId;
+                g_TexturePageId[slotIndex] = texId;
                 g_TexturePageClutBase[slotIndex] = pageOffset + 0x1E0;
 
                 // Cache pixel + CLUT data for CLUT palette cycling in texture viewer
@@ -822,7 +822,7 @@ void LoadTexturePage(void* imageBuffer, short texId, short pageOffset, int slotI
                 g_TexturePageBpp[slotIndex] = 16;
                 g_TexturePageOriginX[slotIndex] = posX;
                 g_TexturePageOriginY[slotIndex] = posY;
-                g_TexturePageDepth[slotIndex] = texId;
+                g_TexturePageId[slotIndex] = texId;
                 g_TexturePageClutBase[slotIndex] = pageOffset + 0x1E0;
             }
             delete[] rgba;
@@ -1381,7 +1381,7 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
                 // Set VRAM page metadata so display_texture can locate this
                 // SRV by depth/UV bounds. Items are rendered at depth=0x1d
                 // with texU=88, texV=slot*32, printClutTint=0x1e4.
-                g_TexturePageDepth[slot] = 0x1d;
+                g_TexturePageId[slot] = 0x1d;
                 g_TexturePageClutBase[slot] = 0x1e0;
                 g_TexturePageOriginX[slot] = 0;
                 g_TexturePageOriginY[slot] = 0;

@@ -456,7 +456,7 @@ void room_set(void)
     g_omodelCount = 0;
     g_LastEnemyModelId = 0xff;
     g_TextureBankID = 0x06;
-    g_TextureDepthByte = 0x0a;
+    g_TextureCurrentPage = 0x0a;
     g_ItemModelCount = 0;
 
     object_delete_00442170(7);
@@ -520,7 +520,7 @@ void room_set(void)
     }
 
     // 0x00477c89: Setup texture bank data
-    SetupTextureBankData((short)g_TextureDepthByte);
+    SetupTextureBankData((short)g_TextureCurrentPage);
     // 0x00477ca0: Save current texture bank ID for cutscene restoration
     g_SavedTextureBankID = *(unsigned short*)&g_TextureBankCell;
     g_CurrentRdtDataTypePtr = g_RdtPointer->cam_switch_zones;

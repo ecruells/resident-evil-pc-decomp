@@ -639,7 +639,7 @@ unsigned char g_titleMode = 0;            // 0x00d22775
 unsigned char g_titleOptionsFading = 0;   // 0x00d22776
 unsigned char g_titleSelectionId = 0;     // 0x00d22774
 short         g_titleDemoTime = 0;        // 0x00d22788 - demo countdown
-short         g_titleTextureDepthData[8] = {}; // 0x00d22778 - texture depth array
+short         g_titleTexturePageData[8] = {}; // 0x00d22778 - per-selection tpage
 int           g_sceneRenderParam = 0;     // 0x004d6300
 DWORD          g_titlePrimType = 0;        // 0x004d6398
 DWORD          g_primParam = 0;            // 0x004d63e0
@@ -687,7 +687,7 @@ int   g_TexturePageHeight[256] = {};
 int   g_TexturePageBpp[256] = {};
 short g_TexturePageOriginX[256] = {};
 short g_TexturePageOriginY[256] = {};
-short g_TexturePageDepth[256] = {};
+short g_TexturePageId[256] = {};
 short g_TexturePageClutBase[256] = {};
 
 // Player input data

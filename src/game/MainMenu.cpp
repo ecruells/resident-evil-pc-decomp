@@ -757,7 +757,7 @@ static void menu_draw_inventory(void)
     // 0x00463f20-0x00463f80: Draw equipped weapon or no equipped empty slot
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.unk10 = 0;
-    g_TextureDesc.depth = 0x1c;
+    g_TextureDesc.texturePage = 0x1c;
     g_TextureDesc.screenX = 0xa0;
     g_TextureDesc.screenY = 0x92;
     g_TextureDesc.width = 0x28;
@@ -773,7 +773,7 @@ static void menu_draw_inventory(void)
     } else {
         g_TextureDesc.texU = 0x58;
         g_TextureDesc.printClutTint = 0x1e4;
-        g_TextureDesc.depth = 0x1d;
+        g_TextureDesc.texturePage = 0x1d;
         // 0x00463fa1: the original reads [ECX + 0xd21ccf] with ECX = the 1-based
         // equipped slot; 0xd21ccf is the byte just before g_ItemSlotIndices
         // (0xd21cd0), so this aliases g_ItemSlotIndices[slot - 1] - the sheet
@@ -790,7 +790,7 @@ static void menu_draw_inventory(void)
             uVar11 = 1;
             uVar10 = 0x1e;
             g_TextureDesc.printClutTint = 0x1e0;
-            g_TextureDesc.depth = 0;
+            g_TextureDesc.texturePage = 0;
             g_TextureDesc.texV = *pbVar2 * 0x1e - 2;
         }
     }
@@ -800,7 +800,7 @@ static void menu_draw_inventory(void)
     g_invDepthLayer = 9;
     if (g_EquippedItemId != 0) {
         iVar5 = (int)((unsigned int)g_EquippedItemId * 2 + (unsigned int)(uintptr_t)ITEM_SLOTS);
-        g_TextureDesc.depth = 0x1c;
+        g_TextureDesc.texturePage = 0x1c;
         display_item_qty(*(unsigned char*)(iVar5 - 2), *(unsigned char*)(iVar5 - 1), 9);
     }
 
@@ -814,7 +814,7 @@ static void menu_draw_inventory(void)
     g_invDepthLayer = 9;
     bVar6 = g_TotalHeldItems;
     while (bVar6 != 0) {
-        g_TextureDesc.depth = 0x1d;
+        g_TextureDesc.texturePage = 0x1d;
         g_TextureDesc.width = 40;
         bVar6 = bVar6 - 1;
         g_TextureDesc.height = 30;
@@ -833,13 +833,13 @@ static void menu_draw_inventory(void)
             uVar11 = 1;
             g_TextureDesc.texU = 0;
             uVar10 = 0x1e;
-            g_TextureDesc.depth = 0;
+            g_TextureDesc.texturePage = 0;
             g_TextureDesc.printClutTint = 0x1e0;
             g_TextureDesc.texV = *pbVar2 * 0x1e - 2;
         }
         display_texture(&g_TextureDesc, (unsigned short)g_invDepthLayer + 1, uVar10, uVar11);
 
-        g_TextureDesc.depth = 0x1c;
+        g_TextureDesc.texturePage = 0x1c;
         pbVar2 = (unsigned char*)ITEM_SLOTS + uVar7 * 2;
         display_item_qty(*pbVar2, *(pbVar2 + 1), g_invDepthLayer);
     }
@@ -1718,7 +1718,7 @@ move_skip_name:
         // Original: switchD_0040149e::caseD_0 at 0x004014a5 - same draw.
         g_TextureDesc.flags = 0x01000040;
         g_TextureDesc.texU = 0x6c;
-        g_TextureDesc.depth = 0x1c;
+        g_TextureDesc.texturePage = 0x1c;
         g_TextureDesc.texV = 0x60;
         g_TextureDesc.unk10 = 0;
         g_TextureDesc.printClutTint = 0x1e4;
@@ -1754,7 +1754,7 @@ move_skip_name:
 static void menu_draw_cursor(void)
 {
     g_TextureDesc.flags = 0x01000040;
-    g_TextureDesc.depth = 0x1c;
+    g_TextureDesc.texturePage = 0x1c;
     g_TextureDesc.unk10 = 0;
     g_TextureDesc.printClutTint = 0x1e4;
     g_TextureDesc.screenX = *(short*)((int)g_inventorySlotsPos + DAT_00ae9f23 * 2);
@@ -1834,19 +1834,19 @@ void FUN_00454fd0(int itemId, int mode, short x, short y)
     do {
         bVar1 = *pbVar2;
         if (bVar1 == 0xf8) {
-            g_TextureDesc.depth = 0x1e;
+            g_TextureDesc.texturePage = 0x1e;
             pbVar2 = pbVar2 + 1;
             bVar1 = *pbVar2 / 0x12 + 0xf;
         } else if (bVar1 == 0xf9) {
             pbVar2 = pbVar2 + 1;
-            g_TextureDesc.depth = 0x1f;
+            g_TextureDesc.texturePage = 0x1f;
             bVar1 = *pbVar2 / 0x12;
         } else if (bVar1 == 0xfa) {
             pbVar2 = pbVar2 + 1;
-            g_TextureDesc.depth = 0x1f;
+            g_TextureDesc.texturePage = 0x1f;
             bVar1 = *pbVar2 / 0x12 + 0xe;
         } else {
-            g_TextureDesc.depth = 0x1e;
+            g_TextureDesc.texturePage = 0x1e;
             bVar1 = *pbVar2 / 0x12 + 2;
         }
         pbVar4 = pbVar2 + 1;
@@ -1956,7 +1956,7 @@ submenu_default:
     // Draw the item action submenu box with the selected option highlighted
     if ((DAT_00ae9f27 != 0) && ((DAT_00ae9f28 & 8) == 0)) {
         g_TextureDesc.flags = 0x01000040;
-        g_TextureDesc.depth = 0x1c;
+        g_TextureDesc.texturePage = 0x1c;
         g_TextureDesc.unk10 = 0;
         g_TextureDesc.printClutTint = 0x1e4;
         g_TextureDesc.screenX = 0x90;
@@ -2292,7 +2292,7 @@ static void menu_load_item_model(void)
     strcat(DAT_008e1cb0, (const char*)g_ItemModelExtIVM);
 
     LoadFile(DAT_008e1cb0, g_TimImageBuffer__bitmap, 0x20);
-    g_TextureDepthByte = 0x1c;
+    g_TextureCurrentPage = 0x1c;
     g_TextureBankID = 0x15;
     FUN_00484420(g_TimImageBuffer__bitmap, (void*)0xd024cc);
     DAT_00ae9f1e = DAT_00ae9f1e | 0x80;
@@ -2403,7 +2403,7 @@ static void menu_draw_health_bar(void)
         g_TextureDesc.height = 8;
         g_TextureDesc.unk10 = 0;
         g_TextureDesc.printClutTint = 0x1e4;
-        g_TextureDesc.depth = 0x1c;
+        g_TextureDesc.texturePage = 0x1c;
 
         // Draw face icon based on health status
         switch (DAT_00ae9f2f) {
@@ -2964,12 +2964,12 @@ static void map_display_draw(unsigned char* state)
             dbg_printf("[MAP] page %02X srv=%p w=%d h=%d bpp=%d ox=%d oy=%d depth=%d clut=%d\n",
                 s, g_TexturePageSRV[s], g_TexturePageWidth[s], g_TexturePageHeight[s],
                 g_TexturePageBpp[s], g_TexturePageOriginX[s], g_TexturePageOriginY[s],
-                g_TexturePageDepth[s], g_TexturePageClutBase[s]);
+                g_TexturePageId[s], g_TexturePageClutBase[s]);
         }
         dbg_printf("[MAP] zoom0: flags=%08X xy=(%d,%d) wh=(%d,%d) texUV=(%d,%d) depth=%d clut=%d\n",
             g_MapZoomDesc[0].flags, g_MapZoomDesc[0].screenX, g_MapZoomDesc[0].screenY,
             g_MapZoomDesc[0].width, g_MapZoomDesc[0].height,
-            g_MapZoomDesc[0].texU, g_MapZoomDesc[0].texV, g_MapZoomDesc[0].depth,
+            g_MapZoomDesc[0].texU, g_MapZoomDesc[0].texV, g_MapZoomDesc[0].texturePage,
             g_MapZoomDesc[0].printClutTint);
     } else {
         AddSprite_Ex(&g_MapZoomDesc[0], 0x28, 0xd, 1);
@@ -4741,7 +4741,7 @@ static void itembox_draw_cursor(void)
     // frame parts and dropped the *2 scale, so the cursor drew at garbage
     // positions.
     g_TextureDesc.flags = 0x01000040;
-    g_TextureDesc.depth = 0x1c;
+    g_TextureDesc.texturePage = 0x1c;
     g_TextureDesc.unk10 = 0;
     g_TextureDesc.printClutTint = 0x1e4;
     g_TextureDesc.screenX = *(short*)(g_inventorySlotsPos + (unsigned int)DAT_00ae9f23 * 2);
@@ -5037,7 +5037,7 @@ static const unsigned char s_itemboxFramePartsC[36] = {
 static void loadMenuAssets(void)
 {
     LoadFile(GAME_DATA_ROOT "data\\itemboxn.tim", g_TimImageBuffer__bitmap, 0x20);
-    g_TextureDepthByte = 0x1c;
+    g_TextureCurrentPage = 0x1c;
     g_TextureBankID = 0x15;
     LoadTexturePage(g_TimImageBuffer__bitmap, 0x15, 0x1c, 0xc, 0, 0, 0, 0);
 
@@ -5121,7 +5121,7 @@ static void draw_itembox_menu(void)
     // 450) - so the pieces are submitted in the original's order.
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.printClutTint = 0x1fc;
-    g_TextureDesc.depth = 0x15;
+    g_TextureDesc.texturePage = 0x15;
     g_CurrentMenuFramesDataPtr = (unsigned short*)(s_itemboxFramePartsA + sizeof(s_itemboxFramePartsA));
     g_TextureDesc.unk10 = 0;
     for (int i = 0; i < 5; i++) {
@@ -5148,7 +5148,7 @@ static void draw_itembox_menu(void)
             g_TextureDesc.printClutTint = 0x1e0;
             g_TextureDesc.texU = 0;
             g_TextureDesc.texV = 0;
-            g_TextureDesc.depth = 0x1c;
+            g_TextureDesc.texturePage = 0x1c;
             display_texture(&g_TextureDesc, 0x17, 0xa, 1);
         } else {
             // Filled slot: the item icon was composited into the shared
@@ -5158,7 +5158,7 @@ static void draw_itembox_menu(void)
             // original's 0x15/0x1fc (the itemboxn page's space) never matches
             // a page here, so the desc is adapted the same way the inventory
             // item draw is.
-            g_TextureDesc.depth = 0x1d;
+            g_TextureDesc.texturePage = 0x1d;
             g_TextureDesc.texU = (slot & 1) * 0x28;
             g_TextureDesc.printClutTint = 0x1e4;
             g_TextureDesc.texV = (slot & 6) * 0x10 + slide2 + 0x50;
@@ -5168,13 +5168,13 @@ static void draw_itembox_menu(void)
                 // Special items (>= 0x6f) come from staitem.tim (page slot
                 // 0x1E), one 30px row per item id
                 g_TextureDesc.printClutTint = 0x1e0;
-                g_TextureDesc.depth = 0;
+                g_TextureDesc.texturePage = 0;
                 g_TextureDesc.texU = 0;
                 g_TextureDesc.texV = (unsigned char)(itemId * 0x1e) + slide2 - 2;
                 display_texture(&g_TextureDesc, 0x17, 0x1e, 1);
             }
             g_TextureDesc.screenX = g_TextureDesc.screenX - 2;
-            g_TextureDesc.depth = 0x1c;
+            g_TextureDesc.texturePage = 0x1c;
             g_TextureDesc.screenY = (unsigned short)qtyY;
             display_item_qty(itemId, g_itemboxSlots[slot].qty, 0x16);
         }
@@ -5244,7 +5244,7 @@ static void draw_itembox_menu(void)
     g_TextureDesc.height = 1;
     g_TextureDesc.unk10 = 0;
     g_TextureDesc.printClutTint = 0x1fc;
-    g_TextureDesc.depth = 0x15;
+    g_TextureDesc.texturePage = 0x15;
     unsigned char triCount = 3;
     do {
         if (0x2f < triSlot) {
@@ -5546,7 +5546,7 @@ static void FUN_0044eca0(void)
     g_TextureDesc.width = 9;
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.texV = 0x7c;
-    g_TextureDesc.depth = 0x1c;
+    g_TextureDesc.texturePage = 0x1c;
     g_TextureDesc.unk10 = 0;
     g_TextureDesc.printClutTint = 0x1e4;
     g_TextureDesc.height = 9;

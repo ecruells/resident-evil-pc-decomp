@@ -170,14 +170,14 @@ static void LoadCharacterWeaponTmd(void)
 
     // 0x004625a0: the character's own texture bank/depth is swapped in for the
     // texture pass and restored afterwards.
-    unsigned char savedDepth = g_TextureDepthByte;
+    unsigned char savedPage = g_TextureCurrentPage;
     unsigned char savedBank  = g_TextureBankID;
-    g_TextureDepthByte = ENTITY->attacking_direction;   // +0x16c
+    g_TextureCurrentPage = ENTITY->attacking_direction;   // +0x16c
     g_TextureBankID    = ENTITY->texBank;               // +0x16e
     ProcessTmdTextures(2, *(unsigned int**)(weaponSlot + 0x14),
-                       g_TextureBankID, g_TextureDepthByte);
+                       g_TextureBankID, g_TextureCurrentPage);
     g_TextureBankID    = savedBank;
-    g_TextureDepthByte = savedDepth;
+    g_TextureCurrentPage = savedPage;
 
     *(char**)(weaponSlot + 0x14) = *(char**)(weaponSlot + 0x14) + 0xc;
     *(void**)(weaponSlot + 0x18) = g_loadDataDestPointer;

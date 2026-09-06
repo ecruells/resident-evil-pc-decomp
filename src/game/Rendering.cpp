@@ -60,15 +60,15 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (pD3D == NULL) return 0;
 
-    // Determine which font texture to use based on depth/tpage code.
-    // depth == 0x15 (default) → fontus.tim (m_FontTexHandle, bank 0x1E)
-    // depth == 1 (font03t)    → font03t.tim (texture page slot 2)
-    // depth == 0              → fontus.tim (standard text rendering)
+    // Determine which font texture to use based on the tpage code.
+    // texturePage == 0x15 (default) → fontus.tim (m_FontTexHandle, bank 0x1E)
+    // texturePage == 1 (font03t)    → font03t.tim (texture page slot 2)
+    // texturePage == 0              → fontus.tim (standard text rendering)
     MarniHandle texHandle = pD3D->m_FontTexHandle;
     int texW = pD3D->m_FontTexWidth;
     int texH = pD3D->m_FontTexHeight;
 
-    if (texture->depth == 1) {
+    if (texture->texturePage == 1) {
         // Font03t.tim is loaded at texture page slot 2 (slot+0xF = 17)
         int srvIdx = 2 + 0xF;
         if (srvIdx >= 0 && srvIdx < 256 && g_TexturePageSRV[srvIdx] != MARNI_NULL_HANDLE) {
@@ -94,15 +94,16 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     float charW = (float)texture->width * scaleX;
     float charH = (float)texture->height * scaleY;
 
-    // Font page select. The original's AddTintSprite looks `depth` up in the
-    // texture-page table (JPN FUN_00441120 searches slots 12-14 for the id in
-    // TextureDesc+0x0C), so 0x1E and 0x1F name two DIFFERENT pages of the same
-    // font sheet. fontus.tim is 256x256 and only ever fills page 0x1E; the
+    // Font page select. The original's AddTintSprite looks `texturePage` up in
+    // the texture-page table (JPN 0x00441120 / USA 0x0046e0a0 search slots
+    // 12-14 for the id at TextureDesc+0x0C, returning 0 if none matches), so
+    // 0x1E and 0x1F name two DIFFERENT pages of the same font sheet.
+    // fontus.tim is 256x256 and only ever fills page 0x1E; the
     // Japanese FONT.TIM is 768x256, so its kanji half is page 0x1F, one
     // 256-texel page to the right. texU is a byte in the descriptor and cannot
     // carry that, exactly as in the original — the page adds it here.
     int texUBase = texture->texU;
-    if (texture->depth == 0x1F && texW >= 512) {
+    if (texture->texturePage == 0x1F && texW >= 512) {
         texUBase += 256;
     }
 
@@ -709,9 +710,9 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
     static const int s_TexScale[4] = { 4, 2, 1, 1 };
     int scale = s_TexScale[(texture->flags >> 24) & 3];
 
-    // VRAM-space texture position (from depth/tpage code, texU, texV)
+    // VRAM-space texture position (from the tpage code, texU, texV)
     unsigned int vAdd = 0;
-    unsigned int p    = texture->depth;
+    unsigned int p    = texture->texturePage;
     if (p > 16) { vAdd = 256; p -= 16; }
     int texUWords = (int)(p * 0x40u + texture->texU / scale);
     int texVAbs   = (int)(vAdd + texture->texV);
@@ -722,7 +723,7 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
 
     int foundSlot    = -1;
     int foundOriginX = 0, foundOriginY = 0;
-    int foundDepth   = 0;
+    int foundPage   = 0;
 
     // DEBUG: remember the first loaded slot in range so a failed search can
     // report what was checked against what. The menu textures (frame 15,
@@ -739,7 +740,7 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
 
         short oX  = g_TexturePageOriginX[cur];
         short oY  = g_TexturePageOriginY[cur];
-        short d   = g_TexturePageDepth[cur];
+        short d   = g_TexturePageId[cur];
         int   bpp = g_TexturePageBpp[cur];
         if (bpp <= 0) bpp = 16;
         int bw = bpp == 4 ? 4 : bpp == 8 ? 2 : 1;
@@ -768,7 +769,7 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
             foundSlot   = cur;
             foundOriginX = oX;
             foundOriginY = oY;
-            foundDepth   = d;
+            foundPage   = d;
             break;
         }
     }
@@ -782,8 +783,8 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
     //  DX11: use foundSlot + clutIdx for per-palette SRVs when implemented)
 
     // UV computation (page-relative PIXEL units):
-    int depthOfs = ((int)texture->depth - foundDepth) * scale * 0x40;
-    int su0 = (int)texture->texU - foundOriginX * scale + depthOfs;
+    int pageOfs = ((int)texture->texturePage - foundPage) * scale * 0x40;
+    int su0 = (int)texture->texU - foundOriginX * scale + pageOfs;
     int sv0 = (int)texture->texV - foundOriginY;
     int su1 = su0 + texture->width  - 1;
     int sv1 = sv0 + texture->height - 1;
@@ -852,9 +853,9 @@ static int AddSpriteEx_Core(TextureDesc* texture, unsigned short depth, int slot
     static const int s_TexScale[4] = { 4, 2, 1, 1 };
     int scale = s_TexScale[(texture->flags >> 24) & 3];
 
-    // VRAM-space texture position (from depth/tpage code, texU, texV)
+    // VRAM-space texture position (from the tpage code, texU, texV)
     unsigned int vAdd = 0;
-    unsigned int p    = texture->depth;
+    unsigned int p    = texture->texturePage;
     if (p > 16) { vAdd = 256; p -= 16; }
     int texUWords = (int)(p * 0x40u + texture->texU / scale);
     int texVAbs   = (int)(vAdd + texture->texV);
@@ -865,7 +866,7 @@ static int AddSpriteEx_Core(TextureDesc* texture, unsigned short depth, int slot
 
     int foundSlot    = -1;
     int foundOriginX = 0, foundOriginY = 0;
-    int foundDepth   = 0;
+    int foundPage   = 0;
 
     for (int i = 0; i < pageCount; i++) {
         int cur = shiftedSlot + i;
@@ -874,7 +875,7 @@ static int AddSpriteEx_Core(TextureDesc* texture, unsigned short depth, int slot
 
         short oX  = g_TexturePageOriginX[cur];
         short oY  = g_TexturePageOriginY[cur];
-        short d   = g_TexturePageDepth[cur];
+        short d   = g_TexturePageId[cur];
         int   bpp = g_TexturePageBpp[cur];
         if (bpp <= 0) bpp = 16;
         int bw = bpp == 4 ? 4 : bpp == 8 ? 2 : 1;
@@ -895,7 +896,7 @@ static int AddSpriteEx_Core(TextureDesc* texture, unsigned short depth, int slot
             foundSlot   = cur;
             foundOriginX = oX;
             foundOriginY = oY;
-            foundDepth   = d;
+            foundPage   = d;
             break;
         }
     }
@@ -906,8 +907,8 @@ static int AddSpriteEx_Core(TextureDesc* texture, unsigned short depth, int slot
     if (clutIdx == 8) clutIdx = 1;
 
     // UV computation (page-relative PIXEL units):
-    int depthOfs = ((int)texture->depth - foundDepth) * scale * 0x40;
-    int su0 = (int)texture->texU - foundOriginX * scale + depthOfs;
+    int pageOfs = ((int)texture->texturePage - foundPage) * scale * 0x40;
+    int su0 = (int)texture->texU - foundOriginX * scale + pageOfs;
     int sv0 = (int)texture->texV - foundOriginY;
     int su1 = su0 + texture->width  - 1;
     int sv1 = sv0 + texture->height - 1;
@@ -1252,14 +1253,14 @@ static void message_render_chars(void)
         case 0xfa: // full-width character
             bVar1 = pbVar2[1] / 0x12 + 0xe;
 msg_render_char_wide:
-            g_TextureDesc.depth = 0x1f;
+            g_TextureDesc.texturePage = 0x1f;
             pbVar2 = pbVar2 + 1;
             goto msg_draw_char;
 
         default: // normal character
             bVar1 = bVar1 / 0x12 + 2;
 msg_render_char:
-            g_TextureDesc.depth = 0x1e;
+            g_TextureDesc.texturePage = 0x1e;
 msg_draw_char:
             // Calculate texture coordinates from character index
             g_TextureDesc.texV = bVar1 * 0xe;
@@ -1585,7 +1586,7 @@ msg_skip_char:
             g_TextureDesc.flags = 0x40;
             g_TextureDesc.width = curGlyphW;
             g_TextureDesc.height = 14;
-            g_TextureDesc.depth = 0x1e;
+            g_TextureDesc.texturePage = 0x1e;
             g_TextureDesc.texU = (unsigned char)(11 * curGlyphW);
             g_TextureDesc.texV = 28;
             g_TextureDesc.unk10 = 0x100;
@@ -1642,7 +1643,7 @@ msg_skip_char:
                 // 2*14 = 0x1C in the Japanese one.
                 g_TextureDesc.texU = (unsigned char)(2 * ynGlyphW);
                 g_TextureDesc.texV = 0x1c;
-                g_TextureDesc.depth = 0x1e;
+                g_TextureDesc.texturePage = 0x1e;
                 g_TextureDesc.unk10 = 0x100;
                 g_TextureDesc.printClutTint = 0x1e0;
                 g_TextureDesc.screenX = screenX - g_ScreenOffsetX;

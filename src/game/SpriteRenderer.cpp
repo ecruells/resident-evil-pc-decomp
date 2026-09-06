@@ -355,9 +355,9 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
     static const int s_TexScale[4] = { 4, 2, 1, 1 };
     int scale = s_TexScale[(texture->flags >> 24) & 3];
 
-    // VRAM-space texture position (from depth/tpage code, texU, texV)
+    // VRAM-space texture position (from the tpage code, texU, texV)
     unsigned int vAdd = 0;
-    unsigned int p    = texture->depth;
+    unsigned int p    = texture->texturePage;
     if (p > 16) { vAdd = 256; p -= 16; }
     int texUWords = (int)(p * 0x40u + texture->texU / scale);
     int texVAbs   = (int)(vAdd + texture->texV);
@@ -369,14 +369,14 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
     // frame borders, health-bar pieces) rendered the wrong texture or nothing.
     int foundSlot    = -1;
     int foundOriginX = 0, foundOriginY = 0;
-    int foundDepth   = 0;
+    int foundPage   = 0;
 
     for (int cur = 0xF; cur <= 0x2D; cur++) {
         if (g_TexturePageSRV[cur] == NULL) continue;
 
         short oX  = g_TexturePageOriginX[cur];
         short oY  = g_TexturePageOriginY[cur];
-        short d   = g_TexturePageDepth[cur];
+        short d   = g_TexturePageId[cur];
         int   bpp = g_TexturePageBpp[cur];
         if (bpp <= 0) bpp = 16;
         int bw = bpp == 4 ? 4 : bpp == 8 ? 2 : 1;
@@ -397,7 +397,7 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
             foundSlot    = cur;
             foundOriginX = oX;
             foundOriginY = oY;
-            foundDepth   = d;
+            foundPage   = d;
             break;
         }
     }
@@ -409,8 +409,8 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
     if (clutIdx == 8) clutIdx = 1;
 
     // UV computation (page-relative PIXEL units):
-    int depthOfs = ((int)texture->depth - foundDepth) * scale * 0x40;
-    int su0 = (int)texture->texU - foundOriginX * scale + depthOfs;
+    int pageOfs = ((int)texture->texturePage - foundPage) * scale * 0x40;
+    int su0 = (int)texture->texU - foundOriginX * scale + pageOfs;
     int sv0 = (int)texture->texV - foundOriginY;
     int su1 = su0 + texture->width  - 1;
     int sv1 = sv0 + texture->height - 1;
@@ -520,10 +520,10 @@ int AddSprite(TextureDesc* texture, short depth, int tpage, int fade) {
     // raw descriptor U/V values samples unrelated art from the room page.
     static const int pageWidthFactor[4] = { 1, 2, 4, 8 };
     const int factor = pageWidthFactor[(texture->flags & 0x03000000) >> 24];
-    unsigned short textureDepth = (unsigned short)texture->depth;
+    unsigned short pageCode = (unsigned short)texture->texturePage;
     short vPageOffset = 0;
-    if (textureDepth > 0x10) {
-        textureDepth = (unsigned short)(textureDepth - 0x10);
+    if (pageCode > 0x10) {
+        pageCode = (unsigned short)(pageCode - 0x10);
         vPageOffset = 0x100;
     }
 
@@ -535,7 +535,7 @@ int AddSprite(TextureDesc* texture, short depth, int tpage, int fade) {
     const short pageOriginY = (textureSlot >= 0 && textureSlot < 256)
         ? g_TexturePageOriginY[textureSlot] : 0;
     cmd->u0 = (unsigned short)(factor *
-        ((int)textureDepth * 0x40 + ((unsigned int)texture->texU / factor) - pageOriginX));
+        ((int)pageCode * 0x40 + ((unsigned int)texture->texU / factor) - pageOriginX));
     cmd->v0 = (unsigned short)(vPageOffset + texture->texV - pageOriginY);
     cmd->u1 = cmd->u0 + texture->width - 1;
     cmd->v1 = cmd->v0 + texture->height - 1;

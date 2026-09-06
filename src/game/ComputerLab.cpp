@@ -129,7 +129,7 @@ struct ClRow {
     unsigned char  pad2[3];
     short          width;
     short          height;
-    short          depth;
+    short          texturePage;
     short          pad3;
 };
 
@@ -359,7 +359,7 @@ static void cl_windows_update(void);
 static void cl_typing_update(void);
 static void cl_draw_quads(short baseX, short baseY, unsigned char flags,
                           unsigned char count, const ClQuad* quads,
-                          unsigned short depth, short depthKeyA, int depthKeyB);
+                          unsigned short texturePage, short depthKeyA, int depthKeyB);
 static int  cl_fade_step(char step, unsigned char msgOnFadeOut);
 static void cl_text_begin(unsigned char recIdx);
 
@@ -1067,8 +1067,8 @@ static const ClLogoQuad s_logoWedgeQuad[2] = {
 };
 
 // umb02's page descriptor, and the tpage code the wordmark draws it with.
-#define CL_LOGO_WEDGE_PAGE  0x28
-#define CL_LOGO_WEDGE_DEPTH 0x0b
+#define CL_LOGO_WEDGE_SLOT  0x28
+#define CL_LOGO_WEDGE_TPAGE 0x0b
 
 // Verified in-game: with f = g_sceneRenderParam = 589 and centre (160, 120) the
 // mark's rotation origin projects to (160, 81) - the middle of the monitor,
@@ -1078,10 +1078,10 @@ static const ClLogoQuad s_logoWedgeQuad[2] = {
 static void cl_logo_draw_wedge(const ClLogoSlot* s, int quadIdx)
 {
     if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - 1) return;
-    if (g_TexturePageSRV[CL_LOGO_WEDGE_PAGE] == MARNI_NULL_HANDLE) return;
+    if (g_TexturePageSRV[CL_LOGO_WEDGE_SLOT] == MARNI_NULL_HANDLE) return;
 
-    const int pageW = g_TexturePageWidth[CL_LOGO_WEDGE_PAGE];
-    const int pageH = g_TexturePageHeight[CL_LOGO_WEDGE_PAGE];
+    const int pageW = g_TexturePageWidth[CL_LOGO_WEDGE_SLOT];
+    const int pageH = g_TexturePageHeight[CL_LOGO_WEDGE_SLOT];
     if (pageW <= 0 || pageH <= 0) return;
 
     // The three params the original computes from the slot's scale. The wedge
@@ -1110,10 +1110,10 @@ static void cl_logo_draw_wedge(const ClLogoSlot* s, int quadIdx)
     // Page-relative pixel UVs, derived exactly as the sprite path does. Scale 2
     // is s_TexScale[(flags >> 24) & 3] for the 0x01000040 the draw pass sets.
     const int   uvScale  = 2;
-    const int   depthOfs = (CL_LOGO_WEDGE_DEPTH - (int)g_TexturePageDepth[CL_LOGO_WEDGE_PAGE])
+    const int   pageOfs = (CL_LOGO_WEDGE_TPAGE - (int)g_TexturePageId[CL_LOGO_WEDGE_SLOT])
                            * uvScale * 0x40;
-    const int   uBase    = depthOfs - (int)g_TexturePageOriginX[CL_LOGO_WEDGE_PAGE] * uvScale;
-    const int   vBase    = -(int)g_TexturePageOriginY[CL_LOGO_WEDGE_PAGE];
+    const int   uBase    = pageOfs - (int)g_TexturePageOriginX[CL_LOGO_WEDGE_SLOT] * uvScale;
+    const int   vBase    = -(int)g_TexturePageOriginY[CL_LOGO_WEDGE_SLOT];
 
     const ClLogoQuad* q = &s_logoWedgeQuad[quadIdx];
 
@@ -1174,7 +1174,7 @@ static void cl_logo_draw_wedge(const ClLogoSlot* s, int quadIdx)
     cmd->g = 1.0f;
     cmd->b = 1.0f;
     cmd->variantAlpha = 0.0f;
-    cmd->extraFlags   = CL_LOGO_WEDGE_PAGE;
+    cmd->extraFlags   = CL_LOGO_WEDGE_SLOT;
 
     g_SpriteQueueCount++;
 }
@@ -1199,7 +1199,7 @@ static void cl_logo_draw(void)
             continue;
         }
 
-        g_TextureDesc.depth  = 0x0b;
+        g_TextureDesc.texturePage  = 0x0b;
         g_TextureDesc.printClutTint = 0x1ed;
         g_TextureDesc.pivotX = s->pivotX;
         g_TextureDesc.pivotY = s->pivotY;
@@ -1389,17 +1389,19 @@ static void cl_typing_update(void)
 // The terminal's whole UI is built from lists of these quads. Quads are walked
 // BACK TO FRONT (the original advances to entry count-1 and decrements), a
 // zero `repeat` counts as one, and `flags` bit 0 tiles down instead of across.
-// `flags` bit 6 pushes the sprite 0x3ff further back in the sort.
+// `flags` bit 6 pushes the sprite 0x3ff further back in the sort. `texturePage`
+// is the tpage the quads sample from (it also picks the CLUT row); the real
+// sort keys are depthKeyA/depthKeyB.
 // ============================================================================
 static void cl_draw_quads(short baseX, short baseY, unsigned char flags,
                           unsigned char count, const ClQuad* quads,
-                          unsigned short depth, short depthKeyA, int depthKeyB)
+                          unsigned short texturePage, short depthKeyA, int depthKeyB)
 {
-    g_TextureDesc.depth  = (short)depth;
+    g_TextureDesc.texturePage  = (short)texturePage;
     g_TextureDesc.unk10  = 0;
     g_TextureDesc.pivotX = 0;
     g_TextureDesc.pivotY = 0;
-    g_TextureDesc.printClutTint = (short)((int)(depth - 7) / 2 + 0x1eb);
+    g_TextureDesc.printClutTint = (short)((int)(texturePage - 7) / 2 + 0x1eb);
 
     if (count == 0) return;
 
@@ -1454,7 +1456,7 @@ static void cl_draw_keyboard(void)
         const unsigned char bright = (unsigned char)s_win[3].alpha;
 
         g_TextureDesc.flags  = 0x1000000;
-        g_TextureDesc.depth  = 9;
+        g_TextureDesc.texturePage  = 9;
         g_TextureDesc.unk10  = 0;
         g_TextureDesc.width  = 0x18;
         g_TextureDesc.height = 0x18;
@@ -1546,7 +1548,7 @@ static void cl_draw_windows(void)
                 (unsigned char)((5 - idx) * 10);
             cl_draw_quads(w->x, w->y, blend, 8, s_frameQuads, 10, (short)key, key);
 
-            g_TextureDesc.depth  = 9;
+            g_TextureDesc.texturePage  = 9;
             g_TextureDesc.unk10  = 0;
             g_TextureDesc.printClutTint = 0x1ec;
             g_TextureDesc.width  = 0x10;
@@ -1569,8 +1571,8 @@ static void cl_draw_windows(void)
                     g_TextureDesc.texV   = row->texV;
                     g_TextureDesc.width  = (unsigned short)(row->width << 3);
                     g_TextureDesc.height = (unsigned short)(row->height << 4);
-                    g_TextureDesc.depth  = row->depth;
-                    g_TextureDesc.printClutTint = (short)(((int)(row->depth - 7) >> 1) + 0x1eb);
+                    g_TextureDesc.texturePage  = row->texturePage;
+                    g_TextureDesc.printClutTint = (short)(((int)(row->texturePage - 7) >> 1) + 0x1eb);
                     SubmitEffectSprite_Ex(&g_TextureDesc, (unsigned short)(idx * -0x80 + 0x210),
                                           0x17, 2, idx * -0x80 + 0x210);
                 }
@@ -1583,7 +1585,7 @@ static void cl_draw_windows(void)
                     g_TextureDesc.texV   = 0x30;
                     g_TextureDesc.width  = 8;
                     g_TextureDesc.height = 0x10;
-                    g_TextureDesc.depth  = 9;
+                    g_TextureDesc.texturePage  = 9;
                     g_TextureDesc.printClutTint = 0x1ec;
                     g_TextureDesc.screenX = (short)(rowLeft + 0x10 + row->width * 8);
                     for (int i = 0; i < pad; i++) {
@@ -1598,7 +1600,7 @@ static void cl_draw_windows(void)
         } else if (idx == 0) {
             g_TextureDesc.screenX = -0x96;
             g_TextureDesc.screenY = -0x69;
-            g_TextureDesc.depth   = 0;
+            g_TextureDesc.texturePage   = 0;
             g_TextureDesc.unk10   = 0;
             g_TextureDesc.printClutTint = 0x1e0;
             g_TextureDesc.texU    = 0x59;
@@ -1621,7 +1623,7 @@ static void cl_draw_windows(void)
         } else if (idx == 1) {
             g_TextureDesc.screenX = -0x10;
             g_TextureDesc.screenY = -0x39;
-            g_TextureDesc.depth   = 0;
+            g_TextureDesc.texturePage   = 0;
             g_TextureDesc.unk10   = 0;
             g_TextureDesc.printClutTint = 0x1e0;
             g_TextureDesc.texU    = 0x56;
@@ -1638,7 +1640,7 @@ static void cl_draw_windows(void)
         } else {
             g_TextureDesc.screenX = 0x10;
             g_TextureDesc.screenY = -0x28;
-            g_TextureDesc.depth   = 0;
+            g_TextureDesc.texturePage   = 0;
             g_TextureDesc.unk10   = 0;
             g_TextureDesc.printClutTint = 0x1e0;
             g_TextureDesc.texU    = 0xb3;
@@ -1668,7 +1670,7 @@ static void cl_draw_windows(void)
 // ============================================================================
 static void cl_draw_text(void)
 {
-    g_TextureDesc.depth  = 9;
+    g_TextureDesc.texturePage  = 9;
     g_TextureDesc.unk10  = 0;
     g_TextureDesc.printClutTint = 0x1ec;
     g_TextureDesc.width  = 0x10;
@@ -1702,7 +1704,7 @@ static void cl_draw_text(void)
                     PrintText8x8((short)(sx + 0xa4), (short)(sy + 0x7c), 0xf0, 0);
                     g_TextureDesc.texU   = 0xb0;
                     g_TextureDesc.texV   = 0x0f;
-                    g_TextureDesc.depth  = 9;
+                    g_TextureDesc.texturePage  = 9;
                     g_TextureDesc.unk10  = 0;
                     g_TextureDesc.printClutTint = 0x1ec;
                     g_TextureDesc.width  = 0x10;
@@ -1731,7 +1733,7 @@ static void cl_draw_caret(void)
 
     g_TextureDesc.unk10  = 0;
     g_TextureDesc.flags  = 0x01000040;
-    g_TextureDesc.depth  = 9;
+    g_TextureDesc.texturePage  = 9;
     g_TextureDesc.printClutTint = 0x1ec;
     g_TextureDesc.width  = 0x10;
     s_blinkCounter++;
@@ -1770,7 +1772,7 @@ static void cl_draw_caret(void)
         g_TextureDesc.height  = 0x11;
         g_TextureDesc.screenY = (short)((s_caretPos + s_caretBaseY) * 0x10 + s_win[0].y + 0x0e);
         g_TextureDesc.texV    = 0xc6;
-        g_TextureDesc.depth   = 0;
+        g_TextureDesc.texturePage   = 0;
         g_TextureDesc.texU    = 0;
         g_TextureDesc.unk10   = 0;
         g_TextureDesc.pivotX  = 0;
@@ -1787,7 +1789,7 @@ static void cl_draw_caret(void)
         g_TextureDesc.height  = 0x11;
         g_TextureDesc.screenY = (short)((s_caretPos + s_caretBaseY) * 0x12 + s_win[1].y + 0x0c);
         g_TextureDesc.texV    = 0xc6;
-        g_TextureDesc.depth   = 0;
+        g_TextureDesc.texturePage   = 0;
         g_TextureDesc.texU    = 0;
         g_TextureDesc.unk10   = 0;
         g_TextureDesc.pivotX  = 0;
@@ -1837,7 +1839,7 @@ static void cl_draw_door_picture(void)
     g_TextureDesc.printClutTint = 0x1e0;
     g_TextureDesc.width  = 0x54;
     g_TextureDesc.height = 0x61;
-    g_TextureDesc.depth  = 0;
+    g_TextureDesc.texturePage  = 0;
     g_TextureDesc.flags  = 0;
     g_TextureDesc.unk10  = 0;
     g_TextureDesc.texU   = 0;
@@ -1872,7 +1874,7 @@ static void cl_draw_door_picture(void)
 static void cl_draw_leds(void)
 {
     g_TextureDesc.flags  = 0x41000040;
-    g_TextureDesc.depth  = 7;
+    g_TextureDesc.texturePage  = 7;
     g_TextureDesc.printClutTint = 0x1eb;
     g_TextureDesc.width  = 6;
     g_TextureDesc.height = 4;
@@ -1900,7 +1902,7 @@ static void cl_draw_leds(void)
 // the boot sequence can do the CRT power-on stretch. 0x004125f5 / 0x0041399a.
 static void cl_draw_monitor(void)
 {
-    g_TextureDesc.depth  = 7;
+    g_TextureDesc.texturePage  = 7;
     g_TextureDesc.printClutTint = 0x1eb;
     g_TextureDesc.pivotX = 0x3c;
     g_TextureDesc.pivotY = 0x34;
@@ -2578,7 +2580,7 @@ static void cl_cmd_unlock_prompt(void)
     }
     ST_TIMER_B--;
     if (ST_TIMER_B != 0 && (cl_dpad_pressed() & 0xc0) == 0) {
-        g_TextureDesc.depth  = 0;
+        g_TextureDesc.texturePage  = 0;
         g_TextureDesc.flags  = 0;
         g_TextureDesc.screenX = -0x38;
         g_TextureDesc.screenY = -0x40;
@@ -2830,7 +2832,7 @@ static void computer_lab_finish(void)
             g_TextureDesc.colorMulR = 0x80;
             g_TextureDesc.colorMulG = 0x80;
             g_TextureDesc.flags = 0x5000000;
-            g_TextureDesc.depth = 7;
+            g_TextureDesc.texturePage = 7;
             g_TextureDesc.colorMulB = 0x80;
             g_TextureDesc.printClutTint = 0x1eb;
             g_TextureDesc.screenX = 0;

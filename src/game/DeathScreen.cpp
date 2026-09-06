@@ -296,7 +296,7 @@ void display_die_screen(void)
         g_TextureDesc.pivotY = 0;
         unk_00be1180 = 0;
         g_TextureDesc.colorMulR = 0x80;
-        g_TextureDesc.depth     = 6;
+        g_TextureDesc.texturePage     = 6;
         g_TextureDesc.colorMulG = 0x80;
         g_TextureDesc.colorMulB = 0x80;
         g_TextureDesc.scaleX    = 0x1000;

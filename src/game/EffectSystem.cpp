@@ -508,7 +508,7 @@ static const int g_EffectLightRecords[7][3] = {
 // effect_depth_record - the sprite-depth slot for the current effect.
 //
 // The original reads a byte at 0x004c48a0 + depth + (stage*0x20 + room)*4,
-// where depth is the sprite's texture-Y (g_TextureDesc.depth). That region is
+// where depth is the sprite's texture-Y (g_TextureDesc.texturePage). That region is
 // the ROOM EFFECT SPRITE TABLE at 0x004c48b8 (g_RoomEffectSpriteTable) viewed
 // 0x18 bytes early: weapon-FX texY starts at 0x18 and room effects continue
 // from there, so slot = depth - 0x18. Depth < 0x18 would land on six dwords of
@@ -518,7 +518,7 @@ static const int g_EffectLightRecords[7][3] = {
 static unsigned int effect_depth_record(void)
 {
     int idx = ((int)g_stageId * 0x20 + (int)g_roomId) * 4
-            + (int)g_TextureDesc.depth - 0x18;
+            + (int)g_TextureDesc.texturePage - 0x18;
     if (idx < 0 || idx >= (int)sizeof(g_RoomEffectSpriteTable)) return 0xFF;
     return g_RoomEffectSpriteTable[idx];
 }
@@ -2482,7 +2482,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     g_TextureDesc.pivotY = 0x80 - (unsigned short)uv[3];
     g_TextureDesc.screenX = screenX;
     g_TextureDesc.screenY = screenY;
-    g_TextureDesc.depth = *(unsigned short*)(eff->clutInfo + 6);
+    g_TextureDesc.texturePage = *(unsigned short*)(eff->clutInfo + 6);
     g_TextureDesc.unk10 = (*(unsigned short*)(eff->clutInfo + 4) & 0x3f) << 4;
     g_TextureDesc.texU = uv[0];
     g_TextureDesc.texV = uv[1];

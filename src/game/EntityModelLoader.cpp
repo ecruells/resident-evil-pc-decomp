@@ -473,7 +473,7 @@ void InitScaMatrix(int param1, ScaMatrixData* scaData)
 void LoadEntityEMD(Entity* em, unsigned char entity_id)
 {
     unsigned char bVar5 = g_TextureBankID;
-    unsigned char bVar6 = g_TextureDepthByte;
+    unsigned char bVar6 = g_TextureCurrentPage;
 
     if ((g_main_state_flags2 & MSF2_COSTUME_VARIANT) != 0 && entity_id < 2) {
         entity_id = (unsigned char)g_bCostumeVariant + 0x33;
@@ -496,7 +496,7 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
 
     unsigned char entityType = ENTITY->id;
     if (entityType > 0x1f) {
-        unsigned short uVar7 = (unsigned short)g_TextureDepthByte;
+        unsigned short uVar7 = (unsigned short)g_TextureCurrentPage;
         ENTITY->attacking_direction = (char)uVar7;
         ENTITY->dir_control_flags = (char)(uVar7 >> 8);
         *(unsigned short*)&ENTITY->texBank = (unsigned short)g_TextureBankID;
@@ -596,13 +596,13 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
         joint->anim_object = (void*)g_playerEntity.weaponPartAnimObject;
     } else {
         joint->anim_slot_ptr = (puVar1[1] & 0xFFFFFFFC) + (int)anim_buffer;
-        unsigned char prevDepth = g_TextureDepthByte;
+        unsigned char prevPage = g_TextureCurrentPage;
         unsigned char prevBank = g_TextureBankID;
-        g_TextureDepthByte = 7;
+        g_TextureCurrentPage = 7;
         g_TextureBankID = 0x16;
         ProcessTmdTextures(2, (unsigned int*)joint->anim_slot_ptr, 0x16, 7);
         g_TextureBankID = prevBank;
-        g_TextureDepthByte = prevDepth;
+        g_TextureCurrentPage = prevPage;
         joint->anim_slot_ptr += 0xc;
         joint->anim_object = (void*)param_4;
     }
@@ -643,7 +643,7 @@ void SetupCharacterData(void)
 {
     ENTITY = reinterpret_cast<Entity*>(&g_playerEntity);
     InitPlayerEntity();
-    g_TextureDepthByte = 7;
+    g_TextureCurrentPage = 7;
     g_TextureBankID = 0x16;
     Object_DeleteAll(0);
     LoadEntityModel();

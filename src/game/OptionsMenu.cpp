@@ -517,7 +517,7 @@ void options_print_14x14(short x, short y, unsigned char tint, char mirror)
 
     g_TextureDesc.flags = (unsigned int)(mirror != 0) * 0x40000000 + 0x40;
     g_TextureDesc.screenX = x - g_ScreenOffsetX;
-    g_TextureDesc.depth = 1;
+    g_TextureDesc.texturePage = 1;
     g_TextureDesc.screenY = y - g_ScreenOffsetY;
     g_TextureDesc.width = 0xe;
     g_TextureDesc.height = 0xe;
@@ -556,7 +556,7 @@ void options_print_8x8_glyph(short x, short y, unsigned char tint, char mirror)
     g_TextureDesc.flags = (unsigned int)(mirror != 0) * 0x40000000 + 0x40;
     g_TextureDesc.width = 8;
     g_TextureDesc.height = 8;
-    g_TextureDesc.depth = 1;
+    g_TextureDesc.texturePage = 1;
     g_TextureDesc.screenX = x - g_ScreenOffsetX;
     g_TextureDesc.screenY = y - g_ScreenOffsetY;
     g_TextureDesc.colorMulR = 0x80;
@@ -761,7 +761,7 @@ void options_render_cursor(void)
     }
 
     g_TextureDesc.height = 0xc;
-    g_TextureDesc.depth = 2;
+    g_TextureDesc.texturePage = 2;
     g_TextureDesc.screenY = (short)(s_optUseJoystickMode * -0xe + -0x4b);
     g_TextureDesc.width = (unsigned short)(s_optUseJoystickMode * 0x4f + 0x25);
     g_TextureDesc.colorMulR = 0x80;
@@ -1060,7 +1060,7 @@ unsigned int options_display_config_handler(void)
     // Set up render state
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.printClutTint = 0x1ff;
-    g_TextureDesc.depth = 0x15;
+    g_TextureDesc.texturePage = 0x15;
     g_TextureDesc.unk10 = 0;
     g_TextureDesc.colorMulR = 0;
     g_TextureDesc.pivotX = 0;
@@ -1694,7 +1694,7 @@ unsigned int options_key_config_handler(void)
     unk_00be1180 = 0;
     g_TextureDesc.pivotY = 0;
     g_TextureDesc.printClutTint = 0x1ff;
-    g_TextureDesc.depth = 0x15;
+    g_TextureDesc.texturePage = 0x15;
 
     if (s_optSubInitState == 0) {
         s_optPrevButtons = 0;
@@ -2092,7 +2092,7 @@ unsigned int options_joystick_config_handler(void)
     unk_00be1180 = 0;
     g_TextureDesc.pivotY = 0;
     g_TextureDesc.printClutTint = 0x1ff;
-    g_TextureDesc.depth = 0x15;
+    g_TextureDesc.texturePage = 0x15;
 
     if (s_optSubInitState == 0) {
         s_optPrevButtons = 0;
@@ -2568,7 +2568,7 @@ unsigned int options_joystick_config_input(void)
     // Render the cursor box around the selected row (0x00454908)
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.screenX = cursorBoxX[s_optCursorIndex];
-    g_TextureDesc.depth = 2;
+    g_TextureDesc.texturePage = 2;
     g_TextureDesc.screenY = (short)((s_optCursorIndex < 8 ? -0xf : -5) +
         cursorBoxY[s_optCursorIndex]);
     g_TextureDesc.width = (unsigned short)cursorBoxW[s_optCursorIndex];
@@ -2956,7 +2956,7 @@ loadKeyConfigBg:
             g_TextureDesc.pivotY = 0;
             g_TextureDesc.colorMulB = 0;
             g_TextureDesc.printClutTint = 0x1ff;
-            g_TextureDesc.depth = 0x15;
+            g_TextureDesc.texturePage = 0x15;
             unk_00be1180 = 0;
             options_menu_render();
         }

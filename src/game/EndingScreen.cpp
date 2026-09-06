@@ -324,7 +324,7 @@ static void ending_result_draw(void)
         case 3:
             // Clear time. The game timer ticks at 30Hz: 0x1a5e0 = 1h,
             // 0x708 = 1min, 0x1e = 1s. 0x5e is the sheet's separator glyph.
-            s->tex.depth         = 0x1E;
+            s->tex.texturePage         = 0x1E;
             s->tex.width         = 8;
             s->tex.height        = 0x0E;
             s->tex.unk10         = 0x100;
@@ -340,7 +340,7 @@ static void ending_result_draw(void)
         case 5:
             // Save count. The counter is one ahead of the number of saves the
             // player actually made, so it is decremented unless it is zero.
-            s->tex.depth         = 0x1E;
+            s->tex.texturePage         = 0x1E;
             s->tex.width         = 8;
             s->tex.height        = 0x0E;
             s->tex.unk10         = 0x100;
@@ -418,7 +418,7 @@ static void ending_result_build(void)
         s_alloc->tex.height        = e->height;
         s_alloc->tex.unk10         = 0;
         s_alloc->tex.printClutTint = 0x1FB;
-        s_alloc->tex.depth         = 0x1B;
+        s_alloc->tex.texturePage         = 0x1B;
 
         if (s_alloc->type == 3) {
             // Re-centre the clear time once it needs more than two digits of
@@ -663,12 +663,12 @@ static void ending_epilogue_build(void)
         s_alloc->tex.height        = e->height;
         s_alloc->tex.unk10         = 0;
         s_alloc->tex.printClutTint = 0x1FB;
-        s_alloc->tex.depth         = 0x1B;
+        s_alloc->tex.texturePage         = 0x1B;
         s_creditSlots[i] = s_alloc;
     }
 
     // The model itself goes through the item viewer's own loader/renderer.
-    g_TextureDepthByte = 0x1C;
+    g_TextureCurrentPage = 0x1C;
     g_TextureBankID = 0x15;
     FUN_00484420(s_itemModelBuf, s_itemModelDst);
 
@@ -835,7 +835,7 @@ void ending_state(void)
     LoadFile(bgPath, s_bgImageBuffer, 0x20);
 
     g_TextureBankID = 0x1B;
-    g_TextureDepthByte = 0x1B;
+    g_TextureCurrentPage = 0x1B;
     LoadTexturePage(g_loadDataDestPointer, 0x1B, 0x1B, 0xC, 0, 0, 0, 0);
     g_loadDataDestPointer = s_dat4d69f8;
 

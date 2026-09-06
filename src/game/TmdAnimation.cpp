@@ -938,7 +938,7 @@ void TmdProcessingCallback(void)
     DWORD* puVar1 = (DWORD*)(tmdData + subOffset + 0xC);
     DWORD savedVar1 = *puVar1;
 
-    *puVar7 = ((unsigned int)(g_TextureDepthByte + 0x1E0) << 16) | (header.field_10 & 0xFFFF);
+    *puVar7 = ((unsigned int)(g_TextureCurrentPage + 0x1E0) << 16) | (header.field_10 & 0xFFFF);
     *puVar1 = ((unsigned int)(g_TextureBankID & 0x10) << 20) | ((unsigned int)(g_TextureBankID & 0xF) << 6);
 
     VideoDriver_ClearState348(psvTex, g_pMarniDirect3D);
@@ -962,7 +962,7 @@ void TmdProcessingCallback(void)
     }
 
     g_TextureBankID = g_TextureBankID + (unsigned char)pageCount;
-    g_TextureDepthByte = g_TextureDepthByte + (unsigned char)(header.field_16 & 0xFF);
+    g_TextureCurrentPage = g_TextureCurrentPage + (unsigned char)(header.field_16 & 0xFF);
     DAT_004d2bf4 = 1;
 }
 

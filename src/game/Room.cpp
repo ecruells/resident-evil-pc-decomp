@@ -231,7 +231,7 @@ void Room_LoadCameraSprites(void) // 0x004757c0
         do {
             unsigned int sprCount = 0;
             if (groupHeaders[0] != 0) {
-                unsigned short depthByte = (unsigned short)g_TextureDepthByte;
+                unsigned short pageByte = (unsigned short)g_TextureCurrentPage;
                 unsigned short bankID = (unsigned short)g_TextureBankID;
                 unsigned short* sprPtr = spriteData;
                 do {
@@ -240,7 +240,7 @@ void Room_LoadCameraSprites(void) // 0x004757c0
                     entry->active = 1;
                     entry->id = (unsigned char)grpIdx + 1;
                     entry->texDesc.unk10 = (groupHeaders[1] & 0x3f) << 4;
-                    entry->texDesc.printClutTint = (short)(depthByte + 0x1e0);
+                    entry->texDesc.printClutTint = (short)(pageByte + 0x1e0);
                     entry->texDesc.texU = (unsigned char)sprPtr[0];
                     entry->texDesc.texV = *((unsigned char*)sprPtr + 1);
                     entry->texDesc.screenX = (short)((unsigned short)(unsigned char)sprPtr[1] + groupHeaders[2] - 0xa0);
@@ -248,7 +248,7 @@ void Room_LoadCameraSprites(void) // 0x004757c0
                     entry->posData = sprPtr[2];
 
                     unsigned short flags = sprPtr[3];
-                    entry->texDesc.depth = (short)((flags & 0x1f) + bankID);
+                    entry->texDesc.texturePage = (short)((flags & 0x1f) + bankID);
 
                     if ((flags & 0xf000) == 0) {
                         spriteData = sprPtr + 6;
@@ -714,7 +714,7 @@ void load_room_masks(int param_1) // 0x00475a90
         // The original passes texture-set parameter 0 here. Its legacy page
         // handle is stored in texture set 4 internally, while this port keeps
         // the D3D SRV produced from that image at direct slot 0.
-        TexturePage_SetupFull(g_TimImageBuffer__bitmap, g_TextureBankID, g_TextureDepthByte, 0);
+        TexturePage_SetupFull(g_TimImageBuffer__bitmap, g_TextureBankID, g_TextureCurrentPage, 0);
     } else {
         TexturePage_DeleteSet(4);
     }

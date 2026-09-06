@@ -717,7 +717,13 @@ struct TextureDesc {
     short screenY;              // 0x06
     unsigned short width;       // 0x08
     unsigned short height;      // 0x0a
-    short depth;                // 0x0c
+    // PS1 tpage code. AddTintSprite (USA 0x0046e0a0,
+    // JPN 0x00441120) reads this as a word and linear-searches the texture
+    // page descriptors for the slot whose page id matches; draw_texture /
+    // AddSprite decode it as a VRAM page ((v & 15) * 0x40 words across,
+    // (v / 16) * 0x100 lines down). It is the only field wide enough to
+    // reach a second page - texU/texV below are bytes.
+    short texturePage;          // 0x0c
     unsigned char texU;         // 0x0e
     unsigned char texV;         // 0x0f
     short unk10;                // 0x10 legacy PS1 alpha/tint field

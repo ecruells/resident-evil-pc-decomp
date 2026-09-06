@@ -636,7 +636,7 @@ int cmd_item_model_set(void)
     } else {
         if (((char)g_ItemModelCount == 0 || DAT_00bca0d0[1] != itemModelData[1]) && itemModelData[1] != 0) {
             DAT_008e1c78 = g_TextureBankID;
-            DAT_008e1c70 = g_TextureDepthByte;
+            DAT_008e1c70 = g_TextureCurrentPage;
             ClearTmdProcessingFlag();
             // Item types 'R' (0x52) and 'P' (0x50) get their 256-entry 5551 palette
             // darkened: each 5-bit channel drops by 9, clamped at 0, bit 15 kept.
@@ -933,7 +933,7 @@ int cmd_omodel_set(void)
     // Model TMD processing
     if (((char)g_omodelCount == 0 || DAT_00bca0d4[1] != modelData[1]) && modelData[1] != 0) {
         DAT_008e1c7c = g_TextureBankID;
-        DAT_008e1c74 = g_TextureDepthByte;
+        DAT_008e1c74 = g_TextureCurrentPage;
 
         // Stage 5 room-specific texture bank overrides.
         //
@@ -956,21 +956,21 @@ int cmd_omodel_set(void)
             if (g_roomId == ROOM_VISUAL_DATA_ROOM) {
                 if (g_TextureBankID == 9) {
                     g_TextureBankID = 0x0e;
-                    g_TextureDepthByte = 0x13;
+                    g_TextureCurrentPage = 0x13;
                     doProcessAsync = false;
                 }
             } else if (g_roomId == ROOM_SMALL_LABORATORY) {
                 if (g_TextureBankID == 7) {
                     g_TextureBankID = 9;
-                    g_TextureDepthByte++;
+                    g_TextureCurrentPage++;
                     doProcessAsync = false;
                 } else if (g_TextureBankID == 9) {
                     g_TextureBankID = 0x0b;
-                    g_TextureDepthByte++;
+                    g_TextureCurrentPage++;
                     doProcessAsync = false;
                 } else if (g_TextureBankID == 0x0b) {
                     g_TextureBankID = 0x0d;
-                    g_TextureDepthByte++;
+                    g_TextureCurrentPage++;
                     doProcessAsync = false;
                 }
             } else {

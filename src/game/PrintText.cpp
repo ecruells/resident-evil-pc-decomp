@@ -106,7 +106,7 @@ void PrintText8x8(short x, short y, unsigned char color, char shadow)
     g_TextureDesc.flags = (unsigned int)(shadow != 0) * 0x40000000 + 0x40;
     g_TextureDesc.width = 8;
     g_TextureDesc.height = 8;
-    g_TextureDesc.depth = 30;
+    g_TextureDesc.texturePage = 30;
     g_TextureDesc.screenX = x - g_ScreenOffsetX;
     g_TextureDesc.screenY = y - g_ScreenOffsetY;
     g_TextureDesc.colorMulR = 128;
@@ -186,7 +186,7 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
 
     g_TextureDesc.width  = glyphW;
     g_TextureDesc.height = 14;
-    g_TextureDesc.depth = 30;
+    g_TextureDesc.texturePage = 30;
 
     g_TextureDesc.screenX = x - g_ScreenOffsetX;
     g_TextureDesc.screenY = y - g_ScreenOffsetY;
@@ -299,7 +299,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
                 data++;
                 unsigned char nextByte = *data;
                 chr = nextByte / 18 + 15;
-                g_TextureDesc.depth = 30;
+                g_TextureDesc.texturePage = 30;
                 g_TextureDesc.texV = chr * 14;
                 g_TextureDesc.texU = (nextByte % 18) * glyphW;
                 AddTintSprite(&g_TextureDesc, brightness);
@@ -309,7 +309,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
             case 0xF9: {
                 unsigned char nextByte = data[1];
                 chr = nextByte / 18;
-                g_TextureDesc.depth = 31;
+                g_TextureDesc.texturePage = 31;
                 data++;
                 g_TextureDesc.texV = chr * 14;
                 g_TextureDesc.texU = (*data % 18) * glyphW;
@@ -320,7 +320,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
             case 0xFA: {
                 unsigned char nextByte = data[1];
                 chr = nextByte / 18 + 14;
-                g_TextureDesc.depth = 31;
+                g_TextureDesc.texturePage = 31;
                 data++;
                 g_TextureDesc.texV = chr * 14;
                 g_TextureDesc.texU = (*data % 18) * glyphW;
@@ -343,7 +343,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
 
             default:
                 chr = chr / 18 + 2;
-                g_TextureDesc.depth = 30;
+                g_TextureDesc.texturePage = 30;
                 g_TextureDesc.texV = chr * 14;
                 g_TextureDesc.texU = (*data % 18) * glyphW;
                 AddTintSprite(&g_TextureDesc, brightness);

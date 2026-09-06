@@ -320,7 +320,7 @@ void characterSelectionScreen(void)
     // Load characters police cards and selection arrow texture
     LoadFile(GAME_DATA_ROOT "data\\select_b.tim", g_TimImageBuffer__bitmap, 0x20);
     g_TextureBankID = 0x0A;
-    g_TextureDepthByte = 5;
+    g_TextureCurrentPage = 5;
     LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0C, 0, 0, 0, 0);
 
     // unused texture
@@ -485,7 +485,7 @@ void characterSelectionScreen(void)
         g_TextureDesc.colorMulR = 0x80;
         g_TextureDesc.colorMulG = 0x80;
         g_TextureDesc.colorMulB = 0x80;
-        g_TextureDesc.depth = 5;
+        g_TextureDesc.texturePage = 5;
 
         switch (g_selState) {
         case 0:
