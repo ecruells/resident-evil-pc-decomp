@@ -1487,8 +1487,10 @@ char reduce_attack_time_by_btn_press(void)
 // joint_enable_special_effect (0x0048a140)
 // Marks a joint as effect-enabled: clears bit 0 and sets 0x28 on its flags,
 // then reports the animation slot displacement. The original also dispatches
-// an async TMD tint (FUN_004855d0 -> the 0x004850d0 worker); that pipeline is
-// still unported, so only the flag/state half runs here.
+// an async TMD tint (FUN_004855d0 -> the 0x004850d0 worker), which is what
+// allocates the trail/attack-effect slot and builds the gore-spurt strip
+// geometry (port: PathTrail.cpp). That pipeline is now ported, so both halves
+// run.
 // ============================================================================
 void joint_enable_special_effect(int joint, unsigned char a, int b, unsigned char c)
 {
@@ -1498,7 +1500,8 @@ void joint_enable_special_effect(int joint, unsigned char a, int b, unsigned cha
         *flags = f;
         *flags = f | 0x28;
         g_playerDisplacement = *(int*)(*(int*)(joint + 0x14) + 0x14) * 2;
-        // FUN_004855d0(*(int*)(joint + 0x18), a, (unsigned char)b, c); - async tint, pending
+        extern void FUN_004855d0(void*, int, int, int);
+        FUN_004855d0(*(void**)(joint + 0x18), a, (int)b, (int)c);
     }
 }
 

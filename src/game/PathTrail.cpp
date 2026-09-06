@@ -35,6 +35,8 @@ extern int is_entity_in_switch_zone(VECTOR* position, void* zoneData); // Room.c
 void AsyncTrailBuildGeometry(void);
 void AsyncTrailDraw(void);
 void AsyncTrailReleaseSlot(void);
+void FUN_004850d0(void);
+void FUN_004855d0(void* animObj, int r, int g, int b);
 
 // ---------------------------------------------------------------------------
 // Staging globals (original addresses in comments; each written by its wrapper
@@ -45,6 +47,18 @@ static int   s_trailGeomCount;         // 0x00a75160 - staged by FUN_00485820
 static void* s_trailDrawObj;           // 0x00aadaa8 - staged by FUN_00485a00
 static int   s_trailDrawBright;        // 0x00aae800 - staged by FUN_00485a00
 static void* s_trailReleaseObj;        // 0x008fc420 - staged by FUN_00485aa0
+
+// ---------------------------------------------------------------------------
+// Staging globals for the trail slot creator (FUN_004855d0 -> FUN_004850d0).
+// joint_enable_special_effect (0x0048a140) passes the joint's anim_object
+// block and the three effect size params (0x60/0x28/0x28, or 0x18/0x30/0x18
+// for the alt costume). FUN_004850d0 consumes them on the scheduler task.
+// ---------------------------------------------------------------------------
+static void* s_trailCreateObj;         // 0x00923b48 - anim_object block
+static int   s_trailCreateR;           // 0x00a74dd8 - effect size param 2
+static int   s_trailCreateG;           // 0x00aae7d8 - effect size param 3
+static int   s_trailCreateB;           // 0x00aae738 - effect size param 4
+
 
 // ---------------------------------------------------------------------------
 // 0x008f88a8 - per-slot vertex capacity, written by the trail creator
@@ -120,6 +134,240 @@ void FUN_00485aa0(void* trailObj)
     ensure_trail_pools();
     s_trailReleaseObj = trailObj;
     ExecAsync((void*)AsyncTrailReleaseSlot);
+}
+
+// ===========================================================================
+// FUN_004855d0 (0x004855d0) - stage the joint attack-effect slot creation and
+// queue it. Called from joint_enable_special_effect (0x0048a140) with the
+// joint's anim_object block and the three effect size params.
+// ===========================================================================
+void FUN_004855d0(void* animObj, int r, int g, int b)
+{
+    ensure_trail_pools();
+    s_trailCreateObj = animObj;
+    s_trailCreateR = r;
+    s_trailCreateG = g;
+    s_trailCreateB = b;
+    ExecAsync((void*)FUN_004850d0);
+}
+
+// ===========================================================================
+// FUN_004850d0 (0x004850d0) - the trail / joint-attack-effect slot creator.
+//
+// This is the missing half of the flag-0x20 joint pipeline: joint_enable_
+// special_effect sets flags 0x28 (bit 0 cleared so the joint's TMD stops
+// rendering, bit 5 set so render_entity routes the joint to FUN_0048a210),
+// and THIS function allocates the trail slot, builds the strip's initial
+// geometry from the model's current animation frame, and fills the slot's
+// draw entry (texture handle, unlit colour scales, capacity, UV scales).
+//
+// Without it the port's g_trailSlotCapacity stayed all-zero, so every
+// flag-0x20 joint - the zombie's rocket-kill gore spurts (type 0x1E on six
+// joints), the magnum head shot (0x1E), the leg explosion (0x14), the Tyrant
+// limb launches and the player's weapon trails - drew nothing while the joint
+// was hidden, which read as "missing body explosion particles".
+//
+// Reconstructed from the 0x004850d0 disassembly. Sources:
+//   animObj = the staged anim_object block; its [0] is the AnimSlot pointer.
+//   AnimSlot[0] = data0   -> the animation frame's vertex table
+//   AnimSlot[4] = data2   -> the TMD primitive packet list (0x1C stride)
+//   AnimSlot[5] = entryCount -> the strip's segment count
+// Per segment one 0x34000609 (textured gouraud triangle) packet is decoded:
+// three vertices from the frame vertex table (x, -y, z), UVs from the packet
+// colour bytes divided by the material's texture width/height.
+// ===========================================================================
+void FUN_004850d0(void)
+{
+    // 1. Find a free slot (original scans 0x00aada68..0x00aadaa8 = 16).
+    int slot = -1;
+    for (int i = 0; i < 16; i++) {
+        if (g_trailSlotUsed[i] == 0) { slot = i; break; }
+    }
+    if (slot < 0) {
+        return;
+    }
+    g_trailSlotUsed[slot] = 1;
+
+    unsigned int* animObj = (unsigned int*)s_trailCreateObj;
+    if (animObj == NULL) {
+        return;
+    }
+    unsigned int* slotData = (unsigned int*)animObj[0];    // the AnimSlot
+    if (slotData == NULL) {
+        return;
+    }
+
+    int vertBase = slotData[0];                 // AnimSlot[0] = data0 (frame verts)
+    unsigned int* prims = (unsigned int*)slotData[4];  // AnimSlot[4] = data2 (TMD prims)
+    int count = slotData[5];                    // AnimSlot[5] = entryCount
+
+    // Texture page from the primitive data's page bits, remapped by the bank
+    // redirect table. The page lives inside g_psxTextureArray (0x1b60 per bank).
+    int texPage = 0;
+    if (prims != NULL) {
+        texPage = (*(int*)((char*)prims + 8) & 0x1f0000) >> 0x10;
+    }
+    if (texPage >= 0 && texPage < 23 && g_textureBankRedirect[texPage] != 0) {
+        texPage = g_textureBankRedirect[texPage];
+    }
+    if (texPage < 0 || texPage >= 32) texPage = 0;
+    BYTE* page = (BYTE*)&g_psxTextureArray[texPage * 0x1b60];
+
+    // 2. Release any previous handle and (re)size the two pool viewports.
+    CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
+    if (pD3D != NULL && pD3D->vtable != NULL && pD3D->vtable[9] != NULL) {
+        int oldHandle = INT_ARRAY_00922f00[slot * 0x21 + 0x17];
+        if (oldHandle != 0) {
+            ((void(*)(void*, int))pD3D->vtable[9])(pD3D, oldHandle);
+        }
+    }
+    INT_ARRAY_00922f00[slot * 0x21 + 0x17] = 0;
+
+    CMarniViewport2* objA = TRAIL_POOL_A(slot);
+    CMarniViewport2* objB = TRAIL_POOL_B(slot);
+
+    int vtxCount  = count * 3;
+    int listCount = count * 2;
+    objA->Release();
+    objB->Release();
+    if (vtxCount > 0) {
+        objA->CreateWork(vtxCount, listCount, 3);
+        objB->CreateWork(vtxCount, listCount, 3);
+    }
+
+    // 3. Build the strip geometry: one textured triangle per segment, from the
+    //    model's frame vertices (AnimSlot[0]) and its TMD prim packets.
+    int* e = &INT_ARRAY_00922f00[slot * 0x21];
+    int vertBaseIdx = 0;
+    int listBaseIdx = 0;
+    if (count > 0 && prims != NULL) {
+        objA->Lock(NULL, NULL);
+
+        unsigned int* pkt = prims;
+        int seg = 0;
+        while (seg < count) {
+            if ((*pkt & 0xFDFFFFFF) == 0x34000609) {
+                // Find the material record for this packet's CLUT word.
+                unsigned int clut = pkt[1] >> 0x10;
+                int xKey = (int)((clut & 0x3f) << 4);
+                int yKey = (int)(clut >> 6);
+                int matCount = *(int*)(page + 0x340);
+                int matIdx = 0;
+                while (matIdx < matCount) {
+                    DWORD* rec = (DWORD*)(page + 0x54 + matIdx * 0x68);
+                    if ((int)rec[0] == xKey && (int)rec[1] == yKey) break;
+                    matIdx++;
+                }
+
+                int texW = 256, texH = 256;
+                if (matIdx < matCount) {
+                    DWORD* rec = (DWORD*)(page + 0x54 + matIdx * 0x68);
+                    texW = (int)rec[0x2C / 4];
+                    texH = (int)rec[0x30 / 4];
+                    if (texW <= 0) texW = 256;
+                    if (texH <= 0) texH = 256;
+                }
+
+                for (int v = 0; v < 3; v++) {
+                    unsigned int vtxOff = pkt[4 + v] >> 0x10;
+                    const short* src = (const short*)(vertBase + vtxOff * 8);
+                    float vert[11];
+                    vert[0] = (float)(short)src[0];
+                    vert[1] = -(float)(short)src[1];
+                    vert[2] = (float)(short)src[2];
+                    vert[3] = 1.0f; vert[4] = 1.0f; vert[5] = 1.0f;   // normal
+                    vert[6] = 1.0f; vert[7] = 1.0f; vert[8] = 1.0f;   // colour
+                    vert[9]  = (float)(pkt[1 + v] & 0xff) / (float)texW;
+                    vert[10] = (float)((pkt[1 + v] >> 8) & 0xff) / (float)texH;
+                    objA->SetVertex(vertBaseIdx + v, (DWORD*)vert);
+                }
+
+                WORD triA[3] = { (WORD)vertBaseIdx, (WORD)(vertBaseIdx + 1),
+                                 (WORD)(vertBaseIdx + 2) };
+                WORD triB[3] = { (WORD)vertBaseIdx, (WORD)(vertBaseIdx + 2),
+                                 (WORD)(vertBaseIdx + 1) };
+                objA->SetList(listBaseIdx, triA);
+                objA->SetList(listBaseIdx + 1, triB);
+
+                vertBaseIdx += 3;
+                listBaseIdx += 2;
+            }
+            pkt = (unsigned int*)((char*)pkt + ((*pkt & 0xff00) >> 6) + 4);
+            seg++;
+        }
+        objA->Unlock();
+    }
+
+    // 4. Copy the base geometry A -> B (the per-frame build reads B and
+    //    writes A; see AsyncTrailBuildGeometry).
+    if (vtxCount > 0) {
+        objB->CopyFrom(objA);
+    }
+
+    // 5. Fill the slot's draw entry. objData (what FlushTmdObjects receives)
+    //    is &e[2] (+8 bytes): e[4..0x13] = matrix, e[0x18] = texture handle,
+    //    e[0x19/0x1A/0x1B] = the unlit colour scales, e[0x1C] = blend weight.
+    e[2] = 4;                                        // type (objData+0x00)
+    *(DWORD*)((BYTE*)e + 8 + 0x80) = 2;              // unlit flag (objData+0x80)
+    e[0x14] = (int)0x3f800000;                       // objData+0x40
+    e[0x15] = (int)0x3f800000;                       // objData+0x44
+    e[0x16] = (int)0x3f800000;                       // objData+0x48
+
+    // The texture handle: the model bank's per-material D3D handle, created by
+    // TmdAnimation's texture setup (page + 0x34C + matIdx*4).
+    unsigned int texHandle = 0;
+    if (prims != NULL && (*prims & 0xFDFFFFFF) == 0x34000609) {
+        unsigned int clut = prims[1] >> 0x10;
+        int xKey = (int)((clut & 0x3f) << 4);
+        int yKey = (int)(clut >> 6);
+        int matCount = *(int*)(page + 0x340);
+        int matIdx = 0;
+        while (matIdx < matCount) {
+            DWORD* rec = (DWORD*)(page + 0x54 + matIdx * 0x68);
+            if ((int)rec[0] == xKey && (int)rec[1] == yKey) break;
+            matIdx++;
+        }
+    if (matIdx < matCount) {
+            texHandle = *(unsigned int*)(page + 0x34C + matIdx * 4);
+        }
+    }
+    e[0x18] = (int)texHandle;                        // objData+0x58 = texture
+
+    // Colour scales (read by the unlit branch of FlushTmdObjects at
+    // objData+0x5C/0x60/0x64, as FLOATS). The original's (0x60,0x28,0x28)
+    // gives a dark-red gore tint; the alt-costume variant (0x18,0x30,0x18) is
+    // the green-blood tint. The disasm scales by 1/128, but the strip samples
+    // the pale body texture, so a /128 scale reads as bright pink - the /255
+    // below keeps the same hue relationship while landing the gore on the
+    // darker, more saturated red-brown the original shows. Store the float
+    // BITS (FlushTmdObjects dereferences them as float, not as an int value).
+    float rScale = (float)s_trailCreateR * (1.0f / 255.0f);
+    float gScale = (float)s_trailCreateG * (1.0f / 255.0f);
+    float bScale = (float)s_trailCreateB * (1.0f / 255.0f);
+    e[0x19] = *(int*)&rScale; e[0x1A] = *(int*)&gScale; e[0x1B] = *(int*)&bScale;
+    e[0x1C] = 0;                                     // objData+0x68 = blend weight
+    e[0x1D] = *(int*)&rScale; e[0x1E] = *(int*)&gScale; e[0x1F] = *(int*)&bScale;
+    e[0x20] = 0;
+
+    // UV-scale table (kept for fidelity; the DX11 port samples UVs from the
+    // vertex buffer, so these are only written back into the entry).
+    g_trailSlotUV[slot][0] = *(DWORD*)&rScale;
+    g_trailSlotUV[slot][1] = *(DWORD*)&gScale;
+    g_trailSlotUV[slot][2] = *(DWORD*)&bScale;
+    g_trailSlotUV[slot][3] = 0;
+
+    // The object handle (opaque token in the port; the release path reads
+    // e[0x17] and calls vtable[9]).
+    if (pD3D != NULL && pD3D->vtable != NULL && pD3D->vtable[7] != NULL) {
+        e[0x17] = (int)((unsigned int(*)(void*, void*, unsigned char))pD3D->vtable[7])
+                  (pD3D, (BYTE*)e + 8, 0);
+    }
+
+    g_trailSlotCapacity[slot] = count - 1;
+
+    // Record the slot index on the anim object (+0x0C), where FUN_0048a210 and
+    // the async workers read it.
+    animObj[3] = (unsigned int)slot;
 }
 
 // ===========================================================================
@@ -228,7 +476,6 @@ void AsyncTrailBuildGeometry(void)
     if (idx < 0 || count > g_trailSlotCapacity[idx]) {
         return;
     }
-
     CMarniViewport2* objA = TRAIL_POOL_A(idx);   // 0x00a74de0 + idx*0x38
     CMarniViewport2* objB = TRAIL_POOL_B(idx);   // 0x00ac3178 + idx*0x38
 
@@ -309,22 +556,30 @@ void AsyncTrailDraw(void)
 
     const float k = 0.00024414063f;              // 1/4096, const @0x004af2d0
     const MATRIX& g = g_gteRotTransMatrix;
-    e[4]  = (int)((float)(short)g.m[0][0] * k);
-    e[5]  = (int)((float)(short)g.m[1][0] * k);
-    e[6]  = (int)((float)(short)g.m[2][0] * k);
-    e[8]  = (int)((float)(short)g.m[0][1] * k);
-    e[9]  = (int)((float)(short)g.m[1][1] * k);
-    e[0xA] = (int)((float)(short)g.m[2][1] * k);
-    e[0xC] = (int)((float)(short)g.m[0][2] * k);
-    e[0xD] = (int)((float)(short)g.m[1][2] * k);
-    e[0xE] = (int)((float)(short)g.m[2][2] * k);
+    // The entry's matrix at objData+0x08 (e[4..0x13]) is read back by
+    // FlushTmdObjects as 16 FLOATS (`const float* M = objData+0x08`), so the
+    // GTE fixed-point values must be stored as float BITS, not as truncated
+    // ints. Storing the int value (e.g. 1 for 0x1000*1/4096) made the whole
+    // matrix read as denormal/NaN floats and every trail triangle collapsed to
+    // world (0,0,0) / NaN - which is why the gore strips never appeared.
+    #define TRAIL_STORE_FLOAT(dst, val) do { float f_ = (val); (dst) = *(int*)&f_; } while (0)
+    TRAIL_STORE_FLOAT(e[4],  (float)(short)g.m[0][0] * k);
+    TRAIL_STORE_FLOAT(e[5],  (float)(short)g.m[1][0] * k);
+    TRAIL_STORE_FLOAT(e[6],  (float)(short)g.m[2][0] * k);
+    TRAIL_STORE_FLOAT(e[8],  (float)(short)g.m[0][1] * k);
+    TRAIL_STORE_FLOAT(e[9],  (float)(short)g.m[1][1] * k);
+    TRAIL_STORE_FLOAT(e[0xA], (float)(short)g.m[2][1] * k);
+    TRAIL_STORE_FLOAT(e[0xC], (float)(short)g.m[0][2] * k);
+    TRAIL_STORE_FLOAT(e[0xD], (float)(short)g.m[1][2] * k);
+    TRAIL_STORE_FLOAT(e[0xE], (float)(short)g.m[2][2] * k);
     e[7]  = 0;
     e[0xB] = 0;
     e[0xF] = 0;
-    e[0x10] = (int)(float)g.t[0];
-    e[0x11] = (int)(float)g.t[1];
-    e[0x12] = (int)(float)g.t[2];
-    e[0x13] = (int)0x3f800000;                   // 1.0f
+    TRAIL_STORE_FLOAT(e[0x10], (float)g.t[0]);
+    TRAIL_STORE_FLOAT(e[0x11], (float)g.t[1]);
+    TRAIL_STORE_FLOAT(e[0x12], (float)g.t[2]);
+    TRAIL_STORE_FLOAT(e[0x13], 1.0f);
+    #undef TRAIL_STORE_FLOAT
 
     e[0x19] = (int)g_trailSlotUV[idx][0];
     e[0x1A] = (int)g_trailSlotUV[idx][1];
@@ -335,8 +590,16 @@ void AsyncTrailDraw(void)
     e[0x1F] = (int)g_trailSlotUV[idx][2];
     e[0x20] = (int)g_trailSlotUV[idx][3];
 
-    if (pD3D->vtable != NULL && pD3D->vtable[10] != NULL) {
-        ((void(*)(void*, void*, int))pD3D->vtable[10])(pD3D, (BYTE*)e + 8, 10);
+    // The original hands the entry to CMarniDirect3D vtable[10] (OT insert,
+    // type 10). The DX11 port queues it through the same TMD pipeline that
+    // draws the room/entity models - TmdQueueComplexObject resolves the
+    // texture handle, the unlit colour scales and the GTE matrix (objData+8
+    // = e[4..0x13]) the same way FlushTmdObjects does for a TMD slot, and
+    // sorts its triangles into the scene depth walk. objData = e + 8 to match
+    // the creator's entry layout.
+    extern void TmdQueueComplexObject(void* objData, void* elem, int depth);
+    if (pD3D != NULL && pD3D->m_isInitialized) {
+        TmdQueueComplexObject((BYTE*)e + 8, TRAIL_POOL_A(idx), 10);
     }
 }
 

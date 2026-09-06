@@ -200,6 +200,12 @@ unsigned char load_effect_sprite_data(unsigned char* effectAnimIndex, unsigned c
     return lastValid;
 }
 
+// The OG weapon-FX sheet layout inside the Effspr TIM pages. Declared here so
+// setup_effect_sprite_textures (below) and the baker (further down) share it;
+// the full layout comment lives next to load_shoot_direction_data.
+extern const unsigned char kWeaponSheetPage[8];
+extern const unsigned short kWeaponSheetPageV[8];
+
 // ============================================================================
 // FUN_0047bc80 (0x0047bc80) - Set up effect sprite texture pages
 //
@@ -309,12 +315,15 @@ void setup_effect_sprite_textures(unsigned char startSlot)
         // texture id. Port-only bookkeeping - see the header note for why the
         // two blocks index it differently.
         if (startSlot == 0) {
-            // Weapon FX: one SRV per sprite, UVs already local to it. Carry the
-            // page V separately - it is what picks the blend/colour band, and
-            // with a local v of 0 every weapon sprite fell into band 0
-            // (colorIdx 0 = 0xffffff), which is why blood came out grey.
+            // Weapon FX: one SRV per sheet, UVs local to it. The band scan
+            // needs the sheet's PAGE-ABSOLUTE V - the OG page position the
+            // band tables (g_EffectBlendTable) were authored against, NOT the
+            // port's packing cursor (with a local v of 0 and the cursor value
+            // here, sheets 2/5/6/7 landed in the wrong band and got the wrong
+            // blend mode and colour record). See kWeaponSheetPageV for the
+            // verified positions.
             g_effectSpriteSheetSlot[spriteIdx] = slot;
-            g_effectSpriteBandV[spriteIdx] = (unsigned char)curU;
+            g_effectSpriteBandV[spriteIdx] = (unsigned char)kWeaponSheetPageV[slot];
         } else {
             // Room: one SRV per shared TIM page. load_effect_sprites only ever
             // uploads 4 pages, but 8 of the 320 RDTs declare enough sprites to
@@ -370,6 +379,10 @@ void setup_effect_sprite_textures(unsigned char startSlot)
         DAT_00bf0a42 = curV;
     }
 }
+
+// Re-bake the four page-1 weapon sheets from the room's page-1 Effspr file
+// (defined below, next to load_shoot_direction_data).
+void RebakeWeaponSheetsForRoom(void);
 
 // ============================================================================
 // load_effect_sprites (0x0047d020) - Build room effect sprite texture pages
@@ -565,6 +578,12 @@ static void load_effect_sprites(void)
         }
     }
 
+    // The weapon-FX sheets 4-7 (blood, ember, glass, 0xb) live on the page-1
+    // Effspr file, which is a per-room palette variant (esp001 base / esp2xx).
+    // The OG re-loads that page every room, so re-bake those four SRVs from
+    // this room's page-1 file to pick up the room's palette (stage lighting).
+    RebakeWeaponSheetsForRoom();
+
     STAGE_ID_00ac9cf0 = (unsigned int)g_stageId;
     ROOM_ID_00ac9cf4 = (unsigned int)g_roomId;
 }
@@ -578,6 +597,125 @@ static void load_effect_sprites(void)
 // 0xb, 0xc, 0xe, 0x11, 0) stayed 0xffffffff in every room and every muzzle
 // flash / fire billboard was skipped as "not loaded for this room".
 // ============================================================================
+
+// ---------------------------------------------------------------------------
+// The OG weapon-FX sheet layout inside the Effspr TIM pages.
+//
+// The shipped Effspr\esp*.tim files are 256x256 8bpp pages with a baked
+// 256-entry palette; the eight weapon sheets are composited INTO them at
+// fixed positions. The OG's own band tables (g_EffectBlendTable, rec 0/1)
+// were authored against exactly these positions, and the strict art matcher
+// run over esp000/esp001 confirms every region:
+//
+//   page 0 (esp000, the page-0 file for every room):  type 5 [0,64),
+//          smoke 9 [64,176), fire 0xc [176,240), 0x11 [240,256)
+//   page 1 (esp001 / the room's esp2xx file):
+//          blood 0 [3,27), ember 0xe [27,99), glass 8 [99,123), 0xb [123,147)
+//
+// The sheet art in core00.etm is the same shapes, but each Effspr file ships
+// its own palette mapping (per-stage lighting variants - esp001 vs esp201
+// differ in 65 palette entries), so the OG's colours come from the PAGE
+// palette, not from core00.etm's CLUT rows. Baking the weapon SRVs straight
+// from the page pixels is the faithful serve.
+// ---------------------------------------------------------------------------
+const unsigned char kWeaponSheetPage[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
+const unsigned short kWeaponSheetPageV[8] = { 0, 64, 176, 240, 3, 27, 99, 123 };
+
+// Bake weapon sheet `slot` (its SRV lives at 3+slot) from the Effspr page file
+// `fileName` (an esp*.tim name, no extension). Returns 1 on success.
+static int BakeWeaponSheetFromPage(int slot, const char* pageName)
+{
+    if (slot < 0 || slot >= 8) return 0;
+    unsigned char type = g_abEffSpriteIndexTable[slot];
+    if (type == 0xFF) return 0;
+
+    char path[256];
+    sprintf(path, GAME_DATA_ROOT "effspr\\%s.tim", pageName);
+    unsigned char* tim = (unsigned char*)g_TimImageBuffer;
+    unsigned int size = LoadFile(path, tim, 0x20);
+    if (size == 0) return 0;
+
+    const unsigned char* p = tim;
+    if (*(const unsigned int*)p != 0x10) return 0;
+    unsigned int flags = *(const unsigned int*)(p + 4);
+    if ((flags & 0x3) != 1) return 0;
+    p += 8;
+    if (!(flags & 8)) return 0;
+    p += 4;                                                        // CLUT size
+    p += 4;                                                        // CLUT origin
+    unsigned short clutW = *(const unsigned short*)p;
+    p += 2;
+    unsigned short clutH = *(const unsigned short*)p; p += 2;
+    if (clutW != 256 || clutH != 1) return 0;
+    unsigned short clut[256];
+    for (int i = 0; i < 256; i++) {
+        clut[i] = *(const unsigned short*)(p + i * 2);
+    }
+    p += 256 * 2;
+    p += 4;                                                        // image size
+    p += 4;                                                        // image origin
+    unsigned short imgW = *(const unsigned short*)p;
+    unsigned short imgH = *(const unsigned short*)(p + 2); p += 4;
+    if (imgW != 256 || imgH != 256) return 0;
+
+    unsigned short pageV = kWeaponSheetPageV[slot];
+    unsigned short height = 256 - pageV;                           // rest of the page
+    // Clip at the next sheet's top: the regions are packed to page boundaries,
+    // but esp files can carry room art right below - stop at the sheet's own
+    // height by using the NEXT sheet's pageV when it shares our page.
+    unsigned short nextV = 256;
+    for (int s = 0; s < 8; s++) {
+        if (s != slot && kWeaponSheetPage[s] == kWeaponSheetPage[slot]
+            && kWeaponSheetPageV[s] > pageV && kWeaponSheetPageV[s] < nextV) {
+            nextV = kWeaponSheetPageV[s];
+        }
+    }
+    if (nextV < height + pageV) height = (unsigned short)(nextV - pageV);
+
+    static DWORD rgba[256 * 256];
+    const unsigned char* pix = p;
+    for (unsigned short y = 0; y < height; y++) {
+        const unsigned char* src = pix + (pageV + y) * imgW;
+        DWORD* row = &rgba[y * 256];
+        for (unsigned short x = 0; x < 256; x++) {
+            unsigned int idx = src[x];
+            if (idx == 0) { row[x] = 0x00000000u; continue; }
+            unsigned short c = clut[idx];
+            unsigned int r = ((c >> 0)  & 0x1F) * 255 / 31;
+            unsigned int g = ((c >> 5)  & 0x1F) * 255 / 31;
+            unsigned int b = ((c >> 10) & 0x1F) * 255 / 31;
+            row[x] = 0xFF000000u | (b << 16) | (g << 8) | r;
+        }
+    }
+
+    int srvSlot = 3 + slot;
+    if (g_TexturePageSRV[srvSlot] != MARNI_NULL_HANDLE) {
+        if (Marni_DX() != NULL) Marni_DX()->DestroyTexture(g_TexturePageSRV[srvSlot]);
+        g_TexturePageSRV[srvSlot] = MARNI_NULL_HANDLE;
+    }
+    MarniCreateTexture(256, height, 32, rgba, &g_TexturePageSRV[srvSlot]);
+    g_TexturePageWidth[srvSlot] = 256;
+    g_TexturePageHeight[srvSlot] = height;
+    g_TexturePageBpp[srvSlot] = 8;
+    return 1;
+}
+
+// Re-bake the four page-1 weapon sheets (blood, ember, glass, 0xb) from the
+// ROOM's own page-1 Effspr file. The OG loads a per-room variant of that page
+// (esp001 base, esp201+ stage variants) and every weapon sprite on it picks up
+// that file's palette; without this the blood/embers render with the base
+// mansion palette everywhere.
+void RebakeWeaponSheetsForRoom(void)
+{
+    unsigned char nameIdx = g_RoomEffectSpriteTable
+        [((unsigned int)g_stageId * 0x20 + (unsigned int)g_roomId) * 4 + 1];
+    if (nameIdx == 0xFF) return;
+    const char* pageName = (const char*)(g_EffectSpriteNames + nameIdx);
+    for (int slot = 4; slot < 8; slot++) {
+        BakeWeaponSheetFromPage(slot, pageName);
+    }
+}
+
 void load_shoot_direction_data(void)
 {
     g_freeEffectSlots = 0x40;
@@ -613,24 +751,34 @@ void load_shoot_direction_data(void)
 
     setup_effect_sprite_textures(0);
 
-    // Load the eight weapon-FX sheets (core00.etm) into dedicated D3D11
-    // texture-page slots so the effect renderer can find them - the ORIGINAL
-    // keeps the sheets resident in VRAM; the port must upload each sheet to
-    // its SRV slot. Slots 3-10 are free (the global textures own 0-2, the
-    // menu/item images own 15-30); the room's esp sprites use 11-14
-    // (load_effect_sprites). UVs in the esp data are coordinates within each
-    // sheet.
+    // Load the eight weapon-FX sheets into dedicated D3D11 texture-page slots
+    // so the effect renderer can find them. Slots 3-10 are free (the global
+    // textures own 0-2, the menu/item images own 15-30); the room's esp sprites
+    // use 11-14 (load_effect_sprites).
     //
-    // Each sheet also carries up to four 16-entry CLUT rows - palette
-    // VARIANTS selected per spawn by the tint index (see the submit-side note
-    // in EffectSystem.cpp). They are baked to slots 120 + i*4 + row so
-    // effect_submit_sprite can pick the row matching clutY: the blood
-    // sheet (esp index 0) is row 0 red / row 1 green / row 2 orange / row 3
-    // white - Plant 42's sap (depthGroup 0x18/0x1B/0x1C -> tint 3).
+    //
+    //   page 0 (esp000 - every room): type 5 [0,64), smoke [64,176),
+    //          fire [176,240), 0x11 [240,256)
+    //   page 1 (esp001 base / the room's esp2xx variant):
+    //          blood [3,27), ember [27,99), glass [99,123), 0xb [123,147)
+    //
+    // These positions are confirmed by the OG's own band tables (rec 0/1 of
+    // g_EffectBlendTable) AND by a strict art match against the shipped files.
+    // The gore art indices are light; the RGB tint record (blood red/green/
+    // white per enemy) is what colors them - the smoke therefore renders its
+    // WHITE ramp at tint 1, which is what the original does.
+    //
+    // The core00.etm bake below is only a fallback (file missing / parse fail):
+    // it bakes sheet CLUT row 0, so blood lands red - wrong for hunter/Plant42
+    // but better than nothing until the page file shows up.
+    static const char* kWeaponSheetPageFile[8] = {
+        "esp000", "esp000", "esp000", "esp000",
+        "esp001", "esp001", "esp001", "esp001",
+    };
     for (int i = 0; i < 8; i++) {
-        if (DAT_00ac9cd0[i] != 0) {
+        if (DAT_00ac9cd0[i] == 0) continue;
+        if (!BakeWeaponSheetFromPage(i, kWeaponSheetPageFile[i])) {
             LoadEffectTextureSheet(3 + i, (void*)DAT_00ac9cd0[i]);
-            LoadEffectTextureSheetVariants(120 + i * 4, (void*)DAT_00ac9cd0[i], 4);
         }
     }
 }

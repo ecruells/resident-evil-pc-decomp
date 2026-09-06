@@ -2660,32 +2660,23 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     }
     int texSlot = 3 + (int)sheetSlot;
 
-    // ---- weapon-FX sheets: pick the CLUT row variant matching the tint ----
+    // ---- weapon-FX sheets serve their Effspr page palette; the tint record
+    // does the enemy colouring ----
     //
-    // The core00.etm sheets carry up to four 16-entry CLUT rows that are
-    // palette VARIANTS of the same art, and the selector is the tint index
-    // (clutY = depthGroup >> 3): the blood sheet (esp index 0) holds
-    // row 0 dark red / row 1 green / row 2 orange / row 3 white-lavender.
-    // That is how one blood sprite renders red for a zombie (tint 0), green
-    // for a hunter (tint 1) and WHITE for Plant 42 - whose damage splashes
-    // spawn with depthGroup 0x18/0x1B/0x1C (Plant42.cpp), i.e. tint 3. The
-    // port baked only row 0, so the sap came out red. The rows are baked to
-    // SRV 120 + sheetSlot*4 + row by load_shoot_direction_data; fall back
-    // downwards when a sheet has fewer rows (slot 5's single-row sheet).
-    // Room RDT sprites (sheetSlot >= 8) are unaffected - their TIM palette is
-    // single-variant authored art (see the roomArt note above).
-    if (sheetSlot < 8) {
-        int clutRow = (int)g_TextureDesc.clutY;
-        if (clutRow > 3) clutRow = 3;
-        int varSlot = 120 + (int)sheetSlot * 4 + clutRow;
-        while (clutRow > 0 && g_TexturePageSRV[varSlot] == MARNI_NULL_HANDLE) {
-            clutRow--;
-            varSlot--;
-        }
-        if (g_TexturePageSRV[varSlot] != MARNI_NULL_HANDLE) {
-            texSlot = varSlot;
-        }
-    }
+    // the OG's effect path serves page variant 0 - SubmitEffectSprite 
+    // (0x0046d9b0) indexes g_TexturePageTable[textureId*223] with no variant, 
+    // and GetTextureVariant is always 0 for effect descriptors.
+    // The per-tint CLUT-row redirect lives ONLY in
+    // AddSprite_Ex/AddTintSprite_Ex (room static sprites). The old
+    // port-side redirect (SRV 120+sheetSlot*4+clutRow) fabricated that
+    // mechanism for weapon sheets and is what made the explosion smoke render
+    // the smoke sheet's DARK row-1 palette at tint 1 (the OG keeps the WHITE
+    // row-0 palette there and multiplies by the all-white/0xb2 record).
+    // Weapon sheet SRVs are now baked straight from the Effspr page regions by
+    // load_shoot_direction_data (see kWeaponSheetPageV), so no redirect is
+    // needed: texSlot = 3 + sheetSlot for every sheet, and the RGB record
+    // above supplies the per-tint colour (zombie red blood, hunter green,
+    // Plant 42 white - the gore art is light grey, the record is the hue).
 
     // ---- room RDT sheets: the same CLUT-row variant selection ----
     //
@@ -2699,7 +2690,9 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     // maps to colour record 4 - the BLOOD record {69,1e,0a / 37,5a,14 /
     // 91,5a,14 / ff,ff,ff} shared with the zombie splatter that packs to the
     // same page position - which multiplies, and a red ramp times anything
-    // stays red. So the row IS the tint, as with the weapon sheets above.
+    // stays red. So the row IS the tint for these room sheets (the weapon
+    // sheets above are the opposite case: page variant 0 in the OG, the RGB
+    // record does the colouring - see the audit note).
     // load_effect_sprites bakes rows 1-3 to SRV 152 + (sheetSlot-8)*4 +
     // (row-1); row 0 stays on the plain page SRVs 11-14. Single-row room
     // sheets (g_effectSpriteClutRows[type] <= 1) are untouched and keep
