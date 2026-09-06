@@ -2549,11 +2549,11 @@ LAB_0043849d:
         // fall through
     case 3:
         EKG_P_X1 = 0x83;
-        EKG_S_R = 0;
-        EKG_S_G = 0;
+        EKG_P_R = 0;
+        EKG_P_G = 0;
         EKG_P_X0 = 0x54;
         EKG_P_FLAGS = 0x50000000;
-        EKG_S_B = 0;
+        EKG_P_B = 0;
         if (0x83 < DAT_00ae9f36) {
             char cCount;
             if (DAT_00ae9f36 < 0x92) {
@@ -2565,21 +2565,34 @@ LAB_0043849d:
                 DAT_00ae9f2f = 0xff;
                 EKG_P_Y0 = DAT_00ae9f36;
             }
-            if (((DAT_00ae9f13 & 0x20) == 0) || (EKG_S_G = DAT_00ae9f2f, (DAT_00ae9f13 & 0x10) != 0)) {
-                EKG_S_B = DAT_00ae9f2f;
-                EKG_S_R = EKG_S_G;
+            // Sweep tint. The original writes 0x00be11a4/a5/a6 - the PRIMARY
+            // line's own RGB, i.e. the struct handed to FUN_00470c60 below.
+            // (Writing the secondary line's bytes instead leaves the primary
+            //  carrying the health-status colour case 1 last stored, so a heal
+            //  swept orange/red instead of green.)
+            //   0x20 clear           -> blue
+            //   0x20 set, 0x10 clear -> green  (healing item)
+            //   0x20 | 0x10          -> white
+            if ((DAT_00ae9f13 & 0x20) != 0) {
+                EKG_P_G = DAT_00ae9f2f;
+                if ((DAT_00ae9f13 & 0x10) != 0) {
+                    EKG_P_R = DAT_00ae9f2f;
+                    EKG_P_B = DAT_00ae9f2f;
+                }
+            } else {
+                EKG_P_B = DAT_00ae9f2f;
             }
             do {
                 EKG_P_Y1 = EKG_P_Y0;
                 FUN_00470c60(g_EkgPrimaryLine, 10);
-                if (EKG_S_R != 0) {
-                    EKG_S_R = EKG_S_R - 0x10;
+                if (EKG_P_R != 0) {
+                    EKG_P_R = EKG_P_R - 0x10;
                 }
-                if (EKG_S_G != 0) {
-                    EKG_S_G = EKG_S_G - 0x10;
+                if (EKG_P_G != 0) {
+                    EKG_P_G = EKG_P_G - 0x10;
                 }
-                if (EKG_S_B != 0) {
-                    EKG_S_B = EKG_S_B - 0x10;
+                if (EKG_P_B != 0) {
+                    EKG_P_B = EKG_P_B - 0x10;
                 }
                 EKG_P_Y0 = EKG_P_Y0 + 1;
                 cCount = cCount - 1;
