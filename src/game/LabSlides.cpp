@@ -175,10 +175,10 @@ void lab_slides_update(void)
             g_TextureDesc.height = 0x7f;
             g_TextureDesc.texV = (unsigned char)(g_labSlidesSlideIndex << 7);
             g_TextureDesc.width = (unsigned short)g_rect.w;
-            g_TextureDesc.unk10 = 0;
-            // printClutTint = slide CLUT index (+0x1ed base recorded by
+            g_TextureDesc.clutX = 0;
+            // clutY = slide CLUT index (+0x1ed base recorded by
             // TexturePage_LoadImage when load_slides_images ran).
-            g_TextureDesc.printClutTint =
+            g_TextureDesc.clutY =
                 (short)(g_labSlidesSlideIndex + 0x1ed);
             // 0x00463651..0x00463689: depth = ((slide & ~1) * 0x60) >> 7 + 9.
             g_TextureDesc.texturePage = (short)(
@@ -287,11 +287,11 @@ void lab_slides_set_snd_params(int channel, int pan, int volume)
 // ============================================================================
 // AddTintSprite_Ex (0x0046f8a0)
 // Sprite producer used by the slide projector: like AddTintSprite but the
-// texture is the slide.tim sheet and printClutTint selects which of its CLUTs
+// texture is the slide.tim sheet and clutY selects which of its CLUTs
 // (one per slide frame) to render with.
 //
 // The original refreshed PSX texture page 0x2e with CLUT variant
-// (printClutTint - 0x1ed) and drew through the per-variant page handle. The
+// (clutY - 0x1ed) and drew through the per-variant page handle. The
 // D3D11 port instead pre-builds one RGBA SRV per CLUT when load_slides_images
 // parses slide.tim (see TexturePage_LoadImage), so this producer resolves the
 // variant's SRV and submits a normal type-10 sprite command with the same
@@ -303,10 +303,10 @@ int AddTintSprite_Ex(TextureDesc* texture, unsigned short brightness)
         return 0;
     }
 
-    // 0x0046f8bb: variant = printClutTint - CLUT base (0x008f788a = 0xd +
+    // 0x0046f8bb: variant = clutY - CLUT base (0x008f788a = 0xd +
     // 0x1e0 recorded by TexturePage_LoadImage). The font shadow row (diff 8)
     // maps to variant 1 exactly like the original.
-    int variant = (int)texture->printClutTint - 0x1ed;
+    int variant = (int)texture->clutY - 0x1ed;
     if (variant == 8) {
         variant = 1;
     }

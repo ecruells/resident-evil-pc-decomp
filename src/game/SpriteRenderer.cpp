@@ -403,8 +403,8 @@ int draw_texture(TextureDesc* texture, unsigned short depth) {
     }
     if (foundSlot < 0) return 0;
 
-    // CLUT lookup: uVar4 = printClutTint - clutBase; ==8 → 1
-    int clutIdx = (int)texture->printClutTint - g_TexturePageClutBase[foundSlot];
+    // CLUT lookup: uVar4 = clutY - clutBase; ==8 → 1
+    int clutIdx = (int)texture->clutY - g_TexturePageClutBase[foundSlot];
     if (clutIdx < 0 || clutIdx > 7) return 0;
     if (clutIdx == 8) clutIdx = 1;
 
@@ -947,7 +947,7 @@ void delete_texture_set_secondary(int slotIndex) {
 // and the original's TexturePage_LoadImage tail (0x0046d77e) walks the parsed
 // CLUT list and creates ONE texture page per CLUT - each slide frame is the
 // same image with its own palette. AddTintSprite_Ex then picks the page whose
-// index matches printClutTint - 0x1ed.
+// index matches clutY - 0x1ed.
 //
 // The D3D11 path mirrors that with one pre-built RGBA SRV per CLUT at fixed
 // slots SLIDES_TEX_BASE..+7, so the projector never has to rebuild textures

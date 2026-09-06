@@ -2483,7 +2483,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     g_TextureDesc.screenX = screenX;
     g_TextureDesc.screenY = screenY;
     g_TextureDesc.texturePage = *(unsigned short*)(eff->clutInfo + 6);
-    g_TextureDesc.unk10 = (*(unsigned short*)(eff->clutInfo + 4) & 0x3f) << 4;
+    g_TextureDesc.clutX = (*(unsigned short*)(eff->clutInfo + 4) & 0x3f) << 4;
     g_TextureDesc.texU = uv[0];
     g_TextureDesc.texV = uv[1];
     // depthGroup packs two things: the low 3 bits select the animation, and
@@ -2492,7 +2492,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     // AUDITED 2026-08-16 - this path is complete, and an earlier note claiming a
     // "missing CLUT half" was wrong. The audit, so nobody repeats it:
     //
-    //   * g_TextureDesc.printClutTint is 0x00be1172. It has exactly TWO readers
+    //   * g_TextureDesc.clutY is 0x00be1172. It has exactly TWO readers
     //     in the whole exe - 0x0047c8cf (this function) and 0x0047cd6b (the
     //     menu redraw) - and both use it only as the index into
     //     g_EffectColorRecords[colorIdx], which is what the port does below.
@@ -2501,7 +2501,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     //     comes from g_effectSpriteInfo[type], per sprite TYPE, never per tint.
     //   * SubmitEffectSprite takes texture page variant 0 unconditionally
     //     (`g_TexturePageTable[textureId * 223]`). AddSprite_Ex is the one that
-    //     resolves printClutTint into a CLUT variant, and effects do not go
+    //     resolves clutY into a CLUT variant, and effects do not go
     //     through it. That asymmetry in the ORIGINAL is what the old note
     //     mistook for something the port had dropped.
     //
@@ -2518,7 +2518,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     // about what colour those are. If the sap ever does look wrong, the place to
     // look is the sprite art itself (which CLUT blit_effect_tim_at pulls out of
     // the RDT/esp TIM), not this index.
-    g_TextureDesc.printClutTint = (short)(eff->depthGroup >> 3);
+    g_TextureDesc.clutY = (short)(eff->depthGroup >> 3);
 
     // ---- scale: camera light * sprite light factor * width / distance ----
     g_TextureDesc.colorMulR = 0x80;
@@ -2573,7 +2573,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     }
     unsigned int colorIdx = row[3];
 
-    int tint = (int)g_TextureDesc.printClutTint;
+    int tint = (int)g_TextureDesc.clutY;
 
     if (texVHack && (g_stageId == STAGE_MANSION_RETURN_2F) && (g_roomId == ROOM_LESSON_ROOM)
         && ((tint == 2) || (tint == 1))
@@ -2593,7 +2593,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     // The original resolves the RGB through g_EffectColorRecords (0x004c5288)
     // + tint*3 exactly as above (0x0047c99e), but its texture layer also
     // carries a per-primitive CLUT coordinate for these sprites
-    // (g_TextureDesc.unk10 = (spriteInfo[2] & 0x3f) << 4, stored by
+    // (g_TextureDesc.clutX = (spriteInfo[2] & 0x3f) << 4, stored by
     // setup_effect_sprite_textures at 0x0047bdab) that selects which 16-entry
     // CLUT row of the resident page the art indexes - a second palette axis
     // that has no equivalent once the page is baked to RGBA. Baking CLUT row 0
@@ -2664,7 +2664,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     //
     // The core00.etm sheets carry up to four 16-entry CLUT rows that are
     // palette VARIANTS of the same art, and the selector is the tint index
-    // (printClutTint = depthGroup >> 3): the blood sheet (esp index 0) holds
+    // (clutY = depthGroup >> 3): the blood sheet (esp index 0) holds
     // row 0 dark red / row 1 green / row 2 orange / row 3 white-lavender.
     // That is how one blood sprite renders red for a zombie (tint 0), green
     // for a hunter (tint 1) and WHITE for Plant 42 - whose damage splashes
@@ -2675,7 +2675,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     // Room RDT sprites (sheetSlot >= 8) are unaffected - their TIM palette is
     // single-variant authored art (see the roomArt note above).
     if (sheetSlot < 8) {
-        int clutRow = (int)g_TextureDesc.printClutTint;
+        int clutRow = (int)g_TextureDesc.clutY;
         if (clutRow > 3) clutRow = 3;
         int varSlot = 120 + (int)sheetSlot * 4 + clutRow;
         while (clutRow > 0 && g_TexturePageSRV[varSlot] == MARNI_NULL_HANDLE) {
@@ -2707,7 +2707,7 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
     if (sheetSlot >= 8) {
         int rows = (int)g_effectSpriteClutRows[eff->effectType];
         if (rows > 1) {
-            int clutRow = (int)g_TextureDesc.printClutTint;
+            int clutRow = (int)g_TextureDesc.clutY;
             if (clutRow > rows - 1) clutRow = rows - 1;
             if (clutRow > 3) clutRow = 3;
             if (clutRow > 0) {

@@ -200,13 +200,13 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
     // g_titleCurrentSprH = (float)entry->sprHeight;
 
     td->colorMulR = brightness;
-    td->unk10 = 0;
+    td->clutX = 0;
     td->colorMulG = brightness;
     td->pivotX = 0;
     td->pivotY = 0;
     td->colorMulB = brightness;
 
-    td->printClutTint = 0x1E0;
+    td->clutY = 0x1E0;
 
     display_texture(td, 2, 12, 1);
 }

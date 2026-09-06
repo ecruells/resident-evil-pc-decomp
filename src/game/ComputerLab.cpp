@@ -1188,7 +1188,7 @@ static void cl_logo_draw_wedge(const ClLogoSlot* s, int quadIdx)
 // ============================================================================
 static void cl_logo_draw(void)
 {
-    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.clutX = 0;
     g_TextureDesc.flags = 0x01000040;
 
     for (int i = 0; i < CL_LOGO_SLOTS; i++) {
@@ -1200,7 +1200,7 @@ static void cl_logo_draw(void)
         }
 
         g_TextureDesc.texturePage  = 0x0b;
-        g_TextureDesc.printClutTint = 0x1ed;
+        g_TextureDesc.clutY = 0x1ed;
         g_TextureDesc.pivotX = s->pivotX;
         g_TextureDesc.pivotY = s->pivotY;
         g_TextureDesc.texU   = s->texU;
@@ -1398,10 +1398,10 @@ static void cl_draw_quads(short baseX, short baseY, unsigned char flags,
                           unsigned short texturePage, short depthKeyA, int depthKeyB)
 {
     g_TextureDesc.texturePage  = (short)texturePage;
-    g_TextureDesc.unk10  = 0;
+    g_TextureDesc.clutX  = 0;
     g_TextureDesc.pivotX = 0;
     g_TextureDesc.pivotY = 0;
-    g_TextureDesc.printClutTint = (short)((int)(texturePage - 7) / 2 + 0x1eb);
+    g_TextureDesc.clutY = (short)((int)(texturePage - 7) / 2 + 0x1eb);
 
     if (count == 0) return;
 
@@ -1457,10 +1457,10 @@ static void cl_draw_keyboard(void)
 
         g_TextureDesc.flags  = 0x1000000;
         g_TextureDesc.texturePage  = 9;
-        g_TextureDesc.unk10  = 0;
+        g_TextureDesc.clutX  = 0;
         g_TextureDesc.width  = 0x18;
         g_TextureDesc.height = 0x18;
-        g_TextureDesc.printClutTint = 0x1ec;
+        g_TextureDesc.clutY = 0x1ec;
         g_TextureDesc.pivotX = 0;
         g_TextureDesc.pivotY = 0;
         s_colR = bright; s_colG = bright; s_colB = bright;
@@ -1549,8 +1549,8 @@ static void cl_draw_windows(void)
             cl_draw_quads(w->x, w->y, blend, 8, s_frameQuads, 10, (short)key, key);
 
             g_TextureDesc.texturePage  = 9;
-            g_TextureDesc.unk10  = 0;
-            g_TextureDesc.printClutTint = 0x1ec;
+            g_TextureDesc.clutX  = 0;
+            g_TextureDesc.clutY = 0x1ec;
             g_TextureDesc.width  = 0x10;
             g_TextureDesc.height = 0x10;
             g_TextureDesc.pivotX = 0;
@@ -1572,7 +1572,7 @@ static void cl_draw_windows(void)
                     g_TextureDesc.width  = (unsigned short)(row->width << 3);
                     g_TextureDesc.height = (unsigned short)(row->height << 4);
                     g_TextureDesc.texturePage  = row->texturePage;
-                    g_TextureDesc.printClutTint = (short)(((int)(row->texturePage - 7) >> 1) + 0x1eb);
+                    g_TextureDesc.clutY = (short)(((int)(row->texturePage - 7) >> 1) + 0x1eb);
                     SubmitEffectSprite_Ex(&g_TextureDesc, (unsigned short)(idx * -0x80 + 0x210),
                                           0x17, 2, idx * -0x80 + 0x210);
                 }
@@ -1586,7 +1586,7 @@ static void cl_draw_windows(void)
                     g_TextureDesc.width  = 8;
                     g_TextureDesc.height = 0x10;
                     g_TextureDesc.texturePage  = 9;
-                    g_TextureDesc.printClutTint = 0x1ec;
+                    g_TextureDesc.clutY = 0x1ec;
                     g_TextureDesc.screenX = (short)(rowLeft + 0x10 + row->width * 8);
                     for (int i = 0; i < pad; i++) {
                         SubmitEffectSprite_Ex(&g_TextureDesc,
@@ -1601,8 +1601,8 @@ static void cl_draw_windows(void)
             g_TextureDesc.screenX = -0x96;
             g_TextureDesc.screenY = -0x69;
             g_TextureDesc.texturePage   = 0;
-            g_TextureDesc.unk10   = 0;
-            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.clutX   = 0;
+            g_TextureDesc.clutY = 0x1e0;
             g_TextureDesc.texU    = 0x59;
             g_TextureDesc.texV    = 0x5e;
             g_TextureDesc.width   = 0xa3;
@@ -1624,8 +1624,8 @@ static void cl_draw_windows(void)
             g_TextureDesc.screenX = -0x10;
             g_TextureDesc.screenY = -0x39;
             g_TextureDesc.texturePage   = 0;
-            g_TextureDesc.unk10   = 0;
-            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.clutX   = 0;
+            g_TextureDesc.clutY = 0x1e0;
             g_TextureDesc.texU    = 0x56;
             g_TextureDesc.texV    = 0x0a;
             g_TextureDesc.width   = 0x59;
@@ -1641,8 +1641,8 @@ static void cl_draw_windows(void)
             g_TextureDesc.screenX = 0x10;
             g_TextureDesc.screenY = -0x28;
             g_TextureDesc.texturePage   = 0;
-            g_TextureDesc.unk10   = 0;
-            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.clutX   = 0;
+            g_TextureDesc.clutY = 0x1e0;
             g_TextureDesc.texU    = 0xb3;
             g_TextureDesc.texV    = 0x01;
             g_TextureDesc.width   = 0x4b;
@@ -1671,8 +1671,8 @@ static void cl_draw_windows(void)
 static void cl_draw_text(void)
 {
     g_TextureDesc.texturePage  = 9;
-    g_TextureDesc.unk10  = 0;
-    g_TextureDesc.printClutTint = 0x1ec;
+    g_TextureDesc.clutX  = 0;
+    g_TextureDesc.clutY = 0x1ec;
     g_TextureDesc.width  = 0x10;
     g_TextureDesc.height = 0x10;
     g_TextureDesc.pivotX = 0;
@@ -1705,8 +1705,8 @@ static void cl_draw_text(void)
                     g_TextureDesc.texU   = 0xb0;
                     g_TextureDesc.texV   = 0x0f;
                     g_TextureDesc.texturePage  = 9;
-                    g_TextureDesc.unk10  = 0;
-                    g_TextureDesc.printClutTint = 0x1ec;
+                    g_TextureDesc.clutX  = 0;
+                    g_TextureDesc.clutY = 0x1ec;
                     g_TextureDesc.width  = 0x10;
                     g_TextureDesc.height = 0x10;
                     g_TextureDesc.flags  = ((w->visible == 0) ? 0xc0000000u : 0u) + 0x41000000u;
@@ -1731,10 +1731,10 @@ static void cl_draw_caret(void)
     ClWindow* w = &s_win[s_caretWinIdx];
     if (w->enabled == 0) return;
 
-    g_TextureDesc.unk10  = 0;
+    g_TextureDesc.clutX  = 0;
     g_TextureDesc.flags  = 0x01000040;
     g_TextureDesc.texturePage  = 9;
-    g_TextureDesc.printClutTint = 0x1ec;
+    g_TextureDesc.clutY = 0x1ec;
     g_TextureDesc.width  = 0x10;
     s_blinkCounter++;
     g_TextureDesc.pivotX = 0;
@@ -1767,14 +1767,14 @@ static void cl_draw_caret(void)
     if (s_caretWinIdx == 0) {
         g_TextureDesc.flags   = 0x40000000;
         g_TextureDesc.screenX = (short)(s_caretBaseX * 8 + 8 + s_win[0].x);
-        g_TextureDesc.printClutTint = 0x1e0;
+        g_TextureDesc.clutY = 0x1e0;
         g_TextureDesc.width   = 0x3b;
         g_TextureDesc.height  = 0x11;
         g_TextureDesc.screenY = (short)((s_caretPos + s_caretBaseY) * 0x10 + s_win[0].y + 0x0e);
         g_TextureDesc.texV    = 0xc6;
         g_TextureDesc.texturePage   = 0;
         g_TextureDesc.texU    = 0;
-        g_TextureDesc.unk10   = 0;
+        g_TextureDesc.clutX   = 0;
         g_TextureDesc.pivotX  = 0;
         g_TextureDesc.pivotY  = 0;
         g_TextureDesc.colorMulR = 0x80;
@@ -1784,14 +1784,14 @@ static void cl_draw_caret(void)
     } else if (s_caretWinIdx == 1) {
         g_TextureDesc.flags   = 0x40000000;
         g_TextureDesc.screenX = (short)(s_caretBaseX * 8 + 8 + s_win[1].x);
-        g_TextureDesc.printClutTint = 0x1e0;
+        g_TextureDesc.clutY = 0x1e0;
         g_TextureDesc.width   = 0x49;
         g_TextureDesc.height  = 0x11;
         g_TextureDesc.screenY = (short)((s_caretPos + s_caretBaseY) * 0x12 + s_win[1].y + 0x0c);
         g_TextureDesc.texV    = 0xc6;
         g_TextureDesc.texturePage   = 0;
         g_TextureDesc.texU    = 0;
-        g_TextureDesc.unk10   = 0;
+        g_TextureDesc.clutX   = 0;
         g_TextureDesc.pivotX  = 0;
         g_TextureDesc.pivotY  = 0;
         g_TextureDesc.colorMulR = 0x80;
@@ -1836,12 +1836,12 @@ static void cl_draw_door_picture(void)
 
     g_TextureDesc.screenX = -0x28;
     g_TextureDesc.screenY = -0x5c;
-    g_TextureDesc.printClutTint = 0x1e0;
+    g_TextureDesc.clutY = 0x1e0;
     g_TextureDesc.width  = 0x54;
     g_TextureDesc.height = 0x61;
     g_TextureDesc.texturePage  = 0;
     g_TextureDesc.flags  = 0;
-    g_TextureDesc.unk10  = 0;
+    g_TextureDesc.clutX  = 0;
     g_TextureDesc.texU   = 0;
     g_TextureDesc.pivotX = 0;
     g_TextureDesc.texV   = 0;
@@ -1875,10 +1875,10 @@ static void cl_draw_leds(void)
 {
     g_TextureDesc.flags  = 0x41000040;
     g_TextureDesc.texturePage  = 7;
-    g_TextureDesc.printClutTint = 0x1eb;
+    g_TextureDesc.clutY = 0x1eb;
     g_TextureDesc.width  = 6;
     g_TextureDesc.height = 4;
-    g_TextureDesc.unk10  = 0;
+    g_TextureDesc.clutX  = 0;
     g_TextureDesc.pivotX = 0;
     g_TextureDesc.pivotY = 0;
 
@@ -1903,11 +1903,11 @@ static void cl_draw_leds(void)
 static void cl_draw_monitor(void)
 {
     g_TextureDesc.texturePage  = 7;
-    g_TextureDesc.printClutTint = 0x1eb;
+    g_TextureDesc.clutY = 0x1eb;
     g_TextureDesc.pivotX = 0x3c;
     g_TextureDesc.pivotY = 0x34;
     g_TextureDesc.screenY = -0x2b;
-    g_TextureDesc.unk10  = 0;
+    g_TextureDesc.clutX  = 0;
     g_TextureDesc.screenX = 0;
     g_TextureDesc.texU   = 0;
     g_TextureDesc.height = 0x68;
@@ -2586,9 +2586,9 @@ static void cl_cmd_unlock_prompt(void)
         g_TextureDesc.screenY = -0x40;
         g_TextureDesc.texU   = 3;
         g_TextureDesc.texV   = 0xd7;
-        g_TextureDesc.printClutTint = 0x1e0;
+        g_TextureDesc.clutY = 0x1e0;
         g_TextureDesc.width  = 0x72;
-        g_TextureDesc.unk10  = 0;
+        g_TextureDesc.clutX  = 0;
         g_TextureDesc.pivotX = 0;
         g_TextureDesc.pivotY = 0;
         g_TextureDesc.height = 0x29;
@@ -2828,13 +2828,13 @@ static void computer_lab_finish(void)
         cl_typing_update();
         cl_windows_update();
         if (ST_SUB2 != 0) {
-            g_TextureDesc.unk10 = 0;
+            g_TextureDesc.clutX = 0;
             g_TextureDesc.colorMulR = 0x80;
             g_TextureDesc.colorMulG = 0x80;
             g_TextureDesc.flags = 0x5000000;
             g_TextureDesc.texturePage = 7;
             g_TextureDesc.colorMulB = 0x80;
-            g_TextureDesc.printClutTint = 0x1eb;
+            g_TextureDesc.clutY = 0x1eb;
             g_TextureDesc.screenX = 0;
             g_TextureDesc.texU    = 0;
             g_TextureDesc.pivotX  = 0x3c;

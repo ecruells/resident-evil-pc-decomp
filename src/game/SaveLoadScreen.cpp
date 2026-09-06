@@ -263,8 +263,8 @@ void DrawSaveCursor(short x, short y, int mode)
         g_TextureDesc.texturePage = 0x1E;
         g_TextureDesc.texU = 16;
         g_TextureDesc.texV = 28;
-        g_TextureDesc.unk10 = 0x100;
-        g_TextureDesc.printClutTint = 0x1E0;
+        g_TextureDesc.clutX = 0x100;
+        g_TextureDesc.clutY = 0x1E0;
         g_TextureDesc.screenX = x - g_ScreenOffsetX;
         g_TextureDesc.screenY = y - g_ScreenOffsetY;
         AddTintSprite(&g_TextureDesc, 2);

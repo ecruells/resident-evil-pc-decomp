@@ -119,13 +119,13 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     unsigned int g = ((unsigned int)(texture->colorMulG & 0xFF)) * 2; if (g > 255) g = 255;
     unsigned int b = ((unsigned int)(texture->colorMulB & 0xFF)) * 2; if (b > 255) b = 255;
 
-    // CLUT-tint table (original AddTintSprite 0x0046e0a0): printClutTint minus
+    // CLUT-tint table (original AddTintSprite 0x0046e0a0): clutY minus
     // the font CLUT base (0x1E0, set by ProcessTextureImage bank 0x1E) selects
     // an RGB tint multiplier — 0 white, 1 green (message item names), 2 red,
     // 3 gray, anything else yellow. CLUT 8 (the PrintText shadow row 0x1E8)
     // maps to 1 like the original. The message renderer sets 0x1E1 around an
     // item name, which is what turns "INK RIBBON" green.
-    int clutTint = (int)texture->printClutTint - 0x1E0;
+    int clutTint = (int)texture->clutY - 0x1E0;
     if (clutTint == 8) clutTint = 1;
     switch (clutTint) {
     case 0:  break;                       // white (default)
@@ -775,8 +775,8 @@ int display_texture(TextureDesc* texture, unsigned short depth, int slot, int pa
     }
     if (foundSlot < 0) return 0;
 
-    // CLUT lookup: uVar4 = printClutTint - clutBase;  ==8 → 1
-    int clutIdx = (int)texture->printClutTint - g_TexturePageClutBase[foundSlot];
+    // CLUT lookup: uVar4 = clutY - clutBase;  ==8 → 1
+    int clutIdx = (int)texture->clutY - g_TexturePageClutBase[foundSlot];
     if (clutIdx < 0 || clutIdx > 7) return 0;
     if (clutIdx == 8) clutIdx = 1;
     // (Multi-CLUT: page handle = g_TexturePageTable[foundSlot*0xDF + clutIdx]
@@ -902,7 +902,7 @@ static int AddSpriteEx_Core(TextureDesc* texture, unsigned short depth, int slot
     }
     if (foundSlot < 0) return 0;
 
-    int clutIdx = (int)texture->printClutTint - g_TexturePageClutBase[foundSlot];
+    int clutIdx = (int)texture->clutY - g_TexturePageClutBase[foundSlot];
     if (clutIdx < 0 || clutIdx > 7) return 0;
     if (clutIdx == 8) clutIdx = 1;
 
@@ -1186,9 +1186,9 @@ static void message_render_chars(void)
     g_TextureDesc.screenY = g_MessageScreenY;
     g_TextureDesc.flags = 0x40;
     g_TextureDesc.width = glyphW;
-    g_TextureDesc.printClutTint = g_MessageClutBase + 0x1e0;
+    g_TextureDesc.clutY = g_MessageClutBase + 0x1e0;
     g_TextureDesc.height = 0xe;
-    g_TextureDesc.unk10 = 0x100;
+    g_TextureDesc.clutX = 0x100;
 
     pbVar2 = g_MessagePtr;
     if (g_MessagePtr == g_MessageCurrentPtr) {
@@ -1216,8 +1216,8 @@ static void message_render_chars(void)
             break;
 
         case 5: // set CLUT color
-            g_TextureDesc.unk10 = 0x100;
-            g_TextureDesc.printClutTint = pbVar2[1] + 0x1e0;
+            g_TextureDesc.clutX = 0x100;
+            g_TextureDesc.clutY = pbVar2[1] + 0x1e0;
             pbVar3 = pbVar2 + 2;
             break;
 
@@ -1589,8 +1589,8 @@ msg_skip_char:
             g_TextureDesc.texturePage = 0x1e;
             g_TextureDesc.texU = (unsigned char)(11 * curGlyphW);
             g_TextureDesc.texV = 28;
-            g_TextureDesc.unk10 = 0x100;
-            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.clutX = 0x100;
+            g_TextureDesc.clutY = 0x1e0;
             g_TextureDesc.screenX = 0x99 - g_ScreenOffsetX;
             g_TextureDesc.screenY = g_MessageScreenY + 0x1e;
             AddTintSprite(&g_TextureDesc, 2);
@@ -1644,8 +1644,8 @@ msg_skip_char:
                 g_TextureDesc.texU = (unsigned char)(2 * ynGlyphW);
                 g_TextureDesc.texV = 0x1c;
                 g_TextureDesc.texturePage = 0x1e;
-                g_TextureDesc.unk10 = 0x100;
-                g_TextureDesc.printClutTint = 0x1e0;
+                g_TextureDesc.clutX = 0x100;
+                g_TextureDesc.clutY = 0x1e0;
                 g_TextureDesc.screenX = screenX - g_ScreenOffsetX;
                 g_TextureDesc.screenY = g_MessageScreenY + 0x10;
 

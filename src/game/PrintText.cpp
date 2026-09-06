@@ -120,8 +120,8 @@ void PrintText8x8(short x, short y, unsigned char color, char shadow)
         clutIndex = clutIndex + 8;
     }
 
-    g_TextureDesc.unk10 = 0x100;
-    g_TextureDesc.printClutTint = clutIndex + 0x1E0;
+    g_TextureDesc.clutX = 0x100;
+    g_TextureDesc.clutY = clutIndex + 0x1E0;
 
     for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
         unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
@@ -193,11 +193,11 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
 
     g_TextureDesc.colorMulR = 128;
     g_TextureDesc.colorMulG = 128;
-    g_TextureDesc.unk10 = 256;
+    g_TextureDesc.clutX = 256;
     g_TextureDesc.colorMulB = 128;
     g_TextureDesc.pivotX = 0;
     g_TextureDesc.pivotY = 0;
-    g_TextureDesc.printClutTint = (color & 0xF) + 0x1E0;
+    g_TextureDesc.clutY = (color & 0xF) + 0x1E0;
 
     unk_00be1180 = 0;
 
@@ -272,9 +272,9 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
     g_TextureDesc.height = 14;
     g_TextureDesc.flags = 0x40;
     g_TextureDesc.screenX = x - g_ScreenOffsetX;
-    g_TextureDesc.unk10 = 0x100;
+    g_TextureDesc.clutX = 0x100;
     g_TextureDesc.screenY = y - g_ScreenOffsetY;
-    g_TextureDesc.printClutTint = (color & 0xF) + 0x1E0;
+    g_TextureDesc.clutY = (color & 0xF) + 0x1E0;
     g_TextureDesc.width = glyphW;
     g_TextureDesc.colorMulR = 128;
     g_TextureDesc.colorMulG = 128;

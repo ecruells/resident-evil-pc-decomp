@@ -756,7 +756,7 @@ static void menu_draw_inventory(void)
 
     // 0x00463f20-0x00463f80: Draw equipped weapon or no equipped empty slot
     g_TextureDesc.flags = 0x01000040;
-    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.clutX = 0;
     g_TextureDesc.texturePage = 0x1c;
     g_TextureDesc.screenX = 0xa0;
     g_TextureDesc.screenY = 0x92;
@@ -768,11 +768,11 @@ static void menu_draw_inventory(void)
         uVar11 = 1;
         uVar10 = 10;
         g_TextureDesc.texU = 0;
-        g_TextureDesc.printClutTint = 0x1e0;
+        g_TextureDesc.clutY = 0x1e0;
         g_TextureDesc.texV = 0;
     } else {
         g_TextureDesc.texU = 0x58;
-        g_TextureDesc.printClutTint = 0x1e4;
+        g_TextureDesc.clutY = 0x1e4;
         g_TextureDesc.texturePage = 0x1d;
         // 0x00463fa1: the original reads [ECX + 0xd21ccf] with ECX = the 1-based
         // equipped slot; 0xd21ccf is the byte just before g_ItemSlotIndices
@@ -789,7 +789,7 @@ static void menu_draw_inventory(void)
             g_TextureDesc.texU = 0;
             uVar11 = 1;
             uVar10 = 0x1e;
-            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.clutY = 0x1e0;
             g_TextureDesc.texturePage = 0;
             g_TextureDesc.texV = *pbVar2 * 0x1e - 2;
         }
@@ -819,7 +819,7 @@ static void menu_draw_inventory(void)
         bVar6 = bVar6 - 1;
         g_TextureDesc.height = 30;
         uVar7 = (unsigned int)bVar6;
-        g_TextureDesc.printClutTint = 0x1e4;
+        g_TextureDesc.clutY = 0x1e4;
         g_TextureDesc.texU = 88;
         g_TextureDesc.screenY = *(short*)((int)g_inventorySlotsPos + (unsigned int)(unsigned char)(local_2 - 1) * 2);
         local_2 = local_2 - 2;
@@ -834,7 +834,7 @@ static void menu_draw_inventory(void)
             g_TextureDesc.texU = 0;
             uVar10 = 0x1e;
             g_TextureDesc.texturePage = 0;
-            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.clutY = 0x1e0;
             g_TextureDesc.texV = *pbVar2 * 0x1e - 2;
         }
         display_texture(&g_TextureDesc, (unsigned short)g_invDepthLayer + 1, uVar10, uVar11);
@@ -851,7 +851,7 @@ static void menu_draw_inventory(void)
     g_TextureDesc.width = 40;
     g_invDepthLayer = 10;
     g_TextureDesc.height = 30;
-    g_TextureDesc.printClutTint = 0x1e0;
+    g_TextureDesc.clutY = 0x1e0;
     for (char cVar4 = g_totalInventorySlots - g_TotalHeldItems; cVar4 != 0; cVar4 = cVar4 - 1) {
         g_TextureDesc.screenY = *(short*)((int)g_inventorySlotsPos + (unsigned int)(unsigned char)(bVar6 - 1) * 2);
         bVar6 = bVar6 - 2;
@@ -864,7 +864,7 @@ static void menu_draw_inventory(void)
     g_TextureDesc.screenY = 0x92;
     g_TextureDesc.width = 30;
     g_TextureDesc.height = 30;
-    g_TextureDesc.printClutTint = 0x1e0;
+    g_TextureDesc.clutY = 0x1e0;
     g_invDepthLayer = 10;
     g_TextureDesc.texU = (g_playerEntity.id & 1) << 5;
     g_TextureDesc.texV = (g_playerEntity.id & 2) << 4;
@@ -874,7 +874,7 @@ static void menu_draw_inventory(void)
     // 0x00464310: Draw top options menu (Map, File, Radio, Exit)
     g_CurrentMenuFramesDataPtr = (unsigned short*)g_MainMenuTopOptionsPos;
     g_invDepthLayer = 20;
-    g_TextureDesc.printClutTint = 0x1e4;
+    g_TextureDesc.clutY = 0x1e4;
     do {
         bVar6 = bVar6 - 2;
         load_main_menu_frame_part_tex_area();
@@ -1009,7 +1009,7 @@ static void display_item_qty(unsigned char itemId, unsigned char qty, int depth)
            itemId > ITEM_NON_INFINITE_MAX))
         return;
 
-    g_TextureDesc.printClutTint = 0x1E4;
+    g_TextureDesc.clutY = 0x1E4;
     g_TextureDesc.screenY = g_TextureDesc.screenY + 0x14;
     g_TextureDesc.height = 8;
 
@@ -1720,8 +1720,8 @@ move_skip_name:
         g_TextureDesc.texU = 0x6c;
         g_TextureDesc.texturePage = 0x1c;
         g_TextureDesc.texV = 0x60;
-        g_TextureDesc.unk10 = 0;
-        g_TextureDesc.printClutTint = 0x1e4;
+        g_TextureDesc.clutX = 0;
+        g_TextureDesc.clutY = 0x1e4;
         if ((DAT_00ae9f26 & 0x20) == 0) {
             g_TextureDesc.texU = 0x74;
         }
@@ -1755,8 +1755,8 @@ static void menu_draw_cursor(void)
 {
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.texturePage = 0x1c;
-    g_TextureDesc.unk10 = 0;
-    g_TextureDesc.printClutTint = 0x1e4;
+    g_TextureDesc.clutX = 0;
+    g_TextureDesc.clutY = 0x1e4;
     g_TextureDesc.screenX = *(short*)((int)g_inventorySlotsPos + DAT_00ae9f23 * 2);
     g_TextureDesc.screenY = *(short*)((int)g_inventorySlotsPos + DAT_00ae9f23 * 2 + 2);
 
@@ -1816,8 +1816,8 @@ void FUN_00454fd0(int itemId, int mode, short x, short y)
 
     g_TextureDesc.flags = 0x40;
     g_TextureDesc.height = 0xe;
-    g_TextureDesc.unk10 = 0x100;
-    g_TextureDesc.printClutTint = (modeB & 0xf) + 0x1e0;
+    g_TextureDesc.clutX = 0x100;
+    g_TextureDesc.clutY = (modeB & 0xf) + 0x1e0;
     g_TextureDesc.screenX = x;
     g_TextureDesc.screenY = y;
     g_TextureDesc.width = glyphW;
@@ -1957,8 +1957,8 @@ submenu_default:
     if ((DAT_00ae9f27 != 0) && ((DAT_00ae9f28 & 8) == 0)) {
         g_TextureDesc.flags = 0x01000040;
         g_TextureDesc.texturePage = 0x1c;
-        g_TextureDesc.unk10 = 0;
-        g_TextureDesc.printClutTint = 0x1e4;
+        g_TextureDesc.clutX = 0;
+        g_TextureDesc.clutY = 0x1e4;
         g_TextureDesc.screenX = 0x90;
         if (((DAT_00ae9f21 & 1) == 0) && (DAT_00ae9f28 == 0)) {
             g_TextureDesc.texV = 0x60;
@@ -1980,7 +1980,7 @@ submenu_default:
             g_TextureDesc.texU = (0x10 - DAT_00ae9f27) * 6;
             g_TextureDesc.texV = g_TextureDesc.texV + (8 - DAT_00ae9f27) * 3;
         }
-        g_TextureDesc.printClutTint = 0x1e4;
+        g_TextureDesc.clutY = 0x1e4;
         uVar2 = 0;
         g_TextureDesc.width = (DAT_00ae9f27 & 0x7f) * 6;
         g_TextureDesc.height = (DAT_00ae9f27 & 0x7f) * 3;
@@ -2401,8 +2401,8 @@ static void menu_draw_health_bar(void)
         g_TextureDesc.screenY = 0xa8;
         g_TextureDesc.width = 0x20;
         g_TextureDesc.height = 8;
-        g_TextureDesc.unk10 = 0;
-        g_TextureDesc.printClutTint = 0x1e4;
+        g_TextureDesc.clutX = 0;
+        g_TextureDesc.clutY = 0x1e4;
         g_TextureDesc.texturePage = 0x1c;
 
         // Draw face icon based on health status
@@ -2719,9 +2719,9 @@ static TextureDesc g_MapSprites[8] = {
 // and the map never drew - the [MAP] log showed r=0 for zoom0. The desc is
 // retargeted to the page's actual CLUT base (0) so the map sprite is accepted.
 static TextureDesc g_MapZoomDesc[3] = {
-    // printClutTint is 0x1ff, not 0 - all three records at 0x004d3370 / 0x394 /
+    // clutY is 0x1ff, not 0 - all three records at 0x004d3370 / 0x394 /
     // 0x3b8 (stride 0x24) carry it. display_texture derives the palette as
-    // `printClutTint - g_TexturePageClutBase[slot]` and rejects anything outside
+    // `clutY - g_TexturePageClutBase[slot]` and rejects anything outside
     // 0..7, so a 0 here gave 0 - 0x1ff = -511 and the base map layer silently
     // returned 0: the map drew its blue grid and floor label (entries 1 and 2,
     // which had the right tint) but never the room layout.
@@ -2970,7 +2970,7 @@ static void map_display_draw(unsigned char* state)
             g_MapZoomDesc[0].flags, g_MapZoomDesc[0].screenX, g_MapZoomDesc[0].screenY,
             g_MapZoomDesc[0].width, g_MapZoomDesc[0].height,
             g_MapZoomDesc[0].texU, g_MapZoomDesc[0].texV, g_MapZoomDesc[0].texturePage,
-            g_MapZoomDesc[0].printClutTint);
+            g_MapZoomDesc[0].clutY);
     } else {
         AddSprite_Ex(&g_MapZoomDesc[0], 0x28, 0xd, 1);
         AddSprite_Ex(&g_MapZoomDesc[1], 0x2a, 0xf, 1);
@@ -4742,8 +4742,8 @@ static void itembox_draw_cursor(void)
     // positions.
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.texturePage = 0x1c;
-    g_TextureDesc.unk10 = 0;
-    g_TextureDesc.printClutTint = 0x1e4;
+    g_TextureDesc.clutX = 0;
+    g_TextureDesc.clutY = 0x1e4;
     g_TextureDesc.screenX = *(short*)(g_inventorySlotsPos + (unsigned int)DAT_00ae9f23 * 2);
     g_TextureDesc.screenY = *(short*)(g_inventorySlotsPos + (unsigned int)DAT_00ae9f23 * 2 + 2);
     if ((DAT_00ae9f23 & 0xf8) != 0) {
@@ -5120,10 +5120,10 @@ static void draw_itembox_menu(void)
     // render walk orders by depth (shadows 501, frame commands 500, masks
     // 450) - so the pieces are submitted in the original's order.
     g_TextureDesc.flags = 0x01000040;
-    g_TextureDesc.printClutTint = 0x1fc;
+    g_TextureDesc.clutY = 0x1fc;
     g_TextureDesc.texturePage = 0x15;
     g_CurrentMenuFramesDataPtr = (unsigned short*)(s_itemboxFramePartsA + sizeof(s_itemboxFramePartsA));
-    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.clutX = 0;
     for (int i = 0; i < 5; i++) {
         load_main_menu_frame_part_tex_area();
         draw_texture(&g_TextureDesc, 0);
@@ -5145,7 +5145,7 @@ static void draw_itembox_menu(void)
         unsigned char itemId = g_itemboxSlots[slot].Id;
         if (itemId == 0) {
             // Empty slot background (blue.tim at page slot 0xA)
-            g_TextureDesc.printClutTint = 0x1e0;
+            g_TextureDesc.clutY = 0x1e0;
             g_TextureDesc.texU = 0;
             g_TextureDesc.texV = 0;
             g_TextureDesc.texturePage = 0x1c;
@@ -5160,14 +5160,14 @@ static void draw_itembox_menu(void)
             // item draw is.
             g_TextureDesc.texturePage = 0x1d;
             g_TextureDesc.texU = (slot & 1) * 0x28;
-            g_TextureDesc.printClutTint = 0x1e4;
+            g_TextureDesc.clutY = 0x1e4;
             g_TextureDesc.texV = (slot & 6) * 0x10 + slide2 + 0x50;
             if (itemId < 0x6f) {
                 display_texture(&g_TextureDesc, 0x17, 0xf, 8);
             } else {
                 // Special items (>= 0x6f) come from staitem.tim (page slot
                 // 0x1E), one 30px row per item id
-                g_TextureDesc.printClutTint = 0x1e0;
+                g_TextureDesc.clutY = 0x1e0;
                 g_TextureDesc.texturePage = 0;
                 g_TextureDesc.texU = 0;
                 g_TextureDesc.texV = (unsigned char)(itemId * 0x1e) + slide2 - 2;
@@ -5242,8 +5242,8 @@ static void draw_itembox_menu(void)
     g_TextureDesc.screenX = 0xb0;
     g_TextureDesc.width = 6;
     g_TextureDesc.height = 1;
-    g_TextureDesc.unk10 = 0;
-    g_TextureDesc.printClutTint = 0x1fc;
+    g_TextureDesc.clutX = 0;
+    g_TextureDesc.clutY = 0x1fc;
     g_TextureDesc.texturePage = 0x15;
     unsigned char triCount = 3;
     do {
@@ -5547,8 +5547,8 @@ static void FUN_0044eca0(void)
     g_TextureDesc.flags = 0x01000040;
     g_TextureDesc.texV = 0x7c;
     g_TextureDesc.texturePage = 0x1c;
-    g_TextureDesc.unk10 = 0;
-    g_TextureDesc.printClutTint = 0x1e4;
+    g_TextureDesc.clutX = 0;
+    g_TextureDesc.clutY = 0x1e4;
     g_TextureDesc.height = 9;
     unsigned short bitMask = 0x8000;
     unsigned char count = 4;

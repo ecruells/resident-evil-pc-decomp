@@ -184,7 +184,7 @@ extern short         g_TexturePageOriginX[256];   // VRAM X origin (halfwords)
 extern short         g_TexturePageOriginY[256];   // VRAM Y origin (scanlines)
 extern short         g_TexturePageId[256];        // tpage code assigned to each slot;
                                                   // what TextureDesc::texturePage is matched against
-extern short         g_TexturePageClutBase[256];  // base printClutTint (= pageOffset + 0x1E0)
+extern short         g_TexturePageClutBase[256];  // base clutY (= pageOffset + 0x1E0)
 extern int           g_texturePageMode;
 extern int           g_texturePageHandle;
 extern void*         g_texturePageSrcDesc;   // port-only: last create_texture_page source, for diagnostics

@@ -101,7 +101,7 @@ void LoadEffectTextureSheet(int slot, void* timData)
 //
 // The weapon-FX sheets in core00.etm carry MULTIPLE 16-entry CLUT rows, and
 // the rows are palette VARIANTS of the same art, selected per spawn by the
-// tint index (printClutTint = depthGroup >> 3). The blood sheet (esp index 0,
+// tint index (clutY = depthGroup >> 3). The blood sheet (esp index 0,
 // etm offset 0x8200) is the proof: row 0 dark red (zombie), row 1 green
 // (hunter), row 2 orange, row 3 white/lavender - and Plant 42's damage
 // splashes spawn with depthGroup 0x18/0x1B/0x1C (Plant42.cpp), i.e. tint 3,
@@ -1318,7 +1318,7 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
             BYTE* src8 = (BYTE*)srcData;
             int pixW = (int)width * 2;
             int pixH = (int)height;
-            // Use CLUT from printClutTint: 0x1E4 → X=4, 0x1E0 → X=0.
+            // Use CLUT from clutY: 0x1E4 → X=4, 0x1E0 → X=0.
             // CLUT X is in units of 16 halfwords. For 256-entry CLUT (512 bytes
             // = 256 halfwords), CLUT index = X / 16. 0x1E4 X=4 → CLUT 0,
             // but items use 0x1E4 for normal and 0x1E0 for special.
@@ -1380,7 +1380,7 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
                 g_TexturePageBpp[slot] = 16;
                 // Set VRAM page metadata so display_texture can locate this
                 // SRV by depth/UV bounds. Items are rendered at depth=0x1d
-                // with texU=88, texV=slot*32, printClutTint=0x1e4.
+                // with texU=88, texV=slot*32, clutY=0x1e4.
                 g_TexturePageId[slot] = 0x1d;
                 g_TexturePageClutBase[slot] = 0x1e0;
                 g_TexturePageOriginX[slot] = 0;

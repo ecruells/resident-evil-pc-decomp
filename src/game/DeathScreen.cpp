@@ -48,7 +48,7 @@ struct DieScreenTexEntry {
     unsigned short height;
     unsigned char  texU;
     unsigned char  texV;
-    unsigned short printClutTint;
+    unsigned short clutY;
 };
 
 // The four died.tim quadrants (0x004bd2b8). 2x2 grid of 160x120 pieces
@@ -99,8 +99,8 @@ int _fsin(int angle)
 // Copies a 0x10-byte template entry into g_TextureDesc. Ground truth from
 // the original disassembly (offsets into 0x00be1160):
 //   +0x00 flags (u32), +0x04 screenX/screenY (u32), +0x08 width/height (u32),
-//   +0x0E texU/texV from entry+0xC, +0x10 unk10/printClutTint from entry+0xE
-//   (unk10 zeroed by the SHL), +0x1E scaleY = param.
+//   +0x0E texU/texV from entry+0xC, +0x10 clutX/clutY from entry+0xE
+//   (clutX zeroed by the SHL), +0x1E scaleY = param.
 // ============================================================================
 void update_image_fading_(const void* param1, short param2)
 {
@@ -110,8 +110,8 @@ void update_image_fading_(const void* param1, short param2)
     *(unsigned int*)&g_TextureDesc.width   = *(const unsigned int*)&entry->width;
     g_TextureDesc.texU          = entry->texU;
     g_TextureDesc.texV          = entry->texV;
-    g_TextureDesc.unk10         = 0;
-    g_TextureDesc.printClutTint = entry->printClutTint;
+    g_TextureDesc.clutX         = 0;
+    g_TextureDesc.clutY = entry->clutY;
     g_TextureDesc.scaleY        = param2;
 }
 

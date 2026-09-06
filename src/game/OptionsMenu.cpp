@@ -529,8 +529,8 @@ void options_print_14x14(short x, short y, unsigned char tint, char mirror)
     g_TextureDesc.pivotY = 0;
 
     if (mirror != 0) tint = tint + 8;
-    g_TextureDesc.unk10 = 0x100;
-    g_TextureDesc.printClutTint = tint + 0x1e0;
+    g_TextureDesc.clutX = 0x100;
+    g_TextureDesc.clutY = tint + 0x1e0;
 
     unsigned char* pb = (unsigned char*)PRINT_TEXT_BUFFER;
     do {
@@ -567,8 +567,8 @@ void options_print_8x8_glyph(short x, short y, unsigned char tint, char mirror)
     g_TextureDesc.pivotY = 0;
 
     if (mirror != 0) tint = tint + 8;
-    g_TextureDesc.unk10 = 0x100;
-    g_TextureDesc.printClutTint = tint + 0x1e0;
+    g_TextureDesc.clutX = 0x100;
+    g_TextureDesc.clutY = tint + 0x1e0;
 
     unsigned char* pb = (unsigned char*)PRINT_TEXT_BUFFER;
     do {
@@ -766,12 +766,12 @@ void options_render_cursor(void)
     g_TextureDesc.width = (unsigned short)(s_optUseJoystickMode * 0x4f + 0x25);
     g_TextureDesc.colorMulR = 0x80;
     g_TextureDesc.colorMulG = 0x80;
-    g_TextureDesc.printClutTint = 0x1e0;
+    g_TextureDesc.clutY = 0x1e0;
     g_TextureDesc.colorMulB = 0x80;
     g_TextureDesc.pivotX = 0;
     unk_00be1180 = 0;
     g_TextureDesc.pivotY = 0;
-    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.clutX = 0;
 
     if (s_optUseJoystickMode == 0) {
         g_TextureDesc.texU = texUOffsets[(unsigned char)s_optCursorPos * 4];
@@ -1059,9 +1059,9 @@ unsigned int options_display_config_handler(void)
 
     // Set up render state
     g_TextureDesc.flags = 0x01000040;
-    g_TextureDesc.printClutTint = 0x1ff;
+    g_TextureDesc.clutY = 0x1ff;
     g_TextureDesc.texturePage = 0x15;
-    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.clutX = 0;
     g_TextureDesc.colorMulR = 0;
     g_TextureDesc.pivotX = 0;
     g_TextureDesc.colorMulG = 0;
@@ -1685,7 +1685,7 @@ unsigned int options_key_config_handler(void)
     unsigned char* pTmp;
 
     // Set up render state
-    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.clutX = 0;
     g_TextureDesc.colorMulR = 0;
     g_TextureDesc.colorMulG = 0;
     g_TextureDesc.colorMulB = 0;
@@ -1693,7 +1693,7 @@ unsigned int options_key_config_handler(void)
     g_TextureDesc.pivotX = 0;
     unk_00be1180 = 0;
     g_TextureDesc.pivotY = 0;
-    g_TextureDesc.printClutTint = 0x1ff;
+    g_TextureDesc.clutY = 0x1ff;
     g_TextureDesc.texturePage = 0x15;
 
     if (s_optSubInitState == 0) {
@@ -2083,7 +2083,7 @@ unsigned int options_joystick_config_handler(void)
     unsigned char* pTmp;
 
     // Set up render state
-    g_TextureDesc.unk10 = 0;
+    g_TextureDesc.clutX = 0;
     g_TextureDesc.colorMulR = 0;
     g_TextureDesc.colorMulG = 0;
     g_TextureDesc.colorMulB = 0;
@@ -2091,7 +2091,7 @@ unsigned int options_joystick_config_handler(void)
     g_TextureDesc.pivotX = 0;
     unk_00be1180 = 0;
     g_TextureDesc.pivotY = 0;
-    g_TextureDesc.printClutTint = 0x1ff;
+    g_TextureDesc.clutY = 0x1ff;
     g_TextureDesc.texturePage = 0x15;
 
     if (s_optSubInitState == 0) {
@@ -2581,8 +2581,8 @@ unsigned int options_joystick_config_input(void)
     unk_00be1180 = 0;
     g_TextureDesc.pivotY = 0;
     g_TextureDesc.texV = cursorBoxTexV[s_optCursorIndex];
-    g_TextureDesc.unk10 = 0;
-    g_TextureDesc.printClutTint = 0x1e0;
+    g_TextureDesc.clutX = 0;
+    g_TextureDesc.clutY = 0x1e0;
     display_texture(&g_TextureDesc, 2, 0xb, 1);
     return 1;
 }
@@ -2949,13 +2949,13 @@ loadKeyConfigBg:
 
         // Render current state (except during exit)
         if (s_optMainState != 4) {
-            g_TextureDesc.unk10 = 0;
+            g_TextureDesc.clutX = 0;
             g_TextureDesc.colorMulR = 0;
             g_TextureDesc.pivotX = 0;
             g_TextureDesc.colorMulG = 0;
             g_TextureDesc.pivotY = 0;
             g_TextureDesc.colorMulB = 0;
-            g_TextureDesc.printClutTint = 0x1ff;
+            g_TextureDesc.clutY = 0x1ff;
             g_TextureDesc.texturePage = 0x15;
             unk_00be1180 = 0;
             options_menu_render();

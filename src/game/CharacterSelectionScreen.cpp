@@ -227,7 +227,7 @@ static void CharSelectDrawCursor(void)
     g_TextureDesc.screenY = -0x16;
     g_TextureDesc.width = 0x0C;
     g_TextureDesc.height = 0x0B;
-    g_TextureDesc.printClutTint = 0x1EA;
+    g_TextureDesc.clutY = 0x1EA;
 
     if ((g_selTimer & 0x30) == 0) {
         g_TextureDesc.texV = 0x50;
@@ -477,10 +477,10 @@ void characterSelectionScreen(void)
         }
 
         // Common texture descriptor setup
-        g_TextureDesc.unk10 = 0;
+        g_TextureDesc.clutX = 0;
         g_TextureDesc.pivotX = 0;
         g_TextureDesc.pivotY = 0;
-        g_TextureDesc.printClutTint = 0;
+        g_TextureDesc.clutY = 0;
         g_TextureDesc.flags = 0x01000040;
         g_TextureDesc.colorMulR = 0x80;
         g_TextureDesc.colorMulG = 0x80;

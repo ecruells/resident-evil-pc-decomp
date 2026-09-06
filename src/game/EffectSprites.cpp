@@ -467,7 +467,7 @@ static void load_effect_sprites(void)
 
     // Record each declared sprite's CLUT row count. Room esp TIMs are 4bpp with
     // up to four 16-entry CLUT rows, and the rows are palette VARIANTS of the
-    // same art selected per spawn by the tint index (printClutTint =
+    // same art selected per spawn by the tint index (clutY =
     // depthGroup >> 3) - exactly like the weapon-FX sheets in core00.etm (the
     // Plant 42 white-blood fix). ROOM5080's passcode light is the room-side
     // proof: its sheet ships row 0 red / row 1 cyan-blue / row 2 orange /
@@ -624,7 +624,7 @@ void load_shoot_direction_data(void)
     // Each sheet also carries up to four 16-entry CLUT rows - palette
     // VARIANTS selected per spawn by the tint index (see the submit-side note
     // in EffectSystem.cpp). They are baked to slots 120 + i*4 + row so
-    // effect_submit_sprite can pick the row matching printClutTint: the blood
+    // effect_submit_sprite can pick the row matching clutY: the blood
     // sheet (esp index 0) is row 0 red / row 1 green / row 2 orange / row 3
     // white - Plant 42's sap (depthGroup 0x18/0x1B/0x1C -> tint 3).
     for (int i = 0; i < 8; i++) {

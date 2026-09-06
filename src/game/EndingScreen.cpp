@@ -327,8 +327,8 @@ static void ending_result_draw(void)
             s->tex.texturePage         = 0x1E;
             s->tex.width         = 8;
             s->tex.height        = 0x0E;
-            s->tex.unk10         = 0x100;
-            s->tex.printClutTint = 0x1E0;
+            s->tex.clutX         = 0x100;
+            s->tex.clutY = 0x1E0;
             sprintf(PRINT_TEXT_BUFFER, "%02d:%02d%1c%02d",
                     (int)(g_gameTimerSnapshot / 0x1A5E0),
                     (int)((g_gameTimerSnapshot % 0x1A5E0) / 0x708),
@@ -343,8 +343,8 @@ static void ending_result_draw(void)
             s->tex.texturePage         = 0x1E;
             s->tex.width         = 8;
             s->tex.height        = 0x0E;
-            s->tex.unk10         = 0x100;
-            s->tex.printClutTint = 0x1E0;
+            s->tex.clutX         = 0x100;
+            s->tex.clutY = 0x1E0;
             sprintf(PRINT_TEXT_BUFFER, "%02d",
                     (g_SavesCounter == 0) ? 0 : (g_SavesCounter - 1));
             if (s->fadeLevel != 0) ending_draw_text();
@@ -416,8 +416,8 @@ static void ending_result_build(void)
         s_alloc->tex.texV          = e->texV;
         s_alloc->tex.width         = 0x100;
         s_alloc->tex.height        = e->height;
-        s_alloc->tex.unk10         = 0;
-        s_alloc->tex.printClutTint = 0x1FB;
+        s_alloc->tex.clutX         = 0;
+        s_alloc->tex.clutY = 0x1FB;
         s_alloc->tex.texturePage         = 0x1B;
 
         if (s_alloc->type == 3) {
@@ -661,8 +661,8 @@ static void ending_epilogue_build(void)
         s_alloc->tex.texV          = e->texV;
         s_alloc->tex.width         = 0x100;
         s_alloc->tex.height        = e->height;
-        s_alloc->tex.unk10         = 0;
-        s_alloc->tex.printClutTint = 0x1FB;
+        s_alloc->tex.clutX         = 0;
+        s_alloc->tex.clutY = 0x1FB;
         s_alloc->tex.texturePage         = 0x1B;
         s_creditSlots[i] = s_alloc;
     }

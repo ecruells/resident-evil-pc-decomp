@@ -239,8 +239,8 @@ void Room_LoadCameraSprites(void) // 0x004757c0
 
                     entry->active = 1;
                     entry->id = (unsigned char)grpIdx + 1;
-                    entry->texDesc.unk10 = (groupHeaders[1] & 0x3f) << 4;
-                    entry->texDesc.printClutTint = (short)(pageByte + 0x1e0);
+                    entry->texDesc.clutX = (groupHeaders[1] & 0x3f) << 4;
+                    entry->texDesc.clutY = (short)(pageByte + 0x1e0);
                     entry->texDesc.texU = (unsigned char)sprPtr[0];
                     entry->texDesc.texV = *((unsigned char*)sprPtr + 1);
                     entry->texDesc.screenX = (short)((unsigned short)(unsigned char)sprPtr[1] + groupHeaders[2] - 0xa0);
