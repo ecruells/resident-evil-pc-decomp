@@ -1240,6 +1240,20 @@ static void FUN_00483270(unsigned char* objPtr, int depthShift)
 
     CMarniDirect3DTMD* tmd = (CMarniDirect3DTMD*)(void*)tmdObj;
     tmd->Transform(g_pMarniDirect3D, (void*)(size_t)depth, m, 0);
+
+    // 0x004834d2: copy the anim object's live blend weight (spriteData[5] ==
+    // spriteData + 0x14, what scd_model_tint_apply -> TmdObjectSetLightScale
+    // (0x004870a0) writes) into the +0x68/+0x78 blend-weight fields of all 31
+    // records of the first object buffer, every frame. Without this the flush's
+    // `bgWeight` read (e->objData + 0x68) keeps the value CreateTmdObjectInternal
+    // stamped at creation (0 for an opaque model), so any runtime alpha change -
+    // room 20B's lighter-lit map fade over the 2F map - never left the object
+    // solid. The loop runs i = 0x84..0xFF8 (ESI += 0x84, ESI < 0x1080), which
+    // lands on record k's +0x68/+0x78 for k = 0..30 of m_objectData.
+    for (int rec = 0; rec < 31; rec++) {
+        *(int*)((unsigned char*)tmdObj + 0x4D0 + rec * 0x84 + 0x68) = spriteData[5];
+        *(int*)((unsigned char*)tmdObj + 0x4D0 + rec * 0x84 + 0x78) = spriteData[5];
+    }
 }
 
 // (0x00484eb0) 
