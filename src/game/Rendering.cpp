@@ -4,6 +4,7 @@
 #include "../DebugPrint.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
+#include "../system/AssetPath.h"
 #include "SpriteRenderer.h"
 #include "TmdRenderer.h"
 #include <cstdlib>
@@ -93,11 +94,23 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
     float charW = (float)texture->width * scaleX;
     float charH = (float)texture->height * scaleY;
 
+    // Font page select. The original's AddTintSprite looks `depth` up in the
+    // texture-page table (JPN FUN_00441120 searches slots 12-14 for the id in
+    // TextureDesc+0x0C), so 0x1E and 0x1F name two DIFFERENT pages of the same
+    // font sheet. fontus.tim is 256x256 and only ever fills page 0x1E; the
+    // Japanese FONT.TIM is 768x256, so its kanji half is page 0x1F, one
+    // 256-texel page to the right. texU is a byte in the descriptor and cannot
+    // carry that, exactly as in the original — the page adds it here.
+    int texUBase = texture->texU;
+    if (texture->depth == 0x1F && texW >= 512) {
+        texUBase += 256;
+    }
+
     float texW_f = (float)texW;
     float texH_f = (float)texH;
-    float u0 = (float)texture->texU / texW_f;
+    float u0 = (float)texUBase / texW_f;
     float v0 = (float)texture->texV / texH_f;
-    float u1 = (float)(texture->texU + texture->width) / texW_f;
+    float u1 = (float)(texUBase + texture->width) / texW_f;
     float v1 = (float)(texture->texV + texture->height) / texH_f;
 
     // Calculate RGB from tint values — cast to unsigned int first to avoid overflow
@@ -1119,11 +1132,20 @@ void ApplyShakeAndRebuildSprites() {
 // its category is returned instead (e.g. "MANSION KEY").
 unsigned char* message_item_name_lookup(unsigned char itemId)
 {
+    // The Japanese release has its own pair of tables (0x004cd388/0x004cd548,
+    // read by its message_item_name_lookup at 0x00491440) holding the names in
+    // FONT.TIM's encoding. The USA strings would still draw - the two fonts
+    // share their latin rows - but they would draw in English.
+    const int jpn = (GetAssetVersion() != 0);
+    const unsigned char** names = jpn ? g_ItemNamePointersJpn : g_ItemNamePointers;
+    const unsigned char** unknown = jpn ? g_UnknownItemNamePointersJpn
+                                        : g_UnknownItemNamePointers;
+
     unsigned char bVar2 = itemId - 1;
-    unsigned char* puVar3 = (unsigned char*)g_ItemNamePointers[bVar2];
+    unsigned char* puVar3 = (unsigned char*)names[bVar2];
     if ((bVar2 < 0x4d) && ((bVar2 = g_ItemImageLookupTable[(unsigned int)bVar2 * 4 + 6], (bVar2 & 0x80) == 0))) {
         if (Flg_ck((int)g_itemExaminedFlags, (unsigned int)bVar2) == 0) {
-            puVar3 = (unsigned char*)g_UnknownItemNamePointers[bVar2];
+            puVar3 = (unsigned char*)unknown[bVar2];
         }
     }
     return puVar3;
@@ -1148,10 +1170,21 @@ static void message_render_chars(void)
     // debug crash log: EAX/EDX=0xCCCCCCCE in message_render_chars).
     unsigned char* savedPtr = NULL;
 
-    g_TextureDesc.screenX = 0x30 - g_ScreenOffsetX;
+    // Game-text glyph width: 8px (USA/GOG fontus.tim) or 14px (Japanese
+    // FONT.TIM). The JPN renderers (draw_item_name 0x004912c0,
+    // PrintFormattedText 0x00491490, PrintText8x14 0x00491830) all use
+    // texU=(b%18)*14 and a +14 cursor advance.
+    const int glyphW = (GetAssetVersion() != 0) ? 14 : 8;
+    // Left margin of the message box. The wider Japanese glyphs need the text
+    // to start further left or the line runs off the right edge, so the JPN
+    // message_render_chars (0x00492360) opens at 0x22 where the USA one
+    // (0x00456020) opens at 0x30 — both on entry and after every line break.
+    const short msgLeft = (GetAssetVersion() != 0) ? 0x22 : 0x30;
+
+    g_TextureDesc.screenX = msgLeft - g_ScreenOffsetX;
     g_TextureDesc.screenY = g_MessageScreenY;
     g_TextureDesc.flags = 0x40;
-    g_TextureDesc.width = 8;
+    g_TextureDesc.width = glyphW;
     g_TextureDesc.printClutTint = g_MessageClutBase + 0x1e0;
     g_TextureDesc.height = 0xe;
     g_TextureDesc.unk10 = 0x100;
@@ -1170,7 +1203,7 @@ static void message_render_chars(void)
         case 2: // newline
             pbVar3 = pbVar2 + 1;
             g_TextureDesc.screenY += 0x10;
-            g_TextureDesc.screenX = 0x30 - g_ScreenOffsetX;
+            g_TextureDesc.screenX = msgLeft - g_ScreenOffsetX;
             break;
 
         case 3: // unknown tag (skip 1 byte)
@@ -1230,7 +1263,7 @@ msg_render_char:
 msg_draw_char:
             // Calculate texture coordinates from character index
             g_TextureDesc.texV = bVar1 * 0xe;
-            g_TextureDesc.texU = *pbVar2 % 0x12 << 3;
+            g_TextureDesc.texU = *pbVar2 % 0x12 * glyphW;
 
             g_DepthSortOverride = 0;
 
@@ -1245,7 +1278,7 @@ msg_draw_char:
             AddTintSprite(&g_TextureDesc, fade);
 
 msg_next_char:
-            g_TextureDesc.screenX += 8;
+            g_TextureDesc.screenX += glyphW;
             pbVar3 = pbVar2 + 1;
             break;
         }
@@ -1544,12 +1577,16 @@ msg_skip_char:
         g_MessageCharTimer = g_MessageCharTimer - 1;
         // Blink cursor every ~24 frames (0x18 = 24)
         if ((((unsigned int)g_MessageCharTimer & (0x18 << (g_bGameActive == 0)))) != 0) {
-            // Draw cursor indicator
+            // Draw cursor indicator: character-table index 11, the ▼ on row 0.
+            // Both builds draw the same glyph, but the row is 18 columns of
+            // whatever the font's glyph width is, so the Japanese one lands at
+            // 11*14 = 0x9A and is 14 wide (JPN UpdateMessageDisplay 0x00491ac0).
+            const int curGlyphW = (GetAssetVersion() != 0) ? 14 : 8;
             g_TextureDesc.flags = 0x40;
-            g_TextureDesc.width = 8;
+            g_TextureDesc.width = curGlyphW;
             g_TextureDesc.height = 14;
             g_TextureDesc.depth = 0x1e;
-            g_TextureDesc.texU = 88;
+            g_TextureDesc.texU = (unsigned char)(11 * curGlyphW);
             g_TextureDesc.texV = 28;
             g_TextureDesc.unk10 = 0x100;
             g_TextureDesc.printClutTint = 0x1e0;
@@ -1575,7 +1612,16 @@ msg_skip_char:
         break;
 
     // === State 4: Yes/No prompt ===
-    case 4:
+    case 4: {
+        // Yes/No layout. "Yes  No" is drawn one glyph to the right of the
+        // "Yes" cursor, and the "No" cursor sits five glyphs further along, so
+        // the whole row scales with the font: 0xD0/0xF8 + text at 0xD8 in the
+        // USA build, 0xA0/0xE6 + text at 0xAE in the Japanese one
+        // (UpdateMessageDisplay 0x00491ac0 / PrintText8x14 0x00491830).
+        const int   ynGlyphW = (GetAssetVersion() != 0) ? 14 : 8;
+        const short ynCursorX = (GetAssetVersion() != 0) ? 0xa0 : 208;
+        const short ynTextX = ynCursorX + ynGlyphW;
+
         if ((g_PlayerDpadPressed & 0x4000) == 0) {
             if ((g_PlayerPadHeld & (0x2000 | 0x8000)) != 0) {
                 g_menu_choice_id = g_menu_choice_id ^ 1;
@@ -1586,13 +1632,15 @@ msg_skip_char:
             if ((((unsigned int)g_MessageCharTimer & (0x18 << (g_bGameActive == 0)))) != 0) {
                 g_TextureDesc.flags = 0x40;
                 if ((g_menu_choice_id & 1) == 0) {
-                    screenX = 208;
+                    screenX = ynCursorX;
                 } else {
-                    screenX = 248;
+                    screenX = ynCursorX + 5 * ynGlyphW;
                 }
-                g_TextureDesc.width = 8;
+                g_TextureDesc.width = ynGlyphW;
                 g_TextureDesc.height = 14;
-                g_TextureDesc.texU = 0x10;
+                // Character-table index 2, the ► on row 0: 2*8 in the USA font,
+                // 2*14 = 0x1C in the Japanese one.
+                g_TextureDesc.texU = (unsigned char)(2 * ynGlyphW);
                 g_TextureDesc.texV = 0x1c;
                 g_TextureDesc.depth = 0x1e;
                 g_TextureDesc.unk10 = 0x100;
@@ -1611,7 +1659,7 @@ msg_skip_char:
             // selection arrow is drawn at 0xd0/0xf8, so "No" must start at
             // 0x100 — with one space the "N" lands at 0xf8 and covers the arrow.
             sprintf(PRINT_TEXT_BUFFER, "Yes  No");
-            PrintText8x14(216, g_ScreenOffsetY + g_MessageScreenY + 16, 0, 0);
+            PrintText8x14(ynTextX, g_ScreenOffsetY + g_MessageScreenY + 16, 0, 0);
             message_render_chars();
             return;
         }
@@ -1621,6 +1669,7 @@ msg_skip_char:
         g_message_flags = g_messageFlagsBackup;
         handle_message_post_action();
         return;
+    }
 
     // === State 5: Waiting for player input to dismiss ===
     case 5:

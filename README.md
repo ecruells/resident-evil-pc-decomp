@@ -67,18 +67,36 @@ msbuild Game.sln /p:Configuration=Release /p:Platform=Win32 /t:Build
 
 ### Running the game
 
-The decompilation took as base the GOG USA version, which is the same binary released in 1997, so this build expect the assets of any of those version.
+The decompilation took as base the GOG USA version, which is the same binary
+released in 1997, so this build expects the assets of any of those versions.
 
-The asset root is chosen **at compile time** (`src/system/AssetPath.h`), so
-each configuration expects a different directory layout next to the exe:
+Some features of the Japanese PC release (*Biohazard* Mediakite version) is supported as well
 
-| Configuration | Data root | Save folder |
-|---|---|---|
-| Debug | `.\assets\USA\` | `.\assets\save\` |
-| Release | `.\USA\` | `.\SAVE\` |
+Every asset path is built against a data root that differs by build
+configuration and by selected version:
 
-Copy the USA assets directory to the release build path or copy the build exe to an
-existing USA RE1 PC directory, no external DLLs required. In case of running VS debugger, copy the USA assets in the ./assets directory.
+| Configuration | USA root | JPN root | Save folder |
+|---|---|---|---|
+| Debug | `.\assets\USA\` | `.\assets\JPN\` | `.\assets\save\` |
+| Release | `.\USA\` | `.\JPN\` | `.\SAVE\` |
+
+Copy the assets directory to the release build path, or copy the build exe to
+an existing RE1 PC directory; no external DLLs required. When running under the
+VS debugger, put the assets in `.\assets\` instead.
+
+### Asset version (USA / JPN)
+
+`[Assets] Version` in `config.ini` selects which release the build runs. It is
+read once at startup (`src/main.cpp` → `SetAssetVersion`,
+`src/system/AssetPath.cpp`) and swaps the data root every asset reader uses, so
+**one binary runs either version** — no rebuild:
+
+```ini
+[Assets]
+; USA = North American (default)
+; JPN = Japanese (Biohazard)
+Version=USA
+```
 
 Diagnostics: with no debugger attached, trace output is suppressed (see
 below); set the environment variable `RE1_DEBUGLOG=1` to append every trace
@@ -204,8 +222,8 @@ The license covers **only the source in this repository** (`src\`, `tools\`,
 
 - **No game assets are distributed here.** The repository contains source code
   only; `assets\` is git-ignored. Running the build requires your own legally
-  obtained copy of *Resident Evil* for PC (the GOG or 1997 retail USA release)
-  to supply the data files.
+  obtained copy of *Resident Evil* for PC (the GOG or 1997 retail USA release,
+  or the Japanese *Biohazard* PC release) to supply the data files.
 - *Resident Evil*, its code, assets, characters and trademarks are the
   property of **CAPCOM CO., LTD.** This project is an independent
   reverse-engineering and preservation effort, **not affiliated with,

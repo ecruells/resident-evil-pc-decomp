@@ -18,9 +18,11 @@
 // ============================================================================
 size_t LoadFile(const char* path, void* buffer, unsigned char flags)
 {
-    // Paths arrive already rooted at GAME_DATA_ROOT (see system/AssetPath.h), so
-    // there is nothing to rewrite here - the build config picked the root.
-    const char* filePath = path;
+    // Paths arrive already rooted at GAME_DATA_ROOT (see system/AssetPath.h).
+    // ResolveAssetRoot remaps that compile-time root to the config-selected one
+    // (config.ini [Assets] Version), a no-op unless the JPN tree is active.
+    char resolved[260];
+    const char* filePath = ResolveAssetRoot(path, resolved, sizeof(resolved));
 
     // Original: if (DAT_004b3998 & flags) prepend the registry install
     // directory for flagged loads. The port's GAME_DATA_ROOT (system/AssetPath.h)

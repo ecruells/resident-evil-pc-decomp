@@ -149,6 +149,15 @@ static void pickup_list_advance(unsigned char* state);           // 0x00482250 -
 extern unsigned char* message_item_name_lookup(unsigned char itemId); // 0x00455140
 void FUN_00454fd0(int itemId, int mode, short x, short y);            // 0x00454fd0
 
+// Left edge of the item-name line. The Japanese build's callers of
+// draw_item_name (0x004912c0) push 0x22 where the USA ones push 0x30 - its
+// 14px glyphs need the extra room, the same shift the message box gets. The
+// item box (0x2a) and the file-title x table are identical in both builds.
+static short item_name_left(void)
+{
+    return (GetAssetVersion() != 0) ? 0x22 : 0x30;
+}
+
 // g_ItemSlotsPointer is void* in the port; all slot access is byte-based.
 #define ITEM_SLOTS  ((unsigned char*)g_ItemSlotsPointer)
 
@@ -1523,7 +1532,7 @@ static int menu_item_use_item(void)
         }
     }
     DAT_00ae9f13 = DAT_00ae9f13 | 2;
-    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     return 0;
 }
 
@@ -1546,7 +1555,7 @@ static int menu_item_view_model(void)
     }
     DAT_00ae9f28 = DAT_00ae9f28 + 1;
     if ((DAT_00ae9f28 & 8) == 0) {
-        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
         return 0;
     }
     DAT_00ae9f22 = 2;
@@ -1559,7 +1568,7 @@ view_case3:
         if (DAT_00ae9f28 == 0) {
             DAT_00ae9f13 = DAT_00ae9f13 | 4;
         }
-        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     }
     return 0;
 }
@@ -1701,7 +1710,7 @@ move_case3:
             if (g_TotalHeldItems <= bVar2) goto move_skip_name;
             bVar3 = *(unsigned char*)(ITEM_SLOTS + (unsigned int)bVar2 * 2);
         }
-        FUN_00454fd0(bVar3, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+        FUN_00454fd0(bVar3, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     }
 move_skip_name:
     if ((DAT_00ae9f22 != 4) || (DAT_00ae9f29 != 0)) {
@@ -1800,13 +1809,18 @@ void FUN_00454fd0(int itemId, int mode, short x, short y)
         bVar3 = 0x1e;
     }
 
+    // Game-text glyph width: 8px (fontus.tim) or 14px (FONT.TIM), both in an
+    // 18-column grid — the Japanese draw_item_name (0x004912c0) is this same
+    // loop with texU=(b%18)*14 and a +14 advance.
+    const int glyphW = (GetAssetVersion() != 0) ? 14 : 8;
+
     g_TextureDesc.flags = 0x40;
     g_TextureDesc.height = 0xe;
     g_TextureDesc.unk10 = 0x100;
     g_TextureDesc.printClutTint = (modeB & 0xf) + 0x1e0;
     g_TextureDesc.screenX = x;
     g_TextureDesc.screenY = y;
-    g_TextureDesc.width = 8;
+    g_TextureDesc.width = glyphW;
     g_TextureDesc.colorMulR = 0x80;
     g_TextureDesc.colorMulG = 0x80;
     g_TextureDesc.colorMulB = 0x80;
@@ -1837,9 +1851,9 @@ void FUN_00454fd0(int itemId, int mode, short x, short y)
         }
         pbVar4 = pbVar2 + 1;
         g_TextureDesc.texV = bVar1 * 0xe;
-        g_TextureDesc.texU = *pbVar2 % 0x12 << 3;
+        g_TextureDesc.texU = (unsigned char)(*pbVar2 % 0x12 * glyphW);
         AddTintSprite(&g_TextureDesc, (unsigned short)bVar3);
-        g_TextureDesc.screenX = g_TextureDesc.screenX + 8;
+        g_TextureDesc.screenX = g_TextureDesc.screenX + glyphW;
         pbVar2 = pbVar4;
     } while (*pbVar4 != 7);
 }
@@ -1868,7 +1882,7 @@ static void menu_item_submenu(void)
 
     case 2:
         if ((dpad_pressed_byte1() & 0x80) == 0) {
-            FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+            FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
             if ((dpad_pressed_byte1() & 0x40) != 0) {
                 if (DAT_00ae9f24 == 0) {
                     if ((g_bItemMenuSelectedItemId < ITEM_CLIP) || (ITEM_NON_INFINITE_MAX < g_bItemMenuSelectedItemId)) {
@@ -1937,7 +1951,7 @@ static void menu_item_submenu(void)
         goto submenu_default;
     }
 
-    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
 submenu_default:
     // Draw the item action submenu box with the selected option highlighted
     if ((DAT_00ae9f27 != 0) && ((DAT_00ae9f28 & 8) == 0)) {
@@ -2073,7 +2087,7 @@ static void menu_handle_input(void)
     }
 input_draw:
     menu_draw_cursor();
-    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     return;
 
 input_blink:
@@ -4953,7 +4967,7 @@ static int menu_itembox_interaction(void)
         break;
     }
     itembox_draw_cursor();
-    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     return 0;
 }
 
@@ -5617,7 +5631,7 @@ static void FUN_0044e660(void)
             if (g_bItemViewerActionIndex != 1) {
                 return;
             }
-            FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+            FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
             return;
         }
         g_bItemViewerActionIndex = 2;
@@ -5730,7 +5744,7 @@ static void FUN_0044e820(void)
         set_message_display(g_ItemHealTable[(unsigned int)g_ItemImageLookupTable[(unsigned int)g_bItemMenuSelectedItemId * 4 + 2] + 0x51], 0);
         return;
     }
-    FUN_00454fd0(0xf00 | g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+    FUN_00454fd0(0xf00 | g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
 }
 
 // (0x0044e8c0) - Viewer action 2: examine message wait
@@ -5971,7 +5985,7 @@ viewer_state3:
         FUN_0044ea50();
     }
     if ((DAT_00ae9f10 == 0) && (g_bItemViewerActionIndex == 0)) {
-        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, 0x30 - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
+        FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
     }
     return 0;
 }

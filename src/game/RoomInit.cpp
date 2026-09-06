@@ -76,8 +76,16 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
             g_MessagePtr = msgBase + offset;
         }
     } else {
-        // Global message from the global_messages lookup table
-        g_MessagePtr = global_messages[msg_id & 0x3F];
+        // Global message from the global_messages lookup table. The Japanese
+        // release keeps its own copy of the table (Biohazard.exe 0x004cde58,
+        // its set_message_display at 0x00491980), so the region that owns the
+        // asset tree owns the text too — the JPN glyph encoding only makes
+        // sense against data\FONT.TIM.
+        if (GetAssetVersion() != 0) {
+            g_MessagePtr = global_messages_jpn[msg_id & 0x3F];
+        } else {
+            g_MessagePtr = global_messages[msg_id & 0x3F];
+        }
     }
 
     g_MessageStateCounter = 0;
@@ -114,11 +122,16 @@ unsigned int set_item_description_message(unsigned short descIndex, unsigned sho
         return 1;
     }
 
+    // The Japanese release keeps its own description table (0x004c9370, read
+    // by its set_item_description_message at 0x00491a40).
+    unsigned char** descriptions = (GetAssetVersion() != 0) ? g_ItemDescriptionsJpn
+                                                            : g_ItemDescriptions;
+
     // The original indexes the table unchecked; the entries past the last item
     // are the zero padding that follows it, so an out-of-range id would set a
     // NULL g_MessagePtr and fault in UpdateMessageDisplay. Refuse instead.
     if (descIndex >= (sizeof(g_ItemDescriptions) / sizeof(g_ItemDescriptions[0])) ||
-        g_ItemDescriptions[descIndex] == NULL) {
+        descriptions[descIndex] == NULL) {
         return 1;
     }
 
@@ -131,7 +144,7 @@ unsigned int set_item_description_message(unsigned short descIndex, unsigned sho
     g_MessageStateCounter = 0;
     g_MessageSpeedUpFlag = 0x80;
     g_lastScanCodeOrMsgID = (DWORD)descIndex;
-    g_MessagePtr = g_ItemDescriptions[descIndex];
+    g_MessagePtr = descriptions[descIndex];
     g_MessageScreenY = 0xba - (short)g_ScreenOffsetY;
 
     return 0;

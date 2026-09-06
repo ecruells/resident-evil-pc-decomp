@@ -238,3 +238,142 @@ Two things to remember when a message embeds an item name:
 
 All 64 `global_messages` entries have been verified byte-for-byte against
 `ResidentEvil.exe` (`tools/verify_msg_fixes.py` + `tools/decode_msg_table.py`).
+
+## 8. Japanese text — `FONT.TIM` and the `STR_JP()` macro
+
+The Japanese PC release (`Biohazard.exe`) keeps the **identical** message
+protocol, the identical tag set and the identical escapes. Only two things
+change: the glyph sheet, and the fact that a glyph is no longer always one byte.
+
+### 8.1 The font sheet
+
+`data\FONT.TIM` is a **768x256** 4bpp TIM (`fontus.tim` is 256x256). It holds
+the 8x8 ASCII region at the top left exactly like the USA font, and then two
+game-text regions of **14x14** glyphs, 18 columns each:
+
+| Region | VRAM | Rows | Reached by |
+|--------|------|------|-----------|
+| Left page | u 0..251, v = 28 + r*14 | r = 0..15 | plain byte, and `0xF8 nn` |
+| Right page | u 256..507, v = r*14 | r = 0..17 | `0xF9 nn`, `0xFA nn` |
+
+The third 256-wide page (u 512..767) is empty.
+
+```
+plain byte b (0x0C..0xF7)   left page,   row b/18,        col b%18
+0xF8 nn                     left page,   row nn/18 + 13,  col nn%18
+0xF9 nn                     right page,  row nn/18,       col nn%18
+0xFA nn                     right page,  row nn/18 + 14,  col nn%18
+```
+
+That is the same arithmetic the USA renderers already use — the `+2`/`+15`
+row bias, `/18`, `%18`. What differs is the **page**: the renderers write
+`TextureDesc.depth` = `0x1E` for the left page and `0x1F` for the right one,
+and the original's `AddTintSprite` resolves that to a texture page (the JPN
+`AddTintSprite`, 0x00441120, searches page slots 12-14 for the id in
+`TextureDesc+0x0C`). `texU` is a byte in the descriptor and cannot reach 256,
+so the port adds the page offset in `AddTintSprite` (`src/game/Rendering.cpp`),
+gated on the font sheet actually being wider than one page. `fontus.tim` is one
+page wide, never registers a `0x1F`, and is unaffected.
+
+Glyph width is 14 px instead of 8, which `PrintText8x14`, `PrintFormattedText`
+and `message_render_chars` already select from `GetVersion()`.
+
+### 8.2 Character table
+
+The left page's first five rows are the **same table** `fontus.tim` has, so
+`A-Z`, `a-z`, `0-9` and most punctuation encode to the same bytes as `STR()`.
+From index 87 (where the USA font has `Ä`) it diverges into kana, then kanji;
+the right page is 324 kanji. The full map lives in `tools/jpn_font_table.py`.
+
+Three ASCII characters cannot keep their `fontus.tim` index:
+
+| Char | USA | JPN | Why |
+|------|-----|-----|-----|
+| `.` | `0x79` | `0xF8 0x1C` | index 121 is a kana here; the latin full stop is on left row 14 |
+| `,` | `0x18` | `0x17` | index 24 is `。`; `0x17` is `、`, which the Japanese text uses |
+| `;` | `0x17` | `0x17` | no `;` glyph — falls back to `、` |
+
+### 8.3 `STR_JP()`
+
+`STR_JP()` (`src/game/PrintText.h`) is `STR()` for that sheet. Source text is
+written as UTF-8 and looked up by codepoint in `src/game/JpnFontTable.h`, a
+generated codepoint-sorted table the macro binary-searches in a constant
+expression:
+
+```cpp
+static constexpr auto s_msg = STR_JP(u8"カギがかかっている");
+```
+
+The literal **must** be `u8""` and the file **must** be UTF-8 with a BOM — a
+narrow literal is converted to the execution code page first and the codepoints
+never arrive. The escapes are exactly `STR()`'s (`\n \p \s \i \c \q \xNN \d`);
+`\o` has no counterpart because the Japanese quotes are `“` and `”` (left row
+14) and are written as themselves.
+
+### 8.4 The four text tables
+
+`src/game/JpnTextTables.cpp` (generated) holds every text table the Japanese
+executable carries in its own image. Each reader picks the JPN table when the
+JPN asset tree is selected, because the encoding only means anything against
+`FONT.TIM`:
+
+| Table | JPN address | USA address | Read by |
+|-------|-------------|-------------|---------|
+| `global_messages_jpn[64]` | `0x004CDE58` | `0x004BFC58` | `set_message_display` (JPN 0x00491980) |
+| `g_ItemNamePointersJpn[128]` | `0x004CD388` | `0x004BF0A0` | `message_item_name_lookup` (JPN 0x00491440) |
+| `g_UnknownItemNamePointersJpn[16]` | `0x004CD548` | `0x004BF260` | same, for unexamined items |
+| `g_ItemDescriptionsJpn[79]` | `0x004C9370` | `0x004C6160` | `set_item_description_message` (JPN 0x00491A40) |
+
+The name table's last 16 entries **are** the unexamined-item table — the two
+overlap in both builds (`g_ItemNamePointers[112..127]`), and the port keeps
+them as two arrays with identical tails, as it already did for the USA side.
+
+Item names end with `0x07`, not `0x01`: the message state machine reads that as
+"return from item name". `STR_JP()` still appends its own `0x01` after it, the
+same way `STR()` does for the USA names in `MenuData.cpp`; nothing reads past
+the `0x07`.
+
+Messages 27-29 (the opening narration) are **English even in the Japanese
+build**, byte-for-byte the same text as the USA table.
+
+Two of the readers also need the glyph width and the left margin, not just the
+table: `draw_item_name` (`FUN_00454fd0`, JPN 0x004912C0) advances 14px per
+glyph, and its callers push `0x22` for the item-name line where the USA ones
+push `0x30` — the same shift the message box gets in §8.5. The item box
+(`0x2A`) and the file-title x table are identical in both builds.
+
+### 8.5 Message box layout
+
+The message box is not just the same box with wider glyphs — the Japanese
+`UpdateMessageDisplay` (0x00491ac0) and `message_render_chars` (0x00492360)
+carry their own constants, because 14px glyphs would otherwise run off the
+right edge and the Yes/No row would sit under the text:
+
+| | USA (0x004557b0 / 0x00456020) | JPN (0x00491ac0 / 0x00492360) |
+|---|---|---|
+| text left margin (and after `
+`) | `0x30` | `0x22` |
+| page-wait ▼ | index 11 → texU `11*8` = 88, 8 wide | texU `11*14` = `0x9A`, 14 wide |
+| Yes/No ► cursor | index 2 → texU `2*8` = `0x10`, 8 wide | texU `2*14` = `0x1C`, 14 wide |
+| Yes/No cursor X | `0xD0` / `0xF8` | `0xA0` / `0xE6` |
+| `"Yes  No"` X | `0xD8` | `0xAE` |
+
+Both cursors are the **same character-table indices** in both builds (11 and 2
+on row 0); only the column pitch and sprite width change. The cursor always
+sits one glyph left of its label, and the "No" cursor five glyphs right of the
+"Yes" one, so the whole row is derived from the glyph width in
+`src/game/Rendering.cpp`.
+
+### 8.6 Tooling
+
+| Tool | Does |
+|------|------|
+| `tools/jpn_font_table.py` | the glyph map; the single source of truth |
+| `tools/jpn_msg_decode.py messages\|items\|names\|unknown` | decode any JPN table to readable text |
+| `tools/jpn_msg_decode.py verify` | decode + re-encode all four tables and diff against the executable |
+| `tools/gen_jpn_text.py` | regenerate `JpnFontTable.h`, `JpnTextTables.cpp` and `test_str_jp.cpp` |
+| `tools/test_str_jp.cpp` | `static_assert`s all 233 strings against the original bytes; `cl /nologo /c /EHsc tools\test_str_jp.cpp` |
+
+`jpn_msg_decode.py verify` reports **all entries byte-identical** and
+`test_str_jp.cpp` compiles clean, so the glyph table, the encoder and the C++
+macro agree with the original executable for every string it ships.

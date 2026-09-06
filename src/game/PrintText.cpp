@@ -56,9 +56,31 @@
 //     [L2][R2][L1][R1][△][○][×][□][U.][R.][D.][L.]
 //
 // ============================================================================
+// JAPANESE FONT (data\FONT.TIM - 768x256 4-bit TIM)
+// ============================================================================
+//
+// The Japanese release ships a wider sheet with 14x14 game-text glyphs. The
+// 8x8 ASCII region is unchanged; the game-text glyphs occupy TWO 256-wide
+// texture pages, both 18 columns:
+//
+//   left  page  u   0..251, v = 28 + row*14, rows 0..15
+//   right page  u 256..507, v =      row*14, rows 0..17   (kanji)
+//
+// The renderers below already compute the row/column exactly as the Japanese
+// originals do (PrintFormattedText 0x00491490, PrintText8x14 0x00491830,
+// message_render_chars 0x00492360) - what selects the page is TextureDesc's
+// `depth`: 0x1E is the left page and 0x1F the right one, which is why the
+// 0xF9/0xFA cases set 31. `texU` is a byte and cannot reach 256, so
+// AddTintSprite adds the page offset (src/game/Rendering.cpp). fontus.tim is a
+// single page wide and never sets 0x1F, so the USA path is untouched.
+//
+// Character map, escapes and the STR_JP() macro: docs/TEXT_ENCODING.md §8 and
+// tools/jpn_font_table.py.
+// ============================================================================
 
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
+#include "../system/AssetPath.h"
 #include "SpriteRenderer.h"
 
 // ============================================================================
@@ -154,9 +176,15 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
         brightness = 30;
     }
 
+    // The game-text glyph width differs by region: the USA/GOG font (fontus.tim)
+    // uses 8px-wide glyphs in an 18-column grid, while the Japanese font (FONT.TIM)
+    // uses 14px-wide glyphs in the same 18-column grid (see Biohazard.exe's JPN
+    // renderers FUN_004912c0/FUN_00491490 - texU=(ch%18)*14, advance 14).
+    const int glyphW = (GetAssetVersion() != 0) ? 14 : 8;
+
     g_TextureDesc.flags  = ((flags != 0) ? 0x40000000U : 0U) + 0x40;
 
-    g_TextureDesc.width  = 8;
+    g_TextureDesc.width  = glyphW;
     g_TextureDesc.height = 14;
     g_TextureDesc.depth = 30;
 
@@ -177,13 +205,15 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
         unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
 
         if (ch == ' ') {
-            g_TextureDesc.screenX += 8;
+            g_TextureDesc.screenX += glyphW;
             continue;
         }
 
-        g_TextureDesc.texU = (ch % 18) * 8;
+        g_TextureDesc.texU = (ch % 18) * glyphW;
         g_TextureDesc.texV = (ch / 18) * 14;
 
+        // ASCII '(' and ')' are remapped to controller button symbols at
+        // (56,224)/(70,224) in BOTH the USA and Japanese fonts.
         if (ch == 40) {
             g_TextureDesc.texU = 56;
             g_TextureDesc.texV = 224;
@@ -200,7 +230,7 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
 
         AddTintSprite(&g_TextureDesc, finalBrightness);
 
-        g_TextureDesc.screenX += 8;
+        g_TextureDesc.screenX += glyphW;
     }
 }
 
@@ -234,13 +264,18 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
     unsigned char brightness = color >> 4;
     if (brightness == 0) brightness = 2;
 
+    // Glyph width is 8px for the USA/GOG font and 14px for the Japanese font,
+    // both in an 18-column grid (Biohazard.exe JPN renderers FUN_004912c0/
+    // FUN_00491490 use texU=(b%18)*14 and a +14 cursor advance).
+    const int glyphW = (GetAssetVersion() != 0) ? 14 : 8;
+
     g_TextureDesc.height = 14;
     g_TextureDesc.flags = 0x40;
     g_TextureDesc.screenX = x - g_ScreenOffsetX;
     g_TextureDesc.unk10 = 0x100;
     g_TextureDesc.screenY = y - g_ScreenOffsetY;
     g_TextureDesc.printClutTint = (color & 0xF) + 0x1E0;
-    g_TextureDesc.width = 8;
+    g_TextureDesc.width = glyphW;
     g_TextureDesc.colorMulR = 128;
     g_TextureDesc.colorMulG = 128;
     g_TextureDesc.colorMulB = 128;
@@ -266,7 +301,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
                 chr = nextByte / 18 + 15;
                 g_TextureDesc.depth = 30;
                 g_TextureDesc.texV = chr * 14;
-                g_TextureDesc.texU = (nextByte % 18) * 8;
+                g_TextureDesc.texU = (nextByte % 18) * glyphW;
                 AddTintSprite(&g_TextureDesc, brightness);
                 break;
             }
@@ -277,7 +312,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
                 g_TextureDesc.depth = 31;
                 data++;
                 g_TextureDesc.texV = chr * 14;
-                g_TextureDesc.texU = (*data % 18) * 8;
+                g_TextureDesc.texU = (*data % 18) * glyphW;
                 AddTintSprite(&g_TextureDesc, brightness);
                 break;
             }
@@ -288,7 +323,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
                 g_TextureDesc.depth = 31;
                 data++;
                 g_TextureDesc.texV = chr * 14;
-                g_TextureDesc.texU = (*data % 18) * 8;
+                g_TextureDesc.texU = (*data % 18) * glyphW;
                 AddTintSprite(&g_TextureDesc, brightness);
                 break;
             }
@@ -301,7 +336,7 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
                 continue;
 
             case 0xFF:
-                g_TextureDesc.screenX += 4;
+                g_TextureDesc.screenX += glyphW / 2;
                 data++;
                 chr = *data;
                 continue;
@@ -310,13 +345,13 @@ void PrintFormattedText(short x, short y, unsigned char color, const unsigned ch
                 chr = chr / 18 + 2;
                 g_TextureDesc.depth = 30;
                 g_TextureDesc.texV = chr * 14;
-                g_TextureDesc.texU = (*data % 18) * 8;
+                g_TextureDesc.texU = (*data % 18) * glyphW;
                 AddTintSprite(&g_TextureDesc, brightness);
                 break;
         }
 
     next_char:
-        g_TextureDesc.screenX += 8;
+        g_TextureDesc.screenX += glyphW;
         data++;
         chr = *data;
     }

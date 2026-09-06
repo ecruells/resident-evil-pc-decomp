@@ -166,7 +166,15 @@ void load_global_assets(void)
     LoadAllItemsTexture();
 
     // Load main Fonts textures
-    LoadFile(GAME_DATA_ROOT "data\\fontus.tim", g_DataBuffer, 0x20);
+    // The primary text font differs by region: the North American/GOG build uses
+    // data\fontus.tim, while the Japanese PC (Biohazard) build ships it as
+    // data\FONT.TIM. Both resolve through GAME_DATA_ROOT (swapped by
+    // ResolveAssetRoot for the configured tree).
+    if (GetAssetVersion() != 0) {
+        LoadFile(GAME_DATA_ROOT "data\\FONT.TIM", g_DataBuffer, 0x20);
+    } else {
+        LoadFile(GAME_DATA_ROOT "data\\fontus.tim", g_DataBuffer, 0x20);
+    }
     g_TextureBankID = 30;
     ProcessTextureImage(g_DataBuffer, 30, 0, 0);
 

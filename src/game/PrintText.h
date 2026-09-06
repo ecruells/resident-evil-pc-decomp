@@ -81,6 +81,10 @@
 #define STR_BTN_DOWN   "\xF8\x0A"   // ↓  D-pad Down (14x14)
 #define STR_BTN_LEFT   "\xF8\x0B"   // ←  D-pad Left (14x14)
 
+// Japanese glyph table (generated). Declares pft_detail::kJpnGlyphs and
+// pft_detail::jpnGlyphIndex, which STR_JP() below searches at compile time.
+#include "JpnFontTable.h"
+
 namespace pft_detail {
 
 constexpr int pft_hex(char c)
@@ -206,6 +210,130 @@ struct Encoded {
     operator const unsigned char*() const { return bytes; }
 };
 
+// ------------------------------------------------------------------------
+// EncodedJp — the same encoder for the Japanese font (data\FONT.TIM).
+//
+// The Japanese release keeps the identical message protocol and the identical
+// escape set; only the glyph sheet differs. Its 14x14 game-text font spans two
+// 256-wide texture pages of the 768x256 TIM, 18 columns each:
+//
+//   plain byte b (0x0C..0xF7)  left page,  row b/18,       col b%18
+//   0xF8 nn                    left page,  row nn/18 + 13, col nn%18
+//   0xF9 nn                    right page, row nn/18,      col nn%18
+//   0xFA nn                    right page, row nn/18 + 14, col nn%18
+//
+// so a glyph is one or two bytes and the mapping is not derivable from ASCII.
+// The source text is therefore written as UTF-8 and looked up by codepoint in
+// the generated kJpnGlyphs table:
+//
+//   static constexpr auto s_msg = STR_JP(u8"カギがかかっている");
+//
+// The literal MUST be u8"" and the file MUST be UTF-8 (with BOM, so MSVC reads
+// it as such) — a narrow literal is converted to the execution code page first
+// and the codepoints never arrive.
+//
+// The left page's first five rows are the same character table fontus.tim has,
+// so plain ASCII encodes to the same bytes as STR() with three exceptions the
+// table carries: '.' is the two-byte 0xF8 0x1C (index 121 is a kana here),
+// and ',' / ';' both become the ideographic comma, which is what the original
+// Japanese text uses.
+// ------------------------------------------------------------------------
+template <int N>
+struct EncodedJp {
+    // Same worst case as Encoded: \i is 2 source chars -> 6 bytes. A UTF-8
+    // Japanese character is 3 source bytes and at most 2 encoded bytes, so
+    // multi-byte text only ever shrinks.
+    unsigned char bytes[N * 3 + 2];
+
+    constexpr EncodedJp() : bytes{} {}
+
+    constexpr EncodedJp(const char (&str)[N]) : bytes{}
+    {
+        int out = 0;
+        unsigned char dismissDelay = 0;
+        for (int i = 0; i < N - 1; i++) {
+            unsigned char c = (unsigned char)str[i];
+            if (c == 0x5C && i + 1 < N - 1) {
+                switch ((unsigned char)str[i + 1]) {
+                    case 'n': bytes[out++] = 0x02; i++; continue;
+                    case 'p': bytes[out++] = 0x03; i++; continue;
+                    case 's': bytes[out++] = 0x04; i++; continue;
+                    case 'i':
+                        bytes[out++] = 0x05; bytes[out++] = 0x01;
+                        bytes[out++] = 0x06; bytes[out++] = 0x00;
+                        bytes[out++] = 0x05; bytes[out++] = 0x00;
+                        i++; continue;
+                    case 'c': bytes[out++] = 0x08; i++; continue;
+                    case 'q': bytes[out++] = 0x0A; i++; continue;
+                    case 'x':
+                        if (i + 3 < N) {
+                            int hi = pft_hex(str[i + 2]);
+                            int lo = pft_hex(str[i + 3]);
+                            if (hi >= 0 && lo >= 0) {
+                                bytes[out++] = (unsigned char)((hi << 4) | lo);
+                                i += 3;
+                                continue;
+                            }
+                        }
+                        break;
+                    case 'd':
+                        if (i + 5 < N && str[i + 2] == '\\' && str[i + 3] == 'x') {
+                            int hi = pft_hex(str[i + 4]);
+                            int lo = pft_hex(str[i + 5]);
+                            if (hi >= 0 && lo >= 0) {
+                                dismissDelay = (unsigned char)((hi << 4) | lo);
+                                i += 5;
+                                continue;
+                            }
+                            i++;
+                            continue;
+                        }
+                        i++;
+                        continue;
+                    case 0x5C:
+                        // "\\" is one backslash glyph, as in STR(); without
+                        // this both source characters fall through to the
+                        // table and draw it twice.
+                        bytes[out++] = 0x38; i++; continue;
+                    default: break;
+                }
+            }
+
+            // Decode one UTF-8 sequence (the table covers the BMP only, which
+            // is every glyph the font has).
+            unsigned int cp = c;
+            if (c >= 0xE0 && i + 2 < N - 1) {
+                cp = ((unsigned int)(c & 0x0F) << 12)
+                   | ((unsigned int)(str[i + 1] & 0x3F) << 6)
+                   |  (unsigned int)(str[i + 2] & 0x3F);
+                i += 2;
+            } else if (c >= 0xC0 && i + 1 < N - 1) {
+                cp = ((unsigned int)(c & 0x1F) << 6)
+                   |  (unsigned int)(str[i + 1] & 0x3F);
+                i += 1;
+            }
+
+            int gi = jpnGlyphIndex(cp);
+            if (gi < 0) {
+                bytes[out++] = 0x1B;    // '?' — same fallback STR() uses
+                continue;
+            }
+            // Length comes from the table, never from "b1 is zero": a second
+            // byte of zero is just column 0 of a row, so U+58CA encodes to the
+            // two bytes F9 00 and U+4E45 to FA 00.
+            bytes[out++] = kJpnGlyphs[gi].b0;
+            if (kJpnGlyphs[gi].n > 1) bytes[out++] = kJpnGlyphs[gi].b1;
+        }
+        bytes[out++] = 0x01;
+        if (dismissDelay != 0) bytes[out] = dismissDelay;
+    }
+
+    operator const unsigned char*() const { return bytes; }
+};
+
 } // namespace pft_detail
 
 #define STR(str) (::pft_detail::Encoded<sizeof(str)>{str})
+
+// Japanese counterpart of STR(). The literal must be u8"" — see EncodedJp.
+#define STR_JP(str) (::pft_detail::EncodedJp<sizeof(str)>{str})

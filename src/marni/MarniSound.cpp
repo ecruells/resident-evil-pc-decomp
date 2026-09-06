@@ -559,7 +559,10 @@ int DirectSound::CreateSound(const char* wavName)
 
     char dbg[256];
 
-    const char* actualPath = wavName;
+    // Callers build the path with GAME_DATA_ROOT. Remap its root to the config-
+    // selected version (config.ini [Assets] Version); a no-op unless JPN is active.
+    char resolved[260];
+    const char* actualPath = ResolveAssetRoot(wavName, resolved, sizeof(resolved));
 
 
     HANDLE hFile = CreateFileA(actualPath, GENERIC_READ, FILE_SHARE_READ, NULL,

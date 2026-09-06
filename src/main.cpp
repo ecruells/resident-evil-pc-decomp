@@ -3,6 +3,7 @@
 // Adapted from Ghidra decompilation for modern Win32/VS2022
 
 #include "Globals.h"
+#include "system/AssetPath.h"
 
 // Forward declarations for local helpers
 static int  CheckSystemRequirements(void);
@@ -58,6 +59,13 @@ static BOOL LoadIniConfiguration(void)
                               0,
 #endif
                               foundPath);
+
+    // Asset version to run (USA default; JPN selects the Biohazard tree).
+    // SetAssetVersion swaps the data root used by every asset reader.
+    char assetVersion[16];
+    GetPrivateProfileStringA("Assets", "Version", "USA",
+                             assetVersion, sizeof(assetVersion), foundPath);
+    SetAssetVersion(assetVersion);
 
 
     // Clamp to reasonable values

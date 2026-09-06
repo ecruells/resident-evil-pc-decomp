@@ -4,6 +4,7 @@
 
 #include "PSXTexture.h"
 #include "MarniBits.h"
+#include "../system/AssetPath.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <new>
@@ -406,9 +407,14 @@ int PSXTexture::LoadFromFile(const char* filename) {
     // 0x0041fa60
     // Original used _lopen/_llseek/_lread/_lclose CRT functions
     // Modern port uses Win32 CreateFile/ReadFile
-    
+
+    // Remap the compile-time asset root to the config-selected version
+    // (config.ini [Assets] Version); a no-op unless the JPN tree is active.
+    char resolved[260];
+    const char* openPath = ResolveAssetRoot(filename, resolved, sizeof(resolved));
+
     HANDLE hFile = CreateFileA(
-        filename,
+        openPath,
         GENERIC_READ,
         FILE_SHARE_READ,
         NULL,

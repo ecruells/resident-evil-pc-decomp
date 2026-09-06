@@ -936,8 +936,8 @@ void UpdateVideoPlayback(void);
 | State | Operation |
 |-------|-----------|
 | 0 | Initialize: `ClearScreen()` × 2, `MarniPresent()`, open MCI device, pause sounds, store FMV path |
-| 1 | Start playback: `MCI_OpenAndPlay()`, `InputUpdate()` + `PlayerPad_Update()` to seed `g_videoSkipInput`, set `g_videoSkipCounter = 100` |
-| 2 | Playing: each call decrements `g_videoSkipCounter`, polls input, checks skip edge, watches `g_bMCIVideoEvent`, transitions to state 3 when `g_mciVideoDeviceID == 0` |
+| 1 | Start playback: `MCI_OpenAndPlay(path, playTo)` (`playTo` = the prologue cut point for Jill, else 0), `InputUpdate()` + `PlayerPad_Update()` to seed `g_videoSkipInput`, set `g_videoSkipCounter = 100` |
+| 2 | Playing: each call decrements `g_videoSkipCounter`, polls input, checks skip edge, watches `g_bMCIVideoEvent` (which resumes the prologue's second chunk, see below), transitions to state 3 when `g_mciVideoDeviceID == 0` |
 | 3 | Cleanup: `MCI_CloseAll()`, resume sounds, `StMask(3, 0)` |
 
 #### Software Rendering Path
@@ -947,6 +947,31 @@ void UpdateVideoPlayback(void);
 | 0 | Initialize: Clear screen, launch external player |
 | 1 | Playing: Check for skip, wait for completion |
 | 2 | Cleanup: Restore window, resume audio |
+
+#### Prologue Scenario Cut (FMV 1)
+
+The post-character-select prologue (`PU.avi` USA / `PJ.avi` JPN) is authored for the Chris
+scenario: frames **1778..1884** are a Chris-only dialogue beat. Both files run at 10 fps, so
+that is 2:57.8 - 3:08.4 of a 3:45.9 movie.
+
+`main_loop` latches `g_FmvCharacterId = g_SelectedCharactedId` (`0x008f879c`) when it consumes
+the `MSF_FMV_REQUEST` flag. When that id is non-zero (Jill), `UpdateVideoPlayback` plays the
+movie as two MCI_PLAY commands instead of one and drops the range:
+
+| Original call | Port equivalent | Effect |
+|---|---|---|
+| `video_mci_window_helper(0, 0x6f2)` in state 1 | `MCI_OpenAndPlay(path, 0x6f2)` -> `play movie from 0 to 1778 notify` | first chunk, stops before the beat |
+| `video_mci_window_helper(0x75d, 0)` on the first `MM_MCINOTIFY` | `MCI_PlayFrom(0x75d)` -> `play movie from 1885 notify` | remainder, to the end |
+
+Both calls are gated on `g_CurrentFMVID == 1 && g_FmvCharacterId != 0`; the second is
+additionally gated on `g_videoFlagA4` (`DAT_008f87a4`, set in state 0 and cleared by the first
+notification), so only the *first* notification resumes and the second ends the FMV. Chris
+(`g_FmvCharacterId == 0`) plays the movie whole with a single un-ranged `play movie notify`.
+
+The constants are raw frame numbers - MCIAVI's default time format is frames, and the port
+pins it with `set movie time format frames` before playing. They come from the USA executable;
+the JPN prologue is 2 frames longer overall and no JPN binary was available to confirm its own
+cut points, so the same values are reused for both regions.
 
 #### FMV Skip Mechanism
 
