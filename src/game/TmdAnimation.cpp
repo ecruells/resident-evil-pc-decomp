@@ -199,6 +199,15 @@ unsigned int CheckTmdTransparency(int param_1)
     return 0;
 }
 
+// Blend table at 0x004d2c00, indexed by the primitive's tsb ABR field. The
+// value is the 8-bit weight the BACKGROUND keeps behind a semi-transparent
+// TMD - not the model's opacity, see the note in FlushTmdObjects:
+//   abr 0 "B/2 + F/2"  -> 0x80, half the background = the PS1 rule exactly
+//   abr 1 "B + F"      -> 0x00, no background, i.e. opaque
+//   abr 2 "B - F"      -> 0x80
+//   abr 3 "B + F/4"    -> 0xD0, mostly background
+static const int g_TmdBlendModeTable[4] = { 0x80, 0x00, 0x80, 0xD0 };
+
 // ============================================================================
 // FUN_00483d30 (0x00483d30) - Get TMD blend mode
 // Returns blend mode from DAT_004d2be0 override or from polygon flags.
@@ -213,8 +222,16 @@ int GetTmdBlendMode(int param_1)
             if (DAT_004d2be0 >= 0 && DAT_004d2be0 < 256) {
                 return DAT_004d2be0;
             }
-            return *(int*)((BYTE*)&DAT_004d2be0 + (((objData[2] & 0x600000) >> 0x13) * 4));
-            // NOTE: DAT_004d2c00 is the blend mode lookup table at 0x004d2c00
+            // 0x00483d7d-0x00483d8a:
+            //   MOV EAX,[ESI+8] / AND EAX,0x600000 / SHR EAX,0x13
+            //   MOV EAX,[EAX + 0x4d2c00]
+            // objData[2] is the packet's (u1,v1,tsb) dword, so bits 21-22 are
+            // the tsb ABR field and `>> 0x13` already yields abr*4 - a BYTE
+            // offset into the table, which must NOT be scaled again. The base
+            // is the table at 0x004d2c00, not &DAT_004d2be0 (0x20 bytes
+            // earlier); with both errors the abr-0 case happened to read
+            // DAT_004d2be0 (-1, "non-zero") and only looked right.
+            return g_TmdBlendModeTable[(objData[2] & 0x600000) >> 0x15];
         }
         objData = objData + ((*objData >> 8) & 0xFF) + 1;
     }

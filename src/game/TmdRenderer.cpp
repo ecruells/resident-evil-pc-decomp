@@ -146,12 +146,14 @@ struct TmdTri {
     float v[TMD_TRI_FLOATS];
     float depth;   // mean view-space Z (larger = farther)
     DWORD tex;
-    float alpha;   // record +0x68 alpha this triangle was emitted with;
-                   // < 1 marks translucent geometry (water, glass), which
-                   // must NOT write depth or it hides the fade polys
-                   // (ground shadows / blood pools) behind it - see
-                   // room40E0 flooded, where the water plane silenced
+    float alpha;   // opacity this triangle was emitted with (1 - the record's
+                   // +0x68 background weight); < 1 marks translucent geometry
+                   // (water, glass), which must NOT write depth or it hides
+                   // the fade polys (ground shadows / blood pools) behind it -
+                   // see room40E0 flooded, where the water plane silenced
                    // every shadow once they became depth-tested.
+    int   otDepth; // the ordering-table depth its object was queued at. Only
+                   // used to break exact `depth` ties - see the sort below.
 };
 static TmdTri g_tmdTris[TMD_MAX_TRIS_COLLECT];
 static int    g_tmdTriOrder[TMD_MAX_TRIS_COLLECT];
@@ -462,21 +464,43 @@ void FlushTmdObjects(void)
             const float objScaleG = *(float*)(e->objData + 0x60);
             const float objScaleB = *(float*)(e->objData + 0x64);
 
-            // Blend alpha at +0x68, INDEPENDENT of the unlit flag.
+            // Blend weight at +0x68, INDEPENDENT of the unlit flag.
             // CMarniDirect3DTMD::Create zeroes the field (puVar4[3] = 0 at
             // 0x00415650), so an object nobody marked semi-transparent reads 0
-            // here and stays opaque. Two writers set it:
+            // here. Three writers set it:
             //   CreateTmdObjectInternal (0x00483910) - room/entity TMDs; it
             //     happens to set the unlit bit as well, which is what made
-            //     gating on that bit look right, and
+            //     gating on that bit look right,
+            //   FUN_00483270 (0x004834d2), which re-stamps the anim object's
+            //     +0x14 into +0x68/+0x78 of all 31 records every frame, and
             //   the item viewer (0x0048467f) - it stamps DAT_004d2c10 into
             //     +0x68/+0x78 of every record and sets NO flag at all.
             // Gating on the unlit bit therefore dropped the examine screen's
             // 50% pass entirely: the glass bottles rendered solid.
+            //
+            // The value is the weight of the BACKGROUND, not the opacity of
+            // the model - the two are inverted. The proof is the per-texel
+            // semi-transparency pass (FUN_00484dc0): its whole job is to draw
+            // the opaque part of a model back over the translucent copy, and
+            // `Create` leaves its +0x68 at 0. Read as opacity, 0 makes that
+            // pass invisible; read as a background weight, 0 is exactly "let
+            // none of the background through". The same reading is what makes
+            // `blendMode == 0 -> +0x14 = 0` mean opaque in
+            // CreateTmdObjectInternal, and it puts abr 0 - the common case,
+            // table value 0x80 - on 0.5*src + 0.5*dst, the PS1 B/2 + F/2 rule
+            // exactly.
+            //
+            // 0.5 maps to 0.5 either way, so this only moves objects that are
+            // NOT half-transparent. In practice that is room 20A0's tank water:
+            // cmd_omodel_set writes 0x004d2be0 = 0x30 for that one model
+            // (0x00461df2, the only site in the game), which becomes 0.1875
+            // background = 81% opaque. It had been rendering at 19% opacity - a
+            // dark wash you could read the wallpaper through instead of a solid
+            // green tank.
             float triAlpha = 1.0f;
             {
-                float a = *(float*)(e->objData + 0x68);
-                if (a > 0.0f && a <= 1.0f) triAlpha = a;
+                float bgWeight = *(float*)(e->objData + 0x68);
+                if (bgWeight > 0.0f && bgWeight <= 1.0f) triAlpha = 1.0f - bgWeight;
             }
 
             // Transform + project + light every vertex
@@ -635,6 +659,7 @@ void FlushTmdObjects(void)
                     t3->depth = (vzArr[i0] + vzArr[i1] + vzArr[i2]) * (1.0f / 3.0f);
                     t3->tex   = tex;
                     t3->alpha = triAlpha;
+                    t3->otDepth = e->depth;
                     g_tmdTriOrder[collected] = collected;
                     collected++;
                 }
@@ -647,8 +672,30 @@ void FlushTmdObjects(void)
         // load-bearing for opaque geometry - it stays because it keeps the
         // alpha-blended triangles blending back-to-front and it groups runs of
         // one texture together, which halves the draw calls.
+        // Ties on `depth` are not a curiosity - they are how the original draws
+        // per-texel semi-transparency. It cannot blend individual texels, so it
+        // queues the SAME geometry twice at two ordering-table depths: the whole
+        // model at its blend weight, and a second, opaque copy whose texture has
+        // every STP-flagged palette entry punched out to index 0. Room 20A0's
+        // water tank is the room-object case (FUN_00484d90 / FUN_00484e40 /
+        // FUN_00485000, the only site in the game); the item examine screen is
+        // the other. Both passes project through the same matrix, so every
+        // triangle's mean view Z is bit-identical and the primary key cannot
+        // separate them - which left introsort's partitioning to decide which of
+        // the two blended first.
+        //
+        // The ordering table is what decides it in the original: it is walked
+        // from the highest index down to 0, so the LARGER depth draws first. The
+        // tank's translucent pass sits at OT 469 and its opaque pass at OT 117 -
+        // wash first, opaque over the top, punched texels keeping the wash. The
+        // collection index is the last resort, so the whole order is
+        // deterministic frame to frame.
         std::sort(g_tmdTriOrder, g_tmdTriOrder + collected, [](int a, int b) {
-            return g_tmdTris[a].depth > g_tmdTris[b].depth;
+            const TmdTri& ta = g_tmdTris[a];
+            const TmdTri& tb = g_tmdTris[b];
+            if (ta.depth != tb.depth)     return ta.depth > tb.depth;
+            if (ta.otDepth != tb.otDepth) return ta.otDepth > tb.otDepth;
+            return a < b;
         });
 
         static float triVerts[TMD_MAX_TRIS_FLUSH * TMD_TRI_FLOATS];

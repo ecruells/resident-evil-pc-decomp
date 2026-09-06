@@ -445,7 +445,10 @@ static void PSXObjDebugPrint(const char* fmt, ...)
     _vsnprintf(buf, sizeof(buf) - 1, fmt, args);
     va_end(args);
     buf[sizeof(buf) - 1] = '\0';
-    OutputDebugStringA(buf);
+    // Raw OutputDebugStringA is banned in task code: without a debugger the
+    // DBG_PRINTEXCEPTION it raises cannot be dispatched on the scheduler's
+    // switched stack and Windows fail-fasts the process. See DebugPrint.h.
+    dbg_safe_str(buf);
 }
 
 // ============================================================================
