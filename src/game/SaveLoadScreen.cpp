@@ -1,4 +1,4 @@
-// SaveLoadScreen.cpp - Save/Load game state screen
+﻿// SaveLoadScreen.cpp - Save/Load game state screen
 // Decompiled from Ghidra at 0x00493310
 // Dependencies: FileWrite(0x004122a0), ReadSaveFile(0x004120c0),
 //               EnsureDirectoryExists(0x0040b700), GetSaveLocationIndex(0x00494000),
@@ -70,71 +70,68 @@ typedef enum {
 #define OFFSET_KEY_BACKUP    0xA02   // 128 bytes (g_joyRemapBackupKey)
 
 // ============================================================================
-// PrintFormattedText encoded data — byte-identical to the original tables.
-// Decode with: python tools/decode_re1.py <address>
-// Encoding: 0xFB = no-op spacer, 0x00 = space, 0x01 = end, 'A' = 0x1D,
-//           '0' = 0x0C, '\\' = 0x38, '-' = 0x3B.
-// The name entries are 11 bytes ("CHRIS" with a 0xFB after every glyph) and
-// the location entries are 40 bytes (text + 0x00 space padding) because the
-// save animation copies fixed 10/39-byte slices straight out of them.
+// PrintFormattedText encoded data - byte-identical to the original tables at
+// the addresses in the comments. tools/verify_save_screen_tables.py re-encodes
+// every string below and diffs it against the executable.
+//
+// Encoding: 0x00 = a blank cell (advances, draws nothing), 0x01 = end of text,
+// 0xFB = a no-op that neither draws nor advances. The original pads a glyph
+// with 0xFB to make it occupy a whole two-byte cell, which is what STR_CELL()
+// does - see PrintText.h.
+//
+// The names and locations MUST be cell-encoded: the save reveal copies
+// fixed-length slices out of them (10 and 39 bytes) and lengthens the slice two
+// bytes a frame, so a cell that is not two bytes wide desynchronises every cell
+// after it. The rest of the tables pad only their blanks, or nothing at all -
+// the original is not consistent, and the bytes are what they are.
+//
+// A slot row is 28 cells: name(5) '\' count(2) '\' location(19).
 // ============================================================================
 
-// --- Character names (indexed by characterId & 3) ---
+// A padded blank cell: 0x00 advances one cell without drawing, STR_PAD adds the
+// 0xFB the original writes after it. Ordinary literal, so it also concatenates
+// into the u8"" literals of the Japanese tables further down.
+#define PAD_SP  " " STR_PAD
 
-static const unsigned char s_pftChrisName[16] = {   // DAT_004d40f8
-    0x1F, 0xFB, 0x24, 0xFB, 0x2E, 0xFB, 0x25, 0xFB, 0x2F, 0xFB, 0x01
-};
-static const unsigned char s_pftJillName[16] = {    // DAT_004d4108
-    0x26, 0xFB, 0x25, 0xFB, 0x28, 0xFB, 0x28, 0xFB, 0x00, 0xFB, 0x01
-};
+// Cell counts of the two tables the save reveal slices. The trailing blanks
+// that pad the location names to a fixed width are invisible in the source, so
+// the static_asserts below are what actually holds them in place.
+static constexpr int kUsaNameCells = 5;
+static constexpr int kUsaLocCells  = 19;
+
+// --- Character names (indexed by characterId & 3) ---
+// Jill's trailing blank is one of the five cells, not padding: drop it and the
+// reveal copies the terminator into the middle of the line.
+
+static constexpr auto s_pftChrisName = STR_CELL("CHRIS");   // DAT_004d40f8
+static constexpr auto s_pftJillName  = STR_CELL("JILL ");   // DAT_004d4108
+static_assert(s_pftChrisName.len == kUsaNameCells * 2, "USA name must be 5 cells");
+static_assert(s_pftJillName.len  == kUsaNameCells * 2, "USA name must be 5 cells");
+
+// Pointer table at PTR_DAT_004d4118
 static const unsigned char* s_pftCharNameTable[] = {
     s_pftChrisName, s_pftJillName
 };
 
 // --- Location names (indexed by GetSaveLocationIndex) ---
+// 19 cells each, right-padded with blanks to that fixed width. The two leading
+// blanks are why the empty-slot template's location half starts with two.
 
-static const unsigned char s_pftLocRoom1F[40] = {     // DAT_004d41a0 " M.Room 1F"
-    0x00, 0xFB, 0x00, 0xFB, 0x29, 0xFB, 0x79, 0xFB, 0x2E, 0xFB, 0x4B, 0xFB,
-    0x4B, 0xFB, 0x49, 0xFB, 0x00, 0xFB, 0x0D, 0xFB, 0x22, 0xFB, 0x00, 0xFB,
-    0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
-    0x00, 0xFB, 0x01, 0x00
-};
-static const unsigned char s_pftLocHall1F[40] = {     // DAT_004d41c8 " M.Hall 1F"
-    0x00, 0xFB, 0x00, 0xFB, 0x29, 0xFB, 0x79, 0xFB, 0x24, 0xFB, 0x3D, 0xFB,
-    0x48, 0xFB, 0x48, 0xFB, 0x00, 0xFB, 0x0D, 0xFB, 0x22, 0xFB, 0x00, 0xFB,
-    0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
-    0x00, 0xFB, 0x01, 0x00
-};
-static const unsigned char s_pftLocCourtyard[40] = {  // DAT_004d41f0 " Courtyard Room B1"
-    0x00, 0xFB, 0x00, 0xFB, 0x1F, 0xFB, 0x4B, 0xFB, 0x51, 0xFB, 0x4E, 0xFB,
-    0x50, 0xFB, 0x55, 0xFB, 0x3D, 0xFB, 0x4E, 0xFB, 0x40, 0xFB, 0x00, 0xFB,
-    0x2E, 0xFB, 0x4B, 0xFB, 0x4B, 0xFB, 0x49, 0xFB, 0x00, 0xFB, 0x1E, 0xFB,
-    0x0D, 0xFB, 0x01, 0x00
-};
-static const unsigned char s_pftLocGuardhouse[40] = { // DAT_004d4218 " Guardhouse 1F"
-    0x00, 0xFB, 0x00, 0xFB, 0x23, 0xFB, 0x51, 0xFB, 0x3D, 0xFB, 0x4E, 0xFB,
-    0x40, 0xFB, 0x44, 0xFB, 0x4B, 0xFB, 0x51, 0xFB, 0x4F, 0xFB, 0x41, 0xFB,
-    0x00, 0xFB, 0x0D, 0xFB, 0x22, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
-    0x00, 0xFB, 0x01, 0x00
-};
-static const unsigned char s_pftLocLaboratory[40] = { // DAT_004d4240 " Laboratory B3"
-    0x00, 0xFB, 0x00, 0xFB, 0x28, 0xFB, 0x3D, 0xFB, 0x3E, 0xFB, 0x4B, 0xFB,
-    0x4E, 0xFB, 0x3D, 0xFB, 0x50, 0xFB, 0x4B, 0xFB, 0x4E, 0xFB, 0x55, 0xFB,
-    0x00, 0xFB, 0x1E, 0xFB, 0x0F, 0xFB, 0x00, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
-    0x00, 0xFB, 0x01, 0x00
-};
-static const unsigned char s_pftLocStoreroom[40] = {  // DAT_004d4268 " M.Storeroom 1F"
-    0x00, 0xFB, 0x00, 0xFB, 0x29, 0xFB, 0x79, 0xFB, 0x2F, 0xFB, 0x50, 0xFB,
-    0x4B, 0xFB, 0x4E, 0xFB, 0x41, 0xFB, 0x4E, 0xFB, 0x4B, 0xFB, 0x4B, 0xFB,
-    0x49, 0xFB, 0x00, 0xFB, 0x0D, 0x22, 0xFB, 0xFB, 0x00, 0xFB, 0x00, 0xFB,
-    0x00, 0xFB, 0x01, 0x00
-};
-static const unsigned char s_pftLocCourtyard2[40] = { // DAT_004d4290 " Courtyard Path B1"
-    0x00, 0xFB, 0x00, 0xFB, 0x1F, 0xFB, 0x4B, 0xFB, 0x51, 0xFB, 0x4E, 0xFB,
-    0x50, 0xFB, 0x55, 0xFB, 0x3D, 0xFB, 0x4E, 0xFB, 0x40, 0xFB, 0x00, 0xFB,
-    0x2C, 0xFB, 0x3D, 0xFB, 0x50, 0xFB, 0x44, 0xFB, 0x00, 0xFB, 0x1E, 0xFB,
-    0x0D, 0xFB, 0x01, 0x00
-};
+static constexpr auto s_pftLocRoom1F     = STR_CELL("  M.Room 1F        ");   // DAT_004d41a0
+static constexpr auto s_pftLocHall1F     = STR_CELL("  M.Hall 1F        ");   // DAT_004d41c8
+static constexpr auto s_pftLocCourtyard  = STR_CELL("  Courtyard Room B1");   // DAT_004d41f0
+static constexpr auto s_pftLocGuardhouse = STR_CELL("  Guardhouse 1F    ");   // DAT_004d4218
+static constexpr auto s_pftLocLaboratory = STR_CELL("  Laboratory B3    ");   // DAT_004d4240
+static constexpr auto s_pftLocStoreroom  = STR_CELL("  M.Storeroom 1F   ");
+static constexpr auto s_pftLocCourtyard2 = STR_CELL("  Courtyard Path B1");   // DAT_004d4290
+static_assert(s_pftLocRoom1F.len     == kUsaLocCells * 2, "USA location must be 19 cells");
+static_assert(s_pftLocHall1F.len     == kUsaLocCells * 2, "USA location must be 19 cells");
+static_assert(s_pftLocCourtyard.len  == kUsaLocCells * 2, "USA location must be 19 cells");
+static_assert(s_pftLocGuardhouse.len == kUsaLocCells * 2, "USA location must be 19 cells");
+static_assert(s_pftLocLaboratory.len == kUsaLocCells * 2, "USA location must be 19 cells");
+static_assert(s_pftLocStoreroom.len  == kUsaLocCells * 2, "USA location must be 19 cells");
+static_assert(s_pftLocCourtyard2.len == kUsaLocCells * 2, "USA location must be 19 cells");
+
 // Pointer table at 0x004d42b8
 static const unsigned char* s_pftLocNameTable[] = {
     s_pftLocRoom1F, s_pftLocHall1F, s_pftLocCourtyard,
@@ -143,38 +140,273 @@ static const unsigned char* s_pftLocNameTable[] = {
 };
 
 // --- Slot templates ---
-
-// "     \  \" (date separators)
-static constexpr auto s_pftFilledSlot = STR("     \\  \\");           // DAT_004d4058
-// "-----\--\  -------------------" (empty slot dashes)
-static constexpr auto s_pftEmptySlot  = STR("-----\\--\\  -------------------"); // DAT_004d4070
+// Filled (DAT_004d4058): 9 cells - separators at 5 and 8, the rest blanks the
+// name and count overlay. Only the blanks carry the 0xFB pad here.
+static constexpr auto s_pftFilledSlot = STR(    // "     \  \"
+    PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP "\\"
+    PAD_SP PAD_SP "\\");
+// Empty (DAT_004d4070): the whole 28-cell row, unpadded. Cells 9-27 are the two
+// blanks and 17 dashes that stand in for a 19-cell location name - the count
+// has to match, or the dashed row overhangs the filled ones.
+static constexpr auto s_pftEmptySlot = STR("-----\\--\\  -----------------");
 
 // --- Mode title strings (drawn as two overlapping parts per original) ---
-// Bottom: "DO NOT" + "      SAVE"/"      LOAD" → "DO NOT SAVE"/"DO NOT LOAD"
-// Header: "SAVE"/"LOAD" + "     GAME" → "SAVE GAME"/"LOAD GAME"
+// Bottom: "DO NOT" over "       SAVE"/"       LOAD" -> "DO NOT SAVE"/"DO NOT LOAD"
+// Header: "SAVE"/"LOAD" under "     GAME" -> "SAVE GAME"/"LOAD GAME"
 
-static constexpr auto s_pftDoNot     = STR("DO NOT");           // DAT_004d40b8
-static constexpr auto s_pftExitSave  = STR("       SAVE");      // DAT_004d40d8
-static constexpr auto s_pftExitLoad  = STR("       LOAD");      // DAT_004d40c0
+static constexpr auto s_pftDoNot    = STR("DO NOT");   // DAT_004d40b8
+static constexpr auto s_pftExitSave =                  // DAT_004d40d8
+    STR(PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP "SAVE");
+static constexpr auto s_pftExitLoad =                  // DAT_004d40c0
+    STR(PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP "LOAD");
+// Pointer table at 0x004d40f0
 static const unsigned char* s_pftExitTable[] = {
     s_pftExitSave, s_pftExitLoad
 };
-static constexpr auto s_pftSave      = STR("SAVE");             // DAT_004d40a8
-static constexpr auto s_pftLoad      = STR("LOAD");             // DAT_004d40a0
+static constexpr auto s_pftSave = STR("SAVE");   // DAT_004d40a8
+static constexpr auto s_pftLoad = STR("LOAD");   // DAT_004d40a0
+// Pointer table at 0x004d40b0
 static const unsigned char* s_pftHeaderTable[] = {
     s_pftSave, s_pftLoad
 };
-static constexpr auto s_pftGame      = STR("     GAME");        // DAT_004d4090
+static constexpr auto s_pftGame = STR("     GAME");   // DAT_004d4090
 
 // --- Confirmation dialog (state 5) ---
 
-static constexpr auto s_pftOverwritePrompt = STR("OK TO OVERWRITE THE DATA?"); // DAT_004d4170
-static constexpr auto s_pftYesNo           = STR(" YES  NO ");  // DAT_004d4190
+static constexpr auto s_pftOverwritePrompt =    // DAT_004d4170
+    STR("OK TO OVERWRITE THE DATA?");
+// DAT_004d4190. The cursor sits on the blank before each answer, five cells
+// apart, which is what L.confirmStride encodes.
+static constexpr auto s_pftYesNo = STR(PAD_SP "YES" PAD_SP PAD_SP "NO ");
 
 // --- Error messages (state 9) ---
+// Both lines are 34 cells: the original right-pads the first with blanks and
+// indents the second by 20 of them.
 
-static constexpr auto s_pftNoFreeSpace  = STR("NOT ENOUGH FREE SPACE");   // DAT_004d4120
-static constexpr auto s_pftOnHardDrive  = STR("               ON HARD DRIVE."); // DAT_004d4148
+static constexpr auto s_pftNoFreeSpace =        // DAT_004d4120
+    STR("NOT ENOUGH FREE SPACE             ");
+static constexpr auto s_pftOnHardDrive =        // DAT_004d4148
+    STR("                    ON HARD DRIVE.");
+
+// ============================================================================
+// Japanese (Biohazard.exe) screen data - FUN_00435af0, the JPN counterpart of
+// LoadSaveGameState.
+//
+// The Japanese release runs the SAME state machine over its own strings, so
+// only the data and the column positions differ. Two things drive every one of
+// those differences:
+//
+//   * FONT.TIM's game-text glyph is 14px wide, not 8, so every X in the screen
+//     is a different multiple of the glyph cell (see PrintFormattedText in
+//     PrintText.cpp, which already switches its advance on GetAssetVersion).
+//   * A Japanese slot line is 15 glyph cells instead of the USA's 28, laid out
+//     name(3) '/' count(2) '/' location(8) rather than name(5) '\\' count(2)
+//     '\\' location(19).
+//
+// Every string below encodes byte-for-byte to the table at the address in its
+// comment; tools/verify_jpn_save_screen.py re-checks that against the
+// executable. Note that glyph 0x38 is a backslash in fontus.tim and a forward
+// slash in FONT.TIM, so the separator byte is the same in both releases and
+// only looks different.
+//
+// Three spellings appear here, and which one a string needs is not cosmetic:
+//
+//   STR_JP_CELL  the character-name and location tables, because the save
+//                reveal copies FIXED-LENGTH slices out of them (6 and 17
+//                bytes) and lengthens the slice two bytes a frame. The encoder
+//                pads every glyph to a two-byte cell so a slice can never end
+//                inside a kanji; the static_asserts below pin the widths.
+//   PAD_SP        a blank cell in a table the original padded (the filled-slot
+//                template and the yes/no line pad their spaces but not their
+//                other glyphs, so neither encoder reproduces them on its own).
+//   STR_JP       everything else - the original leaves those unpadded.
+// ============================================================================
+
+// Cell counts of the two sliced tables. The reveal reads name bytes
+// [0, nameLen) and location bytes [locBase, locBase + locLen), and the
+// location slice includes the 0x01 terminator - hence the odd length.
+static constexpr int kJpnNameCells = 3;
+static constexpr int kJpnLocCells  = 8;
+
+// --- Character names (indexed by characterId & 3) ---
+// Three cells each. Jill's trailing space is one of them, not padding: drop it
+// and the reveal copies the terminator into the middle of the line.
+
+static constexpr auto s_jpnChrisName = STR_JP_CELL(u8"クリス");   // 0x004b1010
+static constexpr auto s_jpnJillName  = STR_JP_CELL(u8"ジル ");    // 0x004b1018
+static_assert(s_jpnChrisName.len == kJpnNameCells * 2, "JPN name must be 3 cells");
+static_assert(s_jpnJillName.len  == kJpnNameCells * 2, "JPN name must be 3 cells");
+
+// Pointer table at 0x004b1020
+static const unsigned char* s_jpnCharNameTable[] = {
+    s_jpnChrisName, s_jpnJillName
+};
+
+// --- Location names (indexed by GetSaveLocationIndex) ---
+// Eight cells each. The '/' in cell 5 of the text lands on the third separator
+// of the filled-slot template, exactly as the USA strings' backslash does.
+
+static constexpr auto s_jpnLocRoom1F     = STR_JP_CELL(u8"館 小部屋/1F");    // 0x004b1068
+static constexpr auto s_jpnLocHall1F     = STR_JP_CELL(u8"館 ホール/1F");    // 0x004b1080
+static constexpr auto s_jpnLocCourtyard  = STR_JP_CELL(u8"中庭 部屋/B1");    // 0x004b1098
+static constexpr auto s_jpnLocGuardhouse = STR_JP_CELL(u8" 寄宿舎 /1F");    // 0x004b10b0
+static constexpr auto s_jpnLocLaboratory = STR_JP_CELL(u8" 研究所 /B3");    // 0x004b10c8
+static constexpr auto s_jpnLocStoreroom  = STR_JP_CELL(u8"館  物置/1F");    // 0x004b10e0
+static constexpr auto s_jpnLocCourtyard2 = STR_JP_CELL(u8"中庭 通路/B1");    // 0x004b10f8
+static_assert(s_jpnLocRoom1F.len     == kJpnLocCells * 2, "JPN location must be 8 cells");
+static_assert(s_jpnLocHall1F.len     == kJpnLocCells * 2, "JPN location must be 8 cells");
+static_assert(s_jpnLocCourtyard.len  == kJpnLocCells * 2, "JPN location must be 8 cells");
+static_assert(s_jpnLocGuardhouse.len == kJpnLocCells * 2, "JPN location must be 8 cells");
+static_assert(s_jpnLocLaboratory.len == kJpnLocCells * 2, "JPN location must be 8 cells");
+static_assert(s_jpnLocStoreroom.len  == kJpnLocCells * 2, "JPN location must be 8 cells");
+static_assert(s_jpnLocCourtyard2.len == kJpnLocCells * 2, "JPN location must be 8 cells");
+
+// Pointer table at 0x004b1110
+static const unsigned char* s_jpnLocNameTable[] = {
+    s_jpnLocRoom1F, s_jpnLocHall1F, s_jpnLocCourtyard,
+    s_jpnLocGuardhouse, s_jpnLocLaboratory, s_jpnLocStoreroom,
+    s_jpnLocCourtyard2
+};
+
+// --- Slot templates (15 cells) ---
+// Filled (0x004b0fa0): separators at cells 3, 6 and 12, everything else a
+// blank the name / count / location overlays land on. Only the blanks carry
+// the 0xFB pad in the original, so they are spelled with PAD_SP and the
+// separators plainly.
+static constexpr auto s_jpnFilledSlot = STR_JP(     // "   /  /     /  "
+    PAD_SP PAD_SP PAD_SP u8"/"
+    PAD_SP PAD_SP u8"/"
+    PAD_SP PAD_SP PAD_SP PAD_SP PAD_SP u8"/"
+    PAD_SP PAD_SP);
+// Empty (0x004b0fc0): the dash is the katakana long-vowel mark, which is what
+// index 0x3B is in FONT.TIM (it is '-' in fontus.tim).
+static constexpr auto s_jpnEmptySlot = STR_JP(u8"ーーー/ーー/ーーーーー/ーー");   // 0x004b0fc0
+
+// --- Exit line ---
+// Drawn as two overlapping parts at the same position, like the USA's
+// "DO NOT" + "       SAVE": the verb takes cells 0-2 and the suffix's three
+// leading blanks skip over it.
+static constexpr auto s_jpnExitSave = STR_JP(u8"セーブ");   // 0x004b1004
+static constexpr auto s_jpnExitLoad = STR_JP(u8"ロード");   // 0x004b1000
+// Pointer table at 0x004b1008
+static const unsigned char* s_jpnExitTable[] = {
+    s_jpnExitSave, s_jpnExitLoad
+};
+static constexpr auto s_jpnExitSuffix = STR_JP(u8"   しない");   // 0x004b0ff8
+
+// The header is Latin in both releases and the two fonts share their latin
+// rows, so 0x004b0fe8/0x004b0fe0/0x004b0fd0 are byte-identical to s_pftSave/
+// s_pftLoad/s_pftGame - only the X moves (the 9-cell "SAVE GAME" is centred
+// at 124 for an 8px font and at 97 for a 14px one).
+
+// --- Confirmation dialog (state 5) ---
+static constexpr auto s_jpnOverwritePrompt =        // 0x004b1130
+    STR_JP(u8"データを上書きしてよろしいですか");
+// 0x004b1148. The cursor sits on the blank before each answer, four cells
+// apart, which is what L.confirmStride encodes.
+static constexpr auto s_jpnYesNo = STR_JP(PAD_SP u8"はい" PAD_SP PAD_SP u8"いいえ");
+
+// --- Error messages (state 9) ---
+// The Japanese message fits on one line, so the second line is 34 blanks and a
+// terminator - it draws nothing. Kept because the original still issues the
+// call, and because dropping it would make the two versions structurally
+// different for no gain.
+static constexpr auto s_jpnNoFreeSpace =            // 0x004b1028
+    STR_JP(u8"ハードディスクの空きがたりません");
+static constexpr auto s_jpnErrLine2 =               // 0x004b1040, 34 blanks
+    STR_JP(u8"                                  ");
+
+// ============================================================================
+// Per-version screen layout.
+//
+// Everything that differs between LoadSaveGameState (USA, 0x00493310) and its
+// Japanese counterpart (0x00435af0) is a string, a column, or a length of the
+// save-reveal string. Collecting them here keeps ONE state machine: the two
+// versions differ in data, not in control flow, and a behavioural fix made to
+// the screen cannot land on only one of them.
+// ============================================================================
+typedef struct SaveScreenLayout
+{
+    const unsigned char* const* charNames;    // [characterId & 3]
+    const unsigned char* const* locNames;     // [GetSaveLocationIndex(...)]
+    const unsigned char* const* exitNames;    // [mode]
+    const unsigned char* const* headerNames;  // [mode]
+    const unsigned char* filledSlot;
+    const unsigned char* emptySlot;
+    const unsigned char* exitSuffix;          // overlays the exit verb
+    const unsigned char* headerSuffix;        // "     GAME"
+    const unsigned char* overwritePrompt;
+    const unsigned char* yesNo;
+    const unsigned char* errLine1;
+    const unsigned char* errLine2;
+    short countX;         // PrintText8x14 X for the two save-count digits
+    short locX;           // location-name X
+    short headerX;        // "SAVE GAME" / "LOAD GAME" X
+    short cursorX;        // slot cursor X (one glyph cell left of the text)
+    short confirmStride;  // YES -> NO cursor step, five glyph cells
+    int   nameLen;        // bytes of character name the reveal string holds
+    int   locLen;         // bytes of location name it holds
+} SaveScreenLayout;
+
+// Reveal-string layout, shared by both versions:
+//   [0 .. nameLen)            character name
+//   [nameLen]                 separator, [+1] 0xFB
+//   [nameLen+2], [nameLen+4]  save-count tens / units digit, each + 0xFB
+//   [nameLen+6]               separator, [+1] 0xFB
+//   [nameLen+8 ...]           location name (locLen bytes, terminator included)
+#define SAVE_REVEAL_LOC_BASE(L)  ((L).nameLen + 8)
+#define SAVE_REVEAL_LEN(L)       (SAVE_REVEAL_LOC_BASE(L) + (L).locLen)
+
+static SaveScreenLayout GetSaveScreenLayout(void)
+{
+    SaveScreenLayout L;
+
+    if (GetAssetVersion() != 0) {
+        L.charNames       = s_jpnCharNameTable;
+        L.locNames        = s_jpnLocNameTable;
+        L.exitNames       = s_jpnExitTable;
+        L.filledSlot      = s_jpnFilledSlot;
+        L.emptySlot       = s_jpnEmptySlot;
+        L.exitSuffix      = s_jpnExitSuffix;
+        L.overwritePrompt = s_jpnOverwritePrompt;
+        L.yesNo           = s_jpnYesNo;
+        L.errLine1        = s_jpnNoFreeSpace;
+        L.errLine2        = s_jpnErrLine2;
+        L.countX          = 0x6f;   // cell 4 of a 14px grid starting at 55
+        L.locX            = 0x99;   // cell 7
+        L.headerX         = 0x61;
+        L.cursorX         = 0x29;   // 55 - 14
+        L.confirmStride   = 56;     // 4 cells: " はい" -> "  いいえ"
+        L.nameLen         = kJpnNameCells * 2;
+        L.locLen          = kJpnLocCells * 2 + 1;   // the slice takes the 0x01 too
+    } else {
+        L.charNames       = s_pftCharNameTable;
+        L.locNames        = s_pftLocNameTable;
+        L.exitNames       = s_pftExitTable;
+        L.filledSlot      = s_pftFilledSlot;
+        L.emptySlot       = s_pftEmptySlot;
+        L.exitSuffix      = s_pftDoNot;
+        L.overwritePrompt = s_pftOverwritePrompt;
+        L.yesNo           = s_pftYesNo;
+        L.errLine1        = s_pftNoFreeSpace;
+        L.errLine2        = s_pftOnHardDrive;
+        L.countX          = 103;    // cell 6 of an 8px grid starting at 55
+        L.locX            = 127;    // cell 9
+        L.headerX         = 124;
+        L.cursorX         = 47;     // 55 - 8
+        L.confirmStride   = 40;     // 5 cells: " YES" -> " NO"
+        L.nameLen         = kUsaNameCells * 2;
+        L.locLen          = kUsaLocCells * 2 + 1;   // the slice takes the 0x01 too
+    }
+
+    // Identical in both releases: the two fonts share their latin rows, so the
+    // USA-encoded "SAVE"/"LOAD"/"     GAME" ARE the bytes at 0x004b0fe8 /
+    // 0x004b0fe0 / 0x004b0fd0.
+    L.headerNames  = s_pftHeaderTable;
+    L.headerSuffix = s_pftGame;
+
+    return L;
+}
 
 // ============================================================================
 // FileWrite (0x004122a0)
@@ -258,10 +490,16 @@ int GetSaveLocationIndex(int stageId, int roomId)
 void DrawSaveCursor(short x, short y, int mode)
 {
     if (mode == 0) {
-        g_TextureDesc.width = 8;
+        // The cursor glyph is character-table index 2 (the arrowhead) on row 2
+        // of the sheet, so its U is 2 glyph widths in and its V is a fixed 28.
+        // That is 2*8 for fontus.tim and 2*14 for FONT.TIM - the Japanese
+        // DrawSaveCursor (0x004366e0) writes width/height 14 and texU/texV
+        // 0x1C/0x1C, which is the same cell one font over.
+        const int glyphW = (GetAssetVersion() != 0) ? 14 : 8;
+        g_TextureDesc.width = (unsigned short)glyphW;
         g_TextureDesc.height = 14;
         g_TextureDesc.texturePage = 0x1E;
-        g_TextureDesc.texU = 16;
+        g_TextureDesc.texU = (unsigned char)(2 * glyphW);
         g_TextureDesc.texV = 28;
         g_TextureDesc.clutX = 0x100;
         g_TextureDesc.clutY = 0x1E0;
@@ -517,8 +755,13 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
 
     char saveBuffer[SAVE_FILE_SIZE + 8];    // slot-scan / load buffer
     char fileBuffer[SAVE_FILE_SIZE + 8];    // save-assembly buffer
-    char displayStr[64];                    // save-animation reveal string (57 bytes)
+    char displayStr[64];                    // save-animation reveal string (57 bytes USA / 31 JPN)
     char animBuf[64];                       // reveal buffer (terminated at anim_counter)
+
+    // Strings and columns for the running asset version. Everything below is
+    // shared; only this table differs between the USA screen (0x00493310) and
+    // the Japanese one (0x00435af0).
+    const SaveScreenLayout L = GetSaveScreenLayout();
 
     // Set save/load active flag
     g_loadSaveStateFlag = 1;
@@ -723,8 +966,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
         // ================================================================
         case STATE_CONFIRM_OVERWRITE:
         {
-            PrintFormattedText(49, 193, 1, s_pftOverwritePrompt);
-            PrintFormattedText(118, 209, 0, s_pftYesNo);
+            PrintFormattedText(49, 193, 1, L.overwritePrompt);
+            PrintFormattedText(118, 209, 0, L.yesNo);
 
             // no direction held → reset delay
             if ((g_RawPadHeld & 0x5000) == 0) {
@@ -821,23 +1064,27 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             FileWrite(g_saveFileName, fileBuffer, SAVE_FILE_SIZE);
 
             // Build the save-animation reveal string:
-            //   name (10) + "\" + count(2) + "\" (8) + location (39) = 57 bytes
-            const unsigned char* nameStr = s_pftCharNameTable[g_SelectedCharactedId & 3];
-            for (int i = 0; i < 10; i++) {
+            //   name + separator + count(2) + separator + location.
+            // 57 bytes for the USA screen (10 + 8 + 39), 31 for the Japanese
+            // one (6 + 8 + 17); glyph 0x38 is a backslash in fontus.tim and a
+            // forward slash in FONT.TIM, which is why the two look different
+            // while the byte is the same.
+            const unsigned char* nameStr = L.charNames[g_SelectedCharactedId & 3];
+            for (int i = 0; i < L.nameLen; i++) {
                 displayStr[i] = (char)nameStr[i];
             }
-            displayStr[0x0A] = (char)0x38;   // '\'
-            displayStr[0x0B] = (char)0xFB;
-            displayStr[0x0C] = (char)((g_SavesCounter / 10) + 0x0C);
-            displayStr[0x0D] = (char)0xFB;
-            displayStr[0x0E] = (char)((g_SavesCounter % 10) + 0x0C);
-            displayStr[0x0F] = (char)0xFB;
-            displayStr[0x10] = (char)0x38;   // '\'
-            displayStr[0x11] = (char)0xFB;
+            displayStr[L.nameLen + 0] = (char)0x38;
+            displayStr[L.nameLen + 1] = (char)0xFB;
+            displayStr[L.nameLen + 2] = (char)((g_SavesCounter / 10) + 0x0C);
+            displayStr[L.nameLen + 3] = (char)0xFB;
+            displayStr[L.nameLen + 4] = (char)((g_SavesCounter % 10) + 0x0C);
+            displayStr[L.nameLen + 5] = (char)0xFB;
+            displayStr[L.nameLen + 6] = (char)0x38;
+            displayStr[L.nameLen + 7] = (char)0xFB;
             int locIdx = GetSaveLocationIndex(g_stageId, g_roomId);
-            const unsigned char* locStr = s_pftLocNameTable[locIdx];
-            for (int i = 0x12; i < 0x39; i++) {
-                displayStr[i] = (char)locStr[i - 0x12];
+            const unsigned char* locStr = L.locNames[locIdx];
+            for (int i = 0; i < L.locLen; i++) {
+                displayStr[SAVE_REVEAL_LOC_BASE(L) + i] = (char)locStr[i];
             }
 
             g_SavesCounter = (g_SavesCounter + 1 >= 100) ? 99 : (unsigned char)(g_SavesCounter + 1);
@@ -866,7 +1113,10 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             animBuf[copyLen] = 1;           // STR terminator
             anim_counter += 2;
 
-            if (anim_counter > 58) {
+            // The reveal walks two bytes at a time and stops once the counter
+            // steps past the string: 58 for the USA's 57 bytes, 32 for the
+            // Japanese screen's 31 (0x20 at 0x004362e9).
+            if (anim_counter > SAVE_REVEAL_LEN(L) + 1) {
                 // Animation finished
                 if (!cutsceneReset) {
                     cut_set();
@@ -909,8 +1159,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
         // ================================================================
         case STATE_ERROR_MSG:
         {
-            PrintFormattedText(49, 209, 0, s_pftNoFreeSpace);
-            PrintFormattedText(49, 225, 0, s_pftOnHardDrive);
+            PrintFormattedText(49, 209, 0, L.errLine1);
+            PrintFormattedText(49, 225, 0, L.errLine2);
             if (((g_RawPadHeld & 0xF000) != 0) ||
                 ((g_PlayerDpadPressed & 0xC000) != 0)) {
                 g_RawPadHeld = 0;
@@ -934,43 +1184,48 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             const SaveSlotInfo* slot = &save_slots[i];
 
             if (slot->hasData) {
-                // Filled slot: draw template dashes, then overlay character name
-                PrintFormattedText(55, (short)y, 0, s_pftFilledSlot);
+                // Filled slot: draw the separator template, then overlay the
+                // character name on it
+                PrintFormattedText(55, (short)y, 0, L.filledSlot);
 
-                // Character name overlay at same X=55 (from PTR_DAT_004d4118)
+                // Character name overlay at same X=55 (from PTR_DAT_004d4118 /
+                // the JPN 0x004b1020)
                 unsigned char charIdx = (unsigned char)(save_slots[i].characterId & 3);
-                PrintFormattedText(55, (short)y, 0, s_pftCharNameTable[charIdx]);
+                PrintFormattedText(55, (short)y, 0, L.charNames[charIdx]);
 
-                // Save count at X=103 (sprintf + PrintText8x14 from assembly)
+                // Save count (sprintf + PrintText8x14 from assembly)
                 int saveNum = save_slots[i].savesCount % 100;
                 sprintf(PRINT_TEXT_BUFFER, "%02d", saveNum);
-                PrintText8x14(103, (short)y, 0, 0);
+                PrintText8x14(L.countX, (short)y, 0, 0);
 
-                // Location name at X=127 (from PTR_DAT_004d42b8)
+                // Location name (from PTR_DAT_004d42b8 / the JPN 0x004b1110)
                 int locIdx = GetSaveLocationIndex(save_slots[i].stageId, save_slots[i].roomId);
-                PrintFormattedText(127, (short)y, 0, s_pftLocNameTable[locIdx]);
+                PrintFormattedText(L.locX, (short)y, 0, L.locNames[locIdx]);
             } else {
                 // Empty slot: full dash template
-                PrintFormattedText(55, (short)y, 0, s_pftEmptySlot);
+                PrintFormattedText(55, (short)y, 0, L.emptySlot);
             }
         }
 
         // Print exit option — assembly draws two parts at same position:
-        // 1. "      SAVE"/"      LOAD" (spaces + word)
-        // 2. "DO NOT" (overwrites the leading spaces)
-        // Result: "DO NOT SAVE" / "DO NOT LOAD"
+        // 1. the verb, in the first cells of the line
+        // 2. the suffix, whose leading spaces skip over the verb
+        // Result: "DO NOT SAVE"/"DO NOT LOAD", or "セーブしない"/"ロードしない"
+        // on the Japanese screen, which puts the verb first and the negation
+        // after it (0x004b1008 + 0x004b0ff8).
         {
             int y = 45 + SAVE_SLOT_COUNT * 16;
-            PrintFormattedText(55, (short)y, 0, s_pftExitTable[mode]);
-            PrintFormattedText(55, (short)y, 0, s_pftDoNot);
+            PrintFormattedText(55, (short)y, 0, L.exitNames[mode]);
+            PrintFormattedText(55, (short)y, 0, L.exitSuffix);
         }
 
         // Print header — assembly draws two parts at same position:
-        // 1. "SAVE"/"LOAD" at (124,13)
-        // 2. "     GAME" at (124,13) — spaces don't overwrite, "GAME" follows
-        // Result: "SAVE GAME" / "LOAD GAME"
-        PrintFormattedText(124, 13, 0, s_pftHeaderTable[mode]);
-        PrintFormattedText(124, 13, 0, s_pftGame);
+        // 1. "SAVE"/"LOAD"
+        // 2. "     GAME" — spaces don't overwrite, "GAME" follows
+        // Result: "SAVE GAME" / "LOAD GAME". Latin in both releases; only the
+        // X moves, so the 9-cell word stays centred for either glyph width.
+        PrintFormattedText(L.headerX, 13, 0, L.headerNames[mode]);
+        PrintFormattedText(L.headerX, 13, 0, L.headerSuffix);
 
         // Draw cursor arrow(s) — matching assembly at 0x00493ca8
         // blinkToggle: 0=cursor visible, 1=cursor hidden (toggles every 5 frames)
@@ -978,12 +1233,12 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
         {
             if (state == STATE_CONFIRM_OVERWRITE) {
                 // State 5: draw slot cursor (always visible) + confirm cursor (blinks)
-                DrawSaveCursor(47, (short)(45 + selected_slot * 16), 0);
-                int confirmX = confirm_choice * 40 + 118;
+                DrawSaveCursor(L.cursorX, (short)(45 + selected_slot * 16), 0);
+                int confirmX = confirm_choice * L.confirmStride + 118;
                 DrawSaveCursor((short)confirmX, 209, blink_state);
             } else {
                 // States 1-4,9: cursor at slot position, blinks with blinkToggle
-                DrawSaveCursor(47, (short)(45 + selected_slot * 16), blink_state);
+                DrawSaveCursor(L.cursorX, (short)(45 + selected_slot * 16), blink_state);
             }
         }
 

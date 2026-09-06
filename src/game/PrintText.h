@@ -211,6 +211,64 @@ struct Encoded {
 };
 
 // ------------------------------------------------------------------------
+// EncodedCells - STR() in FIXED-WIDTH CELLS.
+//
+// Same character table as Encoded, but every glyph is followed by a 0xFB.
+// 0xFB neither draws nor advances the cursor (PrintFormattedText's
+// `case 0xfb: break;`), so the padding is invisible on screen - it exists so
+// that a byte offset into the string is always a whole number of glyph cells.
+//
+// The save screen is what needs that. Its reveal animation copies fixed-length
+// byte slices out of the character-name and location tables and lengthens the
+// slice by two bytes a frame, so a cell that is not two bytes wide
+// desynchronises every cell after it. The original's tables are padded for
+// exactly this reason.
+//
+// `len` is the encoded length WITHOUT the 0x01 terminator - twice the cell
+// count - so a table's expected width can be static_assert-ed at the point of
+// definition rather than trusted to a run of trailing spaces nobody can count.
+//
+// The ONLY escape interpreted is \xNN, which emits a raw byte and does NOT pad
+// it. That is the escape hatch for a table whose original bytes are irregular;
+// see s_pftLocStoreroom in SaveLoadScreen.cpp. Anything carrying message-stream
+// tags belongs in STR.
+// ------------------------------------------------------------------------
+template <int N>
+struct EncodedCells {
+    // Two bytes per source character is the worst case: a glyph plus its pad.
+    unsigned char bytes[N * 2 + 2];
+    int len;
+
+    constexpr EncodedCells() : bytes{}, len(0) {}
+
+    constexpr EncodedCells(const char (&str)[N]) : bytes{}, len(0)
+    {
+        int out = 0;
+        for (int i = 0; i < N - 1; i++) {
+            unsigned char c = (unsigned char)str[i];
+
+            // \xNN - raw byte, emitted unpadded.
+            if (c == 0x5C && i + 3 < N && str[i + 1] == 'x') {
+                int hi = pft_hex(str[i + 2]);
+                int lo = pft_hex(str[i + 3]);
+                if (hi >= 0 && lo >= 0) {
+                    bytes[out++] = (unsigned char)((hi << 4) | lo);
+                    i += 3;
+                    continue;
+                }
+            }
+
+            bytes[out++] = encodeChar(c);
+            bytes[out++] = 0xFB;
+        }
+        len = out;
+        bytes[out] = 0x01;
+    }
+
+    operator const unsigned char*() const { return bytes; }
+};
+
+// ------------------------------------------------------------------------
 // EncodedJp — the same encoder for the Japanese font (data\FONT.TIM).
 //
 // The Japanese release keeps the identical message protocol and the identical
@@ -331,9 +389,110 @@ struct EncodedJp {
     operator const unsigned char*() const { return bytes; }
 };
 
+// ------------------------------------------------------------------------
+// EncodedJpCells - the Japanese encoder in FIXED-WIDTH CELLS.
+//
+// Same glyph table as EncodedJp, but every glyph is padded to exactly two
+// bytes with a 0xFB. 0xFB draws nothing and does not move the cursor
+// (PrintFormattedText's `case 0xfb: break;`), so the padding is invisible on
+// screen - it exists so that a byte offset into the string is always a whole
+// number of glyph cells.
+//
+// The save screen is what needs that. Its reveal animation copies fixed-length
+// byte slices out of the character-name and location tables and lengthens the
+// slice by two bytes a frame (Biohazard.exe FUN_00435af0, the copy loops at
+// 0x004361d1 / 0x00436274 and the counter at 0x004362e4). Without the padding
+// a slice could end between the two halves of a kanji, and the renderer would
+// read the 0x01 terminator as that glyph's second byte and draw garbage.
+//
+// `len` is the encoded length WITHOUT the 0x01 terminator - twice the cell
+// count - so a table's expected width can be static_assert-ed at the point of
+// definition rather than trusted.
+//
+// The ONLY escape interpreted is \xNN, which emits a raw byte and does NOT pad
+// it - the escape hatch for a table whose original bytes are irregular. Do not
+// use STR_PAD here: the encoder already pads, and the two together would pad
+// twice. Anything carrying message-stream tags belongs in STR_JP.
+// ------------------------------------------------------------------------
+template <int N>
+struct EncodedJpCells {
+    // Two bytes per source character is the worst case: a one-byte glyph plus
+    // its pad. Multi-byte UTF-8 input only shrinks.
+    unsigned char bytes[N * 2 + 2];
+    int len;
+
+    constexpr EncodedJpCells() : bytes{}, len(0) {}
+
+    constexpr EncodedJpCells(const char (&str)[N]) : bytes{}, len(0)
+    {
+        int out = 0;
+        for (int i = 0; i < N - 1; i++) {
+            unsigned char c = (unsigned char)str[i];
+
+            // \xNN - raw byte, emitted unpadded (see EncodedCells).
+            if (c == 0x5C && i + 3 < N && str[i + 1] == 'x') {
+                int hi = pft_hex(str[i + 2]);
+                int lo = pft_hex(str[i + 3]);
+                if (hi >= 0 && lo >= 0) {
+                    bytes[out++] = (unsigned char)((hi << 4) | lo);
+                    i += 3;
+                    continue;
+                }
+            }
+
+            // Decode one UTF-8 sequence, exactly as EncodedJp does.
+            unsigned int cp = c;
+            if (c >= 0xE0 && i + 2 < N - 1) {
+                cp = ((unsigned int)(c & 0x0F) << 12)
+                   | ((unsigned int)(str[i + 1] & 0x3F) << 6)
+                   |  (unsigned int)(str[i + 2] & 0x3F);
+                i += 2;
+            } else if (c >= 0xC0 && i + 1 < N - 1) {
+                cp = ((unsigned int)(c & 0x1F) << 6)
+                   |  (unsigned int)(str[i + 1] & 0x3F);
+                i += 1;
+            }
+
+            int gi = jpnGlyphIndex(cp);
+            if (gi < 0) {
+                bytes[out++] = 0x1B;    // '?' - same fallback STR() uses
+                bytes[out++] = 0xFB;
+                continue;
+            }
+            bytes[out++] = kJpnGlyphs[gi].b0;
+            // A two-byte glyph already fills its cell; a one-byte one is padded
+            // so that every cell is the same two bytes wide.
+            bytes[out++] = (kJpnGlyphs[gi].n > 1) ? kJpnGlyphs[gi].b1 : 0xFB;
+        }
+        len = out;
+        bytes[out] = 0x01;
+    }
+
+    operator const unsigned char*() const { return bytes; }
+};
+
 } // namespace pft_detail
 
 #define STR(str) (::pft_detail::Encoded<sizeof(str)>{str})
 
 // Japanese counterpart of STR(). The literal must be u8"" — see EncodedJp.
 #define STR_JP(str) (::pft_detail::EncodedJp<sizeof(str)>{str})
+
+// The 0xFB pad, as a string fragment. It draws nothing and does not advance the
+// cursor; the original's fixed-layout tables use it to make a glyph occupy a
+// whole two-byte cell. Written as the SOURCE characters \xFB so that the
+// encoder's own \xNN escape emits the byte - a C++ "\xFB" would put 0xFB
+// straight into the literal, where STR_JP's UTF-8 decoder would eat it as the
+// lead byte of a three-byte sequence.
+//
+// It is an ordinary literal on purpose: an ordinary and a u8 literal
+// concatenate into a u8 one, so the same macro serves STR() and STR_JP().
+// Do NOT use it inside STR_CELL/STR_JP_CELL, which pad on their own.
+#define STR_PAD "\\xFB"
+
+// Fixed-cell encoders - see EncodedCells / EncodedJpCells. They pad every glyph
+// out to two bytes, so `.len` is twice the number of cells and any byte offset
+// into the result lands on a cell boundary. Use them for tables that are sliced
+// by byte offset; use STR/STR_JP for ordinary text.
+#define STR_CELL(str)    (::pft_detail::EncodedCells<sizeof(str)>{str})
+#define STR_JP_CELL(str) (::pft_detail::EncodedJpCells<sizeof(str)>{str})
