@@ -654,9 +654,16 @@ static int BakeWeaponSheetFromPage(int slot, const char* pageName)
     p += 256 * 2;
     p += 4;                                                        // image size
     p += 4;                                                        // image origin
+    // The TIM image width field is in 16-bit HALFWORDS, not pixels (PSX TIM
+    // spec; for 8bpp the pixel width is imgW * 2). The shipped Effspr pages are
+    // 256 px wide and therefore store 128 here. The original check compared the
+    // raw field against 256, so EVERY bake of these files failed at this check
+    // and every weapon sheet silently fell back to LoadEffectTextureSheet's
+    // core00.etm CLUT-row-0 bake - a RED gore palette.
     unsigned short imgW = *(const unsigned short*)p;
     unsigned short imgH = *(const unsigned short*)(p + 2); p += 4;
-    if (imgW != 256 || imgH != 256) return 0;
+    unsigned int pixW = (unsigned int)imgW * 2;                    // 8bpp halfword units
+    if (pixW != 256 || imgH != 256) return 0;
 
     unsigned short pageV = kWeaponSheetPageV[slot];
     unsigned short height = 256 - pageV;                           // rest of the page
@@ -675,7 +682,7 @@ static int BakeWeaponSheetFromPage(int slot, const char* pageName)
     static DWORD rgba[256 * 256];
     const unsigned char* pix = p;
     for (unsigned short y = 0; y < height; y++) {
-        const unsigned char* src = pix + (pageV + y) * imgW;
+        const unsigned char* src = pix + (pageV + y) * pixW;
         DWORD* row = &rgba[y * 256];
         for (unsigned short x = 0; x < 256; x++) {
             unsigned int idx = src[x];
