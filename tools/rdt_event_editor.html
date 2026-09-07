@@ -574,7 +574,7 @@ function raParamFields(F, handler, at0) {
   }
 }
 
-const ENTITY_KIND = { 0:'player', 1:'enemy/npc', 2:'itembox', 3:'item model' };
+const ENTITY_KIND = { 0:'player', 1:'enemy/npc', 2:'room object (omodel)', 3:'item model' };
 
 // Player state-8 SCD behaviours, table 0x004beca0. Names from PlayerAnimations.cpp.
 // The NPC table (0x004c4780) has 11 entries and different meanings - these labels
@@ -779,6 +779,58 @@ const stByte = n => STATE_BYTES[n] || ('state byte ' + n);
 const stWord = n => STATE_WORDS[n] || ('state word ' + n);
 const enumFrom = t => Object.fromEntries(Object.entries(t).map(([k,v]) => [k, k + ' - ' + v]));
 
+// ---------------------------------------------------------------------------
+// Item ids.
+//
+// Names come from g_ItemNamePointers (0x004bf0a0, indexed by itemId - 1; see
+// src/game/MenuData.cpp), which is what the inventory actually prints. The ids
+// that have no name string there - oil, the pick axe and the six maps - are
+// filled in from the ITEM_* constants in src/game/Types.h. Parentheses
+// disambiguate the ids that share one string (the three bazookas, the six
+// mixed herbs, and the keys whose printed name differs from the constant).
+// 0x5F-0x6E are the sixteen documents, in FILE order (their "read" bit is
+// ROOM_FLAG_FILE_BASE + itemId - 0x5F); 0x54-0x5E are unused.
+// ---------------------------------------------------------------------------
+const ITEM_NAMES = {
+  0x00: 'nothing', 0x01: 'COMBAT KNIFE', 0x02: 'BERETTA', 0x03: 'SHOTGUN', 0x04: 'COLT PYTHON (dum-dum)',
+  0x05: 'COLT PYTHON (magnum)', 0x06: 'FLAMETHROWER', 0x07: 'BAZOOKA (explosive)',
+  0x08: 'BAZOOKA (acid)', 0x09: 'BAZOOKA (flame)', 0x0A: 'R. LAUNCHER', 0x0B: 'CLIP',
+  0x0C: 'SHELLS', 0x0D: 'DUMDUM ROUNDS', 0x0E: 'MAGNUM ROUNDS', 0x0F: 'FUEL',
+  0x10: 'EXPLOSIVE R.', 0x11: 'ACID ROUNDS', 0x12: 'FLAME ROUNDS', 0x13: 'EMPTY BOTTLE',
+  0x14: 'WATER', 0x15: 'UMB No.2', 0x16: 'UMB No.4', 0x17: 'UMB No.7', 0x18: 'UMB No.13',
+  0x19: 'Yellow-6', 0x1A: 'NP-003', 0x1B: 'V-JOLT', 0x1C: 'BROKEN SHOTGUN', 0x1D: 'SQUARE CRANK',
+  0x1E: 'HEX. CRANK', 0x1F: 'EMBLEM', 0x20: 'GOLD EMBLEM', 0x21: 'BLUE JEWEL',
+  0x22: 'RED JEWEL', 0x23: 'MUSIC NOTES', 0x24: 'WOLF MEDAL', 0x25: 'EAGLE MEDAL',
+  0x26: 'HERBICIDE (chemical)', 0x27: 'BATTERY', 0x28: 'MO DISK', 0x29: 'WIND CREST',
+  0x2A: 'FLARE', 0x2B: 'SLIDES', 0x2C: 'MOON CREST', 0x2D: 'STAR CREST', 0x2E: 'SUN CREST',
+  0x2F: 'INK RIBBON', 0x30: 'LIGHTER', 0x31: 'LOCKPICK', 0x32: 'OIL (no name string)',
+  0x33: 'SWORD KEY', 0x34: 'ARMOR KEY', 0x35: 'SHIELD KEY', 0x36: 'HELMET KEY',
+  0x37: 'MASTER KEY (lab key A)', 0x38: 'CLOSET KEY (special key)', 0x39: '002 KEY (dormitory A)',
+  0x3A: '003 KEY (dormitory B)', 0x3B: 'C. ROOM KEY', 0x3C: 'P. ROOM KEY (lab key B)',
+  0x3D: 'DESK KEY', 0x3E: 'BLANK BOOK (red book)', 0x3F: 'DOOM BOOK 2', 0x40: 'DOOM BOOK 1',
+  0x41: 'F.-AID SPRAY', 0x42: 'SERUM', 0x43: 'RED HERB', 0x44: 'GREEN HERB', 0x45: 'BLUE HERB',
+  0x46: 'MIXED HERBS (blue+red)', 0x47: 'MIXED HERBS (2 green)', 0x48: 'MIXED HERBS (green+blue)',
+  0x49: 'MIXED HERBS (green+red+blue)', 0x4A: 'MIXED HERBS (3 green)', 0x4B: 'MIXED HERBS (2 green+red)',
+  0x4C: 'PICK AXE (no name string)', 0x4D: 'COM. RADIO', 0x4E: 'MAP - mansion 1F',
+  0x4F: 'MAP - mansion 2F', 0x50: 'MAP - courtyard', 0x51: 'MAP - underground',
+  0x52: 'MAP - guardhouse', 0x53: 'MAP - laboratory', 0x54: 'unused id 0x54',
+  0x55: 'unused id 0x55', 0x56: 'unused id 0x56', 0x57: 'unused id 0x57', 0x58: 'unused id 0x58',
+  0x59: 'unused id 0x59', 0x5A: 'unused id 0x5A', 0x5B: 'unused id 0x5B', 0x5C: 'unused id 0x5C',
+  0x5D: 'unused id 0x5D', 0x5E: 'unused id 0x5E', 0x5F: 'FILE 00 - RESEARCHER\'S WILL',
+  0x60: 'FILE 01 - RESEARCHER\'S WILL', 0x61: 'FILE 02 - KEEPER\'S DIARY', 0x62: 'FILE 03 - ORDERS',
+  0x63: 'FILE 04 - PASS NUMBER', 0x64: 'FILE 05 - PLANT42 REPORT', 0x65: 'FILE 06 - FAX',
+  0x66: 'FILE 07 - SCRAPBOOK', 0x67: 'FILE 08 - SECURITY SYSTEM', 0x68: 'FILE 09 - RESEARCHER\'S LETTER',
+  0x69: 'FILE 0A - "V-JOLT" REPORT', 0x6A: 'FILE 0B - BARRY\'S PICTURE', 0x6B: 'FILE 0C - PASS CODE01',
+  0x6C: 'FILE 0D - PASS CODE02', 0x6D: 'FILE 0E - PASS CODE03', 0x6E: 'FILE 0F - BOTANY BOOK',
+  0x6F: 'INGRAM (PC bonus)', 0x70: 'MINIMI (PC bonus)',
+};
+// "NAME (0xNN)" for a note line, or a bare id when nothing claims it.
+function itemLabel(id) {
+  return ITEM_NAMES[id] ? ITEM_NAMES[id] + ' (0x' + hx(id) + ')' : 'item 0x' + hx(id);
+}
+const ITEM_ENUM = Object.fromEntries(Object.entries(ITEM_NAMES)
+  .map(([k, v]) => [k, '0x' + hx(Number(k)) + ' - ' + v]));
+
 // Sub-commands of opcode 0x33 (the player twin of 0x28).
 const PLAYER_PROP_SUB = {
   0:'unequip weapon', 1:'hit: isBeingAttackedFlag + reset anim', 3:'flags SET/OR/XOR',
@@ -831,6 +883,15 @@ function scdNoteFor(op, args) {
         (pt === 2 ? ' enemy/NPC ' + args[4] : '') +
         (pt > 3 ? ' (position operand not consumed)' : '');
     }
+    // 0x18 item_model_set: the item id is args[9] (g_ScdOpcodes[10]) and the
+    // model it draws is args[11] (the g_item_model_table / RDT item_models
+    // index) - the two are independent, so both are worth showing.
+    case 0x18: return args.length >= 22
+      ? itemLabel(args[9]) + ' -> model ' + args[11] +
+        ', action entry ' + (args[0] & 0x7F) +
+        (args[0] & 0x80 ? ' (alt rotation)' : '') +
+        ' at (' + i16(args, 13) + ',' + i16(args, 15) + ',' + i16(args, 17) + ')' +
+        ' roomItems bit 0x' + hx(args[21]) : '';
     case 0x1b: {
       if (args.length < 21) return '';
       const guard = args[2];
@@ -858,7 +919,8 @@ function scdNoteFor(op, args) {
     case 0x2a:
     case 0x3d: return args.length >= 6
       ? 'effect type ' + args[0] + ' parent ' + args[1] + ' (' +
-        (args[2] === 0 ? 'identity' : args[2] === 1 ? 'player' : 'pool/itembox') + ')' +
+        (args[2] === 0 ? 'identity' : args[2] === 1 ? 'player'
+         : args[2] < 0x80 ? 'effect pool' : 'omodel ' + (args[2] & 0x7F)) + ')' +
         ' at (' + i16(args, 3) + ',' + i16(args, 5) + ',' + i16(args, 7) + ')' +
         ' flags=0x' + hx(u16(args, 9), 4) : '';
     case 0x30: return args.length >= 4
@@ -871,12 +933,12 @@ function scdNoteFor(op, args) {
     }
     case 0x35: return (args[0] === 0 ? 'omodel ' : 'item model ') + args[1] + ' byte[0] = ' + args[2];
     case 0x36: return args.length >= 3
-      ? 'itembox ' + args[0] + ' billboard handle ' + cmp(args, 1) + ' ' + args[2] : '';
+      ? 'omodel ' + args[0] + ' billboard handle ' + cmp(args, 1) + ' ' + args[2] : '';
     case 0x37: return 'roomBgmState[stage ' + args[0] + '][room ' + args[1] + '] = ' + args[2];
     case 0x38: return args.length >= 3
       ? 'dpad mask 0x' + hx(u16(args, 1), 4) + (args[0] ? ' (inverted)' : '') : '';
     case 0x3c: return args.length >= 6
-      ? 'dist to ' + ({0:'enemy/NPC ',1:'itembox ',2:'item model '}[args[1] & 0xFF] || '') +
+      ? 'dist to ' + ({0:'enemy/NPC ',1:'omodel ',2:'item model '}[args[1] & 0xFF] || '') +
         (args[1] >> 8) + ' <= ' + u16(args, 3) : '';
     case 0x3f: return args.length >= 6
       ? 'player direction in [' + u16(args, 1) + '..' + u16(args, 3) + ']' : '';
@@ -1067,13 +1129,16 @@ const MIRROR_FLAGS = {
 const SCA_PARENT = {
   0xFF: '0xFF - none', 0xFE: '0xFE - player',
 };
-// cmd_item_model_set (0x18): anything but 0xFF/0xFE is an itembox.
-const SCA_PARENT_ITEMBOX = Object.assign({
-  0x00: 'other - itembox (default)',
+// cmd_item_model_set (0x18): anything but 0xFF/0xFE indexes g_omodel_table,
+// i.e. the item hangs off one of the ROOM'S OBJECT MODELS (RDT+0x50 - a desk,
+// a drawer, the item box lid) and rides its matrix. Note there is no 0x80
+// split here, unlike cmd_omodel_set: every non-0xFF/0xFE value is an omodel.
+const SCA_PARENT_OMODEL = Object.assign({
+  0x00: 'other - room object (omodel) slot',
 }, SCA_PARENT);
-// cmd_omodel_set (0x1F): < 0x80 itembox, >= 0x80 enemy/NPC.
+// cmd_omodel_set (0x1F): < 0x80 omodel slot, >= 0x80 g_EnemiesList[v & 0x7F].
 const SCA_PARENT_ENEMY = Object.assign({
-  0x00: '0x00..0x7F - itembox',
+  0x00: '0x00..0x7F - room object (omodel) slot',
   0x80: '0x80..0xFD - enemy/NPC',
 }, SCA_PARENT);
 const EFFECT_PARENT = { 0: '0 - identity matrix', 1: '1 - player matrix' };
@@ -1221,10 +1286,19 @@ function scdFieldsFor(op, ib) {
     case 0x18:
       F.push({ at: 0, type: 'bits', mask: 0x7F, shift: 0, label: 'event slot (x0C each)',
                hint: 'bit 7 of this byte selects the alt rotation' });
-      F.push({ at: 9, type: 'u8', label: 'item type' });
+      F.push({ at: 9, type: 'u8', label: 'item id (item type)', enum: ITEM_ENUM,
+               hint: 'picks the pick-up the player receives AND the room check '
+                   + 'action: a map (0x4E-0x53) gets 0x0F pickup_key_event, a '
+                   + 'document (> 0x53) gets 0x0D, anything else 4. 0x2F (ink '
+                   + 'ribbon) is skipped entirely on Jill\'s first playthrough, '
+                   + 'and 0x50/0x52 get their palette darkened. The MODEL is the '
+                   + 'separate field below - this id does not choose it.' });
       F.push({ at: 11, type: 'u8', label: 'model index (g_item_model_table)' });
-      F.push({ at: 12, type: 'u8', label: 'SCA parent', enum: SCA_PARENT_ITEMBOX,
-               hint: '0xFF none, 0xFE player, anything else itembox' });
+      F.push({ at: 12, type: 'u8', label: 'SCA parent', enum: SCA_PARENT_OMODEL,
+               hint: 'whose matrix the pick-up hangs off. 0xFF = none (the item '
+                   + 'uses its own matrix and sits at the pos below), 0xFE = the '
+                   + 'player, anything else = g_omodel_table[value], so the item '
+                   + 'moves with that room object' });
       F.push({ at: 13, type: 'i16', label: 'pos X' });
       F.push({ at: 15, type: 'i16', label: 'pos Y' });
       F.push({ at: 17, type: 'i16', label: 'pos Z' });
@@ -1267,11 +1341,13 @@ function scdFieldsFor(op, ib) {
       F.push({ at: 1, type: 'u16', label: 'voice line id' });
       break;
     case 0x1F:
-      F.push({ at: 0, type: 'bits', mask: 0x3F, shift: 0, label: 'itembox slot',
-               hint: 'bit 7 of this byte queues the texture' });
+      F.push({ at: 0, type: 'bits', mask: 0x3F, shift: 0, label: 'omodel slot being set up',
+               hint: 'index into g_omodel_table / RDT object_models; bit 7 of this '
+                   + 'byte queues the texture' });
       F.push({ at: 1, type: 'u8', label: 'entry flags (bit 4 = alt rotation)' });
       F.push({ at: 2, type: 'u8', label: 'SCA parent', enum: SCA_PARENT_ENEMY,
-               hint: '0xFF none, 0xFE player, < 0x80 itembox, >= 0x80 enemy/NPC' });
+               hint: '0xFF none, 0xFE player, < 0x80 g_omodel_table[value], '
+                   + '>= 0x80 g_EnemiesList[value & 0x7F]' });
       F.push({ at: 3, type: 'i16', label: 'pos X' });
       F.push({ at: 5, type: 'i16', label: 'pos Y' });
       F.push({ at: 7, type: 'i16', label: 'pos Z' });
@@ -1324,11 +1400,19 @@ function scdFieldsFor(op, ib) {
       F.push({ at: 0, type: 'u8', label: 'effect type' });
       F.push({ at: 1, type: 'u8', label: 'parent index' });
       F.push({ at: 2, type: 'u8', label: 'parent kind',
-               enum: Object.assign({ 2: '2 - effect pool', 3: '3 - itembox' }, EFFECT_PARENT) });
+               enum: Object.assign({ 2: '2..0x7F - effect pool slot',
+                                     0x80: '0x80..0xFF - room object, omodel = value & 0x7F' },
+                                   EFFECT_PARENT),
+               hint: 'the HIGH byte of the parent word. 0 identity, 1 player, '
+                   + '2-0x7F reads g_effectPool[kind * 3 + 0x3D] (past the 64-slot '
+                   + 'pool - the original overruns here too), and 0x80 up takes '
+                   + 'g_omodel_table[kind & 0x7F]' });
       F.push({ at: 3, type: 'i16', label: 'offset X' });
       F.push({ at: 5, type: 'i16', label: 'offset Y' });
       F.push({ at: 7, type: 'i16', label: 'offset Z' });
-      F.push({ at: 9, type: 'u16', label: 'flags (bit 0x8000 = itembox matrix)' });
+      F.push({ at: 9, type: 'u16', label: 'effect flags',
+               hint: 'passed straight to Effect_CreateBillboard; the omodel-matrix '
+                   + 'bit is 0x80 of the parent kind above, not a bit in here' });
       break;
     case 0x2B:
       F.push({ at: 0, type: 'i16', label: 'attack behaviour' });
@@ -1364,7 +1448,8 @@ function scdFieldsFor(op, ib) {
       F.push({ at: 2, type: 'u8', label: 'value' });
       break;
     case 0x36:
-      F.push({ at: 0, type: 'u8', label: 'itembox index' });
+      F.push({ at: 0, type: 'u8', label: 'omodel index',
+               hint: 'g_omodel_table[index] + 0x86 - the room object\'s billboard handle' });
       cmpFields(1, 2);
       break;
     case 0x37:
@@ -1386,13 +1471,13 @@ function scdFieldsFor(op, ib) {
       break;
     case 0x3B:
       F.push({ at: 0, type: 'u16', label: 'selector',
-               hint: '< 0x8000: item model (sel >> 8); >= 0x8000: itembox ((sel >> 8) & 0x7F)' });
+               hint: '< 0x8000: item model (sel >> 8); >= 0x8000: omodel ((sel >> 8) & 0x7F)' });
       F.push({ at: 2, type: 'u16', label: 'value -> +0x72' });
       F.push({ at: 4, type: 'u16', label: 'value -> +0x76' });
       break;
     case 0x3C:
       F.push({ at: 1, type: 'u16', label: 'target spec',
-               hint: 'low byte: 0 enemy/NPC / 1 itembox / 2 item model; index is spec >> 8' });
+               hint: 'low byte: 0 enemy/NPC / 1 omodel / 2 item model; index is spec >> 8' });
       F.push({ at: 3, type: 'u16', label: 'max distance' });
       break;
     case 0x3F:

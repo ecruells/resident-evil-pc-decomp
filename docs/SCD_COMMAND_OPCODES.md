@@ -817,7 +817,7 @@ Obstacle record layout (starts at opcode stream `+2`, so record offset = stream 
 | +0x00 | unused0 | u8[8] | Not read by the handler; the record is referenced whole via the entry pointer. |
 | +0x08 | itemType | u8 | Item type character (`0x54` cut-off for visibility mask shape; special cases for `'R'`/`'P'` palettes and `'/'` with Jill). |
 | +0x0A | modelIdx | u8 | Index into `g_item_model_table` / RDT `item_models`; also event entry word `+4`. |
-| +0x0B | scaParent | u8 | `0xFF` none, `0xFE` player, else itembox model index. |
+| +0x0B | scaParent | u8 | Whose matrix the item hangs off — this is what the posX/Y/Z below are *relative to*. `0xFF` none (absolute room coords), `0xFE` player, else `g_omodel_table[value]`. See [SCA parent](#0x18-sca-parent) below. |
 | +0x0C | posX | s16 | Position X (also object `+0x34`/`+0x6C`). |
 | +0x0E | posY | s16 | Position Y (also object `+0x38`/`+0x6E`). |
 | +0x10 | posZ | s16 | Position Z (also object `+0x3C`/`+0x70`). |
@@ -825,6 +825,59 @@ Obstacle record layout (starts at opcode stream `+2`, so record offset = stream 
 | +0x14 | flagBit | u8 | `g_roomItemsFlags` bit index gating visibility; also event entry word `+6`. |
 | +0x15 | entryFlags | u8 | Event entry byte `[1]`. |
 | +0x16 | flags | u16 | Bit 0 (masked back into the stream) → entry word `+2`; bit `0x8000` = spawn billboard; bits `0x0F00` = effect id; bits `0x00F0` = height bias (`-2` per unit). |
+
+<a name="0x18-sca-parent"></a>
+
+#### The `scaParent` byte — what coordinate space posX/Y/Z are in
+
+The three position operands are written to `modelPtr + 0x34/0x38/0x3C`. That is
+not an arbitrary scratch area: the item's `ScaMatrixData` starts at `+0x1C`, its
+`localMatrix` at `+0x20`, and a `MATRIX`'s `t[]` sits at `+0x14` inside it — so
+`+0x34` **is `localMatrix.t[0]`**. The operands are the item's own *local* matrix
+translation, and `scaParent` decides what that local matrix gets composed with.
+`InitScaMatrix(modelPtr+0x64, modelPtr+0x1C)` then seeds the hierarchy.
+
+| Value | Parent pointer (`modelPtr+0x64`) | Sprite matrix | posX/Y/Z mean |
+|---|---|---|---|
+| `0xFF` | zeroed — none | the item's own, `modelPtr+0x20` | absolute room coordinates |
+| `0xFE` | `&g_playerEntity + 0x1C` | `g_playerEntity.scaMatrixData.localMatrix` | offset from the player; the item moves with them |
+| other | `g_omodel_table[value] + 0x1C` | that object's, `+0x20` | offset in that room object's local space; the item rides its transform |
+
+Note there is **no `0x80` split here**, unlike `cmd_omodel_set` (`0x1F`) — every
+value that is not `0xFF`/`0xFE` is an omodel index. `g_omodel_table` is the room's
+*object model* table (RDT `object_models` at +0x50: furniture, doors, the item box
+lid).
+
+Across every shipped room only four values are ever used, and each shows the
+mechanic cleanly:
+
+- **`0xFF` — 570 of the 584 uses.** The ordinary pick-up lying on the floor:
+  `ROOM1000  SWORD KEY  pos(5160,-930,8690)` is a literal room coordinate.
+- **`0xFE` — 4 uses**, all the same flare: `ROOM3030  FLARE  pos(800,0,200)`,
+  i.e. 800 units out from the player rather than anywhere in the room.
+- **omodel — 10 uses.** `ROOM10D0` is the clearest. Omodel 0 is placed in world
+  space at `(3505,0,4145)`; the wind crest and the Colt Python declare
+  `PARENT 0x00` with `pos(-450,-1550,530)` and `(-450,-1500,-360)`. They are not
+  at `-450` in the room — they are ~1550 units *above* omodel 0's origin (Y is
+  negative-up), i.e. resting inside the lion statue and
+  both items follow its rotation.
+- **`(0,0,0)` with a parent means "exactly at the object".** `ROOM5130` sets
+  omodel 6 twice from two different branches — `(10060,-20000,8080)` and
+  `(10975,0,8464)` — and declares `MASTER KEY  PARENT 0x06  pos(0,0,0)`. The item
+  declaration never changes; the key tracks whichever placement ran.
+
+**Authoring rule:** an item on the floor takes `0xFF` and real room coordinates.
+Reach for an omodel parent only when the item belongs *to* an object — on a desk,
+in a drawer, on the item box lid — and especially when that object's own position
+is script-dependent.
+
+The handler branches on `0xFF` a second time when it spawns the sparkle billboard
+(`0x00461220`, the `flags & 0x8000` block). Unparented, the billboard spawns at
+`(0, heightBias, 0)` against the item's own matrix, which already puts it on the
+item. Parented, the billboard hangs off the *parent's* matrix instead, so the
+handler feeds it the posX/Y/Z operands to bring it back onto the item. Both paths
+land in the same place; the asymmetry is only because the two cases start from
+different matrices.
 
 ### `0x19` — `cmd_model_flag_set`
 
@@ -856,9 +909,9 @@ Obstacle record layout (starts at opcode stream `+2`, so record offset = stream 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x1F` |
-| +1 | slot | u8 | Bits 0–5: itembox slot index. Bit 7: queue texture for processing. |
+| +1 | slot | u8 | Bits 0–5: omodel slot index (`g_omodel_table` / RDT `object_models`). Bit 7: queue texture for processing. |
 | +2 | entryFlags | u8 | Stored to object byte 0; bit 4 = alternate rotation (`0x40000040`). |
-| +3 | scaParent | u8 | `0xFF` none, `0xFE` player, `< 0x80` itembox model, else enemy index `& 0x7F`. |
+| +3 | scaParent | u8 | `0xFF` none, `0xFE` player, `< 0x80` omodel index (`g_omodel_table[value]`), else `g_EnemiesList[value & 0x7F]`. Same relative-space meaning as [0x18's scaParent](#0x18-sca-parent). |
 | +4 | posX | s16 | Position X (object `+0x6C`/`+0x34`). |
 | +6 | posY | s16 | Position Y (object `+0x6E`/`+0x38`). |
 | +8 | posZ | s16 | Position Z (object `+0x70`/`+0x3C`). |
@@ -903,7 +956,7 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 | Address | `0x00431c90` |
 | Length | 4 bytes |
 | Returns | bool |
-| Description | Compares the `u16` at `itembox[objIdx] + 0x86` (the billboard effect handle) against `cmpVal`. Unknown mode returns 0. |
+| Description | Compares the `u16` at `g_omodel_table[objIdx] + 0x86` (the billboard effect handle) against `cmpVal`. Unknown mode returns 0. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -920,12 +973,12 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 | Address | `0x00431ea0` |
 | Length | 6 bytes |
 | Returns | `1` |
-| Description | Writes two rotation words at object `+0x72` and `+0x76` — but only when the object is active (byte 0 non-zero); otherwise the four operand bytes are skipped without effect. Selector asymmetry is original behaviour: item models use the raw byte, itemboxes mask with `0x7F`. |
+| Description | Writes two rotation words at object `+0x72` and `+0x76` — but only when the object is active (byte 0 non-zero); otherwise the four operand bytes are skipped without effect. Selector asymmetry is original behaviour: item models use the raw byte, omodels mask with `0x7F`. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x3B` |
-| +1 | sel | u8 | High byte of the first word. Bit 7 clear = interactable model `(g_item_model_table[sel])`; set = itembox `g_omodel_table[sel & 0x7F]`. |
+| +1 | sel | u8 | High byte of the first word. Bit 7 clear = interactable model `(g_item_model_table[sel])`; set = room object `g_omodel_table[sel & 0x7F]`. |
 | +2 | rotA | u16 | Written to object `+0x72`. |
 | +4 | rotB | u16 | Written to object `+0x76`. |
 
@@ -1137,7 +1190,7 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 |---|---|---|---|
 | +0 | opcode | u8 | `0x3C` |
 | +1 | pad | u8 | Unused. |
-| +2 | targetSpec | u16 | Low byte: `0` enemy, `1` itembox, `2` item model. High byte: target index. |
+| +2 | targetSpec | u16 | Low byte: `0` enemy, `1` omodel (`g_omodel_table`), `2` item model. High byte: target index. |
 | +4 | maxDist | u16 | Maximum distance. |
 
 ### `0x3F` — `cmd_player_dir_test` (Cond)
@@ -1191,8 +1244,8 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 |---|---|---|---|
 | +0 | opcode | u8 | `0x2A` |
 | +1 | type | u8 | Effect type id. |
-| +2 | parentIdx | u8 | Sprite parent index (effect pool / itembox selector). |
-| +3 | parentType | u8 | `0` identity matrix, `1` player matrix; else effect-pool matrix, or itembox matrix when the opcode word has bit `0x8000`. |
+| +2 | parentIdx | u8 | Low byte of the parent word; passed to `Effect_CreateBillboard` as its second argument. |
+| +3 | parentType | u8 | High byte of the parent word. `0` identity matrix, `1` player matrix, `2..0x7F` effect-pool matrix (`g_effectPool[type * 3 + 0x3D]`, past the 64-slot pool — the original overruns here too), `0x80..0xFF` omodel matrix `g_omodel_table[type & 0x7F]`. The `0x8000` test is on this parent word, not on the trailing flags word. |
 | +4 | posX | s16 | Spawn X. |
 | +6 | posY | s16 | Spawn Y. |
 | +8 | posZ | s16 | Spawn Z. |
@@ -1213,7 +1266,7 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 | +0 | opcode | u8 | `0x3D` |
 | +1 | type | u8 | Effect type id. |
 | +2 | parentIdx | u8 | Sprite parent index. |
-| +3 | parentType | u8 | `0` identity, `1` player; else effect-pool (degenerates to pool slot `0x3D`, original behaviour) or itembox matrix (degenerates to itembox 0, original behaviour). |
+| +3 | parentType | u8 | `0` identity, `1` player; else effect-pool (degenerates to pool slot `0x3D`, original behaviour) or omodel matrix (degenerates to omodel 0, original behaviour). |
 | +4 | posX | u16 | Spawn X (zero-extended). |
 | +6 | posY | u16 | Spawn Y (zero-extended). |
 | +8 | posZ | u16 | Spawn Z (zero-extended). |

@@ -699,6 +699,19 @@ int cmd_item_model_set(void)
             FUN_004870d0(*(int*)(modelPtr + 0x18));
         }
 
+        // SCA parent: what the pos operands below are RELATIVE TO. They land in
+        // modelPtr+0x34/38/3C, which is localMatrix.t[] (ScaMatrixData at +0x1C,
+        // its localMatrix at +0x20, a MATRIX's t[] at +0x14 inside that), so they
+        // are this item's own LOCAL translation and the parent supplies the frame
+        // it composes against:
+        //   0xFF  no parent   -> local == world, pos is absolute room coords (570
+        //                        of the 584 uses in the shipped RDTs)
+        //   0xFE  the player  -> pos is an offset from the player, item follows
+        //   else  omodel      -> pos is an offset in g_omodel_table[value]'s space,
+        //                        so the item rides that room object (a desk, a
+        //                        drawer, the item box lid). (0,0,0) = exactly at it.
+        // Unlike cmd_omodel_set there is no 0x80 split here - every other value is
+        // an omodel index. Full write-up in docs/SCD_COMMAND_OPCODES.md (0x18).
         unsigned char parentType = g_ScdOpcodes[0xd];
         if (parentType == 0xff) {
             modelPtr[100] = 0; modelPtr[0x65] = 0;
@@ -731,6 +744,12 @@ int cmd_item_model_set(void)
             effectId = (animType == 0x600) ? 0x14 : (animType == 0x700 ? 0x1c : 0x14);
         }
 
+        // The 0xFF test mirrors the SCA parent branch above, because spriteInfo
+        // differs between the two: unparented, it is the item's OWN matrix, so
+        // (0, heightBias, 0) already sits on the item; parented, it is the PARENT's
+        // matrix, so the pos operands have to be repeated to bring the sparkle back
+        // onto the item. Both paths land in the same world position.
+        //
         // The original writes the global scratch VECTOR at 0x00be11b0 as three ints
         // and passes its address - not a local SVECTOR of shorts.
         if ((char)g_ScdOpcodes[0xd] == -1) {

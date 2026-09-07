@@ -59,7 +59,8 @@ static void scd_event_cmd_set_entity(void)
     case 1: // Enemy/NPC entity
         g_pScdEventCurrent->entity = &g_EnemiesList[p[1]];
         break;
-    case 2: // Items, obstacle, itembox cover, etc
+    case 2: // Room OBJECT model (g_omodel_table / RDT object_models) - furniture,
+            // statues, boxes, obstacles, doors, the item box's lid, etc.
         g_pScdEventCurrent->entity = (Entity*)g_omodel_table[p[1]];
         break;
     case 3: // Item model (g_item_model_table) - the room's pick-up models
