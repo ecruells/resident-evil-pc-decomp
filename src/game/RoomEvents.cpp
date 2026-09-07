@@ -586,7 +586,7 @@ static int scd_event_state1_anim(void)
 //
 // Control flow opcodes (0xF6-0xFF):
 //   0xF6 - Push loop counter (fall through to F7)
-//   0xF7 - Wait condition: exit if main_state_flags bit or menu active
+//   0xF7 - Wait: block while MSF_VOICE_PLAYING (0x20000) or a message is up
 //   0xF8 - Push counter with value from script
 //   0xF9 - Decrement counter, skip if zero
 //   0xFA - Loop start with counter
@@ -644,8 +644,13 @@ event_dispatch:
                     g_pScdEventCurrent->stackDepth++;
                     g_pScdEventCurrent->scriptPtr++;
                     // fall through
-                case 0xF7: // Wait condition
-                    if (((g_main_state_flags & MSF_MENU_MODE_5) == 0) &&
+                case 0xF7: // Wait for the voice line / message to finish
+                    // 0x0041d918: TEST byte ptr [0x00be41c2],0x2 - byte 2 of
+                    // g_main_state_flags, so the polled bit is 0x00020000 =
+                    // MSF_VOICE_PLAYING, the flag cmd_voice_play (0x1E) raises and
+                    // UpdateMusicWaitState / play_sound_and_voice_effect type 2
+                    // clear.
+                    if (((g_main_state_flags & MSF_VOICE_PLAYING) == 0) &&
                         ((g_menu_choice_id & 0x80) == 0)) {
                         g_pScdEventCurrent->scriptPtr++;
                         g_pScdEventCurrent->stackDepth--;
