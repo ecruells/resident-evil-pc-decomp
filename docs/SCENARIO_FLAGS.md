@@ -441,6 +441,6 @@ in passing.
   word with `0xFD3F` on entry to gameplay, and backs it up in
   `g_short_message_flags` while a menu is open.
 - **Bank 7, `g_roomItemsFlags`** — one bit per room item/model, the bit index
-  carried in the `item_set` / `item_model_set` record itself (`opcode[0x16]`).
+  carried in the `room_action_set` / `item_model_set` record itself (`opcode[0x16]`).
   Set means the item is still there; picking it up clears the bit.
 - **Bank 9, `g_itemUseFlags`** — per-frame, cleared by `game_loop` every frame.

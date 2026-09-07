@@ -357,7 +357,7 @@ void main_menu(void)
     case 3:
     case 4:
         // Desk mode: get item from room event
-        g_bItemMenuSelectedItemId = *(unsigned char*)(*(int*)((int)g_room_event_index + 8) + 8);
+        g_bItemMenuSelectedItemId = *(unsigned char*)(*(int*)((int)g_pRoomActionEntry + 8) + 8);
 LAB_0046381c:
         menu_load_item_model();
     }
@@ -4104,7 +4104,7 @@ static int menu_update_status_screen(void)
         if ((state[1] == 0) && (pickup_fade_update(0) != 0)) {
             state[0] = 1;
             state[7] = (g_main_state_flags & MSF_CHAR_VARIANT) != 0;
-            unsigned char itemId = *(unsigned char*)(*(unsigned char**)((int)g_room_event_index + 8) + 8);
+            unsigned char itemId = *(unsigned char*)(*(unsigned char**)((int)g_pRoomActionEntry + 8) + 8);
             unsigned char uVar3 = itemId - 0x5f;
             file_set_collected_flag(uVar3);
             pickup_mark_seen(state);
@@ -4134,7 +4134,7 @@ static int menu_update_status_screen(void)
                 g_playerEntity.attackAnim = 0;
                 Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
                 state[3] = 0;
-                g_selectedItemId = *(unsigned char*)(*(unsigned char**)((int)g_room_event_index + 8) + 8);
+                g_selectedItemId = *(unsigned char*)(*(unsigned char**)((int)g_pRoomActionEntry + 8) + 8);
                 set_message_display(0xc6, 0);
             }
         }
@@ -4153,7 +4153,7 @@ static int menu_update_status_screen(void)
 
     if ((state[8] == 1) && ((g_menu_choice_id & 0x80) == 0)) {
         // Pickup complete: consume the entry and clear its flags.
-        unsigned char* evt = (unsigned char*)g_room_event_index;
+        unsigned char* evt = (unsigned char*)g_pRoomActionEntry;
         unsigned char* record = *(unsigned char**)(evt + 8);
         ((unsigned char*)g_item_model_table[record[10]])[0] = 0;
         *evt = 0;
@@ -5914,7 +5914,7 @@ int FUN_0044e1b0(void)
                         unsigned char* pbVar2 = (unsigned char*)((unsigned int)bVar5 * 2 + (unsigned int)g_ItemSlotsPointer);
                         if ((*pbVar2 == g_bItemMenuSelectedItemId) &&
                             ((unsigned short)((unsigned short)pbVar2[1] +
-                             (unsigned short)*(unsigned char*)(*(int*)((int)g_room_event_index + 8) + 9)) < 0xfb)) {
+                             (unsigned short)*(unsigned char*)(*(int*)((int)g_pRoomActionEntry + 8) + 9)) < 0xfb)) {
                             set_message_display(0xc0, 0);
                             break;
                         }

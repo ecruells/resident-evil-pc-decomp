@@ -56,8 +56,8 @@ extern void*          g_RoomInitScd;
 // DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
 extern unsigned int   g_itemUseFlags[2];
 
-// Item event table pointer (used for bounds checking)
-extern void*          g_RoomItemEventHead;         // 0x00d91bc0
+// Last used room action entry, inclusive (used for bounds checking)
+extern void*          g_RoomActionTail;         // 0x00d91bc0
 
 // ============================================================================
 // Helper: read 16-bit value from SCD opcode stream
@@ -71,9 +71,15 @@ static inline short scd_read_s16(int offset) {
 }
 
 // ============================================================================
-// 0x00 - cmd_nop (0x004604d0)
+// 0x00 - cmd_block_end (0x004604d0)
+// Ends the current script BLOCK. It clears g_ScriptContinueFlag and returns 0
+// without advancing the stream, so run_command_functions leaves the inner loop
+// AND skips the branch-stack unwind, moving straight on to the next block.
+// Other commands return 0 to mean "condition failed" and DO get unwound - only
+// this one zeroes the flag. Blocks are 4-byte aligned with 0x00 padding, so the
+// trailing zeros a disassembler shows after it are never executed.
 // ============================================================================
-int cmd_nop(void)
+int cmd_block_end(void)
 {
     g_ScriptContinueFlag = 0;
     return 0;
@@ -208,10 +214,17 @@ int cmd_bit_op(void)
 }
 
 // ============================================================================
-// 0x06 - cmd_room_state_test (0x00460760)
-// Compare a byte value from the game state against a constant.
+// 0x06 - cmd_state_byte_test (0x00460760)
+// Compare one byte of the BioCard state block against a constant. The index is
+// a byte offset from g_stageId (BioCard +0x200): 0 stageId, 1 roomId,
+// 2 roomCameraId, 3 attractMode_RoomCameraId, 4 cutId, 5 menu_choice_id,
+// 6 selectedItemId, 7 totalHeldItems, 8 specialRoomLightR, 9 characterModelId,
+// 10 scdLastEnemyFlags, 11 bulletEffectId, 12-14 pickupQtyA/B/C,
+// 16 fwdPosActionId, 17 entPosActionId, 18 usedItemId, 19 pickedItemId.
+// Sampled scripts test indices 2 (268 sites), 3, 5, 9, 16, 17, 18 and 19 -
+// nothing room-specific, which is why this is not a "room state" test.
 // ============================================================================
-int cmd_room_state_test(void)
+int cmd_state_byte_test(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short op2 = scd_read_u16(2);
@@ -233,10 +246,16 @@ int cmd_room_state_test(void)
 }
 
 // ============================================================================
-// 0x07 - cmd_fade_state_test (0x00460800)
-// Compare a fading state value against a constant.
+// 0x07 - cmd_state_word_test (0x00460800)
+// Compare one SHORT of the BioCard state block against a constant. The index
+// counts shorts from g_fading_state (BioCard +0x214): 0 fadingState,
+// 1 specialRoomLightState, 2 specialRoomLightDelta, 3 randSeed,
+// 4 countdownTimer, 5 playerHealthCopy, 6 playerDpadHeld, 7 playerDpadPressed.
+// Of the 221 uses reachable in the shipped RDTs, 214 read index 3 (randSeed -
+// this is how scripts roll dice) and 7 read index 4 (the lab countdown); none
+// reads index 0 at all. See the survey caveat above.
 // ============================================================================
-int cmd_fade_state_test(void)
+int cmd_state_word_test(void)
 {
     unsigned int op1 = *(unsigned int*)g_ScdOpcodes;
     g_ScdOpcodes += 6;
@@ -259,10 +278,12 @@ int cmd_fade_state_test(void)
 }
 
 // ============================================================================
-// 0x08 - cmd_room_state_set (0x004608a0)
-// Set a byte in the g_stageId/g_roomId byte array.
+// 0x08 - cmd_state_byte_set (0x004608a0)
+// Write one byte of the BioCard state block; same index space as 0x06. The
+// index is unbounded and scripts use that: ROOM1130 writes index 82, which
+// lands in scenarioFlags2[30], and ROOM40A0 writes index 57 (scenarioFlags2[5]).
 // ============================================================================
-int cmd_room_state_set(void)
+int cmd_state_byte_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short op2 = scd_read_u16(2);
@@ -335,16 +356,16 @@ int cmd_message_set(void)
 
 // ============================================================================
 // 0x0C - cmd_door_set (0x004611b0)
-// Set up a door interaction in the room item event table.
+// Set up a door trigger zone in the room action table.
 // ============================================================================
 int cmd_door_set(void)
 {
     dbg_printf("DOOR_AT_SET START %s\n", "door_at_set");
     unsigned char doorNumber = g_ScdOpcodes[1];
     int tableOffset = (unsigned int)doorNumber * 0xc;
-    unsigned char* entry = &g_RoomItemEventTable[tableOffset];
-    if (entry > (unsigned char*)g_RoomItemEventHead) {
-        g_RoomItemEventHead = entry;
+    unsigned char* entry = &g_RoomActionTable[tableOffset];
+    if (entry > (unsigned char*)g_RoomActionTail) {
+        g_RoomActionTail = entry;
     }
     entry[0] = 1;
     entry[1] = g_ScdOpcodes[0x19];
@@ -356,16 +377,21 @@ int cmd_door_set(void)
 }
 
 // ============================================================================
-// 0x0D - cmd_item_set (0x00461130)
-// Set up an item pickup in the room item event table.
+// 0x0D - cmd_room_action_set (0x00461130)
+// Build one room action (AOT) entry from scratch: an 8-byte zone box plus an
+// explicit room_check_actions handler index, probe flags and three parameter
+// words. The generic sibling of cmd_door_set, which hardcodes handler 1.
+//
+// Operands: +1 slot, +2..+9 zone (u16 x, z, width, depth), +0xA handler,
+// +0xB flags, +0xC/+0xE/+0x10 the entry words at +2/+4/+6. Width 18.
 // ============================================================================
-int cmd_item_set(void)
+int cmd_room_action_set(void)
 {
     unsigned char itemSlot = g_ScdOpcodes[1];
     int tableOffset = (unsigned int)itemSlot * 0xc;
-    unsigned char* entry = &g_RoomItemEventTable[tableOffset];
-    if (entry > (unsigned char*)g_RoomItemEventHead) {
-        g_RoomItemEventHead = entry;
+    unsigned char* entry = &g_RoomActionTable[tableOffset];
+    if (entry > (unsigned char*)g_RoomActionTail) {
+        g_RoomActionTail = entry;
     }
     entry[0] = g_ScdOpcodes[10];
     entry[1] = g_ScdOpcodes[11];
@@ -389,7 +415,9 @@ int cmd_skip_2bytes_opcode(void)
 
 // ============================================================================
 // 0x0F - cmd_mirror_set (0x004610b0)
-// Set up player entity state and joint animation.
+// Arm the room mirror: operand byte 1 goes into main_state_flags bits 0-1
+// (bit 0 enables the pass, bit 1 picks the plane axis), followed by the three
+// extent words. Re-runs the player joint animation so the mirrored copy exists.
 // ============================================================================
 int cmd_mirror_set(void)
 {
@@ -433,31 +461,37 @@ int cmd_picked_item_test(void)
 }
 
 // ============================================================================
-// 0x12 - cmd_item_record_set (0x00460fc0)
-// Update item event table entry flags.
+// 0x12 - cmd_room_action_reset (0x00460fc0)
+// Rewrite bytes [0..7] of a room action entry, leaving the SCD record pointer
+// at +8 (and so the zone geometry) alone.
 // ============================================================================
-int cmd_item_record_set(void)
+int cmd_room_action_reset(void)
 {
     int base = (unsigned int)g_ScdOpcodes[1] * 0xc;
     g_ScdOpcodes += 10;
-    g_RoomItemEventTable[base]     = g_ScdOpcodes[-8]; // param at +2 from original
-    g_RoomItemEventTable[base + 1] = g_ScdOpcodes[-7]; // param at +3
-    *(unsigned short*)(&g_RoomItemEventTable[base + 2]) = *(unsigned short*)(g_ScdOpcodes - 6);
-    *(unsigned short*)(&g_RoomItemEventTable[base + 4]) = *(unsigned short*)(g_ScdOpcodes - 4);
-    *(unsigned short*)(&g_RoomItemEventTable[base + 6]) = *(unsigned short*)(g_ScdOpcodes - 2);
+    g_RoomActionTable[base]     = g_ScdOpcodes[-8]; // param at +2 from original
+    g_RoomActionTable[base + 1] = g_ScdOpcodes[-7]; // param at +3
+    *(unsigned short*)(&g_RoomActionTable[base + 2]) = *(unsigned short*)(g_ScdOpcodes - 6);
+    *(unsigned short*)(&g_RoomActionTable[base + 4]) = *(unsigned short*)(g_ScdOpcodes - 4);
+    *(unsigned short*)(&g_RoomActionTable[base + 6]) = *(unsigned short*)(g_ScdOpcodes - 2);
     return 1;
 }
 
 // ============================================================================
-// 0x13 - cmd_item_event_set (0x00461010)
-// Update item event table entry (simpler version).
+// 0x13 - cmd_room_action_arm (0x00461010)
+// Arm, disarm or re-type one room action entry: writes only byte 0 (the
+// room_check_actions handler index) and byte 1 (the probe flags). Scripts use
+// it in if/else pairs to toggle a zone that door_set/room_action_set already
+// built -
+// handler 0 (no_room_action), or a flags byte whose low three bits miss every
+// prober's mask, makes the zone dead.
 // ============================================================================
-int cmd_item_event_set(void)
+int cmd_room_action_arm(void)
 {
     int base = (unsigned int)g_ScdOpcodes[1] * 0xc;
     g_ScdOpcodes += 4;
-    g_RoomItemEventTable[base]     = g_ScdOpcodes[-2];
-    g_RoomItemEventTable[base + 1] = g_ScdOpcodes[-1];
+    g_RoomActionTable[base]     = g_ScdOpcodes[-2];
+    g_RoomActionTable[base + 1] = g_ScdOpcodes[-1];
     return 1;
 }
 
@@ -585,7 +619,7 @@ int cmd_item_model_set(void)
 
     unsigned int slotIdx = (unsigned int)(g_ScdOpcodes[1] & 0x7f);
     int tableOffset = slotIdx * 0xc;
-    unsigned char* entry = &g_RoomItemEventTable[tableOffset];
+    unsigned char* entry = &g_RoomActionTable[tableOffset];
     unsigned char itemType = g_ScdOpcodes[10];
 
     // Determine entry visibility based on flag check and item type. entry[0] is
@@ -620,8 +654,8 @@ int cmd_item_model_set(void)
     *(unsigned short*)(entry + 4) = (unsigned short)g_ScdOpcodes[0xc];
     *(unsigned short*)(entry + 6) = (unsigned short)g_ScdOpcodes[0x16];
     *(unsigned int*)(entry + 8) = (unsigned int)(g_ScdOpcodes + 2);
-    if (entry > (unsigned char*)g_RoomItemEventHead) {
-        g_RoomItemEventHead = entry;
+    if (entry > (unsigned char*)g_RoomActionTail) {
+        g_RoomActionTail = entry;
     }
 
     char* modelPtr = (char*)g_item_model_table[g_ScdOpcodes[0xc]];
@@ -714,7 +748,7 @@ int cmd_item_model_set(void)
     }
 
     // These two writes target the item model's byte 0 (`*pcVar5` in the original),
-    // not the room-item-event entry - the entry's byte 0 was already set from
+    // not the room action entry - the entry's byte 0 was already set from
     // visFlag further up.
     flagResult = Flg_ck((int)&g_roomItemsFlags, g_ScdOpcodes[0x16]);
     modelPtr[0] = (char)(1 - (flagResult == 0));
@@ -887,10 +921,12 @@ int cmd_room_light_fade_set(void)
 }
 
 // ============================================================================
-// 0x1D - cmd_equipped_weapon_test (0x00460ee0)
-// Test if the equipped weapon matches a value.
+// 0x1D - cmd_equipped_item_test (0x00460ee0)
+// Compare the item id in the currently equipped inventory slot against a
+// constant. Not weapon-specific - every sampled use tests 0, i.e. "nothing
+// equipped".
 // ============================================================================
-int cmd_equipped_weapon_test(void)
+int cmd_equipped_item_test(void)
 {
     unsigned char testVal = g_ScdOpcodes[1];
     g_ScdOpcodes += 2;
@@ -898,10 +934,13 @@ int cmd_equipped_weapon_test(void)
 }
 
 // ============================================================================
-// 0x1E - cmd_sfx_set (0x00461a80)
-// Play a sound/voice effect.
+// 0x1E - cmd_voice_play (0x00461a80)
+// Start or end a cutscene VOICE line - 0x17 is the sound-effect command.
+// play_sound_and_voice_effect type 1 loads and plays the line, type 2 ends it,
+// resets the mixer and clears the wait flag. Raising MSF_VOICE_PLAYING here is
+// what event-VM opcode 0xF7 blocks on, so this is what gates a line advancing.
 // ============================================================================
-int cmd_sfx_set(void)
+int cmd_voice_play(void)
 {
     unsigned short sndId = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -1262,10 +1301,12 @@ int cmd_item_count_test(void)
 }
 
 // ============================================================================
-// 0x23 - cmd_cut_lock_toggle (0x00431280)
-// Toggle camera change enable/disable.
+// 0x23 - cmd_cut_lock_write (0x00431280)
+// WRITE the camera lock from the operand: 0 clears MSF_CAMERA_LOCK, anything
+// else sets it. It is not a toggle - the sampled scripts pass a literal 1
+// (16 sites) or 0 (14 sites), never a toggle request.
 // ============================================================================
-int cmd_cut_lock_toggle(void)
+int cmd_cut_lock_write(void)
 {
     if ((char)g_ScdOpcodes[1] == 0) {
         g_main_state_flags &= ~MSF_CAMERA_LOCK;
@@ -1295,7 +1336,7 @@ int cmd_room_action(void)
         return 1;
     }
     ((RoomActionFunc)room_check_actions[actionIdx])(
-        &g_RoomItemEventTable[(unsigned int)slotIdx * 0xc]);
+        &g_RoomActionTable[(unsigned int)slotIdx * 0xc]);
     return 1;
 }
 
@@ -1556,7 +1597,8 @@ int cmd_dead_slot_hang_2e(void)
 
 // ============================================================================
 // 0x2F - cmd_snd_pan_vol_set (0x00460c00)
-// Set up screen effect parameters.
+// Set the pan and volume of one sound channel and mirror the pair into
+// g_SndPanVol[ch].
 // ============================================================================
 int cmd_snd_pan_vol_set(void)
 {
@@ -1603,10 +1645,15 @@ int cmd_boundary_set(void)
 }
 
 // ============================================================================
-// 0x31 - cmd_fade_state_set (0x004608d0)
-// Set a fading state value.
+// 0x31 - cmd_state_word_set (0x004608d0)
+// Write one SHORT of the BioCard state block; same index space as 0x07. Known
+// users: index 4 (the lab countdown, ROOM60A0) and indices 1 and 2 in ROOM4110,
+// which drives the flashing red emergency light by writing specialRoomLightState
+// and specialRoomLightDelta - the special-room-light system opcode 0x1C arms.
+// Note ROOM4110's init desyncs in the disassembler, so a script survey alone
+// will not find that second user.
 // ============================================================================
-int cmd_fade_state_set(void)
+int cmd_state_word_set(void)
 {
     unsigned short op1 = scd_read_u16(0);
     unsigned short value = scd_read_u16(2);
@@ -1629,10 +1676,15 @@ int cmd_skip_4bytes(void)
 }
 
 // ============================================================================
-// 0x33 - cmd_damage_set (0x004314b0)
-// Modify player damage/combat state.
+// 0x33 - cmd_player_prop_set (0x004314b0)
+// Multi-subcommand PLAYER property setter - the twin of cmd_enemy_prop_set
+// (0x28). Subcommands: 0 clear equipped weapon, 1 enter the being-attacked
+// animation, 3 write/or/xor player.flags, 4 force action 1/6, 5 directionAngle,
+// 6 clear unk_8c, 7 reset to idle, 8 write/or/xor healthStatusFlags, 9 xor joint
+// flags, 10 set/clear unk_e0 bit 0x40. The sampled scripts use only 10, 8 and 0
+// - subcommand 1, the only damage-adjacent one, never turned up.
 // ============================================================================
-int cmd_damage_set(void)
+int cmd_player_prop_set(void)
 {
     unsigned short* params = (unsigned short*)(g_ScdOpcodes + 2);
     unsigned char subCmd = (unsigned char)(scd_read_u16(0) >> 8);
@@ -1962,7 +2014,9 @@ int cmd_bullet_effect_spawn(void)
 
 // ============================================================================
 // 0x3E - cmd_bullet_effect_clear (0x00431840)
-// Trigger a previously set up bullet effect.
+// FREE every effect slot matching the last bullet effect spawned by 0x3D:
+// FUN_0047cf80 criteria mask 9 = effectType AND spriteInfo. It clears effects,
+// it does not spawn one.
 // ============================================================================
 int cmd_bullet_effect_clear(void)
 {
@@ -2024,7 +2078,9 @@ int cmd_entity_posy_set(void)
 
 // ============================================================================
 // 0x42 - cmd_effect_clear_typed (0x00431870)
-// Trigger effect type 3.
+// FREE every effect slot matching a type/depth pair: FUN_0047cf80 criteria
+// mask 3 = effectType AND depthGroup. The leading 3 is that mask, not an
+// effect type.
 // ============================================================================
 int cmd_effect_clear_typed(void)
 {
@@ -2064,10 +2120,11 @@ int cmd_scd_event_kill(void)
 }
 
 // ============================================================================
-// 0x45 - cmd_entity_posy_add (0x004320f0)
-// Add to player posY field.
+// 0x45 - cmd_player_posy_add (0x004320f0)
+// Add a signed byte to the PLAYER's posY. Unlike 0x41 it has no entity
+// selector - g_playerEntity is the only target it can reach.
 // ============================================================================
-int cmd_entity_posy_add(void)
+int cmd_player_posy_add(void)
 {
     unsigned short val = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -2157,10 +2214,12 @@ int cmd_effect_pool_clear(void)
 }
 
 // ============================================================================
-// 0x49 - cmd_room_bitmask_set (0x00432290)
-// Set or clear DAT_00d22770 flags.
+// 0x49 - cmd_room_sprite_hide (0x00432290)
+// Queue a room sprite id for hiding. Room_ApplySpriteFlags (0x00432220) walks
+// the mask and sets active = 0 on every room sprite whose id is a set bit, then
+// clears it. Operand 0xFF wipes the pending mask instead of adding to it.
 // ============================================================================
-int cmd_room_bitmask_set(void)
+int cmd_room_sprite_hide(void)
 {
     unsigned short val = scd_read_u16(0);
     g_ScdOpcodes += 2;
@@ -2213,7 +2272,13 @@ int cmd_bgm_stop_all(void)
 
 // ============================================================================
 // 0x4C - cmd_item_record_transfer (0x004322d0)
-// Item slot data transfer operations.
+// Move a pick-up QUANTITY between a room action record and one of the BioCard
+// state bytes. Record byte 8 is the item id and byte 9 its quantity, so mode 0
+// remembers the count, mode 1 restores it and mode 2 loads the quantity the
+// player is actually carrying into both. The three uses found are all mode 1 on
+// pickupQtyA/B/C: ROOM1160 restores a shotgun (7 shells), ROOM30B0 and ROOM3080
+// a flamethrower (240 fuel each) - matching the 7/0xF0/0xF0 SetInitialItems
+// seeds exactly, which is what confirms the three-byte mapping.
 // ============================================================================
 int cmd_item_record_transfer(void)
 {
@@ -2226,12 +2291,12 @@ int cmd_item_record_transfer(void)
     unsigned int fieldIdx = op2 >> 8;
 
     // Entry +8 holds a POINTER to the originating SCD record (cmd_door_set /
-    // cmd_item_set store g_ScdOpcodes + 2 there). The original dereferences it and
+    // cmd_room_action_set store g_ScdOpcodes + 2 there). The original dereferences it and
     // reads/writes bytes +8 and +9 *inside that record*:
     //   (&DAT_00d91aa8)[slot * 3]   ==  *(u8**)(table + slot * 0xC + 8)
     // The old code indexed the table entry itself at +9 / +8, i.e. it read and wrote
     // the bytes of the pointer instead of following it.
-    unsigned char* rec = *(unsigned char**)&g_RoomItemEventTable[slotIdx * 0xc + 8];
+    unsigned char* rec = *(unsigned char**)&g_RoomActionTable[slotIdx * 0xc + 8];
 
     if (mode == 0) {
         (&g_stageId)[fieldIdx] = rec[9];
@@ -2307,10 +2372,11 @@ int cmd_effect_flags_modify(void)
 }
 
 // ============================================================================
-// 0x4F - cmd_script_flag_set (0x004622b0)
-// Call FUN_0040c560 with parameter.
+// 0x4F - cmd_costume_variant_set (0x004622b0)
+// Store the operand's low bit in g_bCostumeVariant, which LoadEntityEMD reads
+// to pick the alternate character model.
 // ============================================================================
-int cmd_script_flag_set(void)
+int cmd_costume_variant_set(void)
 {
     extern void FUN_0040c560(int param);
     FUN_0040c560(scd_read_u16(0) >> 8);
@@ -2319,12 +2385,12 @@ int cmd_script_flag_set(void)
 }
 
 // ============================================================================
-// 0x50 - cmd_script_flag_test (0x004622e0)
-// Return the flag byte that opcode 0x4F (cmd_script_flag_set) wrote, so a
-// script can set a condition and branch on it later. The original consumes the
-// 2-byte instruction and returns g_bCostumeVariant directly - there is no callee.
+// 0x50 - cmd_costume_variant_test (0x004622e0)
+// Condition: return g_bCostumeVariant, the bit opcode 0x4F wrote. The original
+// consumes the 2-byte instruction and returns the byte directly - there is no
+// callee, and the operand byte is ignored.
 // ============================================================================
-int cmd_script_flag_test(void)
+int cmd_costume_variant_test(void)
 {
     g_ScdOpcodes += 2;
     return (int)g_bCostumeVariant;
@@ -2337,42 +2403,42 @@ int cmd_script_flag_test(void)
 typedef int (*ScdCmdFunc)(void);
 
 void* script_command_funcs_table[256] = {
-    /* 0x00 */ (void*)cmd_nop,                    // 0x004604d0
+    /* 0x00 */ (void*)cmd_block_end,              // 0x004604d0
     /* 0x01 */ (void*)cmd_if,                     // 0x004604e0
     /* 0x02 */ (void*)cmd_else,                   // 0x00460520
     /* 0x03 */ (void*)cmd_end_if,                 // 0x00460550
     /* 0x04 */ (void*)cmd_bit_test,               // 0x00460570
     /* 0x05 */ (void*)cmd_bit_op,                 // 0x00460650
-    /* 0x06 */ (void*)cmd_room_state_test,        // 0x00460760
-    /* 0x07 */ (void*)cmd_fade_state_test,        // 0x00460800
-    /* 0x08 */ (void*)cmd_room_state_set,         // 0x004608a0
+    /* 0x06 */ (void*)cmd_state_byte_test,        // 0x00460760
+    /* 0x07 */ (void*)cmd_state_word_test,        // 0x00460800
+    /* 0x08 */ (void*)cmd_state_byte_set,         // 0x004608a0
     /* 0x09 */ (void*)cmd_cut_lock_set,           // 0x00460920
     /* 0x0A */ (void*)cmd_current_cut_set,        // 0x00460990
     /* 0x0B */ (void*)cmd_message_set,            // 0x004609f0
     /* 0x0C */ (void*)cmd_door_set,               // 0x004611b0
-    /* 0x0D */ (void*)cmd_item_set,               // 0x00461130
+    /* 0x0D */ (void*)cmd_room_action_set,        // 0x00461130
     /* 0x0E */ (void*)cmd_skip_2bytes_opcode,     // 0x00460900
     /* 0x0F */ (void*)cmd_mirror_set,             // 0x004610b0
     /* 0x10 */ (void*)cmd_used_item_test,         // 0x00460f30
     /* 0x11 */ (void*)cmd_picked_item_test,       // 0x00460f10
-    /* 0x12 */ (void*)cmd_item_record_set,        // 0x00460fc0
-    /* 0x13 */ (void*)cmd_item_event_set,         // 0x00461010
+    /* 0x12 */ (void*)cmd_room_action_reset,      // 0x00460fc0
+    /* 0x13 */ (void*)cmd_room_action_arm,        // 0x00461010
     /* 0x14 */ (void*)cmd_scd_event_create,       // 0x00461040
     /* 0x15 */ (void*)cmd_bgm_play,               // 0x00460a80
     /* 0x16 */ (void*)cmd_bgm_stop,               // 0x00460c70
     /* 0x17 */ (void*)cmd_sfx_3d_play,            // 0x00460d80
     /* 0x18 */ (void*)cmd_item_model_set,         // 0x00461220
-    /* 0x19 */ (void*)cmd_model_flag_set,          // 0x00460f50
+    /* 0x19 */ (void*)cmd_model_flag_set,         // 0x00460f50
     /* 0x1A */ (void*)cmd_item_search,            // 0x00460f80
     /* 0x1B */ (void*)cmd_enemy_set,              // 0x004617d0
     /* 0x1C */ (void*)cmd_room_light_fade_set,    // 0x00462210
-    /* 0x1D */ (void*)cmd_equipped_weapon_test,   // 0x00460ee0
-    /* 0x1E */ (void*)cmd_sfx_set,                // 0x00461a80
+    /* 0x1D */ (void*)cmd_equipped_item_test,     // 0x00460ee0
+    /* 0x1E */ (void*)cmd_voice_play,             // 0x00461a80
     /* 0x1F */ (void*)cmd_omodel_set,             // 0x00461ac0
     /* 0x20 */ (void*)cmd_player_pos_set,         // 0x00430f60
     /* 0x21 */ (void*)cmd_enemy_pos_set,          // 0x00430fe0
     /* 0x22 */ (void*)cmd_item_count_test,        // 0x00431100
-    /* 0x23 */ (void*)cmd_cut_lock_toggle,        // 0x00431280
+    /* 0x23 */ (void*)cmd_cut_lock_write,         // 0x00431280
     /* 0x24 */ (void*)cmd_room_action,            // 0x004312b0
     /* 0x25 */ (void*)cmd_room_sprite_set,        // 0x004621d0
     /* 0x26 */ (void*)cmd_dead_slot_hang_26,      // 0x00460ce0 - dead slot, hangs (faithful)
@@ -2386,9 +2452,9 @@ void* script_command_funcs_table[256] = {
     /* 0x2E */ (void*)cmd_dead_slot_hang_2e,      // 0x00460a70 - dead slot, hangs (faithful)
     /* 0x2F */ (void*)cmd_snd_pan_vol_set,        // 0x00460c00
     /* 0x30 */ (void*)cmd_boundary_set,           // 0x00431a40
-    /* 0x31 */ (void*)cmd_fade_state_set,         // 0x004608d0
+    /* 0x31 */ (void*)cmd_state_word_set,         // 0x004608d0
     /* 0x32 */ (void*)cmd_skip_4bytes,            // 0x00431b00
-    /* 0x33 */ (void*)cmd_damage_set,             // 0x004314b0
+    /* 0x33 */ (void*)cmd_player_prop_set,        // 0x004314b0
     /* 0x34 */ (void*)cmd_model_tint_set,         // 0x00431b10
     /* 0x35 */ (void*)cmd_obj_flag_set,           // 0x00431bf0
     /* 0x36 */ (void*)cmd_obj_field_test,         // 0x00431c90
@@ -2402,23 +2468,25 @@ void* script_command_funcs_table[256] = {
     /* 0x3E */ (void*)cmd_bullet_effect_clear,    // 0x00431840
     /* 0x3F */ (void*)cmd_player_dir_test,        // 0x00431fd0
     /* 0x40 */ (void*)cmd_light_param_set,        // 0x00432010
-    /* 0x41 */ (void*)cmd_entity_posy_set,       // 0x00432090
+    /* 0x41 */ (void*)cmd_entity_posy_set,        // 0x00432090
     /* 0x42 */ (void*)cmd_effect_clear_typed,     // 0x00431870
     /* 0x43 */ (void*)cmd_bgm_volume_ramp,        // 0x00460d20
     /* 0x44 */ (void*)cmd_scd_event_kill,         // 0x00461080
-    /* 0x45 */ (void*)cmd_entity_posy_add,       // 0x004320f0
+    /* 0x45 */ (void*)cmd_player_posy_add,        // 0x004320f0
     /* 0x46 */ (void*)cmd_room_lights_set,        // 0x00432110
     /* 0x47 */ (void*)cmd_obj_transform_set,      // 0x00431080
     /* 0x48 */ (void*)cmd_effect_pool_clear,      // 0x004318a0
-    /* 0x49 */ (void*)cmd_room_bitmask_set,       // 0x00432290
+    /* 0x49 */ (void*)cmd_room_sprite_hide,       // 0x00432290
     /* 0x4A */ (void*)cmd_bgm_restore,            // 0x00460ae0
     /* 0x4B */ (void*)cmd_bgm_stop_all,           // 0x00460b80
     /* 0x4C */ (void*)cmd_item_record_transfer,   // 0x004322d0
     /* 0x4D */ (void*)cmd_player_joint_tint,      // 0x004323a0
     /* 0x4E */ (void*)cmd_effect_flags_modify,    // 0x00431910
-    /* 0x4F */ (void*)cmd_script_flag_set,        // 0x004622b0
-    /* 0x50 */ (void*)cmd_script_flag_test,       // 0x004622e0
-    // Opcodes 0x51-0xFF: fill with cmd_nop as safe default
+    /* 0x4F */ (void*)cmd_costume_variant_set,    // 0x004622b0
+    /* 0x50 */ (void*)cmd_costume_variant_test,   // 0x004622e0
+    // Opcodes 0x51-0xFF: left nullptr. scd_dispatch reports and aborts on a NULL
+    // rather than calling through, because a bad opcode means the stream itself
+    // desynced. The original table has no padding and no bound.
     // (entries 0x51-0xF5 may be accessed; 0xF6-0xFF are handled by room_events_check)
 };
 
@@ -2968,7 +3036,7 @@ void FUN_0048c020(int param)
 
 // ============================================================================
 // FUN_0040c560 (0x0040c560) - Store the low bit of the parameter into g_bCostumeVariant
-// SCD opcode 0x4F writes this flag; opcode 0x50 (cmd_script_flag_test) returns it as its
+// SCD opcode 0x4F writes this flag; opcode 0x50 (cmd_costume_variant_test) returns it as its
 // condition result, so a script can set a flag with 0x4F and branch on it later.
 // ============================================================================
 void FUN_0040c560(int param)

@@ -195,15 +195,15 @@ build shipped them.
 Both are flat arrays of 8-byte `{ TMD*, TIM* }` pairs (either half may be null).
 The omodel pairs are consumed by SCD command 0x1F `cmd_omodel_set`
 (`object_models + slot * 8`, `CmdFunctions.cpp:914`) to build the pushable/
-climbable room objects; the item pairs by the item-event command
+climbable room objects; the item pairs by `cmd_item_model_set` (0x18)
 (`item_models + index * 8`, `CmdFunctions.cpp:611`) that builds pick-ups and
 searchable room models (containers, lids, desks, ...) and fills
-`g_RoomItemEventTable`. Counts come from the header: omodel pair count is
+`g_RoomActionTable`. Counts come from the header: omodel pair count is
 **`omodel_slot_count`**, item pair count is **`item_count`** — each table
 feeds its own 0xA4-byte record pool (`g_omodel_table` / `g_item_model_table`).
 
 That RDT+0x54 is the *item* table (the original `nItem` / item-model block) is
-confirmed twice over: its consumer is the item-event command, and the icon
+confirmed twice over: its consumer is `cmd_item_model_set`, and the icon
 section at RDT+0x78 holds exactly `item_count` inventory icons.
 
 ### Footstep sound zones (RDT+0x5C, .flr)

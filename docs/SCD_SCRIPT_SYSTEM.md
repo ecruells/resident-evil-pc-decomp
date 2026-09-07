@@ -48,7 +48,7 @@ The initialization SCD is a chain of **blocks**. Each block is:
 
 ```
 +0x00  u16  blockSize    // total bytes of this block INCLUDING these 2 header bytes
-+0x02  ...  opcodes      // command stream, terminated by opcode 0x00 (cmd_nop)
++0x02  ...  opcodes      // command stream, terminated by opcode 0x00 (cmd_block_end)
 ```
 
 A `blockSize` of `0` terminates the chain.
@@ -58,7 +58,7 @@ g_CmdOpcodesPointer = g_ScdBranchStack;   // reset the branch stack (0x00bf0808)
 g_ScriptContinueFlag = 0;             // reset the nesting depth
 for (u16 sz = *p; sz != 0; sz = *p) {
     g_ScdOpcodes = (u8*)(p + 1);      // skip the size word
-    ... run until cmd_nop, then unwind pending branches ...
+    ... run until cmd_block_end, then unwind pending branches ...
     p = (u16*)((u8*)p + sz);          // next block
 }
 g_ScdOpcodes = (u8*)p;                // leave the pointer on the terminator
@@ -84,7 +84,7 @@ Two return conventions drive this:
 
 - **Return 1** — "continue": the interpreter immediately dispatches the next
   opcode. Every side-effecting command returns 1.
-- **Return 0** — "stop": ends the straight-line run. Used by `cmd_nop` (end of
+- **Return 0** — "stop": ends the straight-line run. Used by `cmd_block_end` (end of
   stream) and by *condition* commands whose test failed. A failed condition
   therefore aborts the rest of the stream, and the outer loop resumes at the
   address `cmd_if` pushed — that is how `if` skips its body.
@@ -147,6 +147,81 @@ entry->entity     = ENTITY;
 
 `ScdEventEntry_Create(slot, scriptIndex)` with `slot > 7` allocates the first
 free slot.
+
+### Execution states — why the same byte means different things
+
+`ScdEventEntry.state` is not bookkeeping: **it selects which opcode table the
+next byte is read from.** Each frame `room_events_check` takes the byte at
+`scriptPtr` and
+
+1. tests it against the `0xF6`–`0xFF` control range *first* — those work
+   identically in every state (see the table below), then
+2. `switch (entry->state)` to pick the opcode table for everything else.
+
+So one byte has up to three meanings:
+
+| Byte | in state 0 | in state 1 | in state 2 |
+|---|---|---|---|
+| `0x00` | NOP | advance | NOP |
+| `0x01` | → state 1 | **hangs** | → state 0 |
+| `0x02` | → state 2 + reset the entity | **hangs** | `position += speed` |
+| `0x04` | set the current entity (3 bytes) | **hangs** | `position += speed` and apply rotation |
+
+State 1 only understands `0x00` and `0x80`–`0x8B`; its `default` breaks out
+**without advancing `scriptPtr`** and returns 1, so the dispatcher's
+`do { ... } while (result != 0)` re-reads the same byte forever. State 2's
+`default` just returns, which also leaves the pointer put — the outer loop
+`goto`s straight back. Only state 0 treats an unknown byte as an error, and it
+deactivates the entry. A byte read in the wrong state does not misbehave
+quietly; it locks the game.
+
+There is no way to know a byte's meaning from the bytes alone — you have to
+know which state execution reached it in. That is why a disassembler has to
+either simulate from the entry point or let you choose the state, and why
+`tools/rdt_event_editor.html` offers "read from state 0/1/2" per script.
+
+**Reading a script in practice.** Every script the RDT+0x68 table points at
+begins in state 0 (`ScdEventEntry_Init` sets `state = 0`), so start there. Only
+switch views once you have traced an actual `0x01` / `0x02` / `0x03` and want to
+read the bytes that follow it.
+
+#### What each state is for
+
+- **State 0 — command state.** The structural work: set the current entity,
+  create or kill another event, run an inline SCD block (`0x06`) or a single SCD
+  command (`0x07`), restart with a different script. It is also the only state
+  that can enter the others. A script that only touches flags and room actions —
+  like `ROOM20E1`'s event 0 — never leaves it.
+- **State 1 — animation wait.** The entity is playing an animation and the
+  script rides along with it. `scd_event_state1_anim` returning 0 means *stop
+  for this frame*, which is what makes a scripted gesture or line take time.
+  Its opcodes are a disjoint set in the `0x80`+ range (look-at targets, anim
+  selection, timers).
+- **State 2 — movement.** Per-frame integration with no waiting: add `speed` to
+  the position, apply the rotation steps, set an absolute position. An NPC
+  walking a path is state 2 inside a counted `0xFA`/`0xFB` loop.
+
+#### Transitions
+
+```
+                 0x01
+   ┌──────────────────────────────►  state 1  (wait animation)
+   │                                    │
+   │                          0x80 / 0x8B│
+   │            ◄───────────────────────┘
+state 0
+   │            0x02 (reset entity) / 0x03 (keep it)
+   ├──────────────────────────────►  state 2  (movement)
+   │                                    │
+   │                                0x01│
+   │            ◄───────────────────────┘
+   └── 0x08 → ScdEventEntry_Init: restart, back to state 0
+```
+
+`0xFF` deactivates the slot from any state; `0x08` re-inits it (which resets the
+state to 0 along with the stack depth).
+
+State 3 exists in the dispatcher but is **unreachable** — see below.
 
 ### Control-flow opcodes (checked before the state switch, so they work in every state)
 
@@ -225,10 +300,26 @@ pair: (0,0) (0,1) (0,2) (0,3) (0,4) (1,0) (1,1) (1,2) (1,3) (1,4)
 | `0x0A` | 4 | Parametric set by `p[1]`: 0/1/2 = `localMatrix.t[i]`, 3 = `health`, 4 = `unk_c6`, 5 = `unk_c8`. |
 | `0x0B` | 12 | As `0x0A`, then also `position.pad` and both angle halves. |
 
-### State 3 — `scd_event_state3_set_behavior` (`0x0041e150`)
+### State 3 — `scd_event_state3_set_behavior` (`0x0041e150`) — UNREACHABLE
 
 2 bytes. Sets `g_PlayerDpadHeld = 0xFF`; if `p[0] != entity->action_behavior`
 resets `action_state`; assigns `action_behavior = p[0]`. Returns 1.
+
+**Nothing ever enters this state.** The dispatcher has a `case 3:` for it, but
+`ScdEventEntry.state` is written in exactly six places across the whole
+codebase and every one stores 0, 1 or 2:
+
+| Site | Value |
+|---|---|
+| `ScdEventEntry_Init` ([RoomEvents.cpp:18](../src/game/RoomEvents.cpp#L18)) | 0 |
+| state 2 opcode `0x01` ([:215](../src/game/RoomEvents.cpp#L215)) | 0 |
+| state 1 opcode `0x80`/`0x8B` ([:354](../src/game/RoomEvents.cpp#L354)) | 0 |
+| state 0 opcode `0x01` ([:728](../src/game/RoomEvents.cpp#L728)) | 1 |
+| state 0 opcode `0x02` ([:732](../src/game/RoomEvents.cpp#L732)) | 2 |
+| state 0 opcode `0x03` ([:739](../src/game/RoomEvents.cpp#L739)) | 2 |
+
+Treat the handler as dead code: no shipped script byte is ever read through it,
+and a disassembler should not offer state 3 as a reading mode.
 
 ---
 
@@ -250,26 +341,26 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 
 | Op | Name | Addr | Len | Layout / effect |
 |---|---|---|---|---|
-| `0x00` | `cmd_nop` | `004604d0` | 1 | Clears `g_ScriptContinueFlag`, returns 0. End of block. |
+| `0x00` | `cmd_block_end` | `004604d0` | 1 | Clears `g_ScriptContinueFlag`, returns 0. End of block. |
 | `0x01` | `cmd_if` | `004604e0` | 2 | `[op, skipLen]`. Pushes `(p+2) + skipLen` on the branch stack, `++g_ScriptContinueFlag`. |
 | `0x02` | `cmd_else` | `00460520` | 2 | `[op, jumpLen]`. Pops the branch stack and jumps `p += jumpLen`. |
 | `0x03` | `cmd_end_if` | `00460550` | 2 | Pops the branch stack. |
 | `0x04` | `cmd_bit_test` | `00460570` | 4 | **Cond.** `[op, bank][sel, expect]`. `sel & 0x1F` = bit index, `(sel & 0xE0) >> 3` = byte offset into the bank. Returns `bitIsSet ^ expect`. Banks: 0 `g_ScenarioFlags`, 1 `g_ScenarioFlags2`, 2 `g_LocksFlags`, 3 `g_EnemiesFlags`, 4 `g_SysFlags`, 5 `g_main_state_flags`, 6 `g_message_flags`, 7 `g_roomItemsFlags`, 8 `g_RoomFlags`, 9 `g_itemUseFlags` (0x00d213a0 — per-frame item-use flags, cleared by `game_loop` each frame and re-armed by room logic; bits `itemId-0x1B` = "item usable here", bit `0x3F` = radio transmission active). |
 | `0x05` | `cmd_bit_op` | `00460650` | 4 | `[op, bank][sel, mode]`. `mode` 0=set, 1=clear, 2=toggle. Same bank/sel encoding as `0x04`. |
-| `0x06` | `cmd_room_state_test` | `00460760` | 4 | **Cond.** `[op, fieldIdx][mode, cmpVal]`. Compares the byte at `(&g_stageId)[fieldIdx]`. `mode` 0 `==`, 1 `>`, 2 `>=`, 3 `<`, 4 `<=`, 5 `!=` (relative to `cmpVal`). |
-| `0x07` | `cmd_fade_state_test` | `00460800` | 6 | **Cond.** `[op, pad][fieldIdx, mode][cmpVal:u16]`. Compares `((u16*)&g_fading_state)[fieldIdx]`. |
-| `0x08` | `cmd_room_state_set` | `004608a0` | 4 | `[op, fieldIdx][value, pad]`. `(&g_stageId)[fieldIdx] = value`. |
+| `0x06` | `cmd_state_byte_test` | `00460760` | 4 | **Cond.** `[op, fieldIdx][mode, cmpVal]`. Compares the byte at `(&g_stageId)[fieldIdx]`. `mode` 0 `==`, 1 `>`, 2 `>=`, 3 `<`, 4 `<=`, 5 `!=` (relative to `cmpVal`). |
+| `0x07` | `cmd_state_word_test` | `00460800` | 6 | **Cond.** `[op, pad][fieldIdx, mode][cmpVal:u16]`. Compares `((u16*)&g_fading_state)[fieldIdx]`. |
+| `0x08` | `cmd_state_byte_set` | `004608a0` | 4 | `[op, fieldIdx][value, pad]`. `(&g_stageId)[fieldIdx] = value`. |
 | `0x09` | `cmd_cut_lock_set` | `00460920` | 2 | `[op, camId]`. Saves the current camera in `g_cutId`, switches to `camId`, walks `cam_switch_zones` (stride `0x14`, id at `+2`) to find it, calls `cut_set`, sets `g_main_state_flags |= 0x100000` (lock camera). |
 | `0x0A` | `cmd_current_cut_set` | `00460990` | 2 | Restores the camera saved in `g_cutId` and clears `0x100000`. |
 | `0x0B` | `cmd_message_set` | `004609f0` | 4 | `[op, msgId][pause:u16]`. `set_message_display(msgId, pause)`. The pause operand is a word, not a byte. |
-| `0x0C` | `cmd_door_set` | `004611b0` | 26 | `[op, slot]` + a 24-byte door record. Writes `g_RoomItemEventTable[slot*0xC]`: `[0]=1`, `[1]=p[0x19]`, `[2..3]=slot`, `[8..11]= p+2` (record pointer). Bumps `g_RoomItemEventHead`. |
-| `0x0D` | `cmd_item_set` | `00461130` | 18 | `[op, slot]` + 16 bytes. Writes the same 12-byte event entry: `[0]=p[0xA]`, `[1]=p[0xB]`, `[2..7]` = three `u16` from `p[0xC..0x11]`, `[8..11]= p+2`. |
+| `0x0C` | `cmd_door_set` | `004611b0` | 26 | `[op, slot]` + a 24-byte door record. Writes `g_RoomActionTable[slot*0xC]`: `[0]=1`, `[1]=p[0x19]`, `[2..3]=slot`, `[8..11]= p+2` (record pointer). Bumps `g_RoomActionTail`. |
+| `0x0D` | `cmd_room_action_set` | `00461130` | 18 | `[op, slot]` + 16 bytes: an 8-byte zone box then handler/flags/three `u16`. Writes the 12-byte room action entry: `[0]=p[0xA]` (handler), `[1]=p[0xB]` (probe flags), `[2..7]` = three `u16` from `p[0xC..0x11]`, `[8..11]= p+2`. Not item-specific — pick-ups come from `0x18`. |
 | `0x0E` | `cmd_skip_2bytes_opcode` | `00460900` | 2 | No-op that advances. |
 | `0x0F` | `cmd_mirror_set` | `004610b0` | 8 | `[op, modeBits][mirrorMin:u16][mirrorMax:u16][planeCoord:u16]`. Sets `g_main_state_flags` bits 0-1, writes the mirror plane globals (`g_mirrorExtentMin`, `g_mirrorExtentMax`, `g_mirrorPlaneCoord`), then re-runs `SetupEntityJointAnimation` on the player and rebuilds the weapon-joint clone (`FUN_0048bfe0` / `FUN_0048c020`). |
 | `0x10` | `cmd_used_item_test` | `00460f30` | 2 | **Cond.** `[op, itemId]`. `itemId == g_usedItemId`. |
 | `0x11` | `cmd_picked_item_test` | `00460f10` | 2 | **Cond.** `[op, itemId]`. `itemId == g_pickedItemId` (`DAT_00be9833`) — the item id recorded by the last pickup. |
-| `0x12` | `cmd_item_record_set` | `00460fc0` | 10 | `[op, slot]` + 8 bytes → overwrites bytes `[0..7]` of the event entry. |
-| `0x13` | `cmd_item_event_set` | `00461010` | 4 | `[op, slot][b0, b1]` → event entry bytes `[0]`, `[1]`. |
+| `0x12` | `cmd_room_action_reset` | `00460fc0` | 10 | `[op, slot]` + 8 bytes → overwrites bytes `[0..7]` of the event entry. |
+| `0x13` | `cmd_room_action_arm` | `00461010` | 4 | `[op, slot][b0, b1]` → event entry bytes `[0]`, `[1]`. |
 | `0x14` | `cmd_scd_event_create` | `00461040` | 4 | `[op, pad][slot, scriptIdx]`. `ScdEventEntry_Create(slot, scriptIdx)`. |
 | `0x15` | `cmd_bgm_play` | `00460a80` | 2 | `[op, ch]`. Sound channel record = `(u8*)&g_SndBank + ch*8` (bank `int` at `+0`, slot byte at `+5`). Calls `SetSndSlot`, sets `g_BGM_STATE |= 1 << (ch+3)`. |
 | `0x16` | `cmd_bgm_stop` | `00460c70` | 2 | `[op, ch]`. If `g_BGM_STATE` bit `ch+3` set: `setSndStop`, clear the bit, `set_volume(bank, -1)`. |
@@ -279,14 +370,14 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 | `0x1A` | `cmd_item_search` | `00460f80` | 2 | **Cond.** `[op, itemId]`. Scans `g_ItemSlotsPointer` (stride 2) over `g_TotalHeldItems`. |
 | `0x1B` | `cmd_enemy_set` | `004617d0` | 22 | Enemy spawn. `p[1]` = enemy type id, `p[2]` = `behavior_flags`, `p[3]` = `g_EnemiesFlags` guard bit (`0xFF` = none; if already set, skip the spawn), `p[4]` = force-init, `p[5]` = SCA hit-data size / 6, `p[6..7]` = `position.pad`, `p[8..9]` = yaw, `p[0xA..0xB]` = pitch, `p[0xC..0xD]` = x, `p[0xE..0xF]` = y, `p[0x10..0x11]` = z, `p[0x12] & 0xF` = slot, `p[0x13]` = `animationId`, `p[0x14]` = `animation_frame_id`, `p[0x15]` = extra flags. |
 | `0x1C` | `cmd_room_light_fade_set` | `00462210` | 6 | `[op, lightR][delta:s16][rgbMask:u16]`. Special room light: `delta != 0` seeds `g_SpecialRoomLightState` to `0` or `0x7FFF` by sign. Mask bits 0/1/2 → B/G/R = `0xFF`. |
-| `0x1D` | `cmd_equipped_weapon_test` | `00460ee0` | 2 | **Cond.** `[op, weaponId]`. Compares the equipped slot's item id. |
-| `0x1E` | `cmd_sfx_set` | `00461a80` | 4 | `[op, type][param:u16]`. `play_sound_and_voice_effect`, then `g_main_state_flags |= 0x20000`. |
+| `0x1D` | `cmd_equipped_item_test` | `00460ee0` | 2 | **Cond.** `[op, weaponId]`. Compares the equipped slot's item id. |
+| `0x1E` | `cmd_voice_play` | `00461a80` | 4 | `[op, type][param:u16]`. `play_sound_and_voice_effect`, then `g_main_state_flags |= 0x20000`. |
 | `0x1F` | `cmd_omodel_set` | `00461ac0` | 28 | Static object model. `p[1] & 0x3F` = itembox slot (bit 7 = queue texture), `p[2]` = entry flags (bit 4 = alt rotation), `p[3]` = SCA parent (`0xFF` none, `0xFE` player, `<0x80` itembox, else enemy), `p[4..9]` = position `s16 x/y/z`, `p[0xA..0xB]` = anim word, `p[0xC..0x1B]` = sprite/anim parameters. Contains many stage/room-specific palette and position fixups. |
 | `0x20` | `cmd_player_pos_set` | `00430f60` | 14 | `[op,pad][posPad:s16][directionAngle:s16][speedX:s16][x:s16][y:s16][z:s16]` — offsets `+2,+4,+6,+8,+10,+12`. Clears `unk_e0` bits 2-3 via `&= 0xFFF3`. Positions mirror into `localMatrix.t[0..2]`. Note `+6` is `speed.x` (`0x76`) in `PlayerEntity`, whereas the same offset in `Entity` (opcode `0x21`) is the upper half of `angle`. |
 | `0x21` | `cmd_enemy_pos_set` | `00430fe0` | 14 | `[op, enemyIdx][pad:s16][yaw:s16][pitch:s16][x:s16][y:s16][z:s16]` — offsets `+2,+4,+6,+8,+10,+12`, same shape as `0x20`. `enemyIdx` is `(s16)word0 >> 8` (arithmetic). Clears `scd_entity_flags` (`+0xE0`) bits 2-3 via `&= 0xFFF3`. Positions mirror into `localMatrix.t[0..2]`. |
 | `0x22` | `cmd_item_count_test` | `00431100` | 4 | **Cond.** `[op, searchId][mode, cmpVal]`. Sums inventory quantities for an ammo *family* (`searchId` 10-0x12 group several item ids), compares the total. Returns 0 if nothing matched. |
-| `0x23` | `cmd_cut_lock_toggle` | `00431280` | 2 | `[op, lock]`. `lock != 0` sets `g_main_state_flags |= 0x100000`, else clears it. |
-| `0x24` | `cmd_room_action` | `004312b0` | 4 | `[op, itemSlot][actionIdx, pad]`. Calls `room_check_actions[actionIdx](&g_RoomItemEventTable[itemSlot*0xC])`. |
+| `0x23` | `cmd_cut_lock_write` | `00431280` | 2 | `[op, lock]`. `lock != 0` sets `g_main_state_flags |= 0x100000`, else clears it. |
+| `0x24` | `cmd_room_action` | `004312b0` | 4 | `[op, itemSlot][actionIdx, pad]`. Calls `room_check_actions[actionIdx](&g_RoomActionTable[itemSlot*0xC])`. |
 | `0x25` | `cmd_room_sprite_set` | `004621d0` | 4 | `[op, pad][sprId, disable]`. `disable == 0` → `RoomSpr_SetActive(sprId)`, else `RoomSpr_SetInactive(sprId)`. |
 | `0x26` | `cmd_dead_slot_hang_26` | `00460ce0` | 0 | **Dead slot.** Bare `ret`; returns the opcode value left in `EAX` and consumes nothing, so the interpreter spins forever. See §6. |
 | `0x27` | `cmd_snd_fade_set` | `00460cf0` | 2 | `[op, fadeType]`. `BuildSndFadeTbl(fadeType, 0x7F)`. |
@@ -299,9 +390,9 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 | `0x2E` | `cmd_dead_slot_hang_2e` | `00460a70` | 0 | **Dead slot.** Bare `ret`, identical to `0x26`. |
 | `0x2F` | `cmd_snd_pan_vol_set` | `00460c00` | 4 | `[op, ch][paramA, paramB]`. `FUN_004805d0`, then stores `paramA`/`paramB` at byte offset `ch*8` in `DAT_00ac98e0` / `DAT_00ac98e4`. |
 | `0x30` | `cmd_boundary_set` | `00431a40` | 12 | `[op, listIdx][boundIdx, flagMode][z:u16][w:u16][x:u16][y:u16]`. Boundary record = `boundaries[listIdx][boundIdx]` (stride `0xC`). `flagMode != 0` rewrites bits `0x0F00` of `boundary[5]`. |
-| `0x31` | `cmd_fade_state_set` | `004608d0` | 4 | `[op, fieldIdx][value:u16]`. `*(u16*)((u8*)&g_fading_state + fieldIdx*2) = value`. |
+| `0x31` | `cmd_state_word_set` | `004608d0` | 4 | `[op, fieldIdx][value:u16]`. `*(u16*)((u8*)&g_fading_state + fieldIdx*2) = value`. |
 | `0x32` | `cmd_skip_4bytes` | `00431b00` | 4 | No-op that advances. |
-| `0x33` | `cmd_damage_set` | `004314b0` | 2/4 | `[op, subCmd][param:u16]`. `subCmd`: 0 unequip (2 bytes), 1 set `isBeingAttackedFlag` + reset anim, 3 `flags` SET/OR/XOR, 4 `action_behavior=1, action_state=6` (2 bytes), 5 `directionAngle`, 6 clear `unk_8c` (2 bytes), 7 reset to idle (2 bytes), 8 `healthStatusFlags` SET/OR/XOR, 9 toggle joint flags, 10 set/clear `unk_e0 & 0x40`. |
+| `0x33` | `cmd_player_prop_set` | `004314b0` | 2/4 | `[op, subCmd][param:u16]`. `subCmd`: 0 unequip (2 bytes), 1 set `isBeingAttackedFlag` + reset anim, 3 `flags` SET/OR/XOR, 4 `action_behavior=1, action_state=6` (2 bytes), 5 `directionAngle`, 6 clear `unk_8c` (2 bytes), 7 reset to idle (2 bytes), 8 `healthStatusFlags` SET/OR/XOR, 9 toggle joint flags, 10 set/clear `unk_e0 & 0x40`. |
 | `0x34` | `cmd_model_tint_set` | `00431b10` | 8 | `[op][variant][bias][p3][p4][p5][p6][p7]`, all bytes; `bias = byte - 0x80`. `variant` 0 → `FUN_00473b10`, 1 → `FUN_00473d10`, 2 → `FUN_00473d60`. |
 | `0x35` | `cmd_obj_flag_set` | `00431bf0` | 4 | `[op, table][objIdx, value]`. `table` 0 = `g_omodel_table`, 1 = `g_item_model_table`; writes byte `[0]`. Special-cases stage 3 / room 13 / object 5 → force 0. |
 | `0x36` | `cmd_obj_field_test` | `00431c90` | 4 | **Cond.** `[op, objIdx][mode, cmpVal]`. Compares the `u16` at `itembox[objIdx] + 0x86` (the billboard effect handle). |
@@ -319,18 +410,18 @@ side-effecting commands, `_test` for **Cond** commands, plus a few plain verbs
 | `0x42` | `cmd_effect_clear_typed` | `00431870` | 4 | `[op, type][param:u16]`. `FUN_0047cf80(3, type, param, 0, 0)`. |
 | `0x43` | `cmd_bgm_volume_ramp` | `00460d20` | 4 | `[op, ch][a, b]`. Only acts when `g_BGM_STATE` bit `ch+3` is set. |
 | `0x44` | `cmd_scd_event_kill` | `00461080` | 2 | `[op, slot]`. `g_ScdEventTable[slot].active = 0`. |
-| `0x45` | `cmd_entity_posy_add` | `004320f0` | 2 | `[op, delta]`. `g_playerEntity.posY += (s8)delta`. |
+| `0x45` | `cmd_player_posy_add` | `004320f0` | 2 | `[op, delta]`. `g_playerEntity.posY += (s8)delta`. |
 | `0x46` | `cmd_room_lights_set` | `00432110` | 44 | `[op,pad]` then 3 × 12-byte light records `[x:s16][y:s16][z:s16][r][g][b][zero2:u8][radius:s16]` written into `RDT.lights[0..2]` (`+0x00/04/08` as ints, `+0x0C/0D/0E` bytes, word at `+0x10`, `radius` at `+0x12`), then 3 × `s16` into `RDT+6/8/10`. Ends with `setBackColor(RDT+6, RDT+8, RDT+10)`. |
 | `0x47` | `cmd_obj_transform_set` | `00431080` | 14 | `[op, objIdx]` + six `s16`: rotation `+0x72/+0x74/+0x76` and position `+0x6C/+0x6E/+0x70` (mirrored into `+0x34/+0x38/+0x3C`) of `g_omodel_table[objIdx]`. |
 | `0x48` | `cmd_effect_pool_clear` | `004318a0` | 2 | Clears `animId`/`updateId` on all 64 effect-pool slots. |
-| `0x49` | `cmd_room_bitmask_set` | `00432290` | 2 | `[op, bit]`. `bit == 0xFF` clears `DAT_00d22770`, else sets bit `bit & 0x1F`. |
+| `0x49` | `cmd_room_sprite_hide` | `00432290` | 2 | `[op, bit]`. `bit == 0xFF` clears `DAT_00d22770`, else sets bit `bit & 0x1F`. |
 | `0x4A` | `cmd_bgm_restore` | `00460ae0` | 2 | No-op unless `g_targetBgmState != 0xFF`. Restores the three sound channels saved by `0x4B`: `g_BGM_STATE >>= 8`, then `SetSndSlot` per set bit (`0x08` / `0x10` / `0x20`). |
 | `0x4B` | `cmd_bgm_stop_all` | `00460b80` | 2 | No-op unless `g_targetBgmState != 0xFF`. Stops all four sound banks, then `g_BGM_STATE <<= 8` to save the live channel mask into the high byte. |
 | `0x4C` | `cmd_item_record_transfer` | `004322d0` | 4 | `[op, mode][slotIdx, fieldIdx]`. 0 = event-entry byte → `(&g_stageId)[fieldIdx]`; 1 = the reverse; 2 = look the entry's item up in the inventory and copy the quantity into both. |
 | `0x4D` | `cmd_player_joint_tint` | `004323a0` | 2 | Applies a joint colour tint (second `JointApplyColorTint` argument, `0x30`) to joints 0-13 of the pointer at entity `+0x98` (`jointsStructs`, stride `0x7c`). The `0x00606060` push is a dead argument. |
 | `0x4E` | `cmd_effect_flags_modify` | `00431910` | 4 | `[op, mode][mask:u16]`. OR / AND-NOT / XOR `mask` into `+2` of every live effect-pool slot. |
-| `0x4F` | `cmd_script_flag_set` | `004622b0` | 2 | `[op, param]`. `FUN_0040c560(param)` — stores `param & 1` into `g_bCostumeVariant`. |
-| `0x50` | `cmd_script_flag_test` | `004622e0` | 2 | **Cond.** Returns `g_bCostumeVariant`. |
+| `0x4F` | `cmd_costume_variant_set` | `004622b0` | 2 | `[op, param]`. `FUN_0040c560(param)` — stores `param & 1` into `g_bCostumeVariant`. |
+| `0x50` | `cmd_costume_variant_test` | `004622e0` | 2 | **Cond.** Returns `g_bCostumeVariant`. |
 
 `g_bCostumeVariant` (`0x004d6444`) is the costume-variant selector: opcode `0x4F`
 writes `param & 1`, and `LoadEntityEMD` adds it to `0x33` when the costume-swap
@@ -341,7 +432,7 @@ is persisted in the save block at offset `0xA01`.
 ### `room_check_actions` (`0x004b9340`)
 
 18 entries, indices `0x00`–`0x11`, followed by two NULL slots. Each takes a
-pointer to a 12-byte `g_RoomItemEventTable` entry. Port names (defined in
+pointer to a 12-byte `g_RoomActionTable` entry. Port names (defined in
 [RoomEvents.cpp](../src/game/RoomEvents.cpp)):
 
 ```
@@ -356,18 +447,39 @@ pointer to a 12-byte `g_RoomItemEventTable` entry. Port names (defined in
 0x10 0041bed0 check_typewriter        0x11 0041bf90 stairs_height_update
 ```
 
-### Room item event entry (12 bytes, `g_RoomItemEventTable` at `0x00d91aa0`, 24 slots)
+### Room action entry (12 bytes, `g_RoomActionTable` at `0x00d91aa0`, 24 slots)
 
 ```
-+0x00  u8   type / visibility flags
-+0x01  u8   sub-type
++0x00  u8   room_check_actions handler index (0 = dead)
++0x01  u8   probe flags (see below)
 +0x02  u16  id or flag word
 +0x04  u16  parameter
 +0x06  u16  flag bit index
 +0x08  u32  pointer to the originating SCD record (opcodes + 2)
 ```
 
-`g_RoomItemEventHead` (`0x00d91bc0`) tracks the highest entry written so far.
+**Probe flags (byte `+0x01`).** The low three bits are a participation mask, not
+an enable bit. `update_player_position` (`0x0041c060`) takes a `mask` argument and
+skips any entry where `(mask & flags) == 0`, so each bit belongs to one prober:
+
+| Bit | Prober | Passes |
+|---|---|---|
+| `0x01` | `game_loop` (`0x00480ebd`) | the player walking |
+| `0x02` | `tyrant_update` | the Tyrant walking |
+| `0x04` | `update_room_objects` (`RoomCollision.cpp`) | a pushed object entering a zone |
+
+`0x40` switches the hit test from the 600-unit forward reach point to the
+prober entity's own position. `0x80` removes the entry from every per-frame pass
+and hands it to `check_action_object` instead, which fires on the action key and
+requires `0x01` and `0x80` both set.
+
+That is what the odd shipped values mean: `0x44` is an own-position zone only a
+pushed object can trip, `0x42` one only the Tyrant can, and `0x45` one both the
+player and a pushed object can.
+
+`g_RoomActionTail` (`0x00d91bc0`) tracks the highest entry written so far,
+inclusive: the setup commands only raise it and the probe loops run while
+`entry <= g_RoomActionTail`.
 
 ---
 
@@ -401,7 +513,7 @@ Ghidra renders "extract the high byte and scale it" as a masked shift. Read it a
 | `(x & 0xffffff07) >> 3` | `(x >> 8) * 32` — byte offset | `cmd_room_bgm_state_set` (`g_roomBgmState`, 32 rooms/stage) |
 | `(x & 0xffffff1f) >> 5` | `(x >> 8) * 8` — byte offset | `cmd_bgm_play`, `cmd_bgm_stop`, `cmd_snd_pan_vol_set` (8-byte sound channel records) |
 | `(x >> 6) & 0xfffffffc` | `(x >> 8) * 4` — byte offset | `cmd_obj_field_test`, `cmd_player_dist_test`, `cmd_boundary_set` (pointer tables) |
-| `(x >> 7) & 0xfffffffe` | `(x >> 8) * 2` — byte offset | `cmd_fade_state_set` (`u16` array) |
+| `(x >> 7) & 0xfffffffe` | `(x >> 8) * 2` — byte offset | `cmd_state_word_set` (`u16` array) |
 
 These are **byte offsets added to a base address**, not element indices. Writing
 them as `array[idx]` in C double-scales the offset.
@@ -420,5 +532,5 @@ CALL [EAX*4 + 0x4c1110`). Two consequences every handler inherits:
   original: they write no `EAX`, consume no operand bytes, and therefore spin
   the interpreter forever. No shipped script contains them. Reproduce as-is;
   returning 0 would silently end the block instead (divergence). By contrast
-  `cmd_nop` (0x00) explicitly clears `EAX`, which is what makes it a real block
+  `cmd_block_end` (0x00) explicitly clears `EAX`, which is what makes it a real block
   terminator.

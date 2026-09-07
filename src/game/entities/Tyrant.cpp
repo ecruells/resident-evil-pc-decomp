@@ -2835,7 +2835,7 @@ typedef void (*EmScdBehavior)(void);
 // 0x00460550, 0x00460570 and 0x00460650 and marked "not ported".  Those are not
 // Tyrant code at all: 0x004c10c8 + 18*4 == 0x004c1110, which is
 // script_command_funcs_table, and those six addresses are its opcodes
-// 0x00..0x05 - cmd_nop, cmd_if, cmd_else, cmd_end_if, cmd_bit_test, cmd_bit_op,
+// 0x00..0x05 - cmd_block_end, cmd_if, cmd_else, cmd_end_if, cmd_bit_test, cmd_bit_op,
 // all already implemented in CmdFunctions.cpp.  They were the adjacent table
 // bleeding in, not six unported behaviours, so there is nothing to port there.
 //

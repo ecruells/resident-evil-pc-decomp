@@ -807,7 +807,7 @@ extern void display_room_camera_bg(void);                         // Room.cpp
 // room_check_actions (0x004b9340)
 // Dispatch table for SCD command opcode 0x24 (cmd_room_action) and 0x2D
 // (cmd_got_item). 18 real entries (0x00-0x11) followed by two NULL slots in the
-// original. Each handler takes a pointer to a 12-byte g_RoomItemEventTable entry.
+// original. Each handler takes a pointer to a 12-byte g_RoomActionTable entry.
 //
 // Sized correctly here so cmd_room_action's bounds check works; the handler
 // bodies live in PlayerAnimations.cpp. Deliberately left nullptr rather than
@@ -869,7 +869,7 @@ void* room_check_actions[ROOM_CHECK_ACTION_COUNT] = {
 // system (handle_message_post_action, message action 10/0) after the pickup
 // prompt is dismissed.
 //
-// Reads the record at g_room_event_index+8: +8 = item id, +9 = quantity,
+// Reads the record at g_pRoomActionEntry+8: +8 = item id, +9 = quantity,
 // +0x14 = roomItems flag index, +10 = item model slot. The entry itself is
 // deactivated (first byte 0) and the model's opened flag cleared.
 //
@@ -881,7 +881,7 @@ void* room_check_actions[ROOM_CHECK_ACTION_COUNT] = {
 // ============================================================================
 void room_event_item_pickup(void)
 {
-    unsigned char* evt = (unsigned char*)g_room_event_index;
+    unsigned char* evt = (unsigned char*)g_pRoomActionEntry;
     unsigned char* record = *(unsigned char**)(evt + 8);
 
     *evt = 0;                                     // deactivate the event entry
@@ -970,7 +970,7 @@ void room_event_item_pickup(void)
 // ============================================================================
 void room_event_take_item(void)
 {
-    unsigned char* record = *(unsigned char**)((char*)g_room_event_index + 8);
+    unsigned char* record = *(unsigned char**)((char*)g_pRoomActionEntry + 8);
     if ((char)record[8] == 'M') {          // 0x4D = ITEM_COMM_RADIO
         Flg_on((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_RADIO);
         return;
@@ -1010,7 +1010,7 @@ void check_itembox_state(void)
         g_counter_increase = 1;
         g_itembox_state = 2;
         g_itembox_cover_pointer =
-            g_omodel_table[*(unsigned short*)((char*)g_room_event_index + 4)];
+            g_omodel_table[*(unsigned short*)((char*)g_pRoomActionEntry + 4)];
         // fall through
     case 2:
         *(short*)((char*)g_itembox_cover_pointer + 0x76) -= g_short_itembox_open_timer;
@@ -1075,7 +1075,7 @@ void check_desk_state(void)
         if ((g_menu_choice_id & 0x80) == 0) {
             if ((g_menu_choice_id & 1) == 0) {
                 // "Yes": unlock and show the key-turned message.
-                Flg_on((int)g_LocksFlags, *(unsigned short*)((char*)g_room_event_index + 2));
+                Flg_on((int)g_LocksFlags, *(unsigned short*)((char*)g_pRoomActionEntry + 2));
                 play_sfx(2, 0x26, 0);
                 g_selectedItemId = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) ? ITEM_LOCK_PICK : ITEM_DESK_KEY;
                 set_message_display(0xc3, 0xff);
@@ -1087,7 +1087,7 @@ void check_desk_state(void)
     case 4:
         display_room_camera_bg();
         g_desk_check_state = 0;
-        ((unsigned char*)g_item_model_table[*(unsigned short*)((char*)g_room_event_index + 4)])[0] &=
+        ((unsigned char*)g_item_model_table[*(unsigned short*)((char*)g_pRoomActionEntry + 4)])[0] &=
             0xfe;
         return;
     case 5:
@@ -1096,8 +1096,8 @@ void check_desk_state(void)
         ((unsigned char*)&g_message_flags)[0] |= 0x45;
         g_desk_check_state = 4;
         g_roomCameraId = g_cutId;
-        g_room_event_index =
-            &g_RoomItemEventTable[*(unsigned short*)((char*)g_room_event_index + 4) * 12];
+        g_pRoomActionEntry =
+            &g_RoomActionTable[*(unsigned short*)((char*)g_pRoomActionEntry + 4) * 12];
         return;
     case 35:
         StMask(0, 1);
@@ -1122,7 +1122,7 @@ void check_typewriter_state(void)
 {
     switch (g_typewriter_state) {
     case 1:
-        g_typewriter_id = *(unsigned short*)((char*)g_room_event_index + 2);
+        g_typewriter_id = *(unsigned short*)((char*)g_pRoomActionEntry + 2);
         if (((g_playerEntity.id == 1) || (g_playerEntity.id == 5)) &&
             (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)) {
             set_message_display(224, 0xff);   // "Will you save your progress?"

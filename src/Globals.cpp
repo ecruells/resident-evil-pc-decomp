@@ -1259,11 +1259,14 @@ const unsigned char g_StageRoomFlagOffset[6] = { 0, 32, 63, 82, 100, 0 };
 DWORD         g_SysFlags[2] = {};
 // DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
 
-// 0x00d91aa0 - Room item event table (24 entries x 12 bytes = 288 bytes)
-// Used by item_set, door_set, item_model_set commands and player position updates
-unsigned char g_RoomItemEventTable[288] = {};
-// 0x00d91bc0 - Pointer to current room item event entry (reset to g_RoomItemEventTable)
-void*         g_RoomItemEventHead = NULL;
+// 0x00d91aa0 - Room action table (AOT list), 24 entries x 12 bytes = 288 bytes.
+// Built by door_set/room_action_set/item_model_set and probed every frame by the
+// player position update; entry byte 0 selects a room_check_actions handler.
+unsigned char g_RoomActionTable[288] = {};
+// 0x00d91bc0 - Highest table entry any command has touched this room, INCLUSIVE:
+// the setup commands only ever raise it and the probe loops run while
+// entry <= it. Reset to the table base on room load.
+void*         g_RoomActionTail = NULL;
 
 // 0x00d22790 - Lab slides state block (reset by lab_slides_reset)
 unsigned char g_labSlidesFuncIndex = 0;
@@ -1292,8 +1295,9 @@ int            g_labSlidesSavedPlayerY = 0;           // 0x00d2279c
 short          g_labSlidesTimerA = 0;                 // 0x00d227a0 (overlaid)
 short          g_labSlidesTimerB = 0;                 // 0x00d227a2 (overlaid)
 
-// 0x00d226a4 - Room event index (SCD event pointer for current room entity)
-void*         g_room_event_index = NULL;
+// 0x00d226a4 - the room action entry the last fired handler latched. A pointer
+// into g_RoomActionTable, not an index; unrelated to the SCD event scripts.
+void*         g_pRoomActionEntry = NULL;
 
 // 0x00d22734 - Bitmask of held items (1 << count) - 1
 DWORD         g_ItemSlotsBitmask = 0;

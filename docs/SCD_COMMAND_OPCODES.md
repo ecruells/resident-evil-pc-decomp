@@ -25,7 +25,7 @@ Notation:
 
 ## Control flow
 
-### `0x00` — `cmd_nop`
+### `0x00` — `cmd_block_end`
 
 | Key | Value |
 |---|---|
@@ -126,7 +126,7 @@ Notation:
 
 ## Room / fade state
 
-### `0x06` — `cmd_room_state_test` (Cond)
+### `0x06` — `cmd_state_byte_test` (Cond)
 
 | Key | Value |
 |---|---|
@@ -134,7 +134,7 @@ Notation:
 | Address | `0x00460760` |
 | Length | 4 bytes |
 | Returns | bool |
-| Description | Compares the byte at `(&g_stageId)[fieldIdx]` (the stage/room state byte array) against `cmpVal`. Unknown mode returns 0. |
+| Description | Compares one byte of the BioCard state block against `cmpVal`. The index is a byte offset from `g_stageId` (BioCard `+0x200`): 0 stageId, 1 roomId, 2 roomCameraId, 3 attractMode_RoomCameraId, 4 cutId, 5 menu_choice_id, 6 selectedItemId, 7 totalHeldItems, 8 specialRoomLightR, 9 characterModelId, 10 scdLastEnemyFlags, 11 bulletEffectId, 12-14 pickupQtyA/B/C, 16 fwdPosActionId, 17 entPosActionId, 18 usedItemId, 19 pickedItemId. Sampled scripts test indices 2 (268 sites), 3, 5, 9, 16, 17, 18 and 19 — nothing room-specific. Unknown mode returns 0. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -143,7 +143,7 @@ Notation:
 | +2 | mode | u8 | `0` `==`, `1` state `>`, `2` state `>=`, `3` state `<`, `4` state `<=`, `5` `!=` (state vs `cmpVal`). |
 | +3 | cmpVal | u8 | Comparison constant. |
 
-### `0x07` — `cmd_fade_state_test` (Cond)
+### `0x07` — `cmd_state_word_test` (Cond)
 
 | Key | Value |
 |---|---|
@@ -151,7 +151,7 @@ Notation:
 | Address | `0x00460800` |
 | Length | 6 bytes |
 | Returns | bool |
-| Description | Compares the `s16` at `((short*)&g_fading_state)[fieldIdx]` against `cmpVal`. Unknown mode returns 0. |
+| Description | Compares one short of the BioCard state block against `cmpVal`. The index counts **shorts** from `g_fading_state` (BioCard `+0x214`): 0 fadingState, 1 specialRoomLightState, 2 specialRoomLightDelta, 3 randSeed, 4 countdownTimer, 5 playerHealthCopy, 6 playerDpadHeld, 7 playerDpadPressed. Of the 221 *reachable* uses, 214 read index 3 (`randSeed` — this is how scripts roll dice) and 7 read index 4 (the lab countdown); none reads index 0 at all. Unknown mode returns 0. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -161,7 +161,7 @@ Notation:
 | +3 | mode | u8 | `0` `==`, `1` state `>`, `2` state `>=`, `3` cmp `>`, `4` cmp `>=`, `5` `!=`. |
 | +4 | cmpVal | u16 | Comparison constant. |
 
-### `0x08` — `cmd_room_state_set`
+### `0x08` — `cmd_state_byte_set`
 
 | Key | Value |
 |---|---|
@@ -169,7 +169,7 @@ Notation:
 | Address | `0x004608a0` |
 | Length | 4 bytes |
 | Returns | `1` |
-| Description | Writes `value` into the byte at `(&g_stageId)[fieldIdx]`. |
+| Description | Writes one byte of the BioCard state block; same index space as `0x06`. The index is unbounded and scripts use that — ROOM1130 writes index 82, which lands in `scenarioFlags2[30]`, and ROOM40A0 writes index 57 (`scenarioFlags2[5]`). |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -178,7 +178,7 @@ Notation:
 | +2 | value | u8 | New byte value. |
 | +3 | pad | u8 | Unused. |
 
-### `0x31` — `cmd_fade_state_set`
+### `0x31` — `cmd_state_word_set`
 
 | Key | Value |
 |---|---|
@@ -186,7 +186,7 @@ Notation:
 | Address | `0x004608d0` |
 | Length | 4 bytes |
 | Returns | `1` |
-| Description | Writes a `u16` into the `g_fading_state` word array. |
+| Description | Writes one short of the BioCard state block; same index space as `0x07`. Known users: index 4 (the lab countdown) and indices 1/2 in ROOM4110, which drives the flashing red emergency light. The index counts **shorts** from `g_fading_state` (BioCard `+0x214`): 0 fadingState, 1 specialRoomLightState, 2 specialRoomLightDelta, 3 randSeed, 4 countdownTimer, 5 playerHealthCopy, 6 playerDpadHeld, 7 playerDpadPressed. ROOM4110's init desyncs in `mine_room_scd.py`, so a script survey alone will not find that second user. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -228,7 +228,7 @@ Notation:
 | +0 | opcode | u8 | `0x0A` |
 | +1 | pad | u8 | Unused. |
 
-### `0x23` — `cmd_cut_lock_toggle`
+### `0x23` — `cmd_cut_lock_write`
 
 | Key | Value |
 |---|---|
@@ -236,7 +236,7 @@ Notation:
 | Address | `0x00431280` |
 | Length | 2 bytes |
 | Returns | `1` |
-| Description | Sets or clears the `g_main_state_flags` `0x100000` camera-lock bit. |
+| Description | **Writes** the `g_main_state_flags` `0x100000` camera-lock bit from the operand: `0` clears, anything else sets. Not a toggle — sampled scripts pass a literal `1` (16 sites) or `0` (14 sites). |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -297,9 +297,9 @@ Notation:
 
 ---
 
-## Room item event table (doors, items, desks)
+## Room action table (doors, items, desks)
 
-The 12-byte entries live in `g_RoomItemEventTable` (`0x00d91aa0`, 24 slots,
+The 12-byte entries live in `g_RoomActionTable` (`0x00d91aa0`, 24 slots,
 stride `0xC`); see [SCD_SCRIPT_SYSTEM.md](SCD_SCRIPT_SYSTEM.md) §4.
 
 ### `0x0C` — `cmd_door_set`
@@ -310,12 +310,12 @@ stride `0xC`); see [SCD_SCRIPT_SYSTEM.md](SCD_SCRIPT_SYSTEM.md) §4.
 | Address | `0x004611b0` |
 | Length | 26 bytes |
 | Returns | `1` |
-| Description | Registers a door interaction. Fills event entry `slot`: `[0]=1`, `[1]=record byte 0x17`, `[2..3]=slot`, `[8..11]=` pointer to the 24-byte record (`p+2`). Bumps `g_RoomItemEventHead`. |
+| Description | Registers a door interaction. Fills event entry `slot`: `[0]=1`, `[1]=record byte 0x17`, `[2..3]=slot`, `[8..11]=` pointer to the 24-byte record (`p+2`). Bumps `g_RoomActionTail`. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x0C` |
-| +1 | slot | u8 | Room item event slot (index * 0xC). |
+| +1 | slot | u8 | Room action slot (index * 0xC). |
 | +2 | record | u8[24] | 24-byte door record (RDT DOOR data), referenced whole via the pointer stored in the entry; see the record layout below. |
 | +0x19 | subType | u8 | Last record byte; copied into event entry byte `[1]`. |
 
@@ -340,7 +340,7 @@ Door record layout (starts at opcode stream `+2`, so record offset = stream offs
 | +0x16 | keyId | u8 | Key needed (key item id). |
 | +0x17 | pad2 | u8 | Unused; stored into event entry byte `[1]` (`subType` above). |
 
-### `0x0D` — `cmd_item_set`
+### `0x0D` — `cmd_room_action_set`
 
 | Key | Value |
 |---|---|
@@ -348,26 +348,29 @@ Door record layout (starts at opcode stream `+2`, so record offset = stream offs
 | Address | `0x00461130` |
 | Length | 18 bytes |
 | Returns | `1` |
-| Description | Registers an item pickup. Fills event entry `slot`: `[0]=itemType`, `[1]=subType`, `[2..7]=` three `u16`, `[8..11]=` pointer to the record (`p+2`). Bumps `g_RoomItemEventHead`. |
+| Description | Builds one room action (trigger zone) from scratch: an 8-byte zone box plus an explicit handler index, probe flags and three parameter words. Fills entry `slot`: `[0]=handler`, `[1]=flags`, `[2..7]=` three `u16`, `[8..11]=` pointer to the record (`p+2`). Bumps `g_RoomActionTail`. The generic sibling of `0x0C`, which hardcodes handler `1`. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x0D` |
-| +1 | slot | u8 | Room item event slot. |
-| +2 | record | u8[16] | Item record (RDT ITEM data), referenced whole via the pointer stored in the entry; see the record layout below. |
+| +1 | slot | u8 | Room action slot. |
+| +2 | record | u8[16] | The record the entry's `+8` pointer aims at; see the layout below. |
 
-Item record layout (starts at opcode stream `+2`, so record offset = stream offset − 2):
+Record layout (starts at opcode stream `+2`, so record offset = stream offset − 2):
 
 | Record offset | Key | Type | Description |
 |---|---|---|---|
-| +0x00 | unused0 | u8[8] | Not read by the handler; the record is referenced whole via the entry pointer. |
-| +0x08 | itemType | u8 | Event entry byte `[0]` (type/visibility flags). |
-| +0x09 | subType | u8 | Event entry byte `[1]`. |
-| +0x0A | word0 | u16 | Event entry word at `+2` (id / flag word). |
-| +0x0C | word1 | u16 | Event entry word at `+4` (parameter). |
-| +0x0E | word2 | u16 | Event entry word at `+6` (flag bit index). |
+| +0x00 | zoneX | u16 | Zone box origin X. |
+| +0x02 | zoneZ | u16 | Zone box origin Z. |
+| +0x04 | zoneW | u16 | Zone width along +X. |
+| +0x06 | zoneD | u16 | Zone depth along +Z. The box test (`is_point_in_action_zone`, `0x0041b3c0`) compares **unsigned**, so the box only ever extends towards +X/+Z. |
+| +0x08 | handler | u8 | Entry byte `[0]`: `room_check_actions` index. |
+| +0x09 | flags | u8 | Entry byte `[1]`: probe flags. Low three bits are a **participation mask** matched against the prober's own mask: `0x01` the player pass (`game_loop`), `0x02` the Tyrant pass, `0x04` the room-object push pass. `0x40` tests the prober entity's own position instead of the 600-unit forward point; `0x80` makes the entry action-key only, skipped by the per-frame passes. |
+| +0x0A | word0 | u16 | Entry word at `+2` (handler parameter). |
+| +0x0C | word1 | u16 | Entry word at `+4` (handler parameter). |
+| +0x0E | word2 | u16 | Entry word at `+6` (handler parameter). |
 
-### `0x12` — `cmd_item_record_set`
+### `0x12` — `cmd_room_action_reset`
 
 | Key | Value |
 |---|---|
@@ -375,19 +378,19 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | Address | `0x00460fc0` |
 | Length | 10 bytes |
 | Returns | `1` |
-| Description | Overwrites bytes `[0..7]` of event entry `slot` (leaves the record pointer at `+8` untouched). |
+| Description | Rewrites bytes `[0..7]` of room action entry `slot`, leaving the SCD record pointer at `+8` — and so the zone geometry — untouched. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x12` |
-| +1 | slot | u8 | Room item event slot. |
-| +2 | b0 | u8 | Event entry byte `[0]`. |
-| +3 | b1 | u8 | Event entry byte `[1]`. |
-| +4 | word0 | u16 | Event entry word at `+2`. |
-| +6 | word1 | u16 | Event entry word at `+4`. |
-| +8 | word2 | u16 | Event entry word at `+6`. |
+| +1 | slot | u8 | Room action slot. |
+| +2 | type | u8 | Entry byte `[0]`: `room_check_actions` handler index. |
+| +3 | flags | u8 | Entry byte `[1]`: probe flags. Low three bits are a **participation mask** matched against the prober's own mask: `0x01` the player pass (`game_loop`), `0x02` the Tyrant pass, `0x04` the room-object push pass. `0x40` tests the prober entity's own position instead of the 600-unit forward point; `0x80` makes the entry action-key only, skipped by the per-frame passes. |
+| +4 | word0 | u16 | Entry word at `+2`. |
+| +6 | word1 | u16 | Entry word at `+4`. |
+| +8 | word2 | u16 | Entry word at `+6`. |
 
-### `0x13` — `cmd_item_event_set`
+### `0x13` — `cmd_room_action_arm`
 
 | Key | Value |
 |---|---|
@@ -395,14 +398,14 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | Address | `0x00461010` |
 | Length | 4 bytes |
 | Returns | `1` |
-| Description | Overwrites only bytes `[0]` and `[1]` of event entry `slot`. |
+| Description | Arms, disarms or re-types one room action entry: writes only the handler index and the probe flags, so the zone geometry and parameters built by `0x0C`/`0x0D` survive. Handler `0` (`no_room_action`) or flags without bit `0x01` make the zone dead — scripts use it in `if`/`else` pairs to toggle a trigger. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x13` |
-| +1 | slot | u8 | Room item event slot. |
-| +2 | b0 | u8 | Event entry byte `[0]`. |
-| +3 | b1 | u8 | Event entry byte `[1]`. |
+| +1 | slot | u8 | Room action slot. |
+| +2 | type | u8 | Entry byte `[0]`: `room_check_actions` handler index. |
+| +3 | flags | u8 | Entry byte `[1]`: probe flags. Low three bits are a **participation mask** matched against the prober's own mask: `0x01` the player pass (`game_loop`), `0x02` the Tyrant pass, `0x04` the room-object push pass. `0x40` tests the prober entity's own position instead of the 600-unit forward point; `0x80` makes the entry action-key only, skipped by the per-frame passes. |
 
 ### `0x24` — `cmd_room_action`
 
@@ -412,12 +415,12 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | Address | `0x004312b0` |
 | Length | 4 bytes |
 | Returns | `1` |
-| Description | `room_check_actions[actionIdx](&g_RoomItemEventTable[slot * 0xC])` — runs one of the 18 room-action handlers (`0x00`–`0x11`, see [SCD_SCRIPT_SYSTEM.md](SCD_SCRIPT_SYSTEM.md) §4). Out-of-range or unimplemented action index is a guarded no-op in the decomp. |
+| Description | `room_check_actions[actionIdx](&g_RoomActionTable[slot * 0xC])` — runs one of the 18 room-action handlers (`0x00`–`0x11`, see [SCD_SCRIPT_SYSTEM.md](SCD_SCRIPT_SYSTEM.md) §4). Out-of-range or unimplemented action index is a guarded no-op in the decomp. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x24` |
-| +1 | itemSlot | u8 | Room item event slot passed to the handler. |
+| +1 | itemSlot | u8 | Room action slot passed to the handler. |
 | +2 | actionIdx | u8 | Index into `room_check_actions` (`0x004b9340`). |
 | +3 | pad | u8 | Unused. |
 
@@ -446,13 +449,13 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | Address | `0x004322d0` |
 | Length | 4 bytes |
 | Returns | `1` |
-| Description | Transfers data between an event entry's originating SCD record (pointer at entry `+8`) and the `g_stageId` state byte array. Mode 2 looks the record's item id up in the inventory. |
+| Description | Moves a pick-up **quantity** between a room action record and one BioCard state byte. Record byte 8 is the item id and byte 9 its quantity, so mode 0 remembers the count, mode 1 restores it and mode 2 loads the quantity the player is actually carrying into both. The three uses found are all mode 1 on `pickupQtyA/B/C` (state indices 12/13/14): ROOM1160 restores a shotgun (7 shells), ROOM30B0 and ROOM3080 a flamethrower (240 fuel each). |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x4C` |
 | +1 | mode | u8 | `0` = record byte 9 → state byte, `1` = state byte → record byte 9, `2` = copy the inventory quantity of record byte 8 into both. |
-| +2 | slotIdx | u8 | Room item event slot. |
+| +2 | slotIdx | u8 | Room action slot. |
 | +3 | fieldIdx | u8 | Byte index into the `g_stageId` state array. |
 
 ---
@@ -504,7 +507,7 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | +0 | opcode | u8 | `0x1A` |
 | +1 | itemId | u8 | Item id to search for. |
 
-### `0x1D` — `cmd_equipped_weapon_test` (Cond)
+### `0x1D` — `cmd_equipped_item_test` (Cond)
 
 | Key | Value |
 |---|---|
@@ -512,12 +515,12 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | Address | `0x00460ee0` |
 | Length | 2 bytes |
 | Returns | bool |
-| Description | Compares the item id in the currently equipped inventory slot against `weaponId`. |
+| Description | Compares the item id in the currently equipped inventory slot against `itemId`. Not weapon-specific — every sampled use tests `0`, i.e. "nothing equipped". |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
 | +0 | opcode | u8 | `0x1D` |
-| +1 | weaponId | u8 | Item id of the weapon. |
+| +1 | itemId | u8 | Item id to compare against the equipped slot. |
 
 ### `0x22` — `cmd_item_count_test` (Cond)
 
@@ -657,7 +660,7 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | +6 | posX | s16 | X coordinate (posType 0 only). |
 | +8 | posZ | s16 | Z coordinate (posType 0 only). |
 
-### `0x1E` — `cmd_sfx_set`
+### `0x1E` — `cmd_voice_play`
 
 | Key | Value |
 |---|---|
@@ -665,7 +668,7 @@ Item record layout (starts at opcode stream `+2`, so record offset = stream offs
 | Address | `0x00461a80` |
 | Length | 4 bytes |
 | Returns | `1` |
-| Description | `play_sound_and_voice_effect(type, param)` and `g_main_state_flags |= 0x20000`. |
+| Description | Starts or ends a cutscene **voice** line (`0x17` is the sound-effect command). `play_sound_and_voice_effect` type 1 loads and plays the line, type 2 ends it, resets the mixer and clears the wait flag. Raising `MSF_VOICE_PLAYING` (`0x20000`) here is what event-VM opcode `0xF7` blocks on, so this gates a scripted line advancing. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -1041,7 +1044,7 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 | +4 | param | u16 | Value / operand word (subCmd dependent). |
 | +6 | extra | u8 | Only subCmd 1: `hit_state` byte. |
 
-### `0x33` — `cmd_damage_set`
+### `0x33` — `cmd_player_prop_set`
 
 | Key | Value |
 |---|---|
@@ -1049,7 +1052,7 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 | Address | `0x004314b0` |
 | Length | 2/4 bytes (see subCmd) |
 | Returns | `1` |
-| Description | Modifies the player's damage/combat state. Sub-commands select the field and consumed length; unknown subCmd consumes nothing (interpreter spins, as in the original). |
+| Description | Multi-subcommand **player** property setter — the twin of `0x28` `cmd_enemy_prop_set`. Sub-commands: 0 clear equipped weapon, 1 enter the being-attacked animation, 3 write/or/xor `player.flags`, 4 force action 1/6, 5 `directionAngle`, 6 clear `unk_8c`, 7 reset to idle, 8 write/or/xor `healthStatusFlags`, 9 xor joint flags, 10 set/clear `unk_e0` bit `0x40`. Sampled scripts use only 10, 8 and 0 — the damage-adjacent sub-command 1 never turned up. Unknown subCmd consumes nothing (interpreter spins, as in the original). |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -1090,7 +1093,7 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 | +1 | entIdx | u8 | `0` = player, else enemy index. |
 | +2 | value | u16 | Word to write. |
 
-### `0x45` — `cmd_entity_posy_add`
+### `0x45` — `cmd_player_posy_add`
 
 | Key | Value |
 |---|---|
@@ -1098,7 +1101,7 @@ Parameter block layout (starts at opcode stream `+0x0C`, so block offset = strea
 | Address | `0x004320f0` |
 | Length | 2 bytes |
 | Returns | `1` |
-| Description | `g_playerEntity.posY += (s8)delta`. |
+| Description | `g_playerEntity.posY += (s8)delta`. Player-only — unlike `0x41` it has no entity selector. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -1393,7 +1396,7 @@ Light record layout (12 bytes, repeated for `light0`/`light1`/`light2`; record o
 | +2 | sprId | u8 | Sprite id. |
 | +3 | disable | u8 | `0` → `RoomSpr_SetActive`, non-zero → `RoomSpr_SetInactive`. |
 
-### `0x49` — `cmd_room_bitmask_set`
+### `0x49` — `cmd_room_sprite_hide`
 
 | Key | Value |
 |---|---|
@@ -1401,7 +1404,7 @@ Light record layout (12 bytes, repeated for `light0`/`light1`/`light2`; record o
 | Address | `0x00432290` |
 | Length | 2 bytes |
 | Returns | `1` |
-| Description | Sets bit `bit & 0x1F` of `DAT_00d22770`, or clears the whole variable when `bit == 0xFF`. |
+| Description | Queues a room sprite id for hiding: sets bit `id & 0x1F` of the pending mask (`DAT_00d22770`), or wipes the mask when `id == 0xFF`. `Room_ApplySpriteFlags` (`0x00432220`) walks it every frame, sets `active = 0` on every room sprite whose id is a set bit, then clears it. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|
@@ -1471,7 +1474,7 @@ through this table — both are documented in
 | +2 | pad1 | u8 | Unused. |
 | +3 | pad2 | u8 | Unused. |
 
-### `0x4F` — `cmd_script_flag_set`
+### `0x4F` — `cmd_costume_variant_set`
 
 | Key | Value |
 |---|---|
@@ -1486,7 +1489,7 @@ through this table — both are documented in
 | +0 | opcode | u8 | `0x4F` |
 | +1 | param | u8 | Bit 0 becomes `g_bCostumeVariant`. |
 
-### `0x50` — `cmd_script_flag_test` (Cond)
+### `0x50` — `cmd_costume_variant_test` (Cond)
 
 | Key | Value |
 |---|---|
@@ -1494,7 +1497,7 @@ through this table — both are documented in
 | Address | `0x004622e0` |
 | Length | 2 bytes |
 | Returns | bool: `g_bCostumeVariant` |
-| Description | Returns the flag byte written by `0x4F`. |
+| Description | Returns `g_bCostumeVariant`, the bit `0x4F` wrote. The original consumes the 2-byte instruction and returns the byte directly — there is no callee, and the operand byte is ignored. |
 
 | Offset | Key | Type | Description |
 |---|---|---|---|

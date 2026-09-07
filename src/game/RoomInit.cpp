@@ -200,17 +200,20 @@ void init_room(void)
 }
 
 // ============================================================================
-// room_item_event_table_reset (0x00477f80)
-// Clears the room item event table (24 entries x 12 bytes) and resets the
-// head pointer. Used by item_set, door_set, item_model_set commands.
+// room_action_table_reset (0x00477f80)
+// Makes all 24 room action slots inert and rewinds the tail. It zeroes ONLY
+// byte 0 of each slot - the room_check_actions handler index, which the probe
+// loops test first - so the other 11 bytes still hold the previous room's
+// values until a door_set / room_action_set / item_model_set overwrites them.
+// Called on room load, before the room's init SCD rebuilds the table.
 // ============================================================================
-void room_item_event_table_reset(void) {
-    unsigned char* p = g_RoomItemEventTable;
+void room_action_table_reset(void) {
+    unsigned char* p = g_RoomActionTable;
     do {
         *p = 0;
         p += 12;
-    } while (p < g_RoomItemEventTable + 288);
-    g_RoomItemEventHead = g_RoomItemEventTable;
+    } while (p < g_RoomActionTable + 288);
+    g_RoomActionTail = g_RoomActionTable;
 }
 
 // ============================================================================
@@ -301,8 +304,8 @@ void room_set(void)
     // 0x00477833: Reset texture queue
     texture_queue_reset();
 
-    // 0x00477838: Reset room item event table
-    room_item_event_table_reset();
+    // 0x00477838: Reset the room action table
+    room_action_table_reset();
 
     // 0x0047783d: Zero SCD system flags (flag bank 4, both DWORDs)
     g_SysFlags[0] = 0;

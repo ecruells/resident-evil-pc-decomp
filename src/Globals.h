@@ -727,12 +727,20 @@ extern char          FILE_PATH[260];
 extern DWORD         g_SysFlags[2];                    // 0x00be41c8 - SCD flag bank 4 (system flags, case 4 in cmd_bit_test)
 // DAT_00be9830 (g_fwdPosActionId) is now a macro to g_BioCard.fwdPosActionId (see BioCard.h)
 
-// Room item event table (24 entries x 12 bytes, used by item/door commands)
-extern unsigned char g_RoomItemEventTable[288];        // 0x00d91aa0
-extern void*         g_RoomItemEventHead;              // 0x00d91bc0
+// Room action table (AOT list): 24 entries x 12 bytes. One entry per trigger
+// zone in the room - doors, pick-ups, message zones, stairs, the itembox,
+// effect zones and cutscene triggers all live here. Entry byte 0 is the
+// room_check_actions handler index, byte 1 the probe flags, +8 the pointer to
+// the originating SCD record (the zone geometry).
+extern unsigned char g_RoomActionTable[288];        // 0x00d91aa0
+extern void*         g_RoomActionTail;              // 0x00d91bc0
 
-// Room event index (SCD event pointer for current room entity)
-extern void*         g_room_event_index;               // 0x00d226a4
+// Pointer to the room action entry the last fired handler latched (a
+// g_RoomActionTable slot, NOT an index and nothing to do with the SCD event
+// scripts in g_ScdEventTable). The interaction that follows the handler -
+// the item-menu pickup, the desk unlock, the typewriter - reads the entry's
+// +2/+4 fields and follows +8 to the SCD record for the item id and quantity.
+extern void*         g_pRoomActionEntry;               // 0x00d226a4
 
 // Room model record tables (populated by room_set from the RDT VB region)
 extern void*         g_omodel_table[8];      // 0x00d226b0 - room-object (omodel) records
@@ -1307,7 +1315,7 @@ extern DWORD         DAT_00ae9f06;
 extern DWORD         DAT_00ae9f00;
 extern DWORD         DAT_00ae9efc;
 // 0x004d6444 (DAT_004d6444) - costume variant selector. SCD opcode 0x4F
-// (cmd_script_flag_set -> FUN_0040c560) writes param & 1 here. LoadEntityEMD
+// (cmd_costume_variant_set -> FUN_0040c560) writes param & 1 here. LoadEntityEMD
 // adds it to 0x33 to pick the alternate-outfit EMD (em1030/em1032) when the
 // costume-swap flag (g_main_state_flags2 bit 0x4000000) is active, and the
 // value is persisted in the save block at offset 0xA01.

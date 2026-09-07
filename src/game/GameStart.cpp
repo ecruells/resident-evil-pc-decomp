@@ -73,9 +73,12 @@ void SetInitialItems(void)
         memcpy(g_roomItemsFlags, roomItemsFlagsInit, 32);
     }
 
-    g_initUnusedA = 7;
-    g_initUnusedB = 0xf0;
-    g_initUnusedC = 0xf0;
+    // Starting quantities for the three room pick-ups SCD opcode 0x4C restores:
+    // ROOM1160's shotgun (7 shells) and the flamethrowers in ROOM30B0 / ROOM3080
+    // (240 fuel each). see BioCard.h.
+    g_pickupQtyA = 7;
+    g_pickupQtyB = 240;
+    g_pickupQtyC = 240;
 
     if ((g_playerEntity.id & 3) == CHAR_CHRIS) {
         // Chris: 6 slots, Rebecca gets Baretta with 15 bullets
@@ -337,10 +340,10 @@ void InitializeGame(void)
 
     LoadHeldItemsImages();
 
-    // 0x00480a0d: DAT_00d91bc0 = &g_RoomItemEventTable. Redundant in practice —
-    // room_set -> room_item_event_table_reset sets the same head pointer — but
+    // 0x00480a0d: DAT_00d91bc0 = &g_RoomActionTable. Redundant in practice —
+    // room_set -> room_action_table_reset rewinds the same tail pointer — but
     // present in the original.
-    g_RoomItemEventHead = g_RoomItemEventTable;
+    g_RoomActionTail = g_RoomActionTable;
 
     g_playerEntity.pSca_hit_data = (DWORD)g_entityDataBlock;
 

@@ -25,7 +25,7 @@
 // room's script - the destination room's own script does not know where
 // players spawn inside it. So after room_transition_load returns,
 // DebugRoomChange_ApplyPendingPlacement (called from game_loop right after
-// it) scans the freshly-loaded room's item event table for its first door
+// it) scans the freshly-loaded room's action table for its first door
 // record and stands the player just past that door's action zone, with a
 // collision point query to reject spots that are inside a wall.
 //
@@ -446,7 +446,7 @@ static void DebugRoomChange_Draw(void)
 // load finished. Only acts on debug-menu transitions (s_dbgRoomChangeArmed).
 //
 // Places the player at the destination room's first door: scans the freshly
-// loaded room's item event table (g_RoomItemEventTable, 12-byte entries built
+// loaded room's action table (g_RoomActionTable, 12-byte entries built
 // by cmd_door_set / 0x004611b0) for the first door entry (action id 1 =
 // door_try_enter, room_check_actions[1]) and stands the player just outside
 // that door's action zone, which is the 4-u16 box at record+0x00 (x, z,
@@ -512,14 +512,14 @@ void DebugRoomChange_ApplyPendingPlacement(void)
         s_dbgRestoreVariant = 0;
     }
 
-    unsigned char* table = g_RoomItemEventTable;
-    unsigned char* head  = (unsigned char*)g_RoomItemEventHead;
-    if (head == NULL || head < table) {
-        dbg_printf("[debugmenu] room change: no item event table, player left at record entry\n");
+    unsigned char* table = g_RoomActionTable;
+    unsigned char* tail  = (unsigned char*)g_RoomActionTail;
+    if (tail == NULL || tail < table) {
+        dbg_printf("[debugmenu] room change: no room action table, player left at record entry\n");
         return;
     }
 
-    for (unsigned char* entry = table; entry <= head; entry += 12) {
+    for (unsigned char* entry = table; entry <= tail; entry += 12) {
         if (entry[0] != 1) {            // room_check_actions[1] = door
             continue;
         }

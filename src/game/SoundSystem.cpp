@@ -1138,10 +1138,10 @@ void Play3DSnd(int bank, int soundId, int vol, int pos) // 0x0047f9c0
 }
 
 // ============================================================================
-// SCD voice playback (opcode 0x1E, cmd_sfx_set)
+// SCD voice playback (opcode 0x1E, cmd_voice_play)
 //
 // Cutscene dialogue is one WAV per line under .\usa\voice\, loaded into
-// g_BgmSoundBank. The handshake with the script matters: cmd_sfx_set SETS
+// g_BgmSoundBank. The handshake with the script matters: cmd_voice_play SETS
 // g_main_state_flags bit 17 (0x20000) after asking for a voice, and
 // play_sound_and_voice_effect type 2 CLEARS it. Event-VM opcode 0xF7 waits on
 // that bit, so the voice is what gates a cutscene line advancing. While

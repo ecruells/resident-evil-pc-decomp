@@ -2472,8 +2472,8 @@ int check_action_object(void)
     g_playerPosScratch.x = g_svecScratch.x + g_playerEntity.scaMatrixData.localMatrix.t[0];
     g_playerPosScratch.z = g_svecScratch.z + g_playerEntity.scaMatrixData.localMatrix.t[2];
 
-    unsigned char* entry = g_RoomItemEventTable;
-    if ((unsigned char*)g_RoomItemEventTable - 1 < (unsigned char*)g_RoomItemEventHead) {
+    unsigned char* entry = g_RoomActionTable;
+    if ((unsigned char*)g_RoomActionTable - 1 < (unsigned char*)g_RoomActionTail) {
         char index = 0;
         do {
             if (*entry != 0) {
@@ -2496,7 +2496,7 @@ int check_action_object(void)
             }
             entry += 12;
             index++;
-        } while (entry <= (unsigned char*)g_RoomItemEventHead);
+        } while (entry <= (unsigned char*)g_RoomActionTail);
     }
     return 0;
 }
@@ -3496,7 +3496,7 @@ static void player_behavior_0c_interact(void)
     } else if (g_playerEntity.action_state == 1) {
         if (Joint_move(0, g_playerEntity.jointMoveData0,
                        g_playerEntity.jointMoveData1, 0x400) != 0) {
-            if (*(char*)g_room_event_index == 0x0d) {
+            if (*(char*)g_pRoomActionEntry == 0x0d) {
                 g_main_state_flags |= MSF_PICKUP_SCREEN;
             } else {
                 g_main_state_flags |= MSF_MENU_MODE_ITEM_VIEW;
@@ -6777,7 +6777,7 @@ int check_door(unsigned char* entry)
 // ============================================================================
 // Remaining room_check_actions handlers (0x0041b630 - 0x0041bf90)
 //
-// Each takes the 12-byte g_RoomItemEventTable entry. Entries without flag 0x80
+// Each takes the 12-byte g_RoomActionTable entry. Entries without flag 0x80
 // are probed every frame by update_player_position; entries WITH flag 0x80 only
 // by check_action_object on the action-key press. Handlers return 0 when they
 // acted; set_key_flag and set_room_event_flag return 1 when their +2 field is
@@ -6809,7 +6809,7 @@ int include_key(unsigned char* entry)
             *(unsigned char*)(*(unsigned char**)(entry + 8) + 8)) {
         return 0;
     }
-    g_room_event_index = entry;
+    g_pRoomActionEntry = entry;
     set_message_display(0xc1, 0xff);
     return 0;
 }
@@ -6827,7 +6827,7 @@ int include_key(unsigned char* entry)
 // ============================================================================
 int set_key_flag(unsigned char* entry)
 {
-    g_room_event_index = entry;
+    g_pRoomActionEntry = entry;
     if (*(unsigned short*)(entry + 2) == 0) {
         g_main_state_flags |= MSF_MENU_MODE_ITEM_VIEW;
         return 0;
@@ -6933,7 +6933,7 @@ int open_itembox(unsigned char* entry)
         g_itembox_state = 1;
         g_message_flags = (unsigned short)g_message_flags & 0xffba;
         play_sfx(2, 0x20, 0);
-        g_room_event_index = entry;
+        g_pRoomActionEntry = entry;
     }
     return 0;
 }
@@ -7014,7 +7014,7 @@ int set_stairs_zone(unsigned char* entry)
 // ============================================================================
 int set_room_event_flag(unsigned char* entry)
 {
-    g_room_event_index = entry;
+    g_pRoomActionEntry = entry;
     if (*(unsigned short*)(entry + 2) == 0) {
         g_main_state_flags |= MSF_PICKUP_SCREEN;
         return 0;
@@ -7045,8 +7045,8 @@ int check_desk(unsigned char* entry)
         unsigned short eventIdx = *(unsigned short*)(entry + 4);
         // The flag index and item-model slot index live in the +6/+4
         // fields of the event-table entry at index eventIdx
-        // (ITEMS_FLAGS = g_RoomItemEventTable+6).
-        unsigned short itemFlagIdx = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 6 + (unsigned int)eventIdx * 0xc);
+        // (ITEMS_FLAGS = g_RoomActionTable+6).
+        unsigned short itemFlagIdx = *(unsigned short*)((unsigned char*)g_RoomActionTable + 6 + (unsigned int)eventIdx * 0xc);
         if (Flg_ck((int)g_roomItemsFlags, itemFlagIdx) != 0) {
             if ((g_playerEntity.id & 3) == 3) {
                 set_message_display(0xd7, 0xff);
@@ -7057,13 +7057,13 @@ int check_desk(unsigned char* entry)
                     set_message_display(0xd8, 0xff);
                     return 0;
                 }
-                g_room_event_index = entry;
+                g_pRoomActionEntry = entry;
                 g_desk_check_state = 1;
                 return 0;
             }
             // Desk already unlocked: swing the lid open and cut to its camera.
-            g_room_event_index = entry;
-            unsigned short modelSlot = *(unsigned short*)((unsigned char*)g_RoomItemEventTable + 4 + (unsigned int)eventIdx * 0xc);
+            g_pRoomActionEntry = entry;
+            unsigned short modelSlot = *(unsigned short*)((unsigned char*)g_RoomActionTable + 4 + (unsigned int)eventIdx * 0xc);
             ((unsigned char*)g_item_model_table[modelSlot])[0] |= 1;
             play_sfx(2, 0x24, 0);
             g_cutId = g_roomCameraId;
@@ -7124,7 +7124,7 @@ int check_typewriter(unsigned char* entry)
         ((unsigned short)g_message_flags & 0x40) != 0) {
         int ribbonSlot = get_item_slot(ITEM_INK_RIBBONS);
         if (ribbonSlot >= 0) {
-            g_room_event_index = entry;
+            g_pRoomActionEntry = entry;
             *(unsigned short*)(entry + 2) = (unsigned short)ribbonSlot;
             g_typewriter_state = 1;
             g_message_flags = (unsigned short)g_message_flags & 0xffba;
@@ -7132,7 +7132,7 @@ int check_typewriter(unsigned char* entry)
         }
         if ((g_playerEntity.id == 1) || (g_playerEntity.id == 5)) {
             if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
-                g_room_event_index = entry;
+                g_pRoomActionEntry = entry;
                 *(unsigned short*)(entry + 2) = (unsigned short)ribbonSlot;
                 g_typewriter_state = 1;
                 g_message_flags = (unsigned short)g_message_flags & 0xffba;
@@ -7195,14 +7195,14 @@ void update_player_position(PlayerEntity* ent, int mask)
     // 0x0041c0a8: clear the action-available bit
     ENTITY->has_enter_switch_zone &= 0xdf;
 
-    // 0x0041c0b1: bail out when the event table is empty. The original compares
-    // the head pointer against g_RoomItemEventTable - 1.
-    unsigned char* head = (unsigned char*)g_RoomItemEventHead;
-    if (head == NULL || head < g_RoomItemEventTable) {
+    // 0x0041c0b1: bail out when the action table is empty. The original compares
+    // the tail pointer against g_RoomActionTable - 1.
+    unsigned char* tail = (unsigned char*)g_RoomActionTail;
+    if (tail == NULL || tail < g_RoomActionTable) {
         return;
     }
 
-    unsigned char* entry = g_RoomItemEventTable;
+    unsigned char* entry = g_RoomActionTable;
     char index = 0;
     do {
         unsigned char flags = entry[1];
@@ -7232,7 +7232,7 @@ void update_player_position(PlayerEntity* ent, int mask)
         }
         entry += 12;
         index++;
-    } while (entry <= head);
+    } while (entry <= tail);
 
     (void)actionResult;
 }

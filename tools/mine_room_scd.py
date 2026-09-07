@@ -13,89 +13,102 @@ import argparse
 import struct
 import sys
 
+# room_check_actions (0x004b9340) - entry byte 0 selects one of these.
+ROOM_ACTIONS = {
+    0x00: 'no_room_action',        0x01: 'door_try_enter',
+    0x02: 'display_msg_room_action', 0x03: 'include_key',
+    0x04: 'set_key_flag',          0x05: 'check_door',
+    0x06: 'check_door_side',       0x07: 'flag_bank_set',
+    0x08: 'open_itembox',          0x09: 'create_room_event',
+    0x0a: 'room_action_noop10',    0x0b: 'room_action_effect',
+    0x0c: 'set_stairs_zone',       0x0d: 'set_room_event_flag',
+    0x0e: 'check_desk',            0x0f: 'pickup_key_event',
+    0x10: 'check_typewriter',      0x11: 'stairs_height_update',
+}
+
 # opcode -> (name, width_in_bytes_after_opcode, comment)
 CMDS = {
-    0x00: ('nop', 0, ""),
+    0x00: ('block_end', 0, ""),
     0x01: ('if', 1, ""),
     0x02: ('else', 1, ""),
     0x03: ('end_if', 1, ""),
     0x04: ('bit_test', 3, ""),
     0x05: ('bit_op', 3, ""),
-    0x06: ('obj06_test', 3, ""),
-    0x07: ('obj07_test', 5, ""),
-    0x08: ('room_cam_set', 3, ""),
-    0x09: ('cut_set', 1, ""),
+    0x06: ('state_byte_test', 3, ""),
+    0x07: ('state_word_test', 5, ""),
+    0x08: ('state_byte_set', 3, ""),
+    0x09: ('cut_lock_set', 1, ""),
     0x0a: ('current_cut_set', 1, ""),
     0x0b: ('message_set', 3, ""),
     0x0c: ('door_set', 25, ""),
-    0x0d: ('item_set', 17, ""),
-    0x0e: ('skip_2bytes', 1, ""),
-    0x0f: ('entities_0x0f', 7, ""),
-    0x10: ('obj10_test', 1, ""),
-    0x11: ('obj11_test', 1, ""),
-    0x12: ('item_flag_0x12', 9, ""),
-    0x13: ('cmd_0x13', 3, ""),
-    0x14: ('cmd_0x14', 3, ""),
-    0x15: ('bgm_0x15', 1, ""),
-    0x16: ('volume_set', 1, ""),
-    0x17: ('player_pos_0x17', 9, ""),
+    0x0d: ('room_action_set', 17, "slot, zone box, handler index, probe flags"),
+    0x0e: ('skip_2bytes_opcode', 1, ""),
+    0x0f: ('mirror_set', 7, ""),
+    0x10: ('used_item_test', 1, ""),
+    0x11: ('picked_item_test', 1, ""),
+    0x12: ('room_action_reset', 9, "rewrite entry bytes [0..7], keep record ptr"),
+    0x13: ('room_action_arm', 3, "slot, handler index, probe flags"),
+    0x14: ('scd_event_create', 3, ""),
+    0x15: ('bgm_play', 1, ""),
+    0x16: ('bgm_stop', 1, ""),
+    0x17: ('sfx_3d_play', 9, ""),
     0x18: ('item_model_set', 25, ""),
-    0x19: ('obj19_set', 3, ""),
+    0x19: ('model_flag_set', 3, ""),
     0x1a: ('item_search', 1, ""),
     0x1b: ('enemy_set', 21, "22 bytes total - cmd_enemy_set adds 0x16"),
-    0x1c: ('cmd_0x1c', 5, ""),
-    0x1d: ('weapon_set', 1, ""),
-    0x1e: ('sfx_set', 3, ""),
+    0x1c: ('room_light_fade_set', 5, ""),
+    0x1d: ('equipped_item_test', 1, ""),
+    0x1e: ('voice_play', 3, ""),
     0x1f: ('omodel_set', 3, ""),
     0x20: ('player_pos_set', 13, ""),
     0x21: ('enemy_pos_set', 13, ""),
-    0x22: ('item_cmd_0x22', 3, ""),
-    0x23: ('cut_toggle', 1, ""),
+    0x22: ('item_count_test', 3, ""),
+    0x23: ('cut_lock_write', 1, ""),
     0x24: ('room_action', 3, ""),
-    0x25: ('rdt_0x25', 3, ""),
-    0x26: ('nop_0x26', 0, ""),
+    0x25: ('room_sprite_set', 3, ""),
+    0x26: ('dead_slot_hang_26', 0, ""),
     0x27: ('snd_fade_set', 1, ""),
-    0x28: ('enemy_0x28', 5, ""),
+    0x28: ('enemy_prop_set', 5, ""),
     0x29: ('fmv_set', 1, ""),
     0x2a: ('effect_spawn', 11, ""),
-    0x2b: ('player_anim_0x2b', 3, ""),
+    0x2b: ('attack_anim_set', 3, ""),
     0x2c: ('item_remove', 1, ""),
     0x2d: ('got_item', 1, ""),
-    0x2e: ('nop_0x2e', 0, ""),
-    0x2f: ('cmd_0x2f', 3, ""),
-    0x30: ('boundaries_0x30', 11, ""),
-    0x31: ('cmd_0x31', 3, ""),
+    0x2e: ('dead_slot_hang_2e', 0, ""),
+    0x2f: ('snd_pan_vol_set', 3, ""),
+    0x30: ('boundary_set', 11, ""),
+    0x31: ('state_word_set', 3, ""),
     0x32: ('skip_4bytes', 3, ""),
-    0x33: ('damage_set', 1, ""),
-    0x34: ('cmd_0x34', 1, ""),
-    0x35: ('cmd_0x35', 3, ""),
-    0x36: ('cmd_0x36', 3, ""),
-    0x37: ('cmd_0x37', 3, ""),
-    0x38: ('cmd_0x38', 3, ""),
-    0x39: ('cmd_0x39', 1, ""),
-    0x3a: ('cut_0x3a', 3, ""),
-    0x3b: ('cmd_0x3b', 5, ""),
-    0x3c: ('cmd_0x3c', 5, ""),
-    0x3d: ('bullet_0x3d', 11, ""),
-    0x3e: ('cmd_0x3f', 1, ""),
-    0x3f: ('player_dir_set', 5, ""),
-    0x40: ('lights_0x41', 15, ""),
-    0x41: ('cmd_0x42', 3, ""),
-    0x42: ('cmd_0x43', 3, ""),
-    0x43: ('cmd_0x44', 3, ""),
-    0x44: ('cmd_0x45', 1, ""),
-    0x45: ('cmd_0x46', 1, ""),
-    0x46: ('light_set_0x47', 1, ""),
-    0x47: ('cmd_0x48', 13, ""),
-    0x48: ('cmd_0x49', 1, ""),
-    0x49: ('cmd_0x4a', 1, ""),
-    0x4a: ('snd_set0x4b', 1, ""),
-    0x4b: ('cmd_0x4c', 1, ""),
-    0x4c: ('cmd_0x4d', 3, ""),
-    0x4d: ('cmd_0x4e', 1, ""),
-    0x4e: ('cmd_0x4f', 3, ""),
-    0x4f: ('cmd_0x50', 1, ""),
-    0x50: ('cmd_0x51', 1, ""),
+    0x33: ('player_prop_set', 1, ""),
+    0x34: ('model_tint_set', 1, ""),
+    0x35: ('obj_flag_set', 3, ""),
+    0x36: ('obj_field_test', 3, ""),
+    0x37: ('room_bgm_state_set', 3, ""),
+    0x38: ('dpad_test', 3, ""),
+    0x39: ('enemy_flags_get', 1, ""),
+    0x3a: ('cut_zone_set', 3, ""),
+    0x3b: ('obj_rotation_set', 5, ""),
+    0x3c: ('player_dist_test', 5, ""),
+    0x3d: ('bullet_effect_spawn', 11, ""),
+    0x3e: ('bullet_effect_clear', 1, ""),
+    0x3f: ('player_dir_test', 5, ""),
+    0x40: ('light_param_set', 15, ""),
+    0x41: ('entity_posy_set', 3, ""),
+    0x42: ('effect_clear_typed', 3, ""),
+    0x43: ('bgm_volume_ramp', 3, ""),
+    0x44: ('scd_event_kill', 1, ""),
+    0x45: ('player_posy_add', 1, ""),
+    0x46: ('room_lights_set', 1, ""),
+    0x47: ('obj_transform_set', 13, ""),
+    0x48: ('effect_pool_clear', 1, ""),
+    0x49: ('room_sprite_hide', 1, ""),
+    0x4a: ('bgm_restore', 1, ""),
+    0x4b: ('bgm_stop_all', 1, ""),
+    0x4c: ('item_record_transfer', 3, ""),
+    0x4d: ('player_joint_tint', 1, ""),
+    0x4e: ('effect_flags_modify', 3, ""),
+    0x4f: ('costume_variant_set', 1, ""),
+    0x50: ('costume_variant_test', 1, ""),
 }
 
 # cmd_bit_test / cmd_bit_op bank switch - see docs/SCENARIO_FLAGS.md
@@ -153,14 +166,23 @@ def decode(data, off, length, label):
             detail = f"msg={u16(body, 0) >> 8:#x} pause={u16(body, 2):#x}"
         elif op == 0x0D:
             slot = body[0]
+            # body[1..8] is the zone box the entry+8 record pointer aims at:
+            # u16 x, z, width, depth (is_point_in_action_zone, 0x0041b3c0).
+            zx, zz, zw, zd = (u16(body, 1), u16(body, 3),
+                              u16(body, 5), u16(body, 7))
             action = body[9]          # entry[0] = opcode[10] -> body[9]
             flags = body[10]          # entry[1] = opcode[0xb] -> body[10]
-            # cmd_item_set (0x00460970) advances 0x12, so the body is 17 bytes
-            # and holds only THREE u16 after the two flag bytes - entry+2/+4/+6
-            # come from opcode +0xc/+0xe/+0x10. Reading a fourth ran off the end.
-            zx, zz, zw = u16(body, 11), u16(body, 13), u16(body, 15)
-            detail = (f"slot={slot} action={action:#x} flags={flags:#x} "
-                      f"zone=({zx},{zz},{zw}) itemrec@{off+3:#x}")
+            # cmd_room_action_set (0x00460970) advances 0x12, so the body is 17
+            # bytes and holds only THREE u16 after the two flag bytes - entry+2/
+            # +4/+6 come from opcode +0xc/+0xe/+0x10. Reading a fourth ran off the
+            # end. These are handler PARAMETERS, not the zone.
+            p0, p1, p2 = u16(body, 11), u16(body, 13), u16(body, 15)
+            detail = (f"slot={slot} {ROOM_ACTIONS.get(action, hex(action))} "
+                      f"flags={flags:#x} zone=({zx},{zz}) {zw}x{zd} "
+                      f"params=({p0},{p1},{p2})")
+            # entry+8 = g_ScdOpcodes + 2, and body[0] sits at off+1, so the
+            # record starts at off+2 (this printed off+3 before).
+            detail += f" record@{off + 2:#x}"
         elif op == 0x0C:
             door = body[0]
             flags = body[0x18]
