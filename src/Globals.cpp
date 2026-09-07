@@ -722,7 +722,13 @@ void* g_playerAnimFunctions[52] = {};     // 0x00bebbd8
 // own data block (0x004ba240..0x004ba377), so the table is DEFINED IN Tyrant.cpp
 // alongside them. It was an all-NULL placeholder here, which softlocked Chris
 // mid-pose the first time the Tyrant connected.
-void* DAT_004b1a90[32] = {};   // jump table for player_anim_death_alt dispatch (action_behavior)
+// DAT_004b1a90 - player_anim_death_alt dispatch (action_behavior). ONE entry
+// (-> 0x00408900) sitting between s_yawnRepositionPath and s_yawnDustOffset in
+// Yawn's data block; its case is folded into player_anim_death_alt
+// (PlayerAnimations.cpp), so no array is needed. It was an all-NULL placeholder
+// here, which froze the swallowed player mid-pose during Yawn's low-health
+// swallow: part of the body kept floating in the air because the handler that
+// pins the player to the snake's mouth never ran.
 // DAT_004c10b0 - player_anim_dispatch_4b1a90 dispatch (action_state). Three real
 // entries, all of them the monster plant's "held by the vine" player animation
 // living inside the plant's own data block (0x004c0fd8..0x004c10bb), so the table

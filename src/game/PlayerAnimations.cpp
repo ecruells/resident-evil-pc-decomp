@@ -991,10 +991,62 @@ void player_anim_enemy_interact(void) {
         g_playerEntity.health = -1;
     }
 }
-void player_anim_death_alt(void) {            // 0x004088f0 - dispatch via DAT_004b1a90[action_behavior]
-    extern void* DAT_004b1a90[];
-    void (*func)(void) = (void(*)(void))DAT_004b1a90[g_playerEntity.action_behavior];
-    if (func) func();
+// 0x00408900 - the body of player_anim_death_alt.  The original reached it
+// through DAT_004b1a90, a one-entry jump table at 0x004b1a90 sitting between
+// s_yawnRepositionPath and s_yawnDustOffset in Yawn's data block
+// (JMP dword ptr [action_behavior*4 + 0x4b1a90], single entry -> 0x00408900),
+// so no array is needed here.
+//
+// This is the swallowed player's own state machine.
+//
+// States, keyed on action_state (0x87):
+//   0: init (carried pose set), fall into the animation
+//   1: advance the carried-in-mouth animation (index = attackAnim) over the
+//      damage pointers emdScratchPtr1/emdScratchPtr2; releases the player back
+//      to animationId 1 if Yawn (g_EnemiesList[0], the head slot) is dead
+//   2: hold the player in the jaws - recompose the player matrix from Yawn's
+//      head-joint world matrix and the shared capture matrix every frame
+static void player_anim_death_alt_body(void)  // 0x00408900
+{
+    // 0x004b19c0 - shared with Yawn.cpp (yawn_action_swallow)
+    extern MATRIX g_yawnCaptureMatrix;
+
+    switch (g_playerEntity.action_state) {
+    case 0:
+        g_playerEntity.action_state        = 1;
+        g_playerEntity.animation_frame_id  = 0;
+        g_playerEntity.unk_bf              = 0;
+        g_playerEntity.isBeingAttackedFlag = 1;
+        g_playerEntity.attackAnim          = 2;
+        g_playerEntity.unk_8c              = 3;
+        // fall through
+    case 1:
+        g_playerEntity.action_state += Joint_move(0, g_playerEntity.emdScratchPtr1,
+                                                  g_playerEntity.emdScratchPtr2, 0x400);
+        if (g_EnemiesList[0].health < 0) {
+            // One DWORD store at 0x00be6368: animationId=1 and clears
+            // animFrameId / action_behavior / action_state.
+            g_playerEntity.animationId     = 1;
+            g_playerEntity.animFrameId     = 0;
+            g_playerEntity.action_behavior = 0;
+            g_playerEntity.action_state    = 0;
+            g_playerEntity.flags &= 0xf9;
+            g_playerEntity.isBeingAttackedFlag = 0;
+        }
+        break;
+
+    case 2:
+        g_playerEntity.zoneFlags |= 0x80;
+        ApplyLVAndMul0Matrix(&g_EnemiesList[0].jointsStructs[0].world,
+                             &g_yawnCaptureMatrix,
+                             &g_playerEntity.scaMatrixData.localMatrix);
+        break;
+    }
+}
+void player_anim_death_alt(void) {            // 0x004088f0 - JMP [action_behavior*4 + 0x004b1a90]
+    if (g_playerEntity.action_behavior == 0) { // the table's single entry (0x00408900)
+        player_anim_death_alt_body();
+    }
 }
 void player_anim_dispatch_4b1a90(void) {      // 0x0045c460 - dispatch via DAT_004c10b0[action_state]
     // DAT_004c10b0 is defined in MonsterPlant.cpp and has FOUR slots (three

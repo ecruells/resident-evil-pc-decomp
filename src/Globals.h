@@ -1396,7 +1396,6 @@ extern int           g_weaponAngle_Sec2Z;
 // (0x004c2ac8) has no array: its 3 entries are folded into the switch in
 // player_anim_set_attacked_flag (PlayerAnimations.cpp).
 extern void*         DAT_004ba360[];
-extern void*         DAT_004b1a90[];
 extern void*         DAT_004c10b0[];
 
 // Animation data constants

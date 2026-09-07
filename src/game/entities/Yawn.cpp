@@ -167,8 +167,10 @@ const short s_yawnDustOffset[3][2] = {
 
 // 0x004b19c0 - the swallow-attack capture matrix.  Its translation
 // (0x004b19d4/d8/dc) is stepped every frame while the player is in Yawn's
-// mouth, so this has to stay one object.
-static MATRIX g_yawnCaptureMatrix = {};
+// mouth, so this has to stay one object.  Also read by the swallowed player's
+// own animation handler (0x00408900, PlayerAnimations.cpp), which recomposes
+// the player matrix from it during Yawn's chew - so it is NOT file-static.
+MATRIX g_yawnCaptureMatrix = {};
 
 namespace {
 
