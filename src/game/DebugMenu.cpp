@@ -505,6 +505,26 @@ static int DebugRoom_SpotBlocked(int px, int pz)
     return 0;
 }
 
+// Decode a door record's destination byte exactly the way room_transition_load
+// does: < 0x20 is a room in `curStage`; otherwise the stage is (dest >> 5) - 1
+// and the low five bits are the room, with the return-mansion remap (+5 for
+// stages 0/1) applied once SCENARIO_FLAG_STAGE_VARIANT is set.
+static void DebugRoom_DecodeDest(unsigned char dest, unsigned char curStage,
+                                 unsigned char* outStage, unsigned char* outRoom)
+{
+    if (dest < 0x20) {
+        *outStage = curStage;
+        *outRoom  = dest;
+    } else {
+        unsigned char stage = (unsigned char)((dest >> 5) - 1);
+        if (stage < 2 && Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_STAGE_VARIANT) != 0) {
+            stage = (unsigned char)(stage + 5);
+        }
+        *outStage = stage;
+        *outRoom  = (unsigned char)(dest & 0x1F);
+    }
+}
+
 void DebugRoomChange_ApplyPendingPlacement(void)
 {
     if (s_dbgRoomChangeArmed == 0) {
@@ -558,21 +578,35 @@ void DebugRoomChange_ApplyPendingPlacement(void)
         // ROOM1000 (via ROOM1010) -> (3500,2600) ang 0xC00, ROOM2060 (via
         // ROOM2040 door 2) -> (3000,2600) ang 0xC00, ROOM1040 (via ROOM1030)
         // -> (15800,3700) ang 0x400 - all matching normal gameplay.
+        //
+        // The neighbour may be in ANOTHER STAGE (dest >= 0x20, e.g. the
+        // guardhouse entry hall's front door to the guardhouse gate). The
+        // neighbour's RDT then lives in that stage's own directory, so the
+        // path and the back-reference test are both derived from the decoded
+        // destination rather than from g_stageId. Skipping this case used to
+        // fall through to the dir heuristic, which picks a side from the dir
+        // byte alone - and for ROOM4000 it picked the OUTSIDE of the front
+        // door, stranding the player in the unwalled strip behind it.
         // ------------------------------------------------------------------
         int spotX = -1;
         int spotZ = -1;
         int spotY = 0;
         int spotAngle = -1;
+        int pairedArrival = 0;      // spot came from the neighbour's door record
 
-        unsigned char neighbour = rec[0x0D];
-        if (neighbour < 0x20 && neighbour != g_roomId) {
+        unsigned char nStage, nRoom;
+        DebugRoom_DecodeDest(rec[0x0D], g_stageId, &nStage, &nRoom);
+
+        if (nStage != g_stageId || nRoom != g_roomId) {
             static const char hexDigits[] = "0123456789abcdef";
             char path[64];
+            // The room file name is room<S><Rhi><Rlo><F>, so the stage digit
+            // feeds both the directory and the first character of the name.
             sprintf(path, GAME_DATA_ROOT "stage%c\\room%c%c%c0.rdt",
-                    hexDigits[g_stageId + 1],
-                    hexDigits[g_stageId + 1],
-                    hexDigits[neighbour >> 4],
-                    hexDigits[neighbour & 0xF]);
+                    hexDigits[nStage + 1],
+                    hexDigits[nStage + 1],
+                    hexDigits[nRoom >> 4],
+                    hexDigits[nRoom & 0xF]);
 
             static unsigned char s_neighbourRdt[768 * 1024];   // largest shipped RDT is ~630KB
             size_t size = LoadFile(path, s_neighbourRdt, 1);
@@ -594,10 +628,21 @@ void DebugRoomChange_ApplyPendingPlacement(void)
                         unsigned char* r = s_neighbourRdt + p + 2;
                         unsigned short rzw = *(unsigned short*)(r + 4);
                         unsigned short rzd = *(unsigned short*)(r + 6);
-                        if (rzw == 0 || rzw > 0x2000 || rzd == 0 || rzd > 0x2000) {
+                        // Zone extents: the widest shipped door zone is 6000
+                        // and the deepest is an elevator shaft at 29400, so the
+                        // bound has to clear those or the elevator/locked-door
+                        // records are skipped and the room falls back to the
+                        // heuristic.
+                        if (rzw == 0 || rzw > 0x8000 || rzd == 0 || rzd > 0x8000) {
                             continue;
                         }
-                        if (r[13] != g_roomId || r[10] > 0x15) {
+                        unsigned char bStage, bRoom;
+                        DebugRoom_DecodeDest(r[13], nStage, &bStage, &bRoom);
+                        // Door type indexes the 34-entry .dor name table
+                        // (0x00-0x21: doorNN, mon, ele, kai, lad, doorNNk), so
+                        // the old > 0x15 bound rejected every locked door and
+                        // every stair/ladder record.
+                        if (bStage != g_stageId || bRoom != g_roomId || r[10] > 0x21) {
                             continue;
                         }
                         unsigned short ang = *(unsigned short*)(r + 20);
@@ -608,6 +653,7 @@ void DebugRoomChange_ApplyPendingPlacement(void)
                         spotY = (short)*(unsigned short*)(r + 16);
                         spotZ = *(unsigned short*)(r + 18);
                         spotAngle = (int)ang;
+                        pairedArrival = 1;
                         dbg_printf("[debugmenu] room change: paired record in %s door %d -> arrival (%d,%d,%d) ang 0x%X\n",
                                    path, (int)r[-1], spotX, spotY, spotZ, spotAngle);
                         break;
@@ -629,14 +675,24 @@ void DebugRoomChange_ApplyPendingPlacement(void)
             dbg_printf("[debugmenu] room change: no paired record, using dir heuristic\n");
         }
 
-        // Fall back through the zone-edge spots if the primary spot is inside
-        // a wall or off the walkable area.
+        // Fall back through the zone-edge spots if the GUESSED spot is inside a
+        // wall or off the walkable area.
+        //
+        // This net must NOT run on a paired-record arrival: that is the point
+        // the game itself uses when the player walks through the door, so it is
+        // valid by definition. It routinely lies OUTSIDE the RDT+0x58 grid -
+        // which is the NPC navigation grid, not a player boundary - and it can
+        // sit inside the door's own collision volume, where the collision pass
+        // pushes the player clear on the first frame. Rejecting it is what sent
+        // ROOM4000 to the heuristic's (3650,6300): the strip on the OUTSIDE of
+        // the closed front door, with no camera covering it.
         if (spotX >  32000) spotX =  32000;
         if (spotX < -32000) spotX = -32000;
         if (spotZ >  32000) spotZ =  32000;
         if (spotZ < -32000) spotZ = -32000;
-        if (DebugRoom_InWalkZone(spotX, spotZ) == 0 ||
-            DebugRoom_SpotBlocked(spotX, spotZ) != 0) {
+        if (pairedArrival == 0 &&
+            (DebugRoom_InWalkZone(spotX, spotZ) == 0 ||
+             DebugRoom_SpotBlocked(spotX, spotZ) != 0)) {
             struct DebugSpot { int x, z, angle; };
             DebugSpot spots[4] = {
                 { cx,                      cz,                      0     },  // zone centre
