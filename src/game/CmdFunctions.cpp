@@ -1534,13 +1534,36 @@ int cmd_effect_spawn(void)
     } else if (parentType == 1) {
         spriteInfo = &g_playerEntity.scaMatrixData.localMatrix;
     } else if ((parentParam & 0x8000) == 0) {
-        // Original: `g_effectPool[parentType * 3 + 0x3D].pAnimHeader + 0x10`, where
-        // pAnimHeader is the byte ARRAY at effect +0x04 - so this is the ADDRESS
-        // effect + 0x14, not the value of the `animDataBase` field (which lives at
-        // +0x7C). Reproduced as an address; note the index itself exceeds the 64-slot
-        // pool for every parentType >= 2 that can reach here, which is the original's
-        // own out-of-bounds read.
-        spriteInfo = (MATRIX*)((char*)&g_effectPool[parentType * 3 + 0x3d] + 0x14);
+        // parentType >= 2 means ENEMY parentType - 2, and the space is that enemy's
+        // localMatrix (ENTITY+0x20) - NOT the effect pool.
+        //
+        // Ghidra renders this branch as
+        //   `g_effectPool[parentType * 3 + 0x3D].pAnimHeader + 0x10`
+        // because it picked the wrong containing symbol for a base that is BELOW the
+        // array it belongs to. The assembly at 0x00431729 is
+        //   LEA EDI,[EAX + EAX*4]      ; parentType * 5
+        //   LEA EDI,[EDI + EDI*8]      ; * 9   -> * 45
+        //   SUB EDI,EAX                ; -> * 44
+        //   LEA EAX,[EDI + EDI*8 + 0xbe616c]   ; * 9 -> parentType * 0x18C + 0xbe616c
+        // 0x18C is sizeof(Entity) and 0xbe616c == &g_EnemiesList[-2] + 0x20
+        // (0x00be6464 - 2 * 0x18C + 0x20), so the address is exactly
+        // g_EnemiesList[parentType - 2].scaMatrixData.localMatrix. It only LOOKS like
+        // a pool overrun because 3 effect slots (3 * 0x84) happen to equal one Entity
+        // and the folded base lands inside g_effectPool. The sibling branches confirm
+        // the reading: parentType 1 loads 0xbe6304 == g_playerEntity + 0x20.
+        //
+        // Taking the decompile literally read a MATRIX out of whatever the port's own
+        // .bss ordering put at that offset (the port gives g_playerPosX & co. separate
+        // storage the original overlaid on g_playerEntity, so the adjacency the
+        // folded base relies on does not survive - see the .bss-adjacency note in
+        // docs/MEMORY_LAYOUT.md). Effect_UpdateActor memcpy's 0x20 bytes from here
+        // into eff->transform, so a garbage matrix placed the billboard outside every
+        // camera zone and it was culled before drawing: ROOM7060's hunter-kills-
+        // Rebecca cutscene spawns its first-slash blood with parentType 3 (enemy 1 =
+        // Rebecca) and no splash ever appeared, while the decapitation blood - spawned
+        // from Hunter.cpp with a real joint matrix - looked fine.
+        spriteInfo = (MATRIX*)((char*)g_EnemiesList +
+                               (int)(parentType - 2) * sizeof(Entity) + 0x20);
     } else {
         spriteInfo = (MATRIX*)((int)g_omodel_table[(parentParam & 0x7f00) >> 8] + 0x20);
     }
