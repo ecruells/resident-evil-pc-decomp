@@ -240,14 +240,19 @@ static int DebugMenu_SampleKeys(void)
 // retints the WHOLE string (index +8), it does not draw a second offset
 // pass - so it must stay 0. The lower nibble selects the tint palette and
 // must be 0 for white (1 green, 2 red, 3 gray, any other index yellow).
-//   0x00 = white (full), 0xF0 = 50% grey, 0x80 = 27% grey - the tint nibble
-//   must be 0: 1 = green, 2 = red, 3 = gray, ANY other index = yellow.
+//
+// Brightness is a NIBBLE, so white text tops out at 0xF0 = 50% grey: there is
+// no "white but dimmer". Readable off-white therefore comes from the gray
+// tint (3) at full brightness, which is 204/255 - noticeably lighter than the
+// 50% ceiling and clearly legible on the navy box.
+//   0x00 = white (full)   0xF0 = 50% grey (brightest white)
+//   0x03 = 80% grey       0xC0 = 40% grey
 // ============================================================================
 
 #define DBGCOL_TEXT 0x00    // full-brightness white (tint 0)
 #define DBGCOL_GREEN 0x01   // full-brightness green - flag editor cursor bit
-#define DBGCOL_DIM  0xF0    // 50% grey - unimplemented entries
-#define DBGCOL_HINT 0xC0    // 40% grey - control hints
+#define DBGCOL_HINT 0x03    // light grey (tint 3 at full brightness) - control hints
+#define DBGCOL_DIM  0xF0    // 50% grey - unimplemented entries / off-window bits
 #define DBGCOL_RED  0x02    // full-brightness red (tint 2)
 
 // The translucent navy menu box, drawn as two same-depth tints (draw_rect's
@@ -1026,8 +1031,10 @@ static void DebugFlag_DrawRow(short y, unsigned char* data, int base, int cursor
         int byteIdx; unsigned char bmask;
         DebugFlag_BitAddr(bit, &byteIdx, &bmask);
         text[n] = (data[byteIdx] & bmask) ? '1' : '0';
+        // Off-window bits stay at the 50% grey ceiling so they read as dim
+        // against the white in-window bits (DBGCOL_HINT is lighter now).
         col[n] = (bit == cursor)                        ? DBGCOL_GREEN
-               : (bit < firstBit || bit > lastBit)      ? DBGCOL_HINT
+               : (bit < firstBit || bit > lastBit)      ? DBGCOL_DIM
                                                         : DBGCOL_TEXT;
         n++;
     }
@@ -1207,7 +1214,9 @@ static void DebugQuick_Draw(void)
 
 static void DebugMenu_DrawMain(void)
 {
-    DebugMenu_DrawBox();
+    // 12px taller than the standard box: the control hint does not fit one
+    // 272px line (see below), so it needs a second row at y=202.
+    DebugMenu_DrawBoxSize(24, 64, 272, 148);
 
     DebugMenu_PrintCentered(76, "- DEBUG MENU -", DBGCOL_TEXT);
 
@@ -1255,7 +1264,10 @@ static void DebugMenu_DrawMain(void)
     sprintf(PRINT_TEXT_BUFFER, "VER %s", GAME_VERSION_STRING);
     PrintText8x8(32, 182, DBGCOL_HINT, 0);
 
-    DebugMenu_PrintCentered(192, "F1/L1+R1/ESC: CLOSE   ENTER/ACTION: SELECT", DBGCOL_HINT);
+    // Two lines: the combined close/select hint is 42 characters (336px) and
+    // would be clipped at both edges of the 272px box on one line.
+    DebugMenu_PrintCentered(192, "F1/L1+R1/ESC: CLOSE", DBGCOL_HINT);
+    DebugMenu_PrintCentered(202, "ENTER/ACTION: SELECT", DBGCOL_HINT);
 }
 
 // ============================================================================
