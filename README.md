@@ -28,15 +28,6 @@ Measured against the Ghidra project: **2393 functions in the original binary**
 | Software-FMV shared-memory player (replaced by native MCI) | 11 | out of scope |
 | Import thunks (loader-provided) | 6 | out of scope |
 
-**In-scope coverage: 1800 / 1801 functions = 99.9% — function-complete.**
-The single documented remainder is a trivial animation/velocity setter whose
-caller is undefined even in the Ghidra project; its two-line semantics are
-already available through covered helpers.
-
-Tracking tools:
-- `tools/progress_report.py <ghidra_dump.txt> src` regenerates this table.
-- `progress_remaining.txt` lists whatever is left after each run.
-
 ## How to build
 
 Requirements:
