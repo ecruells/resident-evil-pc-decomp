@@ -653,7 +653,7 @@ static bool JoyRemapTableIsEmpty(const void* table)
 }
 
 // Restore a save file buffer into the bio card / input-config globals.
-// Shared by STATE_LOAD_SLOT_SELECTED and DebugQuick_LoadSlot. The block
+// Used by STATE_LOAD_SLOT_SELECTED. The block
 // restore always runs; the extra areas past 0x800 are size-gated so older
 // (smaller) save files still load. The original restores the block with one
 // 0x800 memcpy; the port models that region as g_BioCard + the input-config
@@ -1328,51 +1328,3 @@ void DebugSaveMenu(void)
     g_SavesCounter++;
 }
 
-// ============================================================================
-// DebugQuick_SaveSlot / DebugQuick_LoadSlot (port-added) - slot save/load for
-// the F1 debug menu's QUICK ACCESS lists (DebugMenu.cpp), driven inline in the
-// debug menu instead of the real save/load screens.
-//
-// Save mirrors STATE_PERFORM_SAVE's player snapshot, then writes the 0x800
-// bio-card block the same way DebugSaveMenu (0x00494050) does - the load side
-// size-gates everything past 0x800, so the file stays valid for both the real
-// load screen and the quick access load.
-// Load mirrors STATE_LOAD_SLOT_SELECTED's block restore (RestoreSaveBlock) and
-// arms g_main_state_flags bit 0x10000000; the caller (GameLoop.cpp's quick
-// access load machine) then chains game_start, whose InitializeGame continue
-// branch rebuilds the saved stage from the restored card.
-// ============================================================================
-void DebugQuick_SaveSlot(int slot)
-{
-    // Snapshot the current player state into the bio card (STATE_PERFORM_SAVE)
-    g_PlayerPosXCopy         = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
-    g_PlayerPosZCopy         = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
-    g_SelectedCharactedId    = g_playerEntity.id;
-    g_PlayerHealthStatusCopy = g_playerEntity.healthStatusFlags;
-    g_PlayerDirAngleCopy     = g_playerEntity.directionAngle;
-
-    EnsureDirectoryExists(GAME_SAVE_ROOT);
-    sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slot + 1);
-    int written = FileWrite(g_saveFileName, g_BioCardData, 0x800);
-    if (g_SavesCounter + 1 < 100) {
-        g_SavesCounter = g_SavesCounter + 1;
-    }
-
-    dbg_printf("[debugmenu] quick save: slot %d -> '%s' (%s, %d bytes)\n",
-               slot + 1, g_saveFileName, (written < 0) ? "FAILED" : "OK", written);
-}
-
-void DebugQuick_LoadSlot(int slot)
-{
-    char fileBuffer[SAVE_FILE_SIZE + 8];
-    sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slot + 1);
-    int fileSize = ReadSaveFile(g_saveFileName, fileBuffer);
-    if (fileSize < 0x200) {
-        dbg_printf("[debugmenu] quick load: slot %d has no valid save\n", slot + 1);
-        return;
-    }
-    RestoreSaveBlock(fileBuffer, fileSize);
-    g_main_state_flags |= MSF_CONTINUE_GAME;   // InitializeGame continue branch
-    dbg_printf("[debugmenu] quick load: slot %d restored from '%s' (%d bytes)\n",
-               slot + 1, g_saveFileName, fileSize);
-}

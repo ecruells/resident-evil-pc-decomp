@@ -546,8 +546,8 @@ extern int           g_debugMenuOpen;            // 1 while the F1 debug menu ov
 int debug_menu_overlay(void);                     // DebugMenu.cpp - F1 overlay; 1 while open
 void DebugRoomChange_ApplyPendingPlacement(void); // DebugMenu.cpp - post room_transition_load placement
 extern int           g_debugLoadSlot;             // quick access load: selected slot index (0-7)
-void DebugQuick_SaveSlot(int slot);               // SaveLoadScreen.cpp - write the bio card to savedat<slot+1>.dat
-void DebugQuick_LoadSlot(int slot);               // SaveLoadScreen.cpp - restore the bio card from savedat<slot+1>.dat
+void DebugQuick_SaveSlot(int slot);               // DebugSaveLoad.cpp - write a full save to savedat<slot+1>.dat
+void DebugQuick_LoadSlot(int slot);               // DebugSaveLoad.cpp - restore savedat<slot+1>.dat and arm the continue path
 
 // Room interaction state (0x00be9616-0x00be9618, adjacent to g_eventItemUsedFlag)
 extern unsigned char g_typewriter_state;               // 0x00be9616 - typewriter save-flow state machine
