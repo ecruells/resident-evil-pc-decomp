@@ -1342,9 +1342,11 @@ static void cl_typer_press(void)
     else                   g_EnemiesList[1].behavior_flags = (unsigned char)((arm & 0x3f) | 0x40);
 
     if ((g_playerEntity.id & 1) != 0) {
-        // Same hand twice in a row is slower than alternating hands.
+        // Same hand twice in a row is SLOWER than alternating hands. The
+        // original is `(-(same) & 7) + 6`, i.e. 13 when the bit-7 arm bits
+        // match and 6 when they differ (0x00413e70 / 0x00413ec0).
         const unsigned char next = s_armForKey[s_text[s_typer.line].text[s_typer.charIdx + 2]];
-        s_typer.timer = (short)((((next ^ arm) & 0x80) == 0) ? 6 : 13);
+        s_typer.timer = (short)((((next ^ arm) & 0x80) == 0) ? 13 : 6);
     } else {
         s_typer.timer = (short)((rand() & 0xf) + 10);
     }
