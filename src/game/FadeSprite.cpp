@@ -558,7 +558,16 @@ void DrawFadeSpr(void)
         // original stores in the OT record's translation row (0x004701b4, from
         // the composed matrix) and that AddFadePoly's de-collision pass reads
         // back when ordering this shadow against the ones already queued.
-        AddFadePoly(alpha, (int)composed.t[2], 0x2F, rgb, px, py, vz, vu, vv, n);
+        //
+        // The DRAWN key is different: the original re-inserts the transformed
+        // quad into the second ordering table - the one that is drawn - at the
+        // mean view Z of its vertices (0x0044764a), so pass the mean of the
+        // four UNCLIPPED corners here. cvz, not vz: vz holds the clipped
+        // polygon, and a corner pushed back to the near plane would drag the
+        // mean onto the camera and sort the shadow in front of the very masks
+        // it should be behind.
+        const int sortZ = (cvz[0] + cvz[1] + cvz[2] + cvz[3]) / 4;
+        AddFadePoly(alpha, (int)composed.t[2], sortZ, 0x2F, rgb, px, py, vz, vu, vv, n);
     }
 
     g_FadeSprCount = 0;

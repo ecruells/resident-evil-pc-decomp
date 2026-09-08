@@ -191,9 +191,13 @@ int AddTintSprite(TextureDesc* texture, unsigned short fade);
 // origin). The original stores it in the OT record and compares it against the
 // fade polys already inserted this frame to keep two overlapping shadows off
 // one ordering-table slot; see the de-collision pass in AddFadePoly.
-int AddFadePoly(unsigned short alpha, int transZ, int tpage, unsigned char* rgb,
-                const int* px, const int* py, const int* wz,
-                const int* cu, const int* cv, int count);
+//
+// sortZ is the MEAN VIEW-SPACE Z of the quad's four (unclipped) corners, and it
+// is the key the quad is actually DRAWN at - not the ordering-table key built
+// from alpha. See the two-ordering-table note in AddFadePoly.
+int AddFadePoly(unsigned short alpha, int transZ, int sortZ, int tpage,
+                unsigned char* rgb, const int* px, const int* py,
+                const int* wz, const int* cu, const int* cv, int count);
 int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
                        unsigned char r, unsigned char g, unsigned char b,
                        int scaleX, int scaleY, int blendMode, short brightness);

@@ -702,24 +702,41 @@ int SubmitEffectSprite(TextureDesc* texture, int depth, int textureId,
 static int            g_FadeOtZ[FADE_OT_MAX];
 static unsigned short g_FadeOtKey[FADE_OT_MAX];
 
-int AddFadePoly(unsigned short alpha, int transZ, int tpage, unsigned char* rgb,
-                const int* px, const int* py, const int* wz,
-                const int* cu, const int* cv, int count) {
+int AddFadePoly(unsigned short alpha, int transZ, int sortZ, int tpage,
+                unsigned char* rgb, const int* px, const int* py,
+                const int* wz, const int* cu, const int* cv, int count) {
     // A clipped convex quad has 3..5 corners; a TextureDraw carries 4, so the
     // pentagon (one corner behind the camera) is split into (0,1,2,3) plus
     // the triangle (0,3,4). Fewer than 4 corners repeat the last one.
     int cmds = (count > 4) ? 2 : 1;
     if (g_SpriteQueueCount >= MAX_SPRITE_COMMANDS - cmds) return 0;
 
-    // 0x00470100: the ordering-table key is (alpha >> 2) - g_OTIndex, floored at
-    // 0 and capped at 0xfff. g_OTIndex counts the fade polys already submitted
-    // this frame, so each successive shadow lands one step nearer than the last
-    // and two of them never collide on one slot.
+    // 0x00470100: the FIRST ordering-table key is (alpha >> 2) - g_OTIndex,
+    // floored at 0 and capped at 0xfff. g_OTIndex counts the fade polys already
+    // submitted this frame, so each successive shadow lands one step nearer
+    // than the last and two of them never collide on one slot.
     //
-    // The port stored the raw `alpha` here, which is four times the OT scale and
-    // carries none of that. Scaled properly it becomes OT * 16 like every other
-    // scene primitive - i.e. view-space Z - so the shadow sorts against the room
-    // masks and the entity triangles instead of floating on top of them.
+    // This is NOT the key the quad is drawn at. The original has TWO ordering
+    // tables: AddFadePoly inserts the quad into the first one at the key below,
+    // and when the first table's walk reaches it, FUN_00446e40 transforms the
+    // quad and re-inserts its triangles into the SECOND table - the one
+    // d3d_do_render_ot_walk's second pass actually draws - keyed at
+    // `mean(view z of the triangle's vertices) >> 4` (0x0044764a: sum the three
+    // vertex z's, IDIV 3, SAR 4). Every type-10 sprite is identity-mapped
+    // between the two tables (d3d_do_render_ot_walk re-inserts it at
+    // `capacity - 1 - walkIndex`, i.e. its own bucket), so a room mask keeps its
+    // authored key and the shadow lands among the masks at its TRUE view-space
+    // Z. The first-table key only decides WHEN the quad's triangles are
+    // inserted, which matters only for ties inside one second-table bucket.
+    //
+    // The port used otKey * 16 as the drawn key. That is the first-table key,
+    // and it is wrong: for the placement records with flag == 0 it is only
+    // ~400 view units too far back, but the flag != 0 records (0x00456f6d,
+    // alpha = forceAlpha + 1) collapse it to a near-constant 400/592/800 no
+    // matter where the character stands - so the shadow sorted as if it were
+    // 800 units from the camera and painted over every room mask in front of
+    // her (the "shadow drawn above the background mask" report). Sort on the
+    // projected corners, which is what the original's second table holds.
     //
     unsigned int otKey = (unsigned int)alpha >> 2;
     otKey = (otKey > (unsigned int)g_OTIndex) ? (otKey - (unsigned int)g_OTIndex) : 0u;
@@ -734,6 +751,11 @@ int AddFadePoly(unsigned short alpha, int transZ, int tpage, unsigned char* rgb,
     // each hit raises the running key, so a later comparison sees the raised
     // value. The original compares the OT records' translation Z with a strict
     // FCOMP/C0 test, i.e. `prev < this`.
+    //
+    // This pass orders the FIRST table, so it no longer changes what is drawn
+    // where - the drawn key is sortZ below, which is already ordered by depth.
+    // It is kept because it is the original's bookkeeping for the insertion
+    // order of ties, and because g_FadeOtKey is the table that tie-break reads.
     for (int j = 0; j < g_OTIndex && j < FADE_OT_MAX; j++) {
         if (g_FadeOtZ[j] < transZ && otKey <= (unsigned int)g_FadeOtKey[j]) {
             otKey = (unsigned int)g_FadeOtKey[j] + 1u;
@@ -742,7 +764,13 @@ int AddFadePoly(unsigned short alpha, int transZ, int tpage, unsigned char* rgb,
     }
     if (otKey > 0xfff) otKey = 0xfff;
 
-    const unsigned int shadowDepth = otKey * 16u;
+    // The key the quad is DRAWN at - see the two-ordering-table note above.
+    // sortZ is the mean view-space Z of the quad's corners, the same quantity
+    // and the same units as a TMD triangle's `depth` and a mask's `fade << 4`,
+    // so the shadow now interleaves with both instead of floating over them.
+    // A corner behind the camera makes the mean meaningless; floor it at 0 so
+    // it cannot wrap the unsigned comparison.
+    const unsigned int shadowDepth = (sortZ < 0) ? 0u : (unsigned int)sortZ;
 
     // 0x0047032d/0x00470337: publish this poly's key, then advance. One
     // increment per CALL, not per command - a clipped pentagon becomes two
