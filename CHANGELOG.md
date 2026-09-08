@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.0.1](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.0.0...residentevil-v1.0.1) (2026-09-08)
+
+
+### Bug Fixes
+
+* bug that breaks character state doing quick load between different characters ([e962857](https://github.com/ecruells/resident-evil-pc-decomp/commit/e962857ceb6597537034281062cdc83668d875ce))
+* bug that makes chimeras warp when you shot them and fall from ceiling ([cb11a87](https://github.com/ecruells/resident-evil-pc-decomp/commit/cb11a87c756757aa71834ecddce066a201b7f698))
+* debug menu off-screen and bad contrast texts ([dbc62ba](https://github.com/ecruells/resident-evil-pc-decomp/commit/dbc62bae69d70859925a2107e8ec9eda68985ead))
+* misplacement when changing rooms in certains rooms ([fe98b42](https://github.com/ecruells/resident-evil-pc-decomp/commit/fe98b42c2cef76d0a63ce0ab2964562215383af3))
+* missing jills hand animation in computer lab subsystem ([6d0cbb9](https://github.com/ecruells/resident-evil-pc-decomp/commit/6d0cbb9aa7e3ccae7c824be067a3a9188e5bf234))
+* shadows drawing above bg masks ([80c924e](https://github.com/ecruells/resident-evil-pc-decomp/commit/80c924e16003db0f8736981a054a6ca9d87a4cf3))
+
 ## 1.0.0 (2026-09-08)
 
 
