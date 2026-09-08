@@ -139,21 +139,23 @@ const short chimera_arc_heights[33] = {
     1540, 1225, 1040, 1290, 1625, 2100, 2500, 2900,
     3200, 3500, 3800, 4100, 4300, 4500, 4600, 4700,
     4700, 4700, 4700, 4700, 4700, 4700, 4700, 4700,
-    4700, 4700,
-    4800, 4900, 5000, 5068, 5068, 5068, 5068
+    4700,
+    4800, 4900, 5000, 5068, 5068, 5068, 5068, 5068
 };
 
 // ============================================================================
 // Horizontal speeds read alongside the arc. The swoop reads forward from
-// 0x004bb4ea (launch burst 5068, drift 150 on frames 17-26); the drop reads
+// 0x004bb4ea - whose first word is ZERO, so the climb starts with no
+// horizontal motion and only drifts 150 on frames 18-27; the drop reads
 // backward from 0x004bb52a (drift 150 on frames 6-15). Both spell out the
-// zero runs the original walks through.
+// zero runs the original walks through. The same 150 run serves both reads.
 // ============================================================================
 const short chimera_swoop_speed[33] = {
-    5068,
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0, 0, 0, 0, 0, 0, 0,
+    0, 0,
     150, 150, 150, 150, 150, 150, 150, 150, 150, 150,
-    0, 0, 0, 0, 0, 0
+    0, 0, 0, 0, 0
 };
 const short chimera_drop_speed[32] = {
     0, 0, 0, 0, 0, 0,
@@ -332,6 +334,7 @@ static void chimera_state_init(void) // 0x00438880
     C_REPAUSE = 0;
     C_FADE_FREEZE = 0;
     C_WALL_FRAMES = 0;
+    C_FAR_LATCH = 0;
 
     Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x40);
 }
@@ -1570,8 +1573,13 @@ static void chimera_hit_stagger(void) // 0x0043aff0
         if ((wounded & 1) == 0) {
             chimera_acid_burst();
         }
-    } else if (state != 2) {
-        // release: states >= 1 (state 2 is never set)
+    } else if (state != 1) {
+        // The run body above bumps action_state 1 -> 2 when the animation
+        // finishes; only that state releases. State 1 must fall through to
+        // `run` below (the original jumps state 1 straight to the run body).
+        if (state != 2) {
+            return;
+        }
         ENTITY->hit_state = 0;
         C_STATE_WORD = 1;
         C_BEH_WORD = 0;
