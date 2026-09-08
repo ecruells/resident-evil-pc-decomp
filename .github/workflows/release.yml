@@ -1,0 +1,97 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # The project pins v145 (VS 2026) / SDK 10.0.26100.0, which the hosted
+  # runners do not ship. Override to what the runner has installed.
+  # "10.0" resolves to the newest SDK present.
+  TOOLSET: v143
+  SDK_VERSION: "10.0"
+  CONFIGURATION: Release
+  PLATFORM: Win32
+
+jobs:
+  # Maintains a release PR from Conventional Commits. Merging that PR is what
+  # bumps version.txt + CHANGELOG.md, tags, and cuts the GitHub release.
+  release-please:
+    runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
+      version: ${{ steps.release.outputs.version }}
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          # release-type lives in the config file rather than here: the
+          # inline input takes no extra-files, and src/Version.h has to be
+          # rewritten in the release commit. Both paths are the action's
+          # defaults, named for the reader.
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+  # Runs on every push to main as a compile check; when the push was a release
+  # PR merge, the zip is also attached to the release release-please just made.
+  build:
+    needs: release-please
+    runs-on: windows-2025
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the tagged commit when releasing, otherwise the pushed commit.
+          ref: ${{ needs.release-please.outputs.tag_name || github.sha }}
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Build
+        run: >
+          msbuild Game.sln
+          /p:Configuration=${{ env.CONFIGURATION }}
+          /p:Platform=${{ env.PLATFORM }}
+          /p:PlatformToolset=${{ env.TOOLSET }}
+          /p:WindowsTargetPlatformVersion=${{ env.SDK_VERSION }}
+          /t:Build
+          /m
+          /v:minimal
+
+      - name: Stage release files
+        id: stage
+        run: |
+          $version = "${{ needs.release-please.outputs.version }}"
+          if (-not $version) { $version = $env:GITHUB_SHA.Substring(0,7) }
+          $name = "residentevil-$version-windows-x86"
+          New-Item -ItemType Directory -Force "stage/$name" | Out-Null
+          Copy-Item "bin/$env:CONFIGURATION/residentevil.exe" "stage/$name"
+          Copy-Item "bin/$env:CONFIGURATION/residentevil.pdb" "stage/$name"
+          Copy-Item "config.ini" "stage/$name"
+          Copy-Item "README.md" "stage/$name"
+          Copy-Item "LICENSE" "stage/$name"
+          Compress-Archive -Path "stage/$name/*" -DestinationPath "$name.zip"
+          "zip=$name.zip" >> $env:GITHUB_OUTPUT
+          "name=$name" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: ${{ steps.stage.outputs.zip }}
+
+      - name: Attach build to release
+        if: needs.release-please.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" "${{ steps.stage.outputs.zip }}" --clobber

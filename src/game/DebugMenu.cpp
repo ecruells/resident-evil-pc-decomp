@@ -38,6 +38,7 @@
 // ============================================================================
 #include "../Globals.h"
 #include "../DebugPrint.h"
+#include "../Version.h"
 #include "../system/AssetPath.h"
 #include "../marni/MarniSystem.h"
 #include "SpriteRenderer.h"
@@ -1247,6 +1248,13 @@ static void DebugMenu_DrawMain(void)
         PrintText8x8((short)(288 - (int)strlen(timer) * 8), 182, DBGCOL_RED, 0);
     }
 
+    // Port version (Version.h, rewritten by release-please when a release is
+    // cut), bottom-left on the same row as the play timer. Not in the
+    // original - it is here so a screenshot of this menu identifies the
+    // build it came from.
+    sprintf(PRINT_TEXT_BUFFER, "VER %s", GAME_VERSION_STRING);
+    PrintText8x8(32, 182, DBGCOL_HINT, 0);
+
     DebugMenu_PrintCentered(192, "F1/L1+R1/ESC: CLOSE   ENTER/ACTION: SELECT", DBGCOL_HINT);
 }
 
@@ -1293,6 +1301,10 @@ static void DebugMenu_DrawMain(void)
 // ============================================================================
 int debug_menu_overlay(void)
 {
+    if (g_debugFeaturesEnabled == 0) {
+        return 0;
+    }
+
     // F1 / L1+R1 toggle: sampled every frame with edge detection so one press
     // is one toggle, whether the menu is open or closed. The pad combo is read
     // from the raw hardware mask, not g_RawPadHeld - see DBGPAD_TOGGLE.
