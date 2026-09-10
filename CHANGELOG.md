@@ -1,5 +1,17 @@
 # Changelog
 
+## [1.2.0](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.1.1...residentevil-v1.2.0) (2026-09-10)
+
+
+### Features
+
+* added JPN version F9 menu texts ([fc0b0dc](https://github.com/ecruells/resident-evil-pc-decomp/commit/fc0b0dc1724467107c700bdf776cfd43a809069d))
+
+
+### Bug Fixes
+
+* implement JPN file reader exclusive background images ([867f6c9](https://github.com/ecruells/resident-evil-pc-decomp/commit/867f6c9e68bb7c43b21b5cb2a64403d92f4b0d36))
+
 ## [1.1.1](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.1.0...residentevil-v1.1.1) (2026-09-10)
 
 
