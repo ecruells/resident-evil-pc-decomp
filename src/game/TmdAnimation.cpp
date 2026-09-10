@@ -334,9 +334,13 @@ BYTE* CreateTmdObjectInternal(int depth, int tmdDataPtr, int animObjPtr)
 {
     bool hasTransparency = false;
 
-    // Check if this object is already cached
+    // Check if this object is already cached. The index comes from the
+    // animation object's own +8 field, which a fresh object has not written
+    // yet - the original indexes the table with it unmasked (ASan caught a
+    // read 4 bytes before g_tmdObjectSlotAnimPtrs), so range-check it.
     int slotIndex = *(int*)(animObjPtr + 8);
-    if (g_objectDeletePtr && g_objectDeletePtr[slotIndex] == animObjPtr) {
+    if (slotIndex >= 0 && slotIndex < 251 &&
+        g_objectDeletePtr && g_objectDeletePtr[slotIndex] == animObjPtr) {
         return (BYTE*)&g_tmdObjectBuffer[slotIndex * 0x1594];
     }
 

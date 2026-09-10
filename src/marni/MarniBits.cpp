@@ -15,7 +15,8 @@
 #include <cmath>
 #include <new>
 #include <cstring>
-#include <windows.h>
+#include "../platform/types.h"
+#include "../platform/platform.h"
 
 #include "MarniSystem.h"
 
@@ -1417,12 +1418,7 @@ int CMarniBits::SaveBitmapToFile(const char* filename) {
     tempBmp.m_dataSource = 0;
 
     // Write to file
-    HANDLE hFile = CreateFileA(filename, GENERIC_WRITE, 0, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (hFile != INVALID_HANDLE_VALUE) {
-        DWORD written;
-        WriteFile(hFile, buffer, bmpSize, &written, NULL);
-        CloseHandle(hFile);
-    }
+    plat_file_write(filename, buffer, bmpSize);
 
     free(buffer);
 

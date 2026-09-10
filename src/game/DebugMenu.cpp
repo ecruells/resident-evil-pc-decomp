@@ -37,6 +37,7 @@
 //     ...
 // ============================================================================
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../DebugPrint.h"
 #include "../Version.h"
 #include "../system/AssetPath.h"
@@ -211,14 +212,14 @@ static unsigned char s_dbgDoorRecord[0x18];     // synthetic door record (must o
 static int DebugMenu_SampleKeys(void)
 {
     int keys = 0;
-    if (GetAsyncKeyState(VK_LEFT)   & 0x8000) keys |= DBGKEY_LEFT;
-    if (GetAsyncKeyState(VK_RIGHT)  & 0x8000) keys |= DBGKEY_RIGHT;
-    if (GetAsyncKeyState(VK_UP)     & 0x8000) keys |= DBGKEY_UP;
-    if (GetAsyncKeyState(VK_DOWN)   & 0x8000) keys |= DBGKEY_DOWN;
-    if (GetAsyncKeyState(VK_RETURN) & 0x8000) keys |= DBGKEY_CONFIRM;
-    if (GetAsyncKeyState(VK_SPACE)  & 0x8000) keys |= DBGKEY_CONFIRM;
-    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) keys |= DBGKEY_ESC;
-    if (GetAsyncKeyState(VK_F1)     & 0x8000) keys |= DBGKEY_F1;
+    if (plat_key_state(VK_LEFT)   & 0x8000) keys |= DBGKEY_LEFT;
+    if (plat_key_state(VK_RIGHT)  & 0x8000) keys |= DBGKEY_RIGHT;
+    if (plat_key_state(VK_UP)     & 0x8000) keys |= DBGKEY_UP;
+    if (plat_key_state(VK_DOWN)   & 0x8000) keys |= DBGKEY_DOWN;
+    if (plat_key_state(VK_RETURN) & 0x8000) keys |= DBGKEY_CONFIRM;
+    if (plat_key_state(VK_SPACE)  & 0x8000) keys |= DBGKEY_CONFIRM;
+    if (plat_key_state(VK_ESCAPE) & 0x8000) keys |= DBGKEY_ESC;
+    if (plat_key_state(VK_F1)     & 0x8000) keys |= DBGKEY_F1;
 
     DWORD pad = g_RawPadHeld;
     if (pad & DBGPAD_LEFT)   keys |= DBGKEY_LEFT;
@@ -1057,7 +1058,7 @@ static void DebugFlag_DescribeBit(const DebugFlagView* v, int bit, char* out)
 // sits on.
 static int DebugFlag_AimKeyHeld(void)
 {
-    if (g_keyBindingData[10] != 0 && (GetAsyncKeyState(g_keyBindingData[10]) & 0x8000)) {
+    if (g_keyBindingData[10] != 0 && (plat_key_state(g_keyBindingData[10]) & 0x8000)) {
         return 1;
     }
     return (g_RawPadHeld & DBGPAD_AIM) ? 1 : 0;
@@ -1193,7 +1194,7 @@ static void DebugQuick_ScanSlots(void)
     for (int i = 0; i < 8; i++) {
         DebugQuickSlotInfo* info = &s_dbgQuickSlotInfo[i];
         info->hasData = 0;
-        sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, i + 1);
+        sprintf(g_saveFileName, "%ssavedat%d.dat", GetSaveRoot(), i + 1);
         int size = ReadSaveFile(g_saveFileName, buffer);
         if (size >= 0x200) {
             info->hasData     = 1;
@@ -1377,7 +1378,7 @@ int debug_menu_overlay(void)
     // is one toggle, whether the menu is open or closed. The pad combo is read
     // from the raw hardware mask, not g_RawPadHeld - see DBGPAD_TOGGLE.
     int padToggle = ((DWORD)read_sidewinder_pad() & DBGPAD_TOGGLE) == DBGPAD_TOGGLE;
-    int f1 = ((GetAsyncKeyState(VK_F1) & 0x8000) != 0 || padToggle) ? 1 : 0;
+    int f1 = ((plat_key_state(VK_F1) & 0x8000) != 0 || padToggle) ? 1 : 0;
     int f1Edge = f1 && !s_dbgPrevF1;
     s_dbgPrevF1 = f1;
 

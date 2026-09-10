@@ -23,6 +23,7 @@
 // record's [pair2 .. pair1] span agrees with the set of quadrants that record
 // was duplicated into. Only shapes 1, 3, 4 and 5 occur in the shipped data.
 #include "../Globals.h"
+#include <cstdlib>                   // abs() - MSVC got this via <windows.h>
 #include "Types.h"
 #include "Entities.h"
 

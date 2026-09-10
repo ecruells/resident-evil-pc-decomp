@@ -110,7 +110,7 @@ void* enemies_update_functions_tbl[48] = {
     (void*)character_npc_update,    // [41] Kenneth's corpse, devoured state (em1029)
     (void*)character_npc_update,    // [42] Barry's dying, cutscene variant (em102a)
     (void*)character_npc_update,    // [43] Barry, cutscene variant (em102b)
-    (void*)character_npc_update,    // [44] Rebecca, cutscene variant (em102c)
+    (void*)character_npc_update,    // [44] Rebecca, hunter cutscene variant (em102c)
     (void*)character_npc_update,    // [45] Barry, cutscene variant (em102d)
     (void*)character_npc_update,    // [46] Wesker, cutscene variant (em102e)
     (void*)character_npc_update     // [47] unused by scripts; em1030 = Chris alt

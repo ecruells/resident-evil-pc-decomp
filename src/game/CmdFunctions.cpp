@@ -166,7 +166,9 @@ int cmd_bit_test(void)
     int* target = (int*)((char*)flagBank + bitOffset);
     unsigned int condition = op2 >> 8;
 
-    return ((*target << bitIndex) < 0) ^ condition;
+    // The original shifts the word left and tests the sign bit. Shifting a
+    // negative int is UB, so test the same bit through an unsigned value.
+    return ((((unsigned int)*target << bitIndex) & 0x80000000u) != 0) ^ condition;
 }
 
 // ============================================================================
@@ -898,7 +900,16 @@ int cmd_enemy_set(void)
         ENTITY->collisionFlags = 0;
         // Original clears entity +0xD8 = lookAtFlags, not death_timer (+0xBC).
         ENTITY->lookAtFlags = 0;
-        ENTITY->Sca_info = (unsigned int)g_scaDataTable;
+        // 0x004619e4: `MOV EAX, ds:0x4d4540` - the VALUE of g_scaDataTable[0]
+        // (the Chris SCA record), not the address of the table. Storing the
+        // address made every entity whose own init does not override Sca_info
+        // (static models like Kenneth's corpse) read its collision radius out
+        // of the pointer bytes: radius = high word of a pointer. The original
+        // got away with it because its table sits at 0x004d4540, so the high
+        // word was 0x004d = 77; the port's addresses are ~0x5675xxxx, so the
+        // same read yielded a radius of 22133 and the next corpse-vs-zombie
+        // push teleported the zombie ~22000 units across the room.
+        ENTITY->Sca_info = g_scaDataTable[0];
         ENTITY->pSca_hit_data = g_scaPoolPtr;
         g_enemy_count++;
         g_scaPoolPtr += (unsigned int)g_ScdOpcodes[5] * 6;
@@ -982,6 +993,11 @@ int cmd_omodel_set(void)
     unsigned int slotIdx = (unsigned int)(g_ScdOpcodes[1] & 0x3f);
     char* objPtr = (char*)g_omodel_table[slotIdx];
     int* modelData = (int*)((char*)g_RdtPointer->object_models + slotIdx * 8);
+
+    // Declared before the goto so the jump cannot cross an initialisation
+    // (GCC rejects that; MSVC allowed it). Assigned at their use site below.
+    unsigned char parentByte;
+    unsigned int parentIdx;
 
     if (*modelData == 0) {
         *(int*)(objPtr + 0x14) = 0;
@@ -1103,8 +1119,8 @@ int cmd_omodel_set(void)
     DAT_004d2be0 = -1;
 
     // Set up SCA parent reference
-    unsigned char parentByte = g_ScdOpcodes[3];
-    unsigned int parentIdx = (unsigned int)parentByte;
+    parentByte = g_ScdOpcodes[3];
+    parentIdx = (unsigned int)parentByte;
     if (parentIdx == 0xfe) {
         *(int*)(objPtr + 100) = (int)&g_playerEntity + 0x1c;
     } else if (parentIdx == 0xff) {

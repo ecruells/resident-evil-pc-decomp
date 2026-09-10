@@ -5,6 +5,8 @@
 #include "../marni/MarniBits.h"
 #include "../DebugPrint.h"
 #include <stdio.h>
+#include <cstdlib>
+#include <cstring>
 
 #undef LoadImage  // Win32 WinUser.h macro conflicts with Marni LoadImage
 
@@ -348,6 +350,12 @@ void cleanup_texture_slot(int slot)
 
 // 0x0046c160 - create_texture_page
 // Copies PSXTexture data into work buffer, stores flags, queues async creation
+// Persistent snapshot of the last submitted surface (see the copy note below).
+static BYTE*  s_pagePixelCopy = NULL;
+static size_t s_pagePixelCopyCap = 0;
+static WORD*  s_pagePaletteCopy = NULL;
+static size_t s_pagePaletteCopyCap = 0;
+
 int create_texture_page(void* psxTexData, int flags)
 {
     // The original always passes a slot's stored PSXTexture work buffer
@@ -363,6 +371,50 @@ int create_texture_page(void* psxTexData, int flags)
     g_texturePageSrcDesc = psxTexData;
 
     CMarniBits_CopyFrom(&g_MarniBitsWorkBuffer, psxTexData);
+
+    // CopyFrom ALIASES the caller's pixel/palette pointers, and the async
+    // worker only reads them later, on the scheduler task. The original gets
+    // away with that because every caller hands it the slot's persistent
+    // descriptor; the port keeps no per-slot copy, and ProcessTextureImage
+    // passes a local PSXTexture whose pixels die with the frame - ASan caught
+    // the worker reading 8KB of freed heap. Snapshot the surface instead so
+    // the work buffer owns what the worker reads.
+    {
+        CMarniBits* src = (CMarniBits*)psxTexData;
+        if (src->m_pPixelData != NULL && src->m_height > 0) {
+            size_t pitch = (size_t)src->m_pitch;
+            if (pitch == 0) {
+                pitch = (src->m_bitDepth == 4) ? (size_t)(src->m_width / 2)
+                      : (src->m_bitDepth == 8) ? (size_t)src->m_width
+                                               : (size_t)src->m_width * 2;
+            }
+            size_t need = pitch * (size_t)src->m_height;
+            if (need > 0) {
+                if (need > s_pagePixelCopyCap) {
+                    free(s_pagePixelCopy);
+                    s_pagePixelCopy = (BYTE*)malloc(need);
+                    s_pagePixelCopyCap = (s_pagePixelCopy != NULL) ? need : 0;
+                }
+                if (s_pagePixelCopy != NULL) {
+                    memcpy(s_pagePixelCopy, src->m_pPixelData, need);
+                    g_MarniBitsWorkBuffer.m_pPixelData = s_pagePixelCopy;
+                }
+            }
+        }
+        if (src->m_pPalette != NULL && (src->m_bitDepth == 4 || src->m_bitDepth == 8)) {
+            size_t need = ((src->m_bitDepth == 4) ? 16 : 256) * sizeof(WORD);
+            if (need > s_pagePaletteCopyCap) {
+                free(s_pagePaletteCopy);
+                s_pagePaletteCopy = (WORD*)malloc(need);
+                s_pagePaletteCopyCap = (s_pagePaletteCopy != NULL) ? need : 0;
+            }
+            if (s_pagePaletteCopy != NULL) {
+                memcpy(s_pagePaletteCopy, src->m_pPalette, need);
+                g_MarniBitsWorkBuffer.m_pPalette = s_pagePaletteCopy;
+            }
+        }
+    }
+
     g_texturePageMode = flags;
     ExecAsync((void*)AsyncCreateTexturePage);
     return g_texturePageHandle;
@@ -1035,9 +1087,19 @@ void CreateTexturedQuad(int viewportSlot, int texturePageId, int* vertexData)
     // 0x0046fb50: Scale slot to byte offset
     int slotOffset = viewportSlot * 0x40;
 
+    // Same stand-in caveat as the other legacy-descriptor users: the original's
+    // per-slot arrays are far larger than these fragments, so every access is
+    // range-checked before it happens. An out-of-range read yields "absent".
+    const size_t slotElem = (size_t)slotOffset / sizeof(DWORD);
+    const bool slotOk = slotElem < sizeof(g_VideoDriverArray_03c) / sizeof(DWORD);
+    const bool dataOk = (size_t)slotOffset + 0x40 <= sizeof(g_VideoDriverArray_D0);
+    const bool pageOk = (size_t)texturePageId < sizeof(g_VideoDriverArray_4fc) / sizeof(DWORD);
+    const bool tableOk = (size_t)texturePageId * 0xDF + sizeof(DWORD)
+                         <= sizeof(g_TexturePageTable_DAT);
+
     // 0x0046fb60: If slot is in use, release old resources
-    if (g_VideoDriverArray_03c[slotOffset / sizeof(DWORD)] != 0) {
-        int oldHandle = g_VideoDriverArray_068[slotOffset / sizeof(DWORD)];
+    if (slotOk && g_VideoDriverArray_03c[slotElem] != 0) {
+        int oldHandle = g_VideoDriverArray_068[slotElem];
         if (oldHandle != 0) {
             FUN_0046c280(oldHandle);
         }
@@ -1048,16 +1110,16 @@ void CreateTexturedQuad(int viewportSlot, int texturePageId, int* vertexData)
     // FUN_00427100(4, 1, 4);  // - stubbed
 
     // 0x0046fba0: Clear the surface flag
-    g_VideoDriverArray_04c[slotOffset / sizeof(DWORD)] = 0;
+    if (slotOk) g_VideoDriverArray_04c[slotElem] = 0;
 
     // 0x0046fbb0: Store the texture page ID for this slot
-    g_VideoDriverArray_06c[slotOffset / sizeof(DWORD)] = texturePageId;
+    if (slotOk) g_VideoDriverArray_06c[slotElem] = texturePageId;
 
     // 0x0046fbc0: Check if the texture page exists in the page table
     int texCheckOffset = texturePageId * 0xDF;
     DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
 
-    if (*pageTable != 0) {
+    if (tableOk && *pageTable != 0) {
         // 0x0046fbd0: Get and check background color
         // int bgColor = FUN_004271e0(0, 0);  // - stubbed
         int bgColor = 1;  // Assume non-zero for now
@@ -1085,8 +1147,8 @@ void CreateTexturedQuad(int viewportSlot, int texturePageId, int* vertexData)
                 float b = 1.0f;                             // Color B
 
                 // Texture coordinates normalized by page dimensions
-                float texW = (float)g_VideoDriverArray_4fc[texturePageId];
-                float texH = (float)g_VideoDriverArray_500[texturePageId];
+                float texW = pageOk ? (float)g_VideoDriverArray_4fc[texturePageId] : 0.0f;
+                float texH = pageOk ? (float)g_VideoDriverArray_500[texturePageId] : 0.0f;
                 float u = (texW != 0) ? (float)vertexData[i + 12] / texW : 0.0f;
                 float v = (texH != 0) ? (float)vertexData[i + 16] / texH : 0.0f;
 
@@ -1103,8 +1165,10 @@ void CreateTexturedQuad(int viewportSlot, int texturePageId, int* vertexData)
             // FUN_00427250();  // - stubbed
 
             // 0x0046fcb0: Create execute buffer for this quad
-            int handle = FUN_0046c230(&g_VideoDriverArray_D0 + slotOffset);
-            g_VideoDriverArray_068[slotOffset / sizeof(DWORD)] = handle;
+            if (dataOk && slotOk) {
+                int handle = FUN_0046c230(&g_VideoDriverArray_D0 + slotOffset);
+                g_VideoDriverArray_068[slotElem] = handle;
+            }
         }
     }
 }
@@ -1132,17 +1196,38 @@ void SetupTexturePageHandles(int slotIndex, int pageIndex)
     // 0x0046d0e0: Shift slot by 0xF (matching LoadTexturePage)
     slotIndex = slotIndex + 0xF;
 
+    // Same legacy-descriptor caveat as LoadTexturePage: these tables are
+    // addressed by the shifted slot and the port's stand-ins are far smaller
+    // than the original's 393KB span, so every slot >= 4 is out of range. The
+    // render path never reads them, but the writes used to land in whatever
+    // followed the arrays in .bss - at startup the slot-15 write (offset 3345
+    // into a 1024-byte table) landed in g_imageBufferDataB. Every access below
+    // is range-checked; out-of-range stores are skipped and the count reads
+    // yield 0, which is what makes the whole block a no-op in this port.
+    int slotOffset = slotIndex * 0x37C;
+    int texCheckOffset = slotIndex * 0xDF;
+
+    // g_TexturePageTable_DAT is indexed two incompatible ways - by ELEMENT in
+    // SpriteRenderer.cpp and by BYTE offset here - so both forms need the check.
+    const bool tableOk = (size_t)texCheckOffset + 8 * sizeof(DWORD)
+                         <= sizeof(g_TexturePageTable_DAT);
+    const bool elemOk  = (size_t)texCheckOffset < sizeof(g_TexturePageTable_DAT) / sizeof(DWORD);
+    const bool cntOk   = (size_t)texCheckOffset < sizeof(g_VideoDriverArray_810) / sizeof(DWORD);
+    const bool descOk  = (size_t)slotOffset + 0x68 <= sizeof(g_VideoDriverArray_4d0);
+
     if (pageIndex == 0) {
         // --- Rebuild all pages ---
-        int texCheckOffset = slotIndex * 0xDF;
-        int pageCount = g_VideoDriverArray_810[texCheckOffset];
+        int pageCount = cntOk ? g_VideoDriverArray_810[texCheckOffset] : 0;
         int count = 0;
 
-        if (pageCount > 0) {
-            BYTE* pageData = (BYTE*)&g_VideoDriverArray_4d0 + slotIndex * 0x37C;
+        if (pageCount > 0 && tableOk && descOk) {
+            BYTE* pageData = (BYTE*)&g_VideoDriverArray_4d0 + slotOffset;
             DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
 
             for (int i = 0; i < pageCount; i++) {
+                if ((size_t)slotOffset + (size_t)i * 0x68 + 0x54 > sizeof(g_VideoDriverArray_4d0)) {
+                    break;
+                }
                 // 0x0046d120: Set page flag and create GPU handle with mode 2
                 *(DWORD*)(pageData + 0x50) = 1;
                 int handle = create_texture_page(pageData, 2);
@@ -1158,7 +1243,7 @@ void SetupTexturePageHandles(int slotIndex, int pageIndex)
         }
 
         // 0x0046d170: Fill remaining 8 slots with zero
-        if (count < 8) {
+        if (count < 8 && tableOk) {
             DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset + count * sizeof(DWORD));
             for (int i = 8 - count; i > 0; i--) {
                 *pageTable = 0;
@@ -1167,25 +1252,32 @@ void SetupTexturePageHandles(int slotIndex, int pageIndex)
         }
     } else {
         // --- Setup single page at index (pageIndex - 1) ---
-        int texCheckOffset = slotIndex * 0xDF;
 
         // 0x0046d1a0: Clear all 8 page table slots to zero
-        DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
-        for (int i = 0; i < 8; i++) {
-            *pageTable = 0;
-            pageTable++;
+        if (tableOk) {
+            DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + texCheckOffset);
+            for (int i = 0; i < 8; i++) {
+                *pageTable = 0;
+                pageTable++;
+            }
         }
 
         // 0x0046d1c0: Compute offset for the specific page
-        int pageOffset = slotIndex * 0x37C + (pageIndex - 1) * 0x68;
+        int pageOffset = slotOffset + (pageIndex - 1) * 0x68;
 
         // 0x0046d1d0: Set flag and create GPU handle
-        g_VideoDriverArray_520[pageOffset / sizeof(DWORD)] = 1;
-        int handle = create_texture_page((BYTE*)&g_VideoDriverArray_4d0 + pageOffset, 2);
+        if ((size_t)pageOffset + 0x68 <= sizeof(g_VideoDriverArray_4d0)) {
+            if ((size_t)pageOffset / sizeof(DWORD) < sizeof(g_VideoDriverArray_520) / sizeof(DWORD)) {
+                g_VideoDriverArray_520[pageOffset / sizeof(DWORD)] = 1;
+            }
+            int handle = create_texture_page((BYTE*)&g_VideoDriverArray_4d0 + pageOffset, 2);
 
-        // Store handle in the correct page table slot
-        int pageSlot = slotIndex * 0xDF + pageIndex - 1;
-        ((DWORD*)&g_TexturePageTable_DAT)[pageSlot] = (DWORD)handle;
+            // Store handle in the correct page table slot
+            int pageSlot = texCheckOffset + pageIndex - 1;
+            if (elemOk && (size_t)pageSlot < sizeof(g_TexturePageTable_DAT) / sizeof(DWORD)) {
+                ((DWORD*)&g_TexturePageTable_DAT)[pageSlot] = (DWORD)handle;
+            }
+        }
     }
 }
 

@@ -5,75 +5,26 @@
 #include "system/AssetPath.h"
 
 // ============================================================================
-// Task scheduler state section
+// ============================================================================
+// Global placement — no custom sections
 // ----------------------------------------------------------------------------
-// The scheduler state globals MUST live outside the memory range that
-// InitializeGame()'s memclr(&g_defaultItemSlot, g_BioCardData) wipes. In the
-// original binary these globals (0x00d91a68..0x00d91a90, plus g_TasksTable at
-// 0x00d1fde4 and g_StackPointer at 0x007e0cc8) are placed by the linker far
-// away from the wiped game-state block (0x00be41e0..0x00be9620), so memclr
-// never touches them. Our decompilation's linker happened to place them inside
-// the wiped range, which zeroed g_SchedulerESP mid-task and crashed TaskYield.
+// The original binary wipes the fixed game-state range 0x00be41e0..0x00be9620
+// at game init (InitializeGame's memclr). This decomp used to reproduce that
+// as a contiguous block by allocating every in-range global into a
+// linker-ordered .gwipe section (plus .sched for state that had to stay out of
+// the wipe, and .items for the item image buffer). That required MSVC's
+// $-subsection sorting and could not be expressed on GNU ld/lld.
 //
-// To preserve the original layout intent without disturbing the bio card /
-// game-state globals (whose relative order and sizes are load-bearing), we
-// isolate the scheduler state into its own .sched section. The relative order
-// within this block matches the original's 0x00d91a68 cluster ordering.
+// The wipe is now explicit instead: ResetGameStateBlock() in GameStart.cpp
+// clears each wiped global by name. That is exactly the set the range covered,
+// with no ordering requirement, so the sections are gone and every global here
+// is an ordinary definition.
+//
+// When decompiling a NEW global whose original address is in
+// [0x00be41e0, 0x00be9620): add it to ResetGameStateBlock(). Full member table
+// and incident history: docs/MEMORY_LAYOUT.md
 // ============================================================================
-#pragma section(".sched", read, write)
 
-// ============================================================================
-// Game-state wipe section (.gwipe)
-// ----------------------------------------------------------------------------
-// InitializeGame() calls memclr(&g_defaultItemSlot, g_BioCardData), which in
-// the original binary wipes the fixed range 0x00be41e0..0x00be9620 (effect
-// pool, player entity, enemy list, death state, ...). In this decompilation
-// the linker decides where globals live, so any zero-initialized global it
-// happened to place between those two symbols got wiped at game start (this
-// silently killed the task scheduler, g_pMarniDirect3D, and the keyboard
-// keymap in g_pMasterInputState on three separate occasions).
-//
-// Fix: every global whose ORIGINAL address falls inside the wiped range is
-// allocated into the .gwipe section via __declspec(allocate(".gwipe$<4 low
-// hex digits of original address>")). The linker sorts $-suffixed subsections alphabetically, which
-// reassembles the block in original address order:
-//   .gwipe$41e0 = g_defaultItemSlot (start of the memclr)
-//   .gwipe$...  = everything the original wipes
-//   .gwipe$9620 = g_BioCard         (exclusive end of the memclr)
-// No stranger global can land between the sentinels, and every member listed
-// here is guaranteed to be wiped — exactly like the original.
-//
-// When decompiling a NEW global with an original address in
-// [0x00be41e0, 0x00be9620): add a #pragma section line for its tag below and
-// define it with __declspec(allocate(".gwipe$<tag>")) so it joins the block.
-// (MSVC does not allow building the section name by string concatenation, so
-// each subsection is declared explicitly.)
-//
-// Full member table, placement rules for ALL globals, and incident history:
-// docs/MEMORY_LAYOUT.md
-// ============================================================================
-#pragma section(".gwipe$41e0", read, write)
-#pragma section(".gwipe$41e1", read, write)
-#pragma section(".gwipe$41e2", read, write)
-#pragma section(".gwipe$41e4", read, write)
-#pragma section(".gwipe$62e4", read, write)
-#pragma section(".gwipe$6350", read, write)
-#pragma section(".gwipe$6358", read, write)
-#pragma section(".gwipe$6368", read, write)
-#pragma section(".gwipe$6370", read, write)
-#pragma section(".gwipe$6380", read, write)
-#pragma section(".gwipe$6382", read, write)
-#pragma section(".gwipe$6384", read, write)
-#pragma section(".gwipe$6388", read, write)
-#pragma section(".gwipe$6464", read, write)
-#pragma section(".gwipe$92cc", read, write)
-#pragma section(".gwipe$9614", read, write)
-#pragma section(".gwipe$961d", read, write)
-#pragma section(".gwipe$961e", read, write)
-#pragma section(".gwipe$961f", read, write)
-#pragma section(".gwipe$9620", read, write)
-
-__declspec(allocate(".sched"))
 
 // --- Window system ---
 // 0x00bcb2c0
@@ -203,7 +154,7 @@ RectDrawDesc g_window_rect = {320, 0, 0, 0, 0, 0, 240, 0};
 // pointer mid-game and crashing the graphics readiness check. Isolating it
 // into .sched (alongside the task scheduler state) guarantees the memclr
 // never touches it. See docs/MEMORY_LAYOUT.md.
-__declspec(allocate(".sched")) void* g_pMarniDirect3D = NULL;
+void* g_pMarniDirect3D = NULL;
 
 // Input state master 0x00ac4030
 // NOTE: MUST live in .sched. In the original binary this struct (0x00ac4030) is
@@ -211,7 +162,7 @@ __declspec(allocate(".sched")) void* g_pMarniDirect3D = NULL;
 // memclr(&g_defaultItemSlot, g_BioCardData) wipes. Our linker placed it inside
 // that range, so starting a game zeroed keyMap and killed ALL keyboard input in
 // gameplay (menu button included). See docs/MEMORY_LAYOUT.md.
-__declspec(allocate(".sched")) MasterInputState g_pMasterInputState = {};
+MasterInputState g_pMasterInputState = {};
 
 // --- Main state flags ---
 // 0x00be41c0
@@ -265,25 +216,25 @@ BYTE g_bGameActive = 0;
 // InitializeGame's memclr(&g_defaultItemSlot, g_BioCardData) cannot wipe them.
 // Relative order mirrors the original binary's 0x00d91a68 cluster.
 // _g_StackPointer 0x007e0cc8
-__declspec(allocate(".sched")) DWORD g_StackPointer = 0;
+void* g_StackPointer = NULL;
 // 0x00d1fde4
-__declspec(allocate(".sched")) TaskControlBlock g_TasksTable[3] = {};
+TaskControlBlock g_TasksTable[3] = {};
 // 0x00bf09ec
-__declspec(allocate(".sched")) TaskControlBlock* g_CurrentTask = NULL;
+TaskControlBlock* g_CurrentTask = NULL;
 // 0x00d91a68
-__declspec(allocate(".sched")) TaskControlBlock* g_CurrentTaskPtr = NULL;
+TaskControlBlock* g_CurrentTaskPtr = NULL;
 // 0x00d91a70
-__declspec(allocate(".sched")) DWORD g_TasksESP[3] = {};
+uintptr_t g_TasksESP[3] = {};
 // 0x00d91a7c
-__declspec(allocate(".sched")) DWORD g_CurrentTaskID = 0;
+DWORD g_CurrentTaskID = 0;
 // 0x00d91a80
-__declspec(allocate(".sched")) DWORD g_TasksEIP[3] = {};
+void* g_TasksEIP[3] = {};
 // 0x00d91a8c
-__declspec(allocate(".sched")) DWORD g_SchedulerESP = 0;
+uintptr_t g_SchedulerESP = 0;
 // 0x00d91a90
-__declspec(allocate(".sched")) void* g_AsyncRpcCallback = NULL;
+void* g_AsyncRpcCallback = NULL;
 // 0x004ba0b8
-__declspec(allocate(".sched")) DWORD g_SchedulerRunningFlag = 0;
+DWORD g_SchedulerRunningFlag = 0;
 
 // --- Input state ---
 // 0x00bcb2e0 - last keyboard scan code or dialog message ID
@@ -303,8 +254,6 @@ DWORD g_PlayerPadHeld = 0;
 DWORD g_PlayerPadHeldPrev = 0;
 
 // 0x00bcb430
-#pragma section(".items", read, write)
-__declspec(allocate(".items"))
 BYTE g_ItemsImageBuffer[86400] = {};
 
 // 0x00be05b2 (raw pad state snapshot)
@@ -873,7 +822,7 @@ DWORD  g_objectListPtrArray[0xE00] = {};      // 0x008fc430 - 256 x 0x38 entries
 // whatever the linker placed next (observed: g_objectCountArray itself ended
 // up holding garbage counts, crashing ObjectCleanupCallback).
 BYTE   g_psxTextureArray[32 * 0x1b60] = {};   // 0x00a75168 - PSXTexture array
-DWORD  g_textureBankRedirect[23] = {};        // 0x00aae2b0
+DWORD  g_textureBankRedirect[32] = {};        // 0x00aae2b0
 
 // Async TMD object creation globals (FUN_00483cc0)
 DWORD  g_asyncTmdDepth = 0;                   // 0x008fc42c
@@ -918,14 +867,14 @@ char          g_renderStateTex[0x36c];          // 0x00aad6f0
 // NOTE: the 0x00be63xx entries overlay g_playerEntity's range in the original
 // binary; they get separate storage here but must still be wiped on game init,
 // so they carry .gwipe$ tags placing them inside the .gwipe block.
-__declspec(allocate(".gwipe$6370")) int           g_healthStatus = 0;              // 0x00be6370
-__declspec(allocate(".gwipe$6368")) int           g_playerAngle = 0;               // 0x00be6368
-__declspec(allocate(".gwipe$6380")) short         g_playerBkpPosX = 0;             // 0x00be6380
-__declspec(allocate(".gwipe$6382")) short         g_playerBkpPosZ = 0;             // 0x00be6382
-__declspec(allocate(".gwipe$6384")) int           g_playerBkpHealthStat = 0;       // 0x00be6384
-__declspec(allocate(".gwipe$6388")) short         g_playerBkpAngle = 0;            // 0x00be6388
-__declspec(allocate(".gwipe$6350")) int           g_playerPosX = 0;                // 0x00be6350
-__declspec(allocate(".gwipe$6358")) int           g_playerPosZ = 0;                // 0x00be6358
+int           g_healthStatus = 0;              // 0x00be6370
+int           g_playerAngle = 0;               // 0x00be6368
+short         g_playerBkpPosX = 0;             // 0x00be6380
+short         g_playerBkpPosZ = 0;             // 0x00be6382
+int           g_playerBkpHealthStat = 0;       // 0x00be6384
+short         g_playerBkpAngle = 0;            // 0x00be6388
+int           g_playerPosX = 0;                // 0x00be6350
+int           g_playerPosZ = 0;                // 0x00be6358
 int           g_savesCounter = 0;              // 0x004d467c (outside wipe range)
 char          g_saveFileName[260] = {};         // 0x004d42d8
 
@@ -957,26 +906,26 @@ int end_game_status = 0;
 // ============================================================================
 
 // 0x00be62e4 - Main player entity structure (0x180 bytes)
-__declspec(allocate(".gwipe$62e4")) PlayerEntity g_playerEntity = {};
+PlayerEntity g_playerEntity = {};
 
 // 0x00be6464 - Enemy entity array (30 x 0x18C bytes)
-__declspec(allocate(".gwipe$6464")) Entity g_EnemiesList[30] = {};
+Entity g_EnemiesList[30] = {};
 
 // 0x00be92cc - saved enemy state table, 16 x 0x1C bytes (0x00be92cc-0x00be948b).
 // Inside the game-init wipe block, so it needs a .gwipe tag (see docs/MEMORY_LAYOUT.md).
 // The slot below is g_EnemiesList, which ends at 0x00be928b; the slot above is
 // 0x00be9614 - the range is otherwise unoccupied.
-__declspec(allocate(".gwipe$92cc")) SavedEnemyState g_savedEnemyStates[16] = {};
+SavedEnemyState g_savedEnemyStates[16] = {};
 
 // 0x00be41e2 - Enemy count (inside the wiped range: original zeroes it on game init)
-__declspec(allocate(".gwipe$41e2")) int g_enemy_count = 0;
+int g_enemy_count = 0;
 
 // ============================================================================
 // Effect system globals (billboard/sprite effect pool)
 // ============================================================================
 
 // 0x00be41e4 - Effect pool: 64 slots x 0x84 bytes each (ends at 0x00be62e4)
-__declspec(allocate(".gwipe$41e4")) Effect g_effectPool[MAX_EFFECTS] = {};
+Effect g_effectPool[MAX_EFFECTS] = {};
 
 // 0x00bf07ee - Free effect slot counter (initialized to 64 by InitRoomEffSprite)
 unsigned char g_freeEffectSlots = 0;
@@ -1310,13 +1259,13 @@ DWORD         g_ItemSlotsBitmask = 0;
 
 // 0x00be41e0 - Default/reset item slot (byte). FIRST member of the .gwipe
 // block: memclr(&g_defaultItemSlot, g_BioCardData) starts here.
-__declspec(allocate(".gwipe$41e0")) unsigned char g_defaultItemSlot = 0;
+unsigned char g_defaultItemSlot = 0;
 
 // 0x00be41e1 - Zeroed on game init (adjacent byte to g_defaultItemSlot)
-__declspec(allocate(".gwipe$41e1")) unsigned char DAT_00be41e1 = 0;
+unsigned char DAT_00be41e1 = 0;
 
 // 0x00be9614 - Death/timeout state machine byte (game_loop switch)
-__declspec(allocate(".gwipe$9614")) unsigned char DAT_00be9614 = 0;
+unsigned char DAT_00be9614 = 0;
 
 // 0x004bd81d - Item image lookup table (459 bytes from Ghidra, verified against
 // the original binary). Indexed by itemId * 4. Each entry is 4 bytes:
@@ -1379,7 +1328,7 @@ const unsigned char g_ItemImageLookupTable[459] = {
 // 0x00be9620 - LAST member of .gwipe: exclusive END marker of the game-init
 // memclr (memclr(&g_defaultItemSlot, g_BioCardData) stops here; the bio card
 // itself is NOT wiped).
-__declspec(allocate(".gwipe$9620")) BioCardLayout g_BioCard = {};
+BioCardLayout g_BioCard = {};
 
 // ============================================================================
 // Global Messages Table (0x004bfc58)
@@ -1787,8 +1736,10 @@ DWORD   g_effectSpriteInfo[50] = {};
 // 0x00bf0b1c - Effect animation data (immediately follows g_effectSpriteInfo[50])
 DWORD   g_effectAnimData[425] = {};   // 0x00bf0b1c - per-type effect animation pointers (DWORD array, 1700 bytes)
 
-BYTE    g_entityModelBuffer[52224] = {};    // 0x00bf11c0
-BYTE    g_entityModelBuffer2[56320] = {};   // 0x00bfddc0
+// One contiguous region, exactly as the original: see the note in Globals.h.
+static EntityModelStorage s_entityModelStorage = {};
+BYTE (&g_entityModelBuffer)[52224]  = s_entityModelStorage.first;    // 0x00bf11c0
+BYTE (&g_entityModelBuffer2)[56320] = s_entityModelStorage.second;   // 0x00bfddc0
 
 // 0x00c0b9c0
 BYTE   g_animationBuffer[37888] = {};
@@ -1964,9 +1915,9 @@ SndPanVol      g_SndPanVol[3] = {};                     // 0x00ac98e0 (bound 0x0
 int            DAT_00ac98f8 = 0;                        // 0x00ac98f8
 
 // Special room lighting globals (also used by MainLoop.cpp)
-__declspec(allocate(".gwipe$961d")) int            g_SpecialR1 = 0;           // 0x00be961d
-__declspec(allocate(".gwipe$961e")) int            g_SpecialG1 = 0;           // 0x00be961e
-__declspec(allocate(".gwipe$961f")) int            g_SpecialB1 = 0;           // 0x00be961f
+int            g_SpecialR1 = 0;           // 0x00be961d
+int            g_SpecialG1 = 0;           // 0x00be961e
+int            g_SpecialB1 = 0;           // 0x00be961f
 
 // TMD model caching state
 int*           DAT_00bca0d0 = NULL;                     // 0x00bca0d0

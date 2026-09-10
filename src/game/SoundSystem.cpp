@@ -1,6 +1,7 @@
 // SoundSystem.cpp - Sound system implementation
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../marni/MarniSound.h"
 #include "Entities.h"
 #include "SoundTables.h"
@@ -326,40 +327,13 @@ void ResumeGameSoundsAsync(void)
 // ============================================================================
 // ProbeWaveOutDevicesAndCacheVolume (0x0047...)
 // Enumerates wave out devices and caches the current volume setting.
+//
+// The device walk itself is a Win32 waveOut path; it moved to the platform
+// layer in Phase 0 (src/platform/win32/platform.cpp). Behaviour unchanged.
 // ============================================================================
 void ProbeWaveOutDevicesAndCacheVolume(void)
 {
-    UINT numDevs = waveOutGetNumDevs();
-    HWAVEOUT hWaveOut = NULL;
-
-    for (UINT devId = 0; devId < numDevs; devId++) {
-        WAVEOUTCAPSA caps;
-        if (waveOutGetDevCapsA(devId, &caps, sizeof(caps)) == MMSYSERR_NOERROR) {
-            WAVEFORMATEX wfx = {};
-            wfx.wFormatTag = WAVE_FORMAT_PCM;
-            wfx.wBitsPerSample = 8;
-
-            if ((caps.dwFormats & WAVE_FORMAT_48S16) != 0) {
-                wfx.nSamplesPerSec = 44100;
-                wfx.nChannels = 2;
-            } else {
-                wfx.nSamplesPerSec = 22050;
-                wfx.nChannels = caps.wChannels;
-            }
-
-            wfx.nBlockAlign = (wfx.nChannels * wfx.wBitsPerSample) / 8;
-            wfx.nAvgBytesPerSec = wfx.nBlockAlign * wfx.nSamplesPerSec;
-            wfx.cbSize = 0;
-
-            if (waveOutOpen(&hWaveOut, devId, &wfx, 0, 0, 0) == MMSYSERR_NOERROR) {
-                waveOutGetVolume(hWaveOut, &g_CachedWaveOutVolume);
-            }
-        }
-        if (hWaveOut != NULL) {
-            waveOutClose(hWaveOut);
-            hWaveOut = NULL;
-        }
-    }
+    plat_audio_probe_and_cache_volume();
 }
 
 // ============================================================================
@@ -378,40 +352,12 @@ void StartSoundSystemAsync(HWND hwnd)
 // ============================================================================
 // RestoreWaveOutVolume (0x0047...)
 // Enumerates wave out devices and restores the cached volume.
+//
+// Device walk moved to the platform layer in Phase 0; behaviour unchanged.
 // ============================================================================
 void RestoreWaveOutVolume(void)
 {
-    UINT numDevs = waveOutGetNumDevs();
-    HWAVEOUT hWaveOut = NULL;
-
-    for (UINT devId = 0; devId < numDevs; devId++) {
-        WAVEOUTCAPSA caps;
-        if (waveOutGetDevCapsA(devId, &caps, sizeof(caps)) == MMSYSERR_NOERROR) {
-            WAVEFORMATEX wfx = {};
-            wfx.wFormatTag = WAVE_FORMAT_PCM;
-            wfx.wBitsPerSample = 8;
-
-            if ((caps.dwFormats & WAVE_FORMAT_48S16) != 0) {
-                wfx.nSamplesPerSec = 44100;
-                wfx.nChannels = 2;
-            } else {
-                wfx.nSamplesPerSec = 22050;
-                wfx.nChannels = caps.wChannels;
-            }
-
-            wfx.nBlockAlign = (wfx.nChannels * wfx.wBitsPerSample) / 8;
-            wfx.nAvgBytesPerSec = wfx.nBlockAlign * wfx.nSamplesPerSec;
-            wfx.cbSize = 0;
-
-            if (waveOutOpen(&hWaveOut, devId, &wfx, 0, 0, 0) == MMSYSERR_NOERROR) {
-                waveOutSetVolume(hWaveOut, g_CachedWaveOutVolume);
-            }
-        }
-        if (hWaveOut != NULL) {
-            waveOutClose(hWaveOut);
-            hWaveOut = NULL;
-        }
-    }
+    plat_audio_restore_volume();
 }
 
 // ============================================================================
@@ -966,7 +912,9 @@ unsigned short CalculateAngleBetweenPointsXZ(int pos1_x, int pos1_z, int pos2_x,
     short dx = (short)pos2_x - (short)pos1_x;
     if (dx != 0) {
         short dz = (short)pos2_z - (short)pos1_z;
-        int slope = ((int)dz << 12) / (int)dx;
+        // * 4096, not << 12: dz is a signed short, and shifting a negative
+        // value left is UB (the original's SHL wrapped instead).
+        int slope = ((int)dz * 4096) / (int)dx;
         short angle = (short)GetAngleQuadrantValue(slope);
         return (unsigned short)(-((unsigned short)(dx < 0) * 0x800 + angle)) & 0xFFF;
     }

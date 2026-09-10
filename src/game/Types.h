@@ -1,8 +1,8 @@
 #pragma once
 
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#include <mmsystem.h>
+// Win32 types come from the platform layer, never <windows.h> directly:
+// src/game/ must stay OS-agnostic (docs/LINUX_PORT.md Phase 0).
+#include "../platform/types.h"
 #include <cstdio>
 #include "../marni/MarniDX.h"
 #include "../marni/MarniBits.h"

@@ -9,7 +9,8 @@
 #include <stdlib.h>
 #include <new>
 #include <string.h>
-#include <windows.h>
+#include "../platform/types.h"
+#include "../platform/platform.h"
 
 // Object size must stay 0x348 — g_psxTextureArray slots use 0x36C/0x1b60
 // strides derived from the original layout.
@@ -405,62 +406,29 @@ void PSXTexture::ClearCLUTEntries() {
 // ============================================================================
 int PSXTexture::LoadFromFile(const char* filename) {
     // 0x0041fa60
-    // Original used _lopen/_llseek/_lread/_lclose CRT functions
-    // Modern port uses Win32 CreateFile/ReadFile
+    // Original used _lopen/_llseek/_lread/_lclose CRT functions.
+    // The whole-file read now lives in the platform layer.
 
     // Remap the compile-time asset root to the config-selected version
     // (config.ini [Assets] Version); a no-op unless the JPN tree is active.
     char resolved[260];
     const char* openPath = ResolveAssetRoot(filename, resolved, sizeof(resolved));
 
-    HANDLE hFile = CreateFileA(
-        openPath,
-        GENERIC_READ,
-        FILE_SHARE_READ,
-        NULL,
-        OPEN_EXISTING,
-        FILE_ATTRIBUTE_NORMAL,
-        NULL
-    );
-    
-    if (hFile == INVALID_HANDLE_VALUE) {
+    size_t fileSize = 0;
+    void* buffer = plat_file_read_all(openPath, &fileSize);
+    if (buffer == NULL) {
         char buf[256];
         sprintf_s(buf, sizeof(buf), "can't open file %s", filename);
         printf("%s: MarniSystem PSXTexture::Store\n", buf);
         return 0;
     }
-    
-    // Get file size
-    DWORD fileSize = GetFileSize(hFile, NULL);
-    if (fileSize == INVALID_FILE_SIZE) {
-        CloseHandle(hFile);
-        return 0;
-    }
-    
-    // Allocate buffer (original rounds up to 4-byte alignment + 16 bytes safety)
-    DWORD alignedSize = (fileSize & 0xFFFFFFFC) + 0x10;
-    void* buffer = operator_new(alignedSize);
-    if (buffer == NULL) {
-        CloseHandle(hFile);
-        return 0;
-    }
-    
-    // Read entire file
-    DWORD bytesRead;
-    BOOL readResult = ReadFile(hFile, buffer, fileSize, &bytesRead, NULL);
-    CloseHandle(hFile);
-    
-    if (!readResult || bytesRead != fileSize) {
-        free(buffer);
-        return 0;
-    }
-    
+
     // Parse TIM data (copyData=1: allocate and copy pixel data)
     int result = Store((int*)buffer, 1);
-    
+
     // Free the temporary file buffer
     free(buffer);
-    
+
     return result;
 }
 

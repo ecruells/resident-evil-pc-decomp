@@ -35,6 +35,42 @@ void memclr(void* start, void* end)
 }
 
 // ---------------------------------------------------------------------------
+// ResetGameStateBlock
+//
+// The original's game-init wipe covers the fixed range
+// 0x00be41e0..0x00be9620 (InitializeGame's memclr). Reproduce it by clearing
+// exactly those globals by name, in original address order, instead of relying
+// on the linker to lay them out contiguously — the .gwipe section that used to
+// do that needed MSVC's $-subsection sorting (docs/LINUX_PORT.md Phase 1).
+//
+// Every global whose original address is in that range belongs here; see
+// docs/MEMORY_LAYOUT.md for the member table. g_BioCard (0x00be9620) is the
+// exclusive end and is deliberately NOT cleared.
+// ---------------------------------------------------------------------------
+static void ResetGameStateBlock(void)
+{
+    g_defaultItemSlot = 0;              // 0x00be41e0
+    DAT_00be41e1 = 0;                   // 0x00be41e1
+    g_enemy_count = 0;                  // 0x00be41e2
+    memset(g_effectPool, 0, sizeof(g_effectPool));            // 0x00be41e4
+    memset(&g_playerEntity, 0, sizeof(g_playerEntity));        // 0x00be62e4
+    g_playerPosX = 0;                   // 0x00be6350
+    g_playerPosZ = 0;                   // 0x00be6358
+    g_playerAngle = 0;                  // 0x00be6368
+    g_healthStatus = 0;                 // 0x00be6370
+    g_playerBkpPosX = 0;                // 0x00be6380
+    g_playerBkpPosZ = 0;                // 0x00be6382
+    g_playerBkpHealthStat = 0;          // 0x00be6384
+    g_playerBkpAngle = 0;               // 0x00be6388
+    memset(g_EnemiesList, 0, sizeof(g_EnemiesList));          // 0x00be6464
+    memset(g_savedEnemyStates, 0, sizeof(g_savedEnemyStates)); // 0x00be92cc
+    DAT_00be9614 = 0;                   // 0x00be9614
+    g_SpecialR1 = 0;                    // 0x00be961d
+    g_SpecialG1 = 0;                    // 0x00be961e
+    g_SpecialB1 = 0;                    // 0x00be961f
+}
+
+// ---------------------------------------------------------------------------
 // SetInitialItems (0x004513f0)
 // Sets up the initial inventory based on selected character.
 // ---------------------------------------------------------------------------
@@ -269,7 +305,7 @@ void InitializeGame(void)
 
     // 0x00412380: empty in the original - call dropped
 
-    memclr(&g_defaultItemSlot, g_BioCardData);
+    ResetGameStateBlock();
 
     g_loadDataDestPointer = g_DataBuffer;
     g_SpecialRoomLightDelta = 0;
@@ -349,7 +385,9 @@ void InitializeGame(void)
 
     g_playerEntity.maxHealth = (unsigned char)((g_playerEntity.id & 1) * -44 + 140);
 
-    g_playerEntity.Sca_info = (unsigned int)g_scaDataTable;
+    // Placeholder only: SetupCharacterData (called below) replaces it with the
+    // character's own record. Same value as the original's initial store.
+    g_playerEntity.Sca_info = g_scaDataTable[0];
 
     g_scaPoolPtr = (DWORD)g_entityDataBlock + 6;
     g_scaPoolBase = (DWORD)g_entityDataBlock + 6;

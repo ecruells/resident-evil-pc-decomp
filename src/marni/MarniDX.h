@@ -12,7 +12,7 @@
 // or xinput.h. Only <windows.h> + MarniBits.h are permitted.
 #pragma once
 
-#include <windows.h>
+#include "../platform/types.h"
 #include "MarniBits.h"
 
 // ============================================================================
@@ -187,9 +187,10 @@ public:
                             MarniBlend  blend   = MARNI_BLEND_ALPHA,
                             bool depthTest = false);
 
-    // Depth-buffered variant of DrawTriangles for 3D models: 9 floats per
-    // vertex, { x, y (screen px, Y-down), z (normalised [0,1] depth), u, v,
-    // r, g, b, a }. Tests and writes the depth buffer (LESS_EQUAL) when
+    // Depth-buffered variant of DrawTriangles for 3D models: 10 floats per
+    // vertex, { x, y (screen px, Y-down), z (normalised [0,1] depth), w
+    // (view-space Z), u, v, r, g, b, a } - same layout as DrawTrianglesPersp.
+    // Tests and writes the depth buffer (LESS_EQUAL) when
     // depthWrite is set (default) so faces of the same model resolve correctly
     // whatever order they arrive in; with depthWrite=false it only TESTS, for
     // translucent geometry (water, glass) that must not hide the depth-tested

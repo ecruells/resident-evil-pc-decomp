@@ -2,7 +2,7 @@
 // 3D geometry management for the Marni System
 // Original: Direct3DObject, MarniExecuteBuffer, MarniPolyhedra, Direct3DTMD
 #pragma once
-#include <windows.h>
+#include "../platform/types.h"
 #include <new>
 
 // ============================================================================

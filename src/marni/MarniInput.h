@@ -2,8 +2,10 @@
 // Wraps Win32 GetAsyncKeyState + WinMM joyGetPosEx for PS1 controller emulation
 // Original class: MarniSystem::DirectInput (debug string at 0x004ba154)
 #pragma once
-#include <windows.h>
-#include <mmsystem.h>
+#include "../platform/types.h"
+#ifdef _WIN32
+#include <mmsystem.h>   // JOYINFOEX/JOYCAPS - the Windows input backend
+#endif
 
 // Maximum joysticks supported
 #define MAX_JOYSTICKS 32

@@ -10,6 +10,8 @@
 // Original class: CMarniDirect3D at vtable 0x004af230, size 0x21DC
 // Original functions referenced by address in comments.
 
+#include <cstdlib>                   // malloc/free - MSVC got this via <windows.h>
+#include "../platform/platform.h"
 #include "MarniSystem.h"
 #include "MarniBits.h"
 #include "MarniDX.h"
@@ -308,17 +310,12 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
                           : (bpp == 8) ? (w - 1)
                                        : ((w - 1) * 2 + 1);
         SIZE_T need = (SIZE_T)pitch * (h - 1) + lastByteInRow + 1;
-        MEMORY_BASIC_INFORMATION mbi;
-        SIZE_T avail = 0;
-        if (VirtualQuery(base, &mbi, sizeof(mbi)) == sizeof(mbi) &&
-            mbi.State == MEM_COMMIT) {
-            avail = (SIZE_T)((const BYTE*)mbi.BaseAddress + mbi.RegionSize - base);
-        }
+        SIZE_T avail = plat_readable_bytes(base);
         if (avail < need) {
             char dbg[224];
             sprintf_s(dbg, sizeof(dbg),
                       "[TEXPAGE] TRUNCATED: w=%d h=%d bpp=%d pitch=%d base=%p "
-                      "clut=%p need=%Iu avail=%Iu\n",
+                      "clut=%p need=%zu avail=%zu\n",
                       w, h, bpp, pitch, (const void*)base, (const void*)clut,
                       need, avail);
             OutputDebugStringA(dbg);
@@ -340,19 +337,12 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
     // and drop to the untextured path if it is not.
     if (clut != NULL && (bpp == 4 || bpp == 8)) {
         SIZE_T need = (bpp == 4) ? 16 * sizeof(WORD) : 256 * sizeof(WORD);
-        MEMORY_BASIC_INFORMATION mbi;
-        SIZE_T avail = 0;
-        if (VirtualQuery(clut, &mbi, sizeof(mbi)) == sizeof(mbi) &&
-            mbi.State == MEM_COMMIT &&
-            (mbi.Protect & (PAGE_NOACCESS | PAGE_GUARD)) == 0) {
-            avail = (SIZE_T)((const BYTE*)mbi.BaseAddress + mbi.RegionSize -
-                             (const BYTE*)clut);
-        }
+        SIZE_T avail = plat_readable_bytes(clut);
         if (avail < need) {
             char dbg[224];
             sprintf_s(dbg, sizeof(dbg),
                       "[TEXPAGE] BAD CLUT: w=%d h=%d bpp=%d pitch=%d base=%p "
-                      "clut=%p need=%Iu avail=%Iu src=%p\n",
+                      "clut=%p need=%zu avail=%zu src=%p\n",
                       w, h, bpp, pitch, (const void*)base, (const void*)clut,
                       need, avail, g_texturePageSrcDesc);
             OutputDebugStringA(dbg);
@@ -504,7 +494,7 @@ void InitializeMarniSystem(void)
             "Failed to initialize the Graphics System",
             "RESIDENT EVIL", MB_OK | MB_ICONSTOP);
         CleanupVideoConfigAndSaveAllSettings();
-        DestroyWindow(g_hWnd);
+        plat_window_destroy(g_hWnd);
         return;
     }
 
@@ -517,11 +507,11 @@ void InitializeMarniSystem(void)
 
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (pD3D && pD3D->m_isFullScreen) {
-        ShowCursor(FALSE);
+        plat_cursor_show(FALSE);
         g_isGameCursorHiddenFlag = FALSE;
     }
 
-    g_GameInitTime = timeGetTime();
+    g_GameInitTime = plat_time_ms();
 }
 
 // EnumerateDisplayModes — 0x004976c0

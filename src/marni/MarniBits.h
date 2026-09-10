@@ -3,7 +3,7 @@
 // Class size: 0x54 bytes (fields up to offset 0x50)
 #pragma once
 
-#include <windows.h>
+#include "../platform/types.h"
 
 class CMarniBits {
 public:

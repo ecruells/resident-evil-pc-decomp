@@ -4,6 +4,7 @@
 
 #include "Globals.h"
 #include "system/AssetPath.h"
+#include "system/ConfigFile.h"
 
 // Forward declarations for local helpers
 static int  CheckSystemRequirements(void);
@@ -18,68 +19,20 @@ static int  RunMessageLoop(void);
 
 // ============================================================================
 // LoadIniConfiguration - Read settings from config.ini
-// Tries: current dir, then exe dir, then ..
+//
+// config.ini is the settings store for both builds now (src/system/
+// ConfigFile.h). The registry is still read first so an install that predates
+// the switch keeps its bindings and play counts; config.ini then overrides it
+// and is created with documented defaults when it does not exist.
 // ============================================================================
 static BOOL LoadIniConfiguration(void)
 {
-    const char* iniPaths[] = {
-        ".\\config.ini",          // Current working directory
-        "config.ini",              // Same (alternate form)
-        "..\\config.ini",          // Parent directory (for bin\Debug runs)
-        "..\\..\\config.ini",     // Two levels up (for certain VS layouts)
-    };
-    
-    const char* foundPath = NULL;
-    for (int i = 0; i < 4; i++) {
-        if (GetFileAttributesA(iniPaths[i]) != INVALID_FILE_ATTRIBUTES) {
-            foundPath = iniPaths[i];
-            break;
-        }
+    if (IsGameInstalled()) {
+        LoadInstallationConfiguration((BYTE*)g_szInstallPath);
     }
-    
-    if (foundPath == NULL) {
-        return FALSE;
-    }
-    
-    // Read display config from the found INI file
-    g_bFullScreen = (GetPrivateProfileIntA("Display", "FullScreen", 0, foundPath) != 0);
-    g_dwScreenWidth = GetPrivateProfileIntA("Display", "Width", 640, foundPath);
-    g_dwScreenHeight = GetPrivateProfileIntA("Display", "Height", 480, foundPath);
-    g_dwBitDepth = GetPrivateProfileIntA("Display", "BitDepth", 32, foundPath);
-    g_bVSync = (GetPrivateProfileIntA("Display", "VSync", 0, foundPath) != 0);
 
-    // Master switch for the port-added debug features (F1 menu, F6/F7/F8,
-    // quick access, collision overlay). Absent key: on in debug builds,
-    // off in release builds.
-    g_debugFeaturesEnabled =
-        GetPrivateProfileIntA("Debug", "EnableDebug",
-#ifdef _DEBUG
-                              1,
-#else
-                              0,
-#endif
-                              foundPath);
-
-    // Asset version to run (USA default; JPN selects the Biohazard tree).
-    // SetAssetVersion swaps the data root used by every asset reader.
-    char assetVersion[16];
-    GetPrivateProfileStringA("Assets", "Version", "USA",
-                             assetVersion, sizeof(assetVersion), foundPath);
-    SetAssetVersion(assetVersion);
-
-
-    // Clamp to reasonable values
-    if (g_dwScreenWidth < 320) g_dwScreenWidth = 640;
-    if (g_dwScreenHeight < 240) g_dwScreenHeight = 480;
-    if (g_dwScreenWidth > 3840) g_dwScreenWidth = 3840;
-    if (g_dwScreenHeight > 2160) g_dwScreenHeight = 2160;
-    if (g_dwBitDepth != 16 && g_dwBitDepth != 32) g_dwBitDepth = 32;
-    
-    // Set adapter to hardware (1) to avoid software renderer path
-    g_dwSelectedDisplayAdapterID = 1;
-    g_dwSelectedDisplayModeID = 0;
-    
-    return TRUE;
+    ConfigFile_EnsureExists();
+    return ConfigFile_Load();
 }
 
 // ============================================================================

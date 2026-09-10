@@ -211,6 +211,22 @@ Membership errors cut both ways.
    with explicit clears of exactly the original members (see
    [Known range-based operations](#known-range-based-operations)).
 
+6. **Player-model spill past `EntityModelStorage`** (2026-09-08) — the same
+   class again, this time from a *load* rather than a range operation.
+   `LoadEntityModel` reads the whole player EMD into `g_entityModelBuffer`,
+   which with `g_entityModelBuffer2` forms one 108544-byte region. The larger
+   player models do not fit: `char11.emd` (Jill) is 112968 bytes, `char12.emd`
+   112620, the costume variants up to 112664 — up to 4424 bytes of file data
+   run past the region. In the original binary that tail lands in the
+   animation buffer; in this decompilation it landed on `g_pMasterInputState`
+   (Windows), overwriting `keyMap` and the joystick entries so the game saw a
+   phantom gamepad and the character walked by itself, and on `s_assetIsJpn`
+   (Linux), flipping `GetAssetVersion()` to the JPN tables and corrupting the
+   message glyphs and item names. `EntityModelStorage` now carries a 16 KB
+   `spillGuard` tail. **When a global is a load target, size it for the largest
+   file the game actually ships, not for the original symbol's extent** — and
+   re-check that size when a new asset version is added.
+
 ## Status note
 
 The decompilation is function-complete: every global the original binary

@@ -1,8 +1,15 @@
 // MarniSound.h - DirectSound class (PSYQ-like sound API wrapper)
 // Original Ghidra names preserved for each method.
 #pragma once
-#include <windows.h>
+#include "../platform/types.h"
+#ifdef _WIN32
+// <mmsystem.h> defines PlaySound as a macro (PlaySoundA), which would rename
+// this class's PlaySound method at every call site. Include it first and drop
+// the macro so the member name is stable in every translation unit.
 #include <mmsystem.h>
+#undef PlaySound
+#undef PlaySoundA
+#endif
 
 #pragma pack(push, 1)
 class DirectSound {

@@ -4,6 +4,14 @@ assets/
 .vs/
 bin/
 obj/
+build/
+# Self-contained Linux bundles from tools/package_linux.sh.
+dist/
 *.BMP
 *.jpg
 *.png
+*.log
+# Runtime state (P8): config.ini is created by the game and rewritten on exit,
+# so it is no longer tracked; re1.lock is the single-instance guard.
+config.ini
+re1.lock

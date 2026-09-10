@@ -11,6 +11,7 @@
 // ============================================================================
 
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "game/Types.h"
 #include "game/Entities.h"
 #include "game/OptionsMenu.h"
@@ -59,7 +60,7 @@ unsigned char FUN_00497de0(void)
 {
     g_nOptKeyScanResult = 0;
     for (int i = 0; i < 67; i++) {
-        SHORT state = GetAsyncKeyState((int)g_abOptKeyScanTable[i]);
+        SHORT state = plat_key_state((int)g_abOptKeyScanTable[i]);
         if ((state & 0x8000) != 0 && (state & 1) == 0) {
             g_nOptKeyScanResult = g_abOptKeyScanTable[i];
             break;

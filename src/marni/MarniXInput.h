@@ -21,7 +21,7 @@
 // Buttons occupy bits 8-19, so pad buttons 1-8 (bits 8-15) are exactly the
 // eight rows the SideWinder config screen rebinds.
 #pragma once
-#include <windows.h>
+#include "../platform/types.h"
 
 // Left-stick deflection (0..32767) past which a direction bit is raised.
 // XInput's own XINPUT_GAMEPAD_LEFT_THUMB_DEADZONE (7849) is tuned for free
