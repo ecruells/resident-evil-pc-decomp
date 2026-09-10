@@ -2,6 +2,7 @@
 // Original function: main_loop at 0x00428eb0 (Ghidra)
 // Adapted from Ghidra decompilation
 #include "Globals.h"
+#include "../system/AssetPath.h"
 
 // 0x00470750 - declared in SpriteRenderer.h; the signature must match that
 // definition exactly (see the stub-overload note on display_room_camera_bg).
@@ -96,16 +97,31 @@ int main_loop(void)
     if ((g_AttractModeIdleTimer == 0) && ((g_main_state_flags & MSF_VOICE_PLAYING) == 0) &&
         (g_displayReturnToTitleScreen_Flag != 0)) {
 
-        sprintf(PRINT_TEXT_BUFFER, "Press F9 to abort game and return to");
-        PrintText8x14(16, 100, 128, 1);
+        // F9 return-to-title prompt. The Japanese build (Biohazard.exe
+        // 0x00484130, strings at 0x004cb2d8/0x004cb2d4/0x004cb2c0) shows a
+        // dialog instead of the USA sentence: the action title at y=100, a
+        // large "F9" at (0x8c,0x78) and the cancel hint at (0x1c,0xa0).
+        if (GetAssetVersion() != 0) {
+            sprintf(PRINT_TEXT_BUFFER, "RETURN TITLE");
+            PrintText8x14(0x46, 100, 128, 1);
 
-        sprintf(PRINT_TEXT_BUFFER, "title screen.");
-        PRINT_TEXT_BUFFER[0x0C] = 0x9d;
-        PrintText8x14(16, 116, 128, 1);
+            sprintf(PRINT_TEXT_BUFFER, "F9");
+            PrintText8x14(0x8c, 0x78, 128, 1);
 
-        sprintf(PRINT_TEXT_BUFFER, "Or any other key to continue game.");
-        PRINT_TEXT_BUFFER[0x21] = 0x9d;
-        PrintText8x14(16, 150, 128, 1);
+            sprintf(PRINT_TEXT_BUFFER, "(CANCEL: OTHER KEY)");
+            PrintText8x14(0x1c, 0xa0, 128, 1);
+        } else {
+            sprintf(PRINT_TEXT_BUFFER, "Press F9 to abort game and return to");
+            PrintText8x14(16, 100, 128, 1);
+
+            sprintf(PRINT_TEXT_BUFFER, "title screen.");
+            PRINT_TEXT_BUFFER[0x0C] = 0x9d;
+            PrintText8x14(16, 116, 128, 1);
+
+            sprintf(PRINT_TEXT_BUFFER, "Or any other key to continue game.");
+            PRINT_TEXT_BUFFER[0x21] = 0x9d;
+            PrintText8x14(16, 150, 128, 1);
+        }
 
         g_window_rect.w = 320;
         g_window_rect.textureId = 0;
@@ -130,19 +146,32 @@ int main_loop(void)
     }
 
     if (g_displayExitGameScreen_flag != 0) {
-        sprintf(PRINT_TEXT_BUFFER, "Press F9 to exit game and return");
-        PrintText8x14(16, 100, 128, 1);
+        // F9 exit-to-desktop prompt. The Japanese build shows the same dialog
+        // with "EXIT GAME" at x=0x5a instead of "RETURN TITLE" at x=0x46.
+        if (GetAssetVersion() != 0) {
+            sprintf(PRINT_TEXT_BUFFER, "EXIT GAME");
+            PrintText8x14(0x5a, 100, 128, 1);
 
-        sprintf(PRINT_TEXT_BUFFER, "to desktop.");
-        PRINT_TEXT_BUFFER[0x0A] = 0x9d;
-        PrintText8x14(16, 116, 128, 1);
+            sprintf(PRINT_TEXT_BUFFER, "F9");
+            PrintText8x14(0x8c, 0x78, 128, 1);
 
-        sprintf(PRINT_TEXT_BUFFER, "Or any other key to return to");
-        PrintText8x14(16, 150, 128, 1);
+            sprintf(PRINT_TEXT_BUFFER, "(CANCEL: OTHER KEY)");
+            PrintText8x14(0x1c, 0xa0, 128, 1);
+        } else {
+            sprintf(PRINT_TEXT_BUFFER, "Press F9 to exit game and return");
+            PrintText8x14(16, 100, 128, 1);
 
-        sprintf(PRINT_TEXT_BUFFER, "title screen.");
-        PRINT_TEXT_BUFFER[0x0C] = 0x9d;
-        PrintText8x14(16, 166, 128, 1);
+            sprintf(PRINT_TEXT_BUFFER, "to desktop.");
+            PRINT_TEXT_BUFFER[0x0A] = 0x9d;
+            PrintText8x14(16, 116, 128, 1);
+
+            sprintf(PRINT_TEXT_BUFFER, "Or any other key to return to");
+            PrintText8x14(16, 150, 128, 1);
+
+            sprintf(PRINT_TEXT_BUFFER, "title screen.");
+            PRINT_TEXT_BUFFER[0x0C] = 0x9d;
+            PrintText8x14(16, 166, 128, 1);
+        }
 
         g_window_rect.w = 320;
         g_window_rect.textureId = 0;
