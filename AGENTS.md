@@ -42,8 +42,7 @@ sources for this repo:
 | `ResidentEvil.exe` | USA PC release (1997 / GOG) | the primary source — every address, function and global already in this repo comes from it |
 | `Biohazard.exe` | Japanese MediaKite PC release | the features, text and data the USA build does not have; the JPN tables in `src/game/JpnTextTables.cpp` were generated from it |
 
-- Query code through the MCP Ghidra server (`ghidraMcp`, configured in
-  `opencode.json`, `http://127.0.0.1:8081/mcp`). **If the server is unavailable,
+- Query code through the MCP Ghidra server. **If the server is unavailable,
   stop and ask the user for help — do not guess code from memory.**
 - Addresses differ between the two programs. If an address does not match what
   you expect, ask the user which program is currently loaded.

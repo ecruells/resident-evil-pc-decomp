@@ -51,8 +51,17 @@ This invokes MSBuild on `Game.sln` (Release / Win32) and produces
 ```
 build_debug.bat
 ```
-This produces `bin\Debug\residentevil.exe`. Adjust the MSBuild path inside the
-scripts if your Visual Studio installation differs.
+This produces `bin\Debug\residentevil.exe`.
+
+Both scripts find MSBuild with `vswhere.exe`, so any Visual Studio edition and
+version (2017 or newer) works without editing a path. The solution itself pins
+`PlatformToolset=v145` / SDK `10.0.26100.0`; on an older installation override
+them with the `RE1_TOOLSET` and `RE1_SDK` environment variables, e.g.
+```
+set RE1_TOOLSET=v143
+set RE1_SDK=10.0
+build.bat
+```
 
 > **Note:** Release intentionally builds with `WholeProgramOptimization`
 > disabled — `/GL`+`/LTCG` miscompiles the task scheduler's naked-assembly
@@ -135,7 +144,8 @@ bash tools/package_linux.sh            # --with-assets also copies assets/
 ```
 
 `dist/residentevil-<version>-linux-x86/` then holds the binary, a launcher that
-puts `lib/` on `LD_LIBRARY_PATH`, and the bundled 32-bit libraries. Only the
+puts `lib/` on `LD_LIBRARY_PATH`, the initial `config.ini` (from
+`config.ini.template`) and the bundled 32-bit libraries. Only the
 glibc family and the GL driver stack (`libGL`/`libEGL`/`libdrm`/`libgbm`/
 `libvulkan`) stay the host's, because they have to match the running kernel and
 GPU — on Arch/CachyOS that means `lib32-mesa`, which SteamOS and any
@@ -183,8 +193,10 @@ the executable is in `bin\Debug\`, so that build needs `Path=..\..\assets` too.
 
 The game reads `config.ini` from the executable's directory first (falling back
 to the working directory) and creates one with commented defaults if none is
-present. The `[Display]`, `[Player]` and `[Input]` keys are saved on exit;
-`[Assets]`, `[Save]` and `[Debug]` are yours to edit and are never rewritten.
+present. Release packages ship `config.ini.template` from the repository root as
+that initial `config.ini`. The `[Display]`, `[Player]` and `[Input]` keys are
+saved on exit; `[Assets]`, `[Save]` and `[Debug]` are yours to edit and are
+never rewritten.
 
 ### Asset version (USA / JPN)
 

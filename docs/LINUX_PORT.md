@@ -969,10 +969,12 @@ reporting are real now, and the settings store is shared:
 
 The registry write is gone on Windows; it is still *read* once at startup so an
 install that predates the switch keeps its bindings, and `config.ini` then
-overrides it. Settings therefore travel between the two builds. `config.ini` is
-no longer tracked in git (it is runtime state now), which is also why the
-release workflow stopped copying it into the package - the game creates it on
-first run. `re1.lock` is gitignored too.
+overrides it. Settings therefore travel between the two builds. A live
+`config.ini` is no longer tracked in git (it is runtime state now), so the
+repository carries `config.ini.template` and both release packages copy it in
+as the initial `config.ini`; the game rewrites it on exit, and still creates
+one from its compiled defaults if the file is missing. `re1.lock` is gitignored
+too.
 
 The crash handler is the Linux counterpart of `system/CrashLog.cpp`: SIGSEGV,
 SIGABRT, SIGBUS, SIGILL and SIGFPE append a `backtrace_symbols_fd` trace and

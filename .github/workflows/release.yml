@@ -45,7 +45,7 @@ jobs:
 
   # Runs on every push to main as a compile check; when the push was a release
   # PR merge, the zip is also attached to the release release-please just made.
-  build:
+  build-windows:
     needs: release-please
     runs-on: windows-2025
     steps:
@@ -82,13 +82,71 @@ jobs:
           New-Item -ItemType Directory -Force "stage/$name" | Out-Null
           Copy-Item "bin/$env:CONFIGURATION/residentevil.exe" "stage/$name"
           Copy-Item "bin/$env:CONFIGURATION/residentevil.pdb" "stage/$name"
-          # config.ini is no longer shipped: it is created with documented
-          # defaults on first run and rewritten by the game on exit.
+          # config.ini is runtime state (created/rewritten by the game on exit),
+          # so it is not tracked; ship the documented template as the initial
+          # file instead of relying on first-run generation.
+          Copy-Item "config.ini.template" "stage/$name/config.ini"
           Copy-Item "README.md" "stage/$name"
           Copy-Item "LICENSE" "stage/$name"
           Compress-Archive -Path "stage/$name/*" -DestinationPath "$name.zip"
           "zip=$name.zip" >> $env:GITHUB_OUTPUT
           "name=$name" >> $env:GITHUB_OUTPUT
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.stage.outputs.name }}
+          path: ${{ steps.stage.outputs.zip }}
+
+      - name: Attach build to release
+        if: needs.release-please.outputs.release_created == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" "${{ steps.stage.outputs.zip }}" --clobber
+
+  # Linux x86-32. Shares every game translation unit with Windows; the SDL2 +
+  # OpenGL platform layer stands in for the MarniDX/Win32 backend. The runner is
+  # the Ubuntu 24.04 reference environment from docs/LINUX_PORT.md, and
+  # tools/package_linux.sh bundles the 32-bit SDL2/ffmpeg objects so the archive
+  # does not depend on the target's package set.
+  build-linux:
+    needs: release-please
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Build the tagged commit when releasing, otherwise the pushed commit.
+          ref: ${{ needs.release-please.outputs.tag_name || github.sha }}
+
+      # The project is strictly 32-bit (-m32); these are the i386 packages from
+      # the CMakeLists dependency message. The amd64 dev packages are absent on
+      # a fresh runner, so the two sets do not conflict.
+      - name: Install 32-bit dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -y cmake g++-multilib libc6-dev-i386 zip \
+            libsdl2-dev:i386 \
+            libavformat-dev:i386 libavcodec-dev:i386 \
+            libavutil-dev:i386 libswresample-dev:i386
+
+      - name: Build
+        run: |
+          cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/linux -j"$(nproc)"
+
+      - name: Stage release files
+        id: stage
+        run: |
+          bash tools/package_linux.sh --no-build
+          bundle="$(ls -d dist/residentevil-*-linux-x86 | head -n1)"
+          # package_linux.sh writes no config.ini: ship the template as the
+          # initial settings file, same as the Windows package.
+          cp config.ini.template "$bundle/config.ini"
+          name="$(basename "$bundle")"
+          (cd dist && zip -rq "$name.zip" "$name")
+          echo "zip=dist/$name.zip" >> "$GITHUB_OUTPUT"
+          echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
