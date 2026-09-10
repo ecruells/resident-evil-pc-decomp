@@ -30,7 +30,7 @@ int check_save_files_exist(void)
 {
     char path[260];
     for (int i = 1; i <= 8; i++) {
-        sprintf(path, "%ssavedat%d.dat", GAME_SAVE_ROOT, i);
+        sprintf(path, "%ssavedat%d.dat", GetSaveRoot(), i);
         FILE* f = fopen(path, "rb");
         if (f != NULL) {
             fclose(f);
@@ -46,11 +46,26 @@ int check_save_files_exist(void)
 // ============================================================================
 void title_setup_texture_pages(int slot, int mode)
 {
+    // Same legacy-descriptor caveat as TextureLoader: these tables are indexed
+    // by slot * 0x37C and the port's stand-ins are a few KB, so the room-load
+    // calls (load_room_bg passes the camera index, 0..7) run off the end. The
+    // DX11 path takes page state from the g_TexturePage* arrays, so reads that
+    // fall out of range can yield 0 - but the destroy loop's writes must not
+    // happen at all.
     int slotBase = slot * 0x37C;
-    int pageCount = g_VideoDriverArray_814[slotBase / 4];
-    if (pageCount != 0) {
+    const bool cntOk   = (size_t)slotBase / sizeof(DWORD)
+                         < sizeof(g_VideoDriverArray_814) / sizeof(DWORD);
+    const bool tableOk = (size_t)slotBase + 8 * sizeof(DWORD) <= sizeof(g_TexturePageTable_DAT);
+    const bool dataOk  = (size_t)slotBase + 2 * 0x68 <= sizeof(g_VideoDriverArray_4d0);
+
+    int pageCount = cntOk ? g_VideoDriverArray_814[slotBase / 4] : 0;
+    if (pageCount != 0 && tableOk) {
         DWORD* pageTable = (DWORD*)((BYTE*)&g_TexturePageTable_DAT + slotBase);
         for (int i = 0; i < pageCount; i++) {
+            if ((size_t)slotBase + (size_t)(i + 1) * sizeof(DWORD)
+                > sizeof(g_TexturePageTable_DAT)) {
+                break;
+            }
             if (pageTable[i] != 0) {
                 destroy_texture_page(pageTable[i]);
                 pageTable[i] = 0;
@@ -58,11 +73,13 @@ void title_setup_texture_pages(int slot, int mode)
         }
     }
 
-    BYTE* pageData = (BYTE*)&g_VideoDriverArray_4d0 + slot * 0x37C;
-    for (int i = 0; i < 2; i++) {
-        int handle = create_texture_page(pageData, (mode != 0) ? 26 : 10);
-        if (handle == 0) break;
-        pageData += 0x68;
+    if (dataOk) {
+        BYTE* pageData = (BYTE*)&g_VideoDriverArray_4d0 + slotBase;
+        for (int i = 0; i < 2; i++) {
+            int handle = create_texture_page(pageData, (mode != 0) ? 26 : 10);
+            if (handle == 0) break;
+            pageData += 0x68;
+        }
     }
 
     g_titleTextureSlotId = slot;

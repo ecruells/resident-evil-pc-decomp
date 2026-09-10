@@ -769,10 +769,16 @@ The game stores configuration in the Windows Registry:
 | `Install Flag` | REG_DWORD | Installation status |
 | `Display Mode` | REG_DWORD | Selected display mode |
 
-### Dev Mode
+### Config file
+
+`config.ini` is the settings store for both configurations (see
+`src/system/ConfigFile.h`): the game creates it with documented defaults when it
+is missing and rewrites the `[Display]`, `[Player]` and `[Input]` keys on exit,
+leaving comments and other sections alone. The registry is still read once at
+startup so an install that predates the switch keeps its bindings, but it is no
+longer written. The file is gitignored — it is runtime state, not source.
 
 In debug builds (`USE_ASSET_PATH_REMAP=1`):
-- Reads `config.ini` instead of registry
 - Remaps asset paths: `.\usa\data\*` → `.\assets\USA\data\*`
 - Skips CD-ROM and installation checks
 - Skips shared memory for display config

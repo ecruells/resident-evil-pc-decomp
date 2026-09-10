@@ -1,7 +1,7 @@
 // FileLoader.h - Asset file loading (replaces original LoadFile at 0x00411e10)
 // Handles path resolution and file I/O for game assets
 #pragma once
-#include <windows.h>
+#include "../platform/types.h"
 
 #ifdef __cplusplus
 extern "C" {

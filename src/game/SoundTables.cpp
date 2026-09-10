@@ -1,5 +1,5 @@
 #include "SoundTables.h"
-#include <windows.h>
+#include "../platform/types.h"
 
 // ============================================================
 // Section 1: Voice Offset Data Tables (5 stages)

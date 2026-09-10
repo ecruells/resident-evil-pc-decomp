@@ -4,6 +4,7 @@
 //            DestroyAllSoundBanks (0x004801c0), CleanupAsyncTasks (0x0041d0b0)
 // Adapted from Ghidra decompilation
 #include "Globals.h"
+#include "ConfigFile.h"
 #include "marni/MarniSystem.h"
 
 // ============================================================================
@@ -57,8 +58,8 @@ void CleanupVideoConfigAndSaveAllSettings(void)
     
     g_bHasFinalizedSettings = TRUE;
     
-    // Save settings to registry
-    SaveGameSettingsToRegistry();
+    // Save settings to config.ini
+    SaveGameSettings();
     
     // Cleanup Marni Direct3D
     if (g_pMarniDirect3D != NULL) {
@@ -94,44 +95,15 @@ void CleanupAsyncTasks(void)
 }
 
 // ============================================================================
-// SaveGameSettingsToRegistry - Save current settings (stub)
+// SaveGameSettings - Write the session's settings back
+//
+// Was SaveGameSettingsToRegistry: the registry write is gone, config.ini is the
+// store for both builds now (src/system/ConfigFile.h). The registry is still
+// READ once at startup so pre-switch installs keep their bindings.
 // ============================================================================
-void SaveGameSettingsToRegistry(void)
+void SaveGameSettings(void)
 {
-    // Original saves all display settings to registry
-    HKEY hKey;
-    LSTATUS result = RegCreateKeyExA(HKEY_CURRENT_USER, REGKEY_PATH, 0, NULL,
-        REG_OPTION_NON_VOLATILE, KEY_WRITE, NULL, &hKey, NULL);
-    
-    if (result == ERROR_SUCCESS) {
-        DWORD dwValue;
-        
-        dwValue = g_dwScreenWidth;
-        RegSetValueExA(hKey, "X Size", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        dwValue = g_dwScreenHeight;
-        RegSetValueExA(hKey, "Y Size", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        dwValue = g_dwBitDepth;
-        RegSetValueExA(hKey, "Bit Depth", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        dwValue = g_bFullScreen;
-        RegSetValueExA(hKey, "FullScreen?", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        dwValue = g_dwPlayCount;
-        RegSetValueExA(hKey, "Play Number", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        dwValue = g_dwClearCount;
-        RegSetValueExA(hKey, "Clear Number", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        dwValue = g_dwSelectedDisplayAdapterID;
-        RegSetValueExA(hKey, "Display Driver", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        dwValue = g_dwSelectedDisplayModeID;
-        RegSetValueExA(hKey, "Display Mode", 0, REG_DWORD, (BYTE*)&dwValue, sizeof(DWORD));
-        
-        RegCloseKey(hKey);
-    }
+    ConfigFile_Save();
 }
 
 // ============================================================================

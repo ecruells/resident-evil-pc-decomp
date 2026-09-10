@@ -2,6 +2,7 @@
 // JoyToPSX (0x00404c90), ReadPadBoth (0x00497ba0), PlayerPad_Update (0x0044e000)
 // InputUpdate (0x00497c00)
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../marni/MarniInput.h"
 #include "../marni/MarniXInput.h"
 #include <cstring>
@@ -356,11 +357,7 @@ DWORD PlayerPad_Update(void)
 // ---------------------------------------------------------------------------
 void ResetGetAsyncKeyStateFlags(void)
 {
-    BYTE vk;
-    GetAsyncKeyState(0);
-    for (vk = 1; vk != 0; vk++) {
-        GetAsyncKeyState(vk);
-    }
+    plat_key_flush();
 }
 
 // ---------------------------------------------------------------------------

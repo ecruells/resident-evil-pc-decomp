@@ -16,7 +16,9 @@ int g_spriteAnimG;                  // 0x00be41d2
 int g_spriteAnimB;                  // 0x00be41d3
 short g_spriteAnimIntensity;        // 0x00be41d4
 
-static int g_pressF9Flag;           // 0x004ba718
+// g_pressF9Flag is defined in Globals.cpp and declared in Globals.h; the old
+// file-local `static` here shadowed it, so window_proc's clear had no effect
+// on this file (GCC rejects the shadowing outright).
 static int g_fading_007d9048;       // 0x007d9048
 static int g_fading_007d904c;       // 0x007d904c
 int g_MaxHealthDisplayFlag;  // 0x00d227c0 (also written by the effect system)
@@ -65,6 +67,12 @@ int main_loop(void)
         g_isSideWinderConnected = FALSE;
         g_isPaused = FALSE;
     }
+
+    // Declared before the _post goto so the jump cannot cross their
+    // initialisations (GCC rejects that; MSVC allowed it). Assigned at their
+    // use sites below.
+    bool shakeActive;
+    BYTE intensity;
 
     if ((g_main_state_flags & MSF_FMV_REQUEST) != 0) {
         g_window_rect.h = 240;
@@ -176,8 +184,8 @@ int main_loop(void)
     // `(g_main_state_flags >> 8) & 0xFF` folded in bits 16-31, which always hold
     // the "game loop active"/"game initialized" bits during play, so the shake
     // never ran once.
-    const bool shakeActive = ((g_main_state_flags2 & MSF2_SCREEN_SHAKE) != 0) &&
-                             ((g_main_state_flags & MSF_MENU_BYTE) == 0);
+    shakeActive = ((g_main_state_flags2 & MSF2_SCREEN_SHAKE) != 0) &&
+                  ((g_main_state_flags & MSF_MENU_BYTE) == 0);
 
     // The offsets have to be rolled BEFORE TaskScheduler_Update, not at the end
     // of the frame where the original rolls them (0x004297f6). The original
@@ -275,7 +283,7 @@ _fade_done:
         g_spriteAnimIntensity -= 16;
     }
 
-    BYTE intensity = (BYTE)g_spriteAnimIntensity;
+    intensity = (BYTE)g_spriteAnimIntensity;
     g_LetterboxBarTop.r = intensity;
     g_LetterboxBarTop.g = intensity;
     g_LetterboxBarTop.b = intensity;

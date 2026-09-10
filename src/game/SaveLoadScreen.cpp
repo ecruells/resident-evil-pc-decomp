@@ -7,6 +7,7 @@
 //               rearrange_item_slots(0x00451510), cut_set(0x004628c0),
 //               StMask(0x00497690), Task_sleep(0x004201e0), Task_chain(0x00420210)
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
 #include "SFXIds.h"
@@ -431,8 +432,13 @@ int ReadSaveFile(const char* path, void* buffer)
 {
     // Try the direct path first
     FILE* fp = fopen(path, "rb");
-    if (fp == NULL && g_szInstallPath[0] != '\0') {
-        // Registry-install fallback (only meaningful with a real install entry)
+    if (fp == NULL) {
+        // Registry-install fallback (only meaningful with a real install entry).
+        // Without it a missing file must return -1 here: falling through to the
+        // fseek below dereferences a NULL FILE* and segfaults, which is what an
+        // absent save slot did on Linux (no install path, so the fallback never
+        // applied). Callers treat a negative size as "slot empty".
+        if (g_szInstallPath[0] == '\0') return -1;
         char fullPath[260];
         sprintf(fullPath, "%s%s", g_szInstallPath, path);
         fp = fopen(fullPath, "rb");
@@ -457,11 +463,16 @@ void EnsureDirectoryExists(const char* path)
 {
     char dirPath[260];
     sprintf(dirPath, "%s", path);
+    // Accept either separator: the Windows build only ever sees '\\', but the
+    // path layer normalises to '/' on other hosts (docs/LINUX_PORT.md Phase 0).
     char* lastSlash = strrchr(dirPath, '\\');
+    char* lastFwd = strrchr(dirPath, '/');
+    if (lastFwd != NULL && (lastSlash == NULL || lastFwd > lastSlash)) {
+        lastSlash = lastFwd;
+    }
     if (lastSlash != NULL) {
         *lastSlash = '\0';
-        SECURITY_ATTRIBUTES sa = { sizeof(SECURITY_ATTRIBUTES), NULL, FALSE };
-        CreateDirectoryA(dirPath, &sa);
+        plat_mkdir(dirPath);
     }
 }
 
@@ -785,7 +796,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
 
             for (int slotIndex = 0; slotIndex < 9; slotIndex++)
             {
-                sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slotIndex + 1);
+                sprintf(g_saveFileName, "%ssavedat%d.dat", GetSaveRoot(), slotIndex + 1);
                 FILE* fp = fopen(g_saveFileName, "r");
                 if (fp == NULL) {
                     save_slots[slotIndex].hasData = 0;
@@ -943,8 +954,8 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
         case STATE_LOAD_SLOT_SELECTED:
         {
             if (save_slots[selected_slot].hasData) {
-                sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, selected_slot + 1);
-                EnsureDirectoryExists(GAME_SAVE_ROOT);
+                sprintf(g_saveFileName, "%ssavedat%d.dat", GetSaveRoot(), selected_slot + 1);
+                EnsureDirectoryExists(GetSaveRoot());
                 int fileSize = ReadSaveFile(g_saveFileName, fileBuffer);
                 RestoreSaveBlock(fileBuffer, fileSize);
 
@@ -1015,7 +1026,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
         // ================================================================
         case STATE_PERFORM_SAVE:
         {
-            EnsureDirectoryExists(GAME_SAVE_ROOT);
+            EnsureDirectoryExists(GetSaveRoot());
             // (The original seeds the display string with a copy of the save
             // directory and truncates at a backslash — dead, the reveal
             // string is fully rebuilt below.)
@@ -1037,7 +1048,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             g_PlayerHealthStatusCopy = g_playerEntityPointer.healthStatusFlags;
             g_PlayerDirAngleCopy     = g_playerEntityPointer.directionAngle;
 
-            sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, selected_slot + 1);
+            sprintf(g_saveFileName, "%ssavedat%d.dat", GetSaveRoot(), selected_slot + 1);
 
             // Refresh the joystick-remap backup; the file stores both tables,
             // and the sidewinder-dependent one receives the live bindings.
@@ -1257,7 +1268,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
 // the game - the same keys that confirm/cancel the regular save screen.
 // On confirm it snapshots the player's position/angle/character into the bio
 // card and writes the whole 0x800-byte bio card block to
-// GAME_SAVE_ROOT savedat<N>.dat - exactly what LoadSaveGameState writes, so
+// GetSaveRoot() savedat<N>.dat - exactly what LoadSaveGameState writes, so
 // the slot shows up on the load screen.
 // Every frame logs both pressed words under "[DBGSAVE]" so input issues are
 // diagnosable from the debugger output.
@@ -1311,13 +1322,13 @@ void DebugSaveMenu(void)
     g_SelectedCharactedId = g_playerEntity.id;
     g_PlayerDirAngleCopy  = g_playerEntity.directionAngle;
 
-    // Write through GAME_SAVE_ROOT so the slot lands where the load screen
+    // Write through GetSaveRoot() so the slot lands where the load screen
     // scans (the original hardcoded "SAVE\\" because its installer created
     // that folder; debug builds keep saves under .\assets\save\).
-    EnsureDirectoryExists(GAME_SAVE_ROOT);
+    EnsureDirectoryExists(GetSaveRoot());
 
     char path[260];
-    sprintf(path, "%ssavedat%d.dat", GAME_SAVE_ROOT, selected + 1);
+    sprintf(path, "%ssavedat%d.dat", GetSaveRoot(), selected + 1);
     int written = FileWrite(path, g_BioCardData, 0x800);
     {
         char dbg[320];

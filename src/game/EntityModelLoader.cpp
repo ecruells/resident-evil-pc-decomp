@@ -9,7 +9,8 @@
 // ============================================================================
 // Extern data declarations (not yet extracted to Globals.h)
 // ============================================================================
-extern BYTE  g_entityModelBuffer[0xCC00];      // 0x00bf11c0
+// g_entityModelBuffer / g_entityModelBuffer2 are declared in Globals.h as
+// references into one contiguous 108544-byte region - see the note there.
 extern DWORD g_animObjectBuffer[0x680];        // 0x00c133c0
 extern DWORD DAT_004d2bd8;                     // 0x004d2bd8 - special model flag
 extern DWORD DAT_004d2bf4;                     // 0x004d2bf4 - TMD processing flag
@@ -20,7 +21,7 @@ extern DWORD DAT_004c1a2c;                     // 0x004c1a2c
 extern DWORD DAT_00ae9f04;                     // 0x00ae9f04
 extern BYTE  g_textureQueueData[40];           // 0x00d22740
 extern DWORD g_animSlotIndex;                  // 0x008f8c78
-extern DWORD g_textureBankRedirect[23];        // 0x00aae2b0
+extern DWORD g_textureBankRedirect[32];        // 0x00aae2b0
 extern DWORD g_bCostumeVariant;                     // 0x004d6444
 
 // Player/weapon angle globals

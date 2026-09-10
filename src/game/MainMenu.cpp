@@ -12,6 +12,7 @@
 // Menu mode: DAT_00ae9f10 determines initial submenu on open
 // ============================================================================
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../system/AssetPath.h"
 #include "../DebugPrint.h"
 #include "FileLoader.h"
@@ -320,6 +321,12 @@ void main_menu(void)
     g_fading_counter = 0xE800;
     fade_update();
 
+    // Declared before the goto below so the jump cannot cross an
+    // initialisation (GCC rejects that; MSVC allowed it). Assigned at their
+    // use sites further down.
+    unsigned char charBits;
+    int hasFlag;
+
     // 0x00463768-0x0046377d: Check if opening for message display (bit 8)
     if ((g_main_state_flags & MSF_PICKUP_SCREEN) != 0) {
         g_MainMenuState = 8;
@@ -363,14 +370,14 @@ LAB_0046381c:
     }
 
     // 0x0046381c-0x00463880: Set character display flags
-    unsigned char charBits = ((g_playerEntity.id + 1) & 2);
+    charBits = ((g_playerEntity.id + 1) & 2);
     g_totalInventorySlots = charBits + 6;
     DAT_00ae9f19 = charBits | (g_playerEntity.id & 1);
 
     // 0x00463880-0x004638e3: Check if map is available
     if ((g_playerEntity.id & 3) == 3) {
         DAT_00ae9f1f = 0;
-        int hasFlag = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_RADIO);
+        hasFlag = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_RADIO);
         if ((hasFlag == 0) &&
             (hasFlag = Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PLANT42_OBJ), hasFlag != 0) &&
             (hasFlag = Flg_ck((int)g_ScenarioFlags2, SCENARIO2_FLAG_PROGRESS_22), hasFlag == 0))
@@ -4022,9 +4029,11 @@ static void pickup_list_init(unsigned char* state)
 static void pickup_list_input(unsigned char* state)
 {
     unsigned char count = g_itemMaxCounts[g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]]];
+    unsigned char* hold;
+
     if (state[9] != 0) goto pickup_input_draw;
 
-    unsigned char* hold = &state[0x13];
+    hold = &state[0x13];
     if (((unsigned short)g_button_pressed_id & 0xa000) == 0) {
         *hold = 0;
     } else {
@@ -5835,7 +5844,7 @@ int FUN_0044e1b0(void)
     // (0x00497e00: push 0x10, call GetAsyncKeyState, store 1 if nonzero).
     // Shift switches the d-pad from rotate to zoom+roll, so this must be the
     // live key state - the previous constant 0x10 pinned it to "shift held".
-    g_viewerPadWord = (GetAsyncKeyState(0x10) != 0) ? 1 : 0;
+    g_viewerPadWord = (plat_key_state(0x10) != 0) ? 1 : 0;
     switch (DAT_00ae9f49) {
     case 0:
         // Model setup: resolve the model pointers and initialise the joint chain

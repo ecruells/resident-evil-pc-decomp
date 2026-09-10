@@ -5,6 +5,7 @@
 // projectile distance) to find the closest target in range+FOV, then
 // subtracts damage from the enemy's health and sets the hit reaction state.
 #include "../Globals.h"
+#include <cstdlib>                   // rand() - MSVC got this via <windows.h>
 #include "entities/EntityCommon.h"   // ENEMY_* / NPC_* type ids
 
 // ---- Global scratch variable (set by apply_weapon_damage before hit detection) ----

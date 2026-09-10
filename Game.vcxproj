@@ -103,10 +103,14 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
-    <ClCompile Include="src\main.cpp" />
+    <ClCompile Include="src\platform\win32\main.cpp" />
+    <ClCompile Include="src\platform\win32\window_proc.cpp" />
+    <ClCompile Include="src\platform\win32\platform.cpp" />
+    <ClCompile Include="src\platform\win32\video.cpp" />
+    <ClCompile Include="src\system\ConfigFile.cpp" />
     <ClCompile Include="src\Globals.cpp" />
+    <ClCompile Include="src\game\SoundApi.cpp" />
     <ClCompile Include="src\game\SoundTables.cpp" />
-    <ClCompile Include="src\WindowProc.cpp" />
     <ClCompile Include="src\marni\MarniSystem.cpp" />
     <ClCompile Include="src\marni\MarniDX.cpp" />
     <ClCompile Include="src\marni\PSXTexture.cpp" />

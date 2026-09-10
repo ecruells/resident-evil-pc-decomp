@@ -2,16 +2,22 @@
 
 ## Introduction
 
-This is a decompilation Resident Evil 1 for PC released in 1997. The original game code, reverse-engineered from the Ghidra decompilation of the 1997 executable, is rebuilt as a Win32 game on a
-modern DirectX 11 rendering layer.
+This is a decompilation Resident Evil 1 for PC released in 1997. The original game code, reverse-engineered from the Ghidra decompilation of the 1997 executable, is rebuilt on a modern rendering layer, for **two platforms**:
+
+| Platform | Renderer | Audio | FMV |
+|---|---|---|---|
+| Windows (Win32) | Direct3D 11 | XAudio2 | MCI |
+| Linux (SDL2 + OpenGL 3.3) | OpenGL core | SDL2 mixer | ffmpeg (Cinepak AVI) |
+
+Both builds share every line of game logic; only the platform layer and the renderer backend differ (`src/marni/MarniDX.cpp` vs `MarniDX_GL.cpp`, `src/platform/win32/` vs `src/platform/linux/`). The GL backend is written against the GLES-3-compatible subset so the same code can be repointed at Android/Switch later.
 
 **The port is functional-complete**: the entire original game is playable —
 every room, enemy, cutscene, FMV, menu and ending. Extensive playtesting
 confirms it behaves like the original release.
 
 The DirectX 5.0 wrapper of the original (Capcom's *Marni System*, built on
-DirectDraw/DirectSound) is re-implemented on top of a DX11/XAudio2 layer
-(`src/marni/MarniDX`)
+DirectDraw/DirectSound) is re-implemented on top of those backends
+(`src/marni/`)
 
 ## Completion status
 
@@ -21,14 +27,16 @@ Measured against the Ghidra project: **2393 functions in the original binary**
 | Stream | Count | Status |
 |---|---|---|
 | Game logic implemented in `src\` | 1716 of 1717 | done |
-| Marni System DirectX internals → DX11 layer | 84 of 84 | done |
+| Marni System DirectX internals → DX11 / OpenGL backends | 84 of 84 | done |
 | CRT / MSVC runtime (provided by toolchain) | 290 | out of scope |
 | Compiler SEH / static-init glue (absorbed by real C++ ctors/dtors) | 177 | out of scope |
 | Raw D3D5 API paths (replaced by MarniDX) | 108 | out of scope |
-| Software-FMV shared-memory player (replaced by native MCI) | 11 | out of scope |
+| Software-FMV shared-memory player (replaced by MCI / ffmpeg) | 11 | out of scope |
 | Import thunks (loader-provided) | 6 | out of scope |
 
 ## How to build
+
+### Windows
 
 Requirements:
 - Windows
@@ -56,6 +64,88 @@ To build from a developer command prompt instead:
 msbuild Game.sln /p:Configuration=Release /p:Platform=Win32 /t:Build
 ```
 
+### Linux
+
+A native 32-bit binary (`-m32`) built with CMake. The game logic and the Marni
+layer are shared with Windows; the platform layer, the OpenGL backend and the
+ffmpeg FMV decoder are Linux-only files (`src/platform/linux/`,
+`src/marni/MarniDX_GL.cpp`).
+
+Requirements (64-bit host building 32-bit).
+
+Debian/Ubuntu:
+```
+sudo dpkg --add-architecture i386
+sudo apt update
+sudo apt install build-essential cmake g++-multilib libc6-dev-i386 \
+                 libsdl2-dev:i386 \
+                 libavformat-dev:i386 libavcodec-dev:i386 \
+                 libavutil-dev:i386 libswresample-dev:i386
+```
+
+Arch/CachyOS (with `[multilib]` enabled in `/etc/pacman.conf`):
+```
+sudo pacman -S --needed base-devel cmake lib32-glibc lib32-gcc-libs \
+                        sdl2 lib32-sdl2 ffmpeg lib32-ffmpeg lib32-mesa
+```
+
+The 32-bit packages are the point: the target is 32-bit. On Arch the `lib32-*`
+packages ship runtime objects only, so the ordinary `sdl2`/`ffmpeg` packages
+supply the headers, and `lib32-mesa` is the GL driver SDL loads when it creates
+the context. The build finds the 32-bit library directory itself (Debian
+`/usr/lib/i386-linux-gnu`, Arch `/usr/lib32`) and links the sonames actually
+installed, so the same tree configures on both — no pkg-config path or other
+environment needed.
+
+Note that the result is dynamically linked against the host's ffmpeg ABI
+(ffmpeg 6 = `libavcodec.so.60` on Ubuntu 24.04, ffmpeg 9 = `.so.62` on Arch):
+build on the distribution you intend to run on.
+
+Build:
+```
+cmake -S . -B build/linux -DCMAKE_BUILD_TYPE=Release
+cmake --build build/linux -j
+```
+
+This produces `build/linux/residentevil`, which can be launched from anywhere —
+assets and saves are resolved from the binary's directory plus `config.ini`, not
+from the working directory:
+
+```
+./build/linux/residentevil
+```
+
+Diagnostics go to stderr; `RE1_DEBUGLOG=1` also appends them to
+`re1_debug.log`. A fatal signal writes a symbolized `crash.log`. Test hooks:
+`--capture <file> [frames]` dumps the back buffer and exits, `--press
+<scancode> <frame> [hold]` injects a synthetic key press, which together can
+drive an attract-demo run headlessly.
+
+For the sanitizer build (ASan/UBSan) and the rest of the porting notes see
+`docs/LINUX_PORT.md`.
+
+### Packaging a portable bundle
+
+`build/linux/residentevil` is linked against the build host's ffmpeg, so it only
+runs where those exact sonames exist. To run it on another distribution, whose rootfs is read-only and whose package repo is frozen — build
+a bundle:
+
+```
+bash tools/package_linux.sh            # --with-assets also copies assets/
+```
+
+`dist/residentevil-<version>-linux-x86/` then holds the binary, a launcher that
+puts `lib/` on `LD_LIBRARY_PATH`, and the bundled 32-bit libraries. Only the
+glibc family and the GL driver stack (`libGL`/`libEGL`/`libdrm`/`libgbm`/
+`libvulkan`) stay the host's, because they have to match the running kernel and
+GPU — on Arch/CachyOS that means `lib32-mesa`, which SteamOS and any
+32-bit-capable desktop already have. Everything else travels, including the
+X11/Wayland and ALSA/PulseAudio clients, so the bundle does not depend on the
+target's 32-bit package set.
+
+Game data is not included, same as the Windows release — put the `USA/` (and
+optionally `JPN/`) tree next to the launcher.
+
 ### Running the game
 
 The decompilation took as base the GOG USA version, which is the same binary
@@ -63,30 +153,59 @@ released in 1997, so this build expects the assets of any of those versions.
 
 Some features of the Japanese PC release (*Biohazard* Mediakite version) is supported as well
 
-Every asset path is built against a data root that differs by build
-configuration and by selected version:
+Every asset path is built against a data root that is resolved at startup:
 
-| Configuration | USA root | JPN root | Save folder |
-|---|---|---|---|
-| Debug | `.\assets\USA\` | `.\assets\JPN\` | `.\assets\save\` |
-| Release | `.\USA\` | `.\JPN\` | `.\SAVE\` |
+| What | Comes from | Default |
+|---|---|---|
+| Assets folder | `[Assets] Path` in `config.ini` | the executable's own directory |
+| Region tree | `[Assets] Version` (`USA` / `JPN`) | `USA` |
+| Save folder | `[Save] Path` in `config.ini` | `<assets folder>/SAVE` |
 
-Copy the assets directory to the release build path, or copy the build exe to
-an existing RE1 PC directory; no external DLLs required. When running under the
-VS debugger, put the assets in `.\assets\` instead.
+Relative paths are resolved from the **executable's directory**, never from the
+working directory, so launching through a shortcut or a launcher with an
+arbitrary CWD behaves the same. With nothing configured, put the region folder
+next to the executable:
+
+```
+RE1/
+  residentevil
+  config.ini
+  USA/
+  JPN/
+  SAVE/
+```
+
+The development tree keeps the assets under `assets/` one level above the build
+directory, so its `config.ini` sets `Path=../../assets`. Under the VS debugger
+the executable is in `bin\Debug\`, so that build needs `Path=..\..\assets` too.
+
+### config.ini
+
+The game reads `config.ini` from the executable's directory first (falling back
+to the working directory) and creates one with commented defaults if none is
+present. The `[Display]`, `[Player]` and `[Input]` keys are saved on exit;
+`[Assets]`, `[Save]` and `[Debug]` are yours to edit and are never rewritten.
 
 ### Asset version (USA / JPN)
 
 `[Assets] Version` in `config.ini` selects which release the build runs. It is
-read once at startup (`src/main.cpp` → `SetAssetVersion`,
+read once at startup (`src/system/ConfigFile.cpp` → `SetAssetVersion`,
 `src/system/AssetPath.cpp`) and swaps the data root every asset reader uses, so
 **one binary runs either version** — no rebuild:
 
 ```ini
 [Assets]
+; Folder holding the USA/ and JPN/ trees; relative to the executable's
+; directory. Empty = the executable's directory itself.
+Path=
 ; USA = North American (default)
 ; JPN = Japanese (Biohazard)
 Version=USA
+
+[Save]
+; Where savedat*.dat lives. Empty = <Assets Path>/SAVE, which with the default
+; [Assets] Path is SAVE/ next to the executable.
+Path=
 ```
 
 Diagnostics: with no debugger attached, trace output is suppressed (see
@@ -125,20 +244,23 @@ The original "Key Def" defaults, unchanged (`g_keyBindingData`, `src/Globals.cpp
 
 ### Game pad
 
-Two backends are supported and both publish into the same joystick slot, so
-the game cannot tell them apart:
+Every backend publishes into the same joystick slot, so the game cannot tell
+them apart:
 
-- **XInput** (Xbox pads and anything exposing an XInput device) — preferred,
-  brought up first (`src/marni/MarniXInput.cpp`).
-- **WinMM / HID** — the original 1997 joystick path, used when no XInput pad is
-  present (e.g. a DualShock 4 plugged in directly, or an old SideWinder).
+- **XInput** (Xbox pads and anything exposing an XInput device) — preferred on
+  Windows, brought up first (`src/marni/MarniXInput.cpp`).
+- **WinMM / HID** — the original 1997 joystick path, used on Windows when no
+  XInput pad is present (e.g. a DualShock 4 plugged in directly, or an old
+  SideWinder).
+- **SDL_GameController** — the Linux backend (`src/platform/linux/input.cpp`);
+  the standard SDL mapping covers Xbox, DualShock/DualSense and Switch Pro pads.
 
 The original joystick defaults had no OPTIONS binding at all, so the port
 installs a usable layout out of the box (`InstallPadDefaultBindings`). It only
 ever replaces a table that is still empty or byte-identical to the 1997
 default — anything configured in the options screen is left untouched.
 
-| XInput | WinMM / HID (DualShock naming) | Function |
+| XInput / SDL | WinMM / HID (DualShock naming) | Function |
 |---|---|---|
 | Left stick / D-pad | Left stick / D-pad / POV hat | Move and turn |
 | `A` | Cross | Action / confirm |
@@ -178,23 +300,29 @@ Release):
 | `F8` | Toggle the collision boundary overlay. |
 
 The debug menu's open/close pad combo is the one input read from raw hardware
-rather than through the remap table — `L1`+`R1` are buttons 5 and 6 in both the
-XInput and the WinMM orderings, so the combo means the same thing on either
+rather than through the remap table — `L1`+`R1` are buttons 5 and 6 in the
+XInput, WinMM and SDL orderings, so the combo means the same thing on every
 backend.
 
 ## Project layout
 
-- `src\marni\` — the Marni System compatibility layer; `MarniDX.h/.cpp` is the
-  DX11/XAudio2 rendering backend that replaces DirectDraw/DirectSound/D3D5.
-- `src\game\` — decompiled game logic (rooms, entities, menus, door system,
+- `src/marni/` — the Marni System compatibility layer; `MarniDX.h` is the
+  backend interface, implemented by `MarniDX.cpp` (DX11/XAudio2, Windows) and
+  `MarniDX_GL.cpp` (OpenGL, Linux). Both replace DirectDraw/DirectSound/D3D5.
+- `src/game/` — decompiled game logic (rooms, entities, menus, door system,
   TMD renderer, effects, screens), one module per subsystem where practical.
-- `src\video\` — native MCI-based FMV playback.
-- `docs\` — architecture notes: task scheduler, memory layout, classes and
-  vtable conventions, implementation plan.
-- `tools\` — tools used to help decompilation
+  Shared verbatim by both platforms.
+- `src/platform/win32/`, `src/platform/linux/` — entry points, input, audio,
+  video, settings, crash reporting; `src/platform/platform.h` is the seam.
+- `src/video/` — FMV playback: a shared state machine over `plat_video_*`
+  (MCI on Windows, ffmpeg on Linux).
+- `docs/` — architecture notes: task scheduler, memory layout, classes and
+  vtable conventions, implementation plan, and `LINUX_PORT.md` for the port.
+- `tests/` — build/verification scripts (compile gate, frame comparison).
+- `tools/` — tools used to help decompilation
 
 Every rewritten function carries its original address as a comment, and every
-named global documents its original variable address, so any line in `src\`
+named global documents its original variable address, so any line in `src/`
 can be traced back to the Ghidra project.
 
 ## License
@@ -206,8 +334,9 @@ In practice: fork it, port it, mod it — but derivative works have to ship
 their source under the same terms, so improvements stay available to
 everyone.
 
-The license covers **only the source in this repository** (`src\`, `tools\`,
-`docs\`). It does not and cannot grant any rights over the original game.
+The license covers **only the source in this repository** (`src/`, `tools/`,
+`tests/`, `docs/`). It does not and cannot grant any rights over the original
+game.
 
 ### Legal notice
 

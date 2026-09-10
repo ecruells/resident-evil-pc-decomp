@@ -290,14 +290,14 @@ extern BYTE          g_MasterInputState[256];
 // docs/TASK_SCHEDULER.md).
 // ============================================================================
 
-extern DWORD         g_StackPointer;                   // 0x007e0cc8
+extern void*         g_StackPointer;                   // 0x007e0cc8
 extern TaskControlBlock  g_TasksTable[3];              // 0x00d1fde4
 extern TaskControlBlock* g_CurrentTask;                // 0x00bf09ec
-extern DWORD         g_TasksESP[3];                    // 0x00d91a70
-extern DWORD         g_TasksEIP[3];                    // 0x00d91a80
+extern uintptr_t     g_TasksESP[3];                    // 0x00d91a70
+extern void*         g_TasksEIP[3];                    // 0x00d91a80
 extern DWORD         g_CurrentTaskID;                  // 0x00d91a7c
 extern TaskControlBlock* g_CurrentTaskPtr;             // 0x00d91a68
-extern DWORD         g_SchedulerESP;                   // 0x00d91a8c
+extern uintptr_t     g_SchedulerESP;                   // 0x00d91a8c
 extern DWORD         g_SchedulerRunningFlag;           // 0x004ba0b8
 extern void*         g_AsyncRpcCallback;               // 0x00d91a90
 
@@ -1288,7 +1288,7 @@ extern unsigned short g_SavedTextureBankID;            // 0x00bebcc6 - saved roo
 extern BYTE          g_textureQueueData[40];           // 0x00d22740
 
 extern BYTE          g_psxTextureArray[32 * 0x1b60];   // 0x00a75168 - 32 banks (verified against Ghidra: spans exactly to 0x00aabd68)
-extern DWORD         g_textureBankRedirect[23];        // 0x00aae2b0
+extern DWORD         g_textureBankRedirect[32];        // 0x00aae2b0
 
 // Sprite/clear color
 extern float         g_color_r;                        // 0x004c336c
@@ -1457,19 +1457,31 @@ extern short          g_aimHeightTable[12];            // 0x004c0fc0 - aim heigh
 extern unsigned char  g_aimReticleEnabled;             // 0x004c062c - 1 = aim reticle scan is live
 extern char           g_weaponSpecialFireCountdown;    // 0x008e1c68 - special-weapon fire frame countdown
 
-// PS1 GTE fixed-point pipe matrix globals
-extern int g_fixedPointPipe_matrix_m00;
-extern int g_fixedPointPipe_matrix_m01;
-extern int g_fixedPointPipe_matrix_m02;
-extern int g_fixedPointPipe_matrix_m10;
-extern int g_fixedPointPipe_matrix_m11;
-extern int g_fixedPointPipe_matrix_m12;
-extern int g_fixedPointPipe_matrix_m20;
-extern int g_fixedPointPipe_matrix_m21;
-extern int g_fixedPointPipe_matrix_m22;
-extern int matrix_t0;
-extern int matrix_t1;
-extern int matrix_t2;
+// PS1 GTE fixed-point pipe matrix globals.
+//
+// These MUST be contiguous and in this order: MulMatrixVec3 (0x004410e0) is
+// handed &m00 and indexes m[0..8] as an array, exactly as the original does
+// with its block at 0x004c3790. Declaring them as twelve separate globals let
+// the toolchain lay them out in whatever order it liked - GCC put them in
+// .bss in REVERSE (m22 at the lowest address), so on Linux every row but the
+// first read the neighbouring variable and effect sprites projected with a
+// garbage view Z (they came out as 2-pixel specks, or off-screen entirely,
+// while the 3D path - which uses its own float matrix - looked fine).
+// Keep the storage in one array; the names below stay usable everywhere.
+extern int g_fixedPointPipeMatrix[9];        // 0x004c3790: m00..m22
+extern int g_fixedPointPipeTranslation[3];   // 0x004c37b8: t0..t2
+#define g_fixedPointPipe_matrix_m00 g_fixedPointPipeMatrix[0]
+#define g_fixedPointPipe_matrix_m01 g_fixedPointPipeMatrix[1]
+#define g_fixedPointPipe_matrix_m02 g_fixedPointPipeMatrix[2]
+#define g_fixedPointPipe_matrix_m10 g_fixedPointPipeMatrix[3]
+#define g_fixedPointPipe_matrix_m11 g_fixedPointPipeMatrix[4]
+#define g_fixedPointPipe_matrix_m12 g_fixedPointPipeMatrix[5]
+#define g_fixedPointPipe_matrix_m20 g_fixedPointPipeMatrix[6]
+#define g_fixedPointPipe_matrix_m21 g_fixedPointPipeMatrix[7]
+#define g_fixedPointPipe_matrix_m22 g_fixedPointPipeMatrix[8]
+#define matrix_t0 g_fixedPointPipeTranslation[0]
+#define matrix_t1 g_fixedPointPipeTranslation[1]
+#define matrix_t2 g_fixedPointPipeTranslation[2]
 
 // ============================================================================
 // SECTION 17: Large data buffers
@@ -1488,8 +1500,33 @@ extern WORD  g_padEdgeDetectedWord;                    // 0x00be05b4 - edge-dete
 extern DWORD        g_effectAnimData[425];              // 0x00bf0b1c - per-type effect animation pointers (DWORD array; a BYTE declaration truncated every pointer write to its low byte)
 
 // Model/animation buffers
-extern BYTE         g_entityModelBuffer[52224];      // 0x00bf11c0
-extern BYTE         g_entityModelBuffer2[56320];    // 0x00bfddc0
+// The original lays these two buffers out adjacently (0x00bf11c0 + 0xCC00 ==
+// 0x00bfddc0), forming one contiguous 108544-byte region - which is exactly
+// what the player EMD load needs: char10.emd is 106224 bytes and
+// LoadEntityModel points g_loadDataDestPointer at g_entityModelBuffer. MSVC
+// kept the two adjacent; GCC reordered them, so the spill landed on ENTITY and
+// crashed at room start. They are now members of one struct, which guarantees
+// contiguity on every compiler, and exposed as array references so every
+// existing use (indexing, &buf, sizeof) is unchanged.
+//
+// `spillGuard` is load-bearing: the player model is read into `first` as one
+// whole file, and the larger character models do NOT fit in the 108544-byte
+// pair - char11.emd (Jill) is 112968 bytes, so 4424 bytes run past `second`.
+// In the original binary that spill landed in the animation buffer and was
+// harmless; in this decompilation the linker placed g_pMasterInputState
+// immediately after the pair, so loading Jill overwrote keyMap and the
+// joystick entries with model bytes - the game then saw a phantom gamepad
+// (raw pad word stuck non-zero, keyboard dead) and the character appeared to
+// move on its own. The guard absorbs every such spill; the model's own byte
+// offsets inside the load region are unchanged. Largest model loaded here:
+// char11.emd 112968 B (costume variants: em1030 112664 B).
+struct EntityModelStorage {
+    BYTE first[52224];    // 0x00bf11c0
+    BYTE second[56320];   // 0x00bfddc0
+    BYTE spillGuard[16384];  // not part of the original layout - see above
+};
+extern BYTE (&g_entityModelBuffer)[52224];
+extern BYTE (&g_entityModelBuffer2)[56320];
 
 // 0x00c0b9c0
 extern BYTE         g_animationBuffer[37888];        // 0x00c0b9c0
@@ -1814,7 +1851,7 @@ void DestroyAllSoundBanks(void);
 void CleanupAsyncTasks(void);
 
 // --- Sound system helpers ---
-void SaveGameSettingsToRegistry(void);
+void SaveGameSettings(void);
 void CVideoSystem_Cleanup(void* ptr);
 void ProbeWaveOutDevicesAndCacheVolume(void);
 void StartSoundSystemAsync(HWND hwnd);

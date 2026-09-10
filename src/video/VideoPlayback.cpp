@@ -1,13 +1,15 @@
-// VideoPlayback.cpp - FMV playback state machine via MCI
-// Original function: UpdateVideoPlayback at 0x00474e00
-// Uses Windows MCI (Media Control Interface) with mciSendStringA for simplicity
+// VideoPlayback.cpp - FMV playback state machine (0x00474e00)
+//
+// Platform-neutral. The decoder/presenter is the plat_video_* backend
+// (src/platform/win32/video.cpp = MCI, src/platform/linux/video.cpp
+// = ffmpeg); this file owns the 4-state machine, the per-FMV skip masks, the
+// skip grace period and the prologue scenario cut.
 
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../system/AssetPath.h"
 #include "../marni/MarniSystem.h"
-#include <mmsystem.h>
-
-#pragma comment(lib, "winmm.lib")
+#include <stdio.h>
 
 // ============================================================================
 // FMV path table - maps FMV IDs to AVI filenames
@@ -124,12 +126,9 @@ static const FMVEntry* GetFmvTable(void)
 // Global video playback state (file-scope, persistent across UpdateVideoPlayback calls)
 // ============================================================================
 static int   g_FMVPlaybackState = 0;
-static BOOL  g_bIsMCIVideoOpenSuccess = FALSE;
-static BOOL  g_mciWindowCreated = FALSE;
 static DWORD g_videoFlagA4 = 0;
 static WORD  g_videoSkipInput = 0;
 static int   g_videoSkipCounter = 0;
-static BOOL  g_savedFullScreen = FALSE;
 static char  g_videoFilePath[MAX_PATH] = {};
 
 // ============================================================================
@@ -149,6 +148,8 @@ static const char* ResolveVideoPath(const char* originalPath, char* outPath, siz
 
 // ============================================================================
 // CheckVideoFileExists - Check if video file exists (0x00474d90)
+// The path is normalised through the platform layer (separators + case) so the
+// backend can open exactly what was probed here.
 // ============================================================================
 BOOL CheckVideoFileExists(const char* filename)
 {
@@ -158,49 +159,18 @@ BOOL CheckVideoFileExists(const char* filename)
     const char* filePath = ResolveVideoPath(filename, resolvedPath, sizeof(resolvedPath));
     if (filePath == NULL) filePath = filename;
 
-    DWORD attrib = GetFileAttributesA(filePath);
-    if (attrib == INVALID_FILE_ATTRIBUTES) {
-        char msg[256];
-        sprintf_s(msg, "Could not open file: %s", filename + 2);
-        OutputDebugStringA("[VIDEO] ");
-        OutputDebugStringA(msg);
-        OutputDebugStringA("\n");
+    char normalized[MAX_PATH];
+    filePath = plat_normalize_path(filePath, normalized, sizeof(normalized));
+
+    FILE* f = fopen(filePath, "rb");
+    if (f == NULL) {
+        dbg_printf("[VIDEO] Could not open file: %s\n", filePath);
         return FALSE;
     }
+    fclose(f);
 
-    // Store resolved path for later use
-    strcpy_s(g_videoFilePath, filePath);
+    strcpy_s(g_videoFilePath, sizeof(g_videoFilePath), filePath);
     return TRUE;
-}
-
-// ============================================================================
-// MCISend - Helper to send MCI string command and optionally check error
-// ============================================================================
-static MCIERROR MCISend(const char* cmd, BOOL showError)
-{
-    char buf[256];
-    MCIERROR err = mciSendStringA(cmd, buf, sizeof(buf), g_hWnd);
-    if (err != 0 && showError) {
-        mciGetErrorStringA(err, buf, sizeof(buf));
-        OutputDebugStringA("[VIDEO] MCI error: ");
-        OutputDebugStringA(buf);
-        OutputDebugStringA("\n");
-    }
-    return err;
-}
-
-// ============================================================================
-// MCI_CloseAll - Close the MCI AVI device entirely.
-// NOTE: The MCI AVI video renders directly into g_hWnd (see MCI_OpenAndPlay:
-// "window movie handle <g_hWnd>"), so we must NOT send "window movie state
-// hide" here — that would hide the entire game window. The stale backbuffer
-// flash is handled by presenting a fresh black D3D11 frame in state 3.
-// ============================================================================
-static void MCI_CloseAll(void)
-{
-    MCISend("close all", FALSE);
-    g_mciWindowCreated = FALSE;
-    g_mciVideoDeviceID = 0;
 }
 
 // ============================================================================
@@ -211,124 +181,6 @@ static void MCI_CloseAll(void)
 static BOOL UsesScenarioCut(void)
 {
     return (g_CurrentFMVID == FMV_PROLOGUE_ID) && (g_FmvCharacterId != 0);
-}
-
-// ============================================================================
-// MCI_OpenAndPlay - Open video file and start playback
-// playTo > 0 stops playback at that frame (MCI_TO), matching the original's
-// video_mci_window_helper(0, playTo); 0 plays through to the end.
-// ============================================================================
-static BOOL MCI_OpenAndPlay(const char* filePath, int playTo)
-{
-    // Close any existing video
-    MCI_CloseAll();
-
-    // Convert to absolute path (MCI requires it)
-    char absPath[MAX_PATH];
-    if (GetFullPathNameA(filePath, sizeof(absPath), absPath, NULL) == 0) {
-        strcpy_s(absPath, filePath);
-    }
-
-    // Verify file exists
-    DWORD attrib = GetFileAttributesA(absPath);
-    if (attrib == INVALID_FILE_ATTRIBUTES) {
-        OutputDebugStringA("[VIDEO] Video file not found: ");
-        OutputDebugStringA(absPath);
-        OutputDebugStringA("\n");
-        return FALSE;
-    }
-
-    // Open the AVI file using MCI
-    char cmd[512];
-    sprintf_s(cmd, "open \"%s\" type avivideo alias movie", absPath);
-
-    MCIERROR err = mciSendStringA(cmd, NULL, 0, g_hWnd);
-    if (err != 0) {
-        char errorBuf[256];
-        mciGetErrorStringA(err, errorBuf, sizeof(errorBuf));
-        OutputDebugStringA("[VIDEO] Failed to open video: ");
-        OutputDebugStringA(absPath);
-        OutputDebugStringA(" - ");
-        OutputDebugStringA(errorBuf);
-        OutputDebugStringA("\n");
-        return FALSE;
-    }
-
-    // Set video window as child of our game window
-    sprintf_s(cmd, "window movie handle %u", (UINT)(UINT_PTR)g_hWnd);
-    mciSendStringA(cmd, NULL, 0, g_hWnd);
-
-    // Show the video window
-    mciSendStringA("window movie state show", NULL, 0, g_hWnd);
-
-    g_mciWindowCreated = TRUE;
-
-    // Position the video window — fill the entire client area
-    // The MCI AVI video is always 320x240; MCI handles centering within the destination
-    RECT clientRect;
-    GetClientRect(g_hWnd, &clientRect);
-
-    sprintf_s(cmd, "put movie destination at 0 0 %d %d",
-              clientRect.right - 1, clientRect.bottom - 1);
-    mciSendStringA(cmd, NULL, 0, g_hWnd);
-
-    // The cut points are frame numbers; MCIAVI already defaults to the frames
-    // time format, but pin it so a driver default cannot reinterpret them.
-    mciSendStringA("set movie time format frames", NULL, 0, g_hWnd);
-
-    // Play the video with notification
-    if (playTo > 0) {
-        sprintf_s(cmd, "play movie from 0 to %d notify", playTo);
-    } else {
-        sprintf_s(cmd, "play movie notify");
-    }
-    err = mciSendStringA(cmd, NULL, 0, g_hWnd);
-    if (err != 0) {
-        OutputDebugStringA("[VIDEO] MCI play failed\n");
-        g_mciVideoDeviceID = 0;
-        return FALSE;
-    }
-
-    g_mciVideoDeviceID = 1;
-    return TRUE;
-}
-
-// ============================================================================
-// MCI_PlayFrom - Resume the already-open movie at playFrom, through to the end.
-// Mirrors video_mci_window_helper(playFrom, 0): the device stays open, so this
-// is a second MCI_PLAY on the same alias. Failure zeroes g_mciVideoDeviceID,
-// which lets the state machine fall through to cleanup just as the original
-// helper does.
-// ============================================================================
-static void MCI_PlayFrom(int playFrom)
-{
-    char cmd[128];
-    sprintf_s(cmd, "play movie from %d notify", playFrom);
-    if (mciSendStringA(cmd, NULL, 0, g_hWnd) != 0) {
-        OutputDebugStringA("[VIDEO] MCI resume-play failed\n");
-        g_mciVideoDeviceID = 0;
-        return;
-    }
-    g_mciVideoDeviceID = 1;
-}
-
-// ============================================================================
-// OpenMCIAviVideo - Open MCI video subsystem (0x00474af0)
-// ============================================================================
-void OpenMCIAviVideo(void)
-{
-    g_mciWindowCreated = FALSE;
-    g_mciVideoDeviceID = 0;
-
-    // Test if we can open the MCI AVI driver
-    MCIERROR err = mciSendStringA("open avivideo alias _test_", NULL, 0, NULL);
-    if (err == 0) {
-        mciSendStringA("close _test_", NULL, 0, NULL);
-        g_bIsMCIVideoOpenSuccess = TRUE;
-    } else {
-        g_bIsMCIVideoOpenSuccess = FALSE;
-        OutputDebugStringA("[VIDEO] OpenMCIAviVideo failed - MCI AVI driver not available\n");
-    }
 }
 
 // ============================================================================
@@ -364,23 +216,12 @@ void UpdateVideoPlayback(void)
             if (videoFile != NULL && CheckVideoFileExists(videoFile)) {
                 PauseGameSoundsAsync();
 
-                // Handle window style for video playback
-                if (g_dwSelectedDisplayAdapterID == 5 || g_dwSelectedDisplayAdapterID == 7) {
-                    g_savedFullScreen = g_bFullScreen;
-                    LONG_PTR style = GetWindowLongA(g_hWnd, GWL_STYLE);
-                    if (!g_bFullScreen) {
-                        style = (style & 0xFFFAFFFF) | 0xC00000;
-                    } else {
-                        style = style & 0xFF3AFFFF;
-                    }
-                    SetWindowLongA(g_hWnd, GWL_STYLE, style);
-                }
+                plat_video_set_window_mode(TRUE);
 
-                OpenMCIAviVideo();
-                if (!g_bIsMCIVideoOpenSuccess) {
-                    OutputDebugStringA("[VIDEO] Failed to init video system, skipping FMV\n");
+                if (!plat_video_init()) {
+                    dbg_safe_str("[VIDEO] Failed to init video system, skipping FMV\n");
                     g_bMCINotifyEnabled = FALSE;
-                    g_mciVideoDeviceID = 0;
+                    plat_video_close();
                     setMenuScreenOffset(320, 240, 0, 0, 0);
                     CenterScreenOrigin();
                     return;
@@ -390,7 +231,7 @@ void UpdateVideoPlayback(void)
             } else {
                 // No video file - skip FMV
                 g_bMCINotifyEnabled = FALSE;
-                g_mciVideoDeviceID = 0;
+                plat_video_close();
                 setMenuScreenOffset(320, 240, 0, 0, 0);
                 CenterScreenOrigin();
             }
@@ -402,12 +243,14 @@ void UpdateVideoPlayback(void)
             // Jill: stop the first chunk right before the Chris-only dialogue.
             int playTo = UsesScenarioCut() ? FMV_PROLOGUE_CUT_START : 0;
 
-            if (!MCI_OpenAndPlay(g_videoFilePath, playTo)) {
+            if (!plat_video_open_and_play(g_videoFilePath, playTo)) {
                 g_FMVPlaybackState = 3;
                 break;
             }
 
             g_FMVPlaybackState = 2;
+
+            plat_video_tick();   // present the first frame before polling input
 
             InputUpdate();
             g_videoSkipInput = (WORD)PlayerPad_Update();
@@ -417,6 +260,8 @@ void UpdateVideoPlayback(void)
 
     case 2: // Playing - monitor for skip/completion
         {
+            plat_video_tick();
+
             if (g_videoSkipCounter > 0) {
                 g_videoSkipCounter--;
             }
@@ -428,46 +273,40 @@ void UpdateVideoPlayback(void)
             WORD skipMask = (WORD)GetFmvTable()[g_CurrentFMVID].isSkippable;
             if (((skipMask & ~g_videoSkipInput & currentInput) != 0) && (g_videoSkipCounter == 0)) {
                 // Skip requested - stop playback
-                MCISend("stop movie", FALSE);
-                g_mciVideoDeviceID = 0;
+                plat_video_stop();
             }
 
             g_videoSkipInput = currentInput;
 
-            // Check for MCI notification (MM_MCINOTIFY from WindowProc)
-            if (g_bMCIVideoEvent) {
+            // Segment/film-end notification from the backend
+            if (plat_video_take_end_event()) {
                 if (UsesScenarioCut() && g_videoFlagA4 != 0) {
                     // The first chunk ended at the cut point: jump past the
                     // Chris-only beat and play the remainder. g_videoFlagA4 is
                     // cleared below, so the next notification ends the FMV.
-                    MCI_PlayFrom(FMV_PROLOGUE_CUT_END);
+                    plat_video_play_from(FMV_PROLOGUE_CUT_END);
                 } else {
-                    g_mciVideoDeviceID = 0;
+                    plat_video_stop();
                 }
-                g_bMCIVideoEvent = FALSE;
                 g_videoFlagA4 = 0;
             }
 
             // Check if video has ended
-            if (g_mciVideoDeviceID == 0) {
+            if (!plat_video_is_active()) {
                 g_FMVPlaybackState = 3;
 
-                // Restore window style
-                if (g_dwSelectedDisplayAdapterID == 5 || g_dwSelectedDisplayAdapterID == 7) {
-                    LONG_PTR style = GetWindowLongA(g_hWnd, GWL_STYLE);
-                    SetWindowLongA(g_hWnd, GWL_STYLE, style & 0xFFFAFFFF | 0xC00000);
-                }
+                plat_video_set_window_mode(FALSE);
 
                 setMenuScreenOffset(320, 240, 0, 0, 0);
                 CenterScreenOrigin();
-                MCI_CloseAll();
+                plat_video_close();
             }
         }
         break;
 
     case 3: // Cleanup
         {
-            MCI_CloseAll();
+            plat_video_close();
             ResumeGameSoundsAsync();
 
             g_FMVPlaybackState = 0;

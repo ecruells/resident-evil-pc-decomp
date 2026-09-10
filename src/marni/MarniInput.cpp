@@ -4,6 +4,7 @@
 
 #include "MarniInput.h"
 #include "MarniXInput.h"
+#include "../platform/platform.h"
 #include <cstdio>
 #include <cstring>
 
@@ -39,7 +40,9 @@ void CMarniDirectInput::UpdateKeyboardInputState(MasterInputState* pState)
 
     // 0x004202f8-0x0042056d: Check all 32 mapped keys
     for (int i = 0; i < 32; i++) {
-        SHORT keyState = GetAsyncKeyState(pState->keyMap[i]);
+        // Through the platform layer (identical to GetAsyncKeyState on Windows;
+        // this is the hook the scripted-input test path drives).
+        SHORT keyState = (SHORT)plat_key_state(pState->keyMap[i]);
         if (keyState & 0x8000) {
             pState->keyboardCurr |= (1 << i);
         }

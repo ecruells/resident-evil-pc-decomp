@@ -57,6 +57,11 @@ jobs:
       - name: Add MSBuild to PATH
         uses: microsoft/setup-msbuild@v2
 
+      # src/game/ must stay OS-agnostic (docs/LINUX_PORT.md Phase 0). Without
+      # this, Win32 calls creep back into game code within a few commits.
+      - name: Check platform boundary
+        run: python tests/check_platform_boundary.py
+
       - name: Build
         run: >
           msbuild Game.sln
@@ -77,7 +82,8 @@ jobs:
           New-Item -ItemType Directory -Force "stage/$name" | Out-Null
           Copy-Item "bin/$env:CONFIGURATION/residentevil.exe" "stage/$name"
           Copy-Item "bin/$env:CONFIGURATION/residentevil.pdb" "stage/$name"
-          Copy-Item "config.ini" "stage/$name"
+          # config.ini is no longer shipped: it is created with documented
+          # defaults on first run and rewritten by the game on exit.
           Copy-Item "README.md" "stage/$name"
           Copy-Item "LICENSE" "stage/$name"
           Compress-Archive -Path "stage/$name/*" -DestinationPath "$name.zip"

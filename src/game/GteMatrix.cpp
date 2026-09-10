@@ -8,10 +8,10 @@
 //  SetGlobalScaledRotationMatrix (0x0040a9e0)
 //  get_matrix_t (0x0040a9c0)
 #include "../Globals.h"
+#include "../platform/types.h"
 #include <cmath>
 #include <cstdio>
 #include <cstring>
-#include <windows.h>
 
 // ============================================================================
 // GTE trig lookup tables (standard PS1 12-bit angle precision)
@@ -181,18 +181,8 @@ void MatrixSetTranslation(MATRIX* m, int* translation)
 // ============================================================================
 // GTE fixed-point pipe globals
 // ============================================================================
-int g_fixedPointPipe_matrix_m00 = 0;  // 0x004c3790
-int g_fixedPointPipe_matrix_m01 = 0;  // 0x004c3794
-int g_fixedPointPipe_matrix_m02 = 0;  // 0x004c3798
-int g_fixedPointPipe_matrix_m10 = 0;  // 0x004c379c
-int g_fixedPointPipe_matrix_m11 = 0;  // 0x004c37a0
-int g_fixedPointPipe_matrix_m12 = 0;  // 0x004c37a4
-int g_fixedPointPipe_matrix_m20 = 0;  // 0x004c37a8
-int g_fixedPointPipe_matrix_m21 = 0;  // 0x004c37ac
-int g_fixedPointPipe_matrix_m22 = 0;  // 0x004c37b0
-int matrix_t0 = 0;                    // 0x004c37b8
-int matrix_t1 = 0;                    // 0x004c37bc
-int matrix_t2 = 0;                    // 0x004c37c0
+int g_fixedPointPipeMatrix[9] = {};       // 0x004c3790: m00..m22 (see Globals.h)
+int g_fixedPointPipeTranslation[3] = {};  // 0x004c37b8: t0..t2
 
 // ============================================================================
 // SetGlobalScaledRotationMatrix (0x0040a9e0)
@@ -200,15 +190,19 @@ int matrix_t2 = 0;                    // 0x004c37c0
 // ============================================================================
 void SetGlobalScaledRotationMatrix(MATRIX* m)
 {
-    g_fixedPointPipe_matrix_m00 = (int)m->m[0][0] << 2;
-    g_fixedPointPipe_matrix_m01 = (int)m->m[0][1] << 2;
-    g_fixedPointPipe_matrix_m02 = (int)m->m[0][2] << 2;
-    g_fixedPointPipe_matrix_m10 = (int)m->m[1][0] << 2;
-    g_fixedPointPipe_matrix_m11 = (int)m->m[1][1] << 2;
-    g_fixedPointPipe_matrix_m12 = (int)m->m[1][2] << 2;
-    g_fixedPointPipe_matrix_m20 = (int)m->m[2][0] << 2;
-    g_fixedPointPipe_matrix_m21 = (int)m->m[2][1] << 2;
-    g_fixedPointPipe_matrix_m22 = (int)m->m[2][2] << 2;
+    // * 4, not << 2: the original's SHL is an arithmetic shift on a signed
+    // value, which is UB in C++ for negatives (UBSan flags every call) and
+    // would not survive a move to a non-x86 target. The matrix elements are
+    // shorts, so * 4 cannot overflow.
+    g_fixedPointPipe_matrix_m00 = (int)m->m[0][0] * 4;
+    g_fixedPointPipe_matrix_m01 = (int)m->m[0][1] * 4;
+    g_fixedPointPipe_matrix_m02 = (int)m->m[0][2] * 4;
+    g_fixedPointPipe_matrix_m10 = (int)m->m[1][0] * 4;
+    g_fixedPointPipe_matrix_m11 = (int)m->m[1][1] * 4;
+    g_fixedPointPipe_matrix_m12 = (int)m->m[1][2] * 4;
+    g_fixedPointPipe_matrix_m20 = (int)m->m[2][0] * 4;
+    g_fixedPointPipe_matrix_m21 = (int)m->m[2][1] * 4;
+    g_fixedPointPipe_matrix_m22 = (int)m->m[2][2] * 4;
 }
 
 // ============================================================================

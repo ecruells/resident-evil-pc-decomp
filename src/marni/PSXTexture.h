@@ -3,7 +3,7 @@
 // Original class: MarniSystem::PSXTexture
 // Store method address: 0x0041fb60 (LoadPSXImage in Ghidra)
 #pragma once
-#include <windows.h>
+#include "../platform/types.h"
 #include "MarniBits.h"
 
 // PSXTexture object size: 0x348 bytes

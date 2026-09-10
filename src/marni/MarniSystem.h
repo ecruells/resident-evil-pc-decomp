@@ -11,7 +11,7 @@
 // Game-layer code must NOT include <d3d11.h> — only MarniSystem.h.
 #pragma once
 
-#include <windows.h>
+#include "../platform/types.h"
 #include "MarniBits.h"
 #include "MarniDX.h"
 

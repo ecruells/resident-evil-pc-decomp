@@ -43,6 +43,7 @@
 // (entity id 21) and slot 1 is em1014 (id 20).
 // ============================================================================
 #include "../../Globals.h"
+#include <cstdlib>                   // rand() - MSVC got this via <windows.h>
 #include "../Types.h"
 #include "../Entities.h"
 #include "EntityCommon.h"

@@ -1,6 +1,7 @@
 // Rendering.cpp - Frame rendering, present, sprite drawing
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../DebugPrint.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
@@ -177,15 +178,11 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
 
 // ============================================================================
 // GetTextureVariant (0x0046d950)
-// Returns blend variant index from texture flags.
+//
+// Identical to the shared GetTextureVariant (0x0046d940, SpriteRenderer.cpp);
+// this file used to carry a `static` duplicate, which GCC rejects as a static
+// redeclaration of an extern function. Use the shared one.
 // ============================================================================
-static int GetTextureVariant(unsigned int textureFlags)
-{
-    if ((textureFlags & 0x40000000) != 0) {
-        return ((textureFlags & 0x30000000) >> 0x1c) + 1;
-    }
-    return 0;
-}
 
 // ============================================================================
 // draw_rect (0x00470350)
@@ -346,7 +343,7 @@ void FrameRateGovernor(void)
 {
     g_numFramesRendered++;
 
-    DWORD currentTime = timeGetTime();
+    DWORD currentTime = plat_time_ms();
 
     // 0x004973e2: RETAIL PATCHES THE FRAME-TIME MEASUREMENT OUT. Do not restore it.
     //

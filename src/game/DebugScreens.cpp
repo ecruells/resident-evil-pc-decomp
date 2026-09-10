@@ -1,6 +1,7 @@
 // DebugScreens.cpp - Debug-only interactive screens
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../DebugPrint.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/MarniSound.h"
@@ -38,7 +39,7 @@ void input_test_state(void)
         PlayerPad_Update();
 
         // --- F1 detection (direct GetAsyncKeyState, not via PS1 pipeline) ---
-        int f1Down = (GetAsyncKeyState(VK_F1) & 0x8000) ? 1 : 0;
+        int f1Down = (plat_key_state(VK_F1) & 0x8000) ? 1 : 0;
         int f1Pressed = f1Down && !prevF1;
         prevF1 = f1Down;
 
@@ -269,15 +270,15 @@ void texture_viewer_state(void)
 
         // --- Input handling (direct GetAsyncKeyState with edge detection) ---
         int keys = 0;
-        int aHeld = (GetAsyncKeyState('A') & 0x8000) ? 1 : 0;
-        int zHeld = (GetAsyncKeyState('Z') & 0x8000) ? 1 : 0;
-        if (GetAsyncKeyState(VK_LEFT)   & 0x8000) keys |= 0x001;
-        if (GetAsyncKeyState(VK_RIGHT)  & 0x8000) keys |= 0x002;
-        if (GetAsyncKeyState(VK_UP)     & 0x8000) keys |= 0x004;
-        if (GetAsyncKeyState(VK_DOWN)   & 0x8000) keys |= 0x008;
-        if (GetAsyncKeyState('R')       & 0x8000) keys |= 0x010;
-        if (GetAsyncKeyState(VK_F1)     & 0x8000) keys |= 0x020;
-        if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) keys |= 0x040;
+        int aHeld = (plat_key_state('A') & 0x8000) ? 1 : 0;
+        int zHeld = (plat_key_state('Z') & 0x8000) ? 1 : 0;
+        if (plat_key_state(VK_LEFT)   & 0x8000) keys |= 0x001;
+        if (plat_key_state(VK_RIGHT)  & 0x8000) keys |= 0x002;
+        if (plat_key_state(VK_UP)     & 0x8000) keys |= 0x004;
+        if (plat_key_state(VK_DOWN)   & 0x8000) keys |= 0x008;
+        if (plat_key_state('R')       & 0x8000) keys |= 0x010;
+        if (plat_key_state(VK_F1)     & 0x8000) keys |= 0x020;
+        if (plat_key_state(VK_ESCAPE) & 0x8000) keys |= 0x040;
 
         int newKeys = keys & ~prevKeys;
         prevKeys = keys;
@@ -443,14 +444,14 @@ int texture_viewer_overlay(void)
 
     // --- Input (direct GetAsyncKeyState with edge detection) ---
     int keys = 0;
-    int aHeld = (GetAsyncKeyState('A') & 0x8000) ? 1 : 0;
-    if (GetAsyncKeyState(VK_LEFT)   & 0x8000) keys |= 0x001;
-    if (GetAsyncKeyState(VK_RIGHT)  & 0x8000) keys |= 0x002;
-    if (GetAsyncKeyState(VK_UP)     & 0x8000) keys |= 0x004;
-    if (GetAsyncKeyState(VK_DOWN)   & 0x8000) keys |= 0x008;
-    if (GetAsyncKeyState('R')       & 0x8000) keys |= 0x010;
-    if (GetAsyncKeyState(VK_F6)     & 0x8000) keys |= 0x020;
-    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) keys |= 0x040;
+    int aHeld = (plat_key_state('A') & 0x8000) ? 1 : 0;
+    if (plat_key_state(VK_LEFT)   & 0x8000) keys |= 0x001;
+    if (plat_key_state(VK_RIGHT)  & 0x8000) keys |= 0x002;
+    if (plat_key_state(VK_UP)     & 0x8000) keys |= 0x004;
+    if (plat_key_state(VK_DOWN)   & 0x8000) keys |= 0x008;
+    if (plat_key_state('R')       & 0x8000) keys |= 0x010;
+    if (plat_key_state(VK_F6)     & 0x8000) keys |= 0x020;
+    if (plat_key_state(VK_ESCAPE) & 0x8000) keys |= 0x040;
 
     int newKeys = keys & ~prevKeys;
     prevKeys = keys;
@@ -605,17 +606,17 @@ void debug_state(void)
 
         // --- Input handling with edge detection ---
         int keys = 0;
-        if (GetAsyncKeyState(VK_UP)     & 0x8000) keys |= 0x001;
-        if (GetAsyncKeyState(VK_DOWN)   & 0x8000) keys |= 0x002;
-        if (GetAsyncKeyState(VK_LEFT)   & 0x8000) keys |= 0x004;
-        if (GetAsyncKeyState(VK_RIGHT)  & 0x8000) keys |= 0x008;
-        if (GetAsyncKeyState(VK_RETURN) & 0x8000) keys |= 0x010;
-        if (GetAsyncKeyState(VK_SPACE)  & 0x8000) keys |= 0x020;
-        if (GetAsyncKeyState('S')       & 0x8000) keys |= 0x040;
-        if (GetAsyncKeyState('W')       & 0x8000) keys |= 0x080;
-        if (GetAsyncKeyState('X')       & 0x8000) keys |= 0x100;
-        if (GetAsyncKeyState('L')       & 0x8000) keys |= 0x200;
-        if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) keys |= 0x400;
+        if (plat_key_state(VK_UP)     & 0x8000) keys |= 0x001;
+        if (plat_key_state(VK_DOWN)   & 0x8000) keys |= 0x002;
+        if (plat_key_state(VK_LEFT)   & 0x8000) keys |= 0x004;
+        if (plat_key_state(VK_RIGHT)  & 0x8000) keys |= 0x008;
+        if (plat_key_state(VK_RETURN) & 0x8000) keys |= 0x010;
+        if (plat_key_state(VK_SPACE)  & 0x8000) keys |= 0x020;
+        if (plat_key_state('S')       & 0x8000) keys |= 0x040;
+        if (plat_key_state('W')       & 0x8000) keys |= 0x080;
+        if (plat_key_state('X')       & 0x8000) keys |= 0x100;
+        if (plat_key_state('L')       & 0x8000) keys |= 0x200;
+        if (plat_key_state(VK_ESCAPE) & 0x8000) keys |= 0x400;
 
         int newKeys = keys & ~prevKeys;
         prevKeys = keys;

@@ -21,7 +21,12 @@
 #pragma once
 #include <stddef.h>
 
-#ifdef _DEBUG
+#if !defined(_WIN32)
+// Non-Windows: the shipped asset tree lives at ./assets/<REGION>/ and the
+// filesystem wants '/' separators. Per-component case is fixed up at open time
+// by plat_normalize_path.
+#define GAME_DATA_ROOT      "./assets/USA/"
+#elif defined(_DEBUG)
 #define GAME_DATA_ROOT      ".\\assets\\USA\\"
 #else
 #define GAME_DATA_ROOT      ".\\usa\\"
@@ -31,18 +36,22 @@
 // compile time, so JPN path literals (e.g. the FMV table) initialized statically
 // read as the JPN tree instead of the retail ".\usa\" form that ResolveAssetRoot
 // would otherwise have to swap. Debug/Release lengths match GAME_DATA_ROOT.
-#ifdef _DEBUG
+#if !defined(_WIN32)
+#define GAME_DATA_ROOT_JPN  "./assets/JPN/"
+#elif defined(_DEBUG)
 #define GAME_DATA_ROOT_JPN  ".\\assets\\JPN\\"
 #else
 #define GAME_DATA_ROOT_JPN  ".\\jpn\\"
 #endif
 
 // Save directory root. The original builds save paths as "%ssavedat%d.dat"
-// with the literal "SAVE\\" (CWD-relative, so "SAVE\savedat1.dat"). In
-// development the save folder lives under the asset tree so saves travel
-// with the project (assets/save, matching the original game's SAVE folder).
-#ifdef _DEBUG
-#define GAME_SAVE_ROOT      ".\\assets\\save\\"
+// with the literal "SAVE\\". This is only the compile-time fallback now - the
+// live value comes from GetSaveRoot() (config.ini [Save] Path, else
+// <assets base>/SAVE).
+#if !defined(_WIN32)
+#define GAME_SAVE_ROOT      "./assets/SAVE/"
+#elif defined(_DEBUG)
+#define GAME_SAVE_ROOT      ".\\assets\\SAVE\\"
 #else
 #define GAME_SAVE_ROOT      "SAVE\\"
 #endif
@@ -64,8 +73,22 @@ extern "C" {
 // so static initializers (g_bgPathTemplate, the door table, g_maskPathTemplate)
 // are still valid; SetAssetVersion() swaps the root the readers use at runtime,
 // letting a single build run USA *or* JPN assets per config.ini [Assets].
+//
+// Where that root *is* comes from SetAssetBase(): the folder holding the USA/
+// and JPN/ trees, which config.ini [Assets] Path sets (relative paths are
+// resolved by the caller against the executable's directory). With no base
+// configured the compile-time roots above stay in force.
+void         SetAssetBase(const char* base);
+const char*  GetAssetBase(void);
 void         SetAssetVersion(const char* version);
 const char*  GetAssetRoot(void);
+
+// Save folder (with a trailing separator), from config.ini [Save] Path or
+// <asset base>/SAVE/ when that key is empty. Replaces GAME_SAVE_ROOT, which is
+// now only the compile-time fallback. The result is case-resolved against the
+// filesystem, so an existing SAVE/save/Save directory is found either way.
+void         SetSaveRoot(const char* path);
+const char*  GetSaveRoot(void);
 // 1 when the JPN (Biohazard) asset tree is active, 0 for the USA default.
 int          GetAssetVersion(void);
 

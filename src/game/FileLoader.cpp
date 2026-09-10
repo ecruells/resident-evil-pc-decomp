@@ -2,6 +2,7 @@
 // Original function: LoadFile at 0x00411e10 (Ghidra)
 // Handles fopen/fread with retry logic and path resolution
 #include "../Globals.h"
+#include "../platform/platform.h"
 #include "../system/AssetPath.h"
 #include "FileLoader.h"
 #include <stdio.h>
@@ -23,6 +24,11 @@ size_t LoadFile(const char* path, void* buffer, unsigned char flags)
     // (config.ini [Assets] Version), a no-op unless the JPN tree is active.
     char resolved[260];
     const char* filePath = ResolveAssetRoot(path, resolved, sizeof(resolved));
+
+    // Platform path fix-up: separator conversion and, on a case-sensitive
+    // filesystem, case-insensitive component matching (docs/LINUX_PORT.md).
+    char normalized[260];
+    filePath = plat_normalize_path(filePath, normalized, sizeof(normalized));
 
     // Original: if (DAT_004b3998 & flags) prepend the registry install
     // directory for flagged loads. The port's GAME_DATA_ROOT (system/AssetPath.h)

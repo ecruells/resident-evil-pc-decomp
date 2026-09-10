@@ -167,8 +167,8 @@ void DebugQuick_SaveSlot(int slot)
     g_PlayerHealthStatusCopy = g_playerEntity.healthStatusFlags;
     g_PlayerDirAngleCopy     = g_playerEntity.directionAngle;
 
-    EnsureDirectoryExists(GAME_SAVE_ROOT);
-    sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slot + 1);
+    EnsureDirectoryExists(GetSaveRoot());
+    sprintf(g_saveFileName, "%ssavedat%d.dat", GetSaveRoot(), slot + 1);
 
     char fileBuffer[DBG_SAVE_FILE_SIZE + 8];
     DebugAssembleSaveFile(fileBuffer);
@@ -187,7 +187,7 @@ void DebugQuick_SaveSlot(int slot)
 void DebugQuick_LoadSlot(int slot)
 {
     char fileBuffer[DBG_SAVE_FILE_SIZE + 8];
-    sprintf(g_saveFileName, "%ssavedat%d.dat", GAME_SAVE_ROOT, slot + 1);
+    sprintf(g_saveFileName, "%ssavedat%d.dat", GetSaveRoot(), slot + 1);
     int fileSize = ReadSaveFile(g_saveFileName, fileBuffer);
     if (fileSize < 0x200) {
         dbg_printf("[debugmenu] quick load: slot %d has no valid save\n", slot + 1);
