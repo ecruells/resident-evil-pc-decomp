@@ -147,6 +147,11 @@ extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex); // 0x00473f10
 extern void Flg_on(int baseAddr, unsigned int bitIndex);         // 0x00473ef0
 static void FUN_00481ab0(unsigned char* state);                  // 0x00481ab0 - file book selector
 static void pickup_list_advance(unsigned char* state);           // 0x00482250 - file reading mode advance
+// Japanese build (Biohazard.exe) equivalents, selected when [Assets] Version=JPN.
+static void jpn_file_book_advance(unsigned char* state);                  // 0x0042b790 - JPN file book selector
+static void jpn_file_list_advance(unsigned char* state);                  // 0x0042bf30 - JPN file reading mode advance
+static void file_reader_advance(unsigned char* state);           // dispatch USA/JPN reader advance
+static void file_load_book_cover(unsigned char book);            // dispatch USA/JPN cover load
 extern unsigned char* message_item_name_lookup(unsigned char itemId); // 0x00455140
 void FUN_00454fd0(int itemId, int mode, short x, short y);            // 0x00454fd0
 
@@ -2190,7 +2195,11 @@ static int menu_file_state_machine(void)
             FILE_REQUEST = 2;
             FILE_BUSY = 1;
         }
-        FUN_00481ab0(&DAT_00ac98b0[0]);
+        if (GetAssetVersion() != 0) {
+            jpn_file_book_advance(&DAT_00ac98b0[0]);
+        } else {
+            FUN_00481ab0(&DAT_00ac98b0[0]);
+        }
         if ((FILE_BUSY == 0) && ((dpad_pressed_byte1() & 0x40) != 0) &&
             (FILE_REQUEST == 1) && (FILE_SLOT != 0xff)) {
             FILE_MODE = 1;
@@ -2198,7 +2207,7 @@ static int menu_file_state_machine(void)
             play_sfx(3, 6, 0);
         }
     } else if (FILE_STATE == 1) {
-        pickup_list_advance(&DAT_00ac98b0[0]);
+        file_reader_advance(&DAT_00ac98b0[0]);
         if (FILE_BUSY == 0) {
             // Cancel and confirm-on-last-page both start the same slide-out
             // (0x00481a40 / 0x00481a65 - the second test is NOT re-gated on
@@ -4147,7 +4156,7 @@ static int menu_update_status_screen(void)
                 set_message_display(0xc6, 0);
             }
         }
-    } else if ((state[0] == 1) && (pickup_list_advance(state), state[9] == 0)) {
+    } else if ((state[0] == 1) && (file_reader_advance(state), state[9] == 0)) {
         if ((dpad_pressed_byte1() & 0x80) != 0) {
             state[2] = 0xd;
             state[9] = 1;
@@ -4295,7 +4304,7 @@ static void pickup_screen_render(unsigned char* state)
     case 0x11:
         // The cover to load is the book the reader came from (state[4]),
         // not state[1] - the original indexes 0x4d2308 with state[4]*0x24.
-        pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+        file_load_book_cover(state[4]);
         state[2] = state[2] + 1;
         break;
     case 0x12:
@@ -4343,6 +4352,479 @@ static void pickup_screen_render(unsigned char* state)
             draw_texture((TextureDesc*)DAT_004d29d0, 1);
         }
     }
+}
+
+// ============================================================================
+// Japanese (Biohazard.exe) file subsystem
+//
+// The FILE tab is shared with the USA build, but the Japanese reader draws a
+// scanned "file" backdrop behind each document instead of the USA's plain page
+// art, and stores every page as its own uncompressed TIM rather than one LZW
+// page-pack per document. The book selector is otherwise identical (same cover
+// art and descriptors); only its title x table and scroll-arrow x move.
+//
+// Reader page model: each TEXTM_<letter><n>.TIM is 128x256 and packs TWO
+// 256x128 pages, so state[6] counts half-pages. The page texture's texV is 0
+// for the first page of a TIM and 0x80 for the second, and a new TIM is paged
+// in only when state[6]/2 advances. All addresses below are Biohazard.exe.
+// ============================================================================
+
+// 0x004af1d8 - per-file FILEI backdrop index (into g_jpnFileiNames). The FILEI
+// string table skips filei01/02/05, so this index, not the file id, selects it.
+static const unsigned char g_jpnFileiIndex[16] = {
+    1, 0, 2, 3, 8, 12, 3, 5, 7, 0, 4, 11, 6, 9, 10, 13,
+};
+// 0x004af1e8 - per-file reading length in half-pages. Both 2n and 2n-1 values
+// display n pages; the parity only decides which half of the last TIM is last.
+static const unsigned char g_jpnFilePageCount[16] = {
+    4, 6, 11, 3, 2, 6, 7, 7, 8, 5, 5, 4, 2, 2, 2, 5,
+};
+// 0x004af1f8 - per-file title x offset (the USA table is g_itemMaxCounts+0x10).
+static const unsigned char g_jpnFileTitleX[16] = {
+    42, 42, 42, 21, 42, 21, 49, 28, 0, 42, 14, 42, 35, 35, 35, 63,
+};
+// 0x004af5c0 - per-file start index into the TEXTM page table.
+static const unsigned char g_jpnFilePageStart[16] = {
+    0, 2, 5, 11, 13, 14, 17, 21, 25, 29, 32, 35, 37, 38, 39, 40,
+};
+
+// 0x004ae9d0 - the 43 per-page TIM names, fixed 0x24-byte entries in the order
+// the original indexes them (L M N O P Q R S T U V W X Y Z 00, page by page).
+static const char g_jpnTextmNames[43][0x24] = {
+    GAME_DATA_ROOT_JPN "item_m2/textm_l0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_l1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_m0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_m1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_m2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_n0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_n1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_n2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_n3.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_n4.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_n5.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_o0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_o1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_p0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_q0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_q1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_q2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_r0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_r1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_r2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_r3.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_s0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_s1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_s2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_s3.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_t0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_t1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_t2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_t3.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_u0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_u1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_u2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_v0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_v1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_v2.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_w0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_w1.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_x0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_y0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_z0.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_00.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_01.tim",
+    GAME_DATA_ROOT_JPN "item_m2/textm_02.tim",
+};
+
+// 0x004aefe0 - the per-file backdrop TIMs, fixed 0x24-byte entries. The string
+// table has no filei01/02/05; those tree entries are unused by the reader.
+static const char g_jpnFileiNames[14][0x24] = {
+    GAME_DATA_ROOT_JPN "item_m2/filei03.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei04.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei06.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei07.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei08.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei09.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei10.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei11.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei12.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei13.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei14.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei15.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei16.tim",
+    GAME_DATA_ROOT_JPN "item_m2/filei17.tim",
+};
+
+// 0x004af450 - the reader page texture (256x128). texV is toggled to 0x80 on
+// odd half-pages so the two pages packed in each TEXTM TIM alternate.
+static unsigned char DAT_004af450[0x24] = {
+    0x00,0x00,0x00,0x01, 0x18,0x00,0x34,0x00, 0x00,0x01,0x80,0x00,
+    0x15,0x00,0x00,0x00, 0x00,0x00,0xfd,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+
+// 0x004af478 - six fixed backdrop frame/scrap pieces drawn over the page
+// (stride 0x24); their colour is ramped 0..0x80 by DAT_004af48c.
+static unsigned char g_jpnReaderFrame[6][0x24] = {
+    { 0x00,0x00,0x00,0x51, 0x30,0x00,0x30,0x00, 0xd0,0x00,0x78,0x00,
+      0x15,0x00,0x00,0x00, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x51, 0x30,0x00,0xa8,0x00, 0x30,0x00,0x18,0x00,
+      0x15,0x00,0xd0,0x00, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x51, 0x60,0x00,0xa8,0x00, 0x30,0x00,0x18,0x00,
+      0x15,0x00,0xd0,0x18, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x51, 0x90,0x00,0xa8,0x00, 0x30,0x00,0x18,0x00,
+      0x15,0x00,0xd0,0x30, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x51, 0xc0,0x00,0xa8,0x00, 0x30,0x00,0x18,0x00,
+      0x15,0x00,0xd0,0x48, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+    { 0x00,0x00,0x00,0x51, 0xf0,0x00,0xa8,0x00, 0x10,0x00,0x18,0x00,
+      0x15,0x00,0xd0,0x60, 0x00,0x00,0xfc,0x01, 0x00,0x00,0x00,0x00,
+      0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00 },
+};
+
+// 0x004af550 / 0x004af574 - previous / next page arrows. texU blinks.
+static unsigned char DAT_004af550[0x24] = {
+    0x00,0x00,0x00,0x01, 0x18,0x00,0x74,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0xe0,0x60, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+static unsigned char DAT_004af574[0x24] = {
+    0x00,0x00,0x00,0x01, 0x10,0x01,0x74,0x00, 0x08,0x00,0x08,0x00,
+    0x15,0x00,0xf0,0x60, 0x00,0x00,0xfc,0x01, 0x80,0x80,0x80,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+// 0x004af598 - the EXIT label on the last page.
+static unsigned char DAT_004af598[0x24] = {
+    0x00,0x00,0x00,0x01, 0x18,0x01,0x6f,0x00, 0x18,0x00,0x10,0x00,
+    0x1c,0x00,0x80,0x88, 0x00,0x00,0xe4,0x01, 0x40,0x40,0x40,0x00,
+    0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00, 0x00,0x00,0x00,0x00,
+};
+
+static unsigned char DAT_004af48c;   // 0x004af48c - backdrop fade (0 -> 0x80 -> 0)
+static unsigned char DAT_004af600;   // 0x004af600 - a TEXTM page has been paged in
+static unsigned char DAT_00c2e93d;   // 0x00c2e93d - JPN "texture already loaded" id
+
+// 0x0042c510 - JPN file texture loader. mode 0/1 page the image into SRV 0x1c
+// (clut 0xd); mode 2 pages it into 0x1d (clut 0xe) and marks the page loaded.
+// FUN_00437dd0(0) is an empty stub in the original and is dropped.
+static void jpn_file_load_texture(const char* path, unsigned int texId, int mode)
+{
+    void* loadBuffer = (void*)((int)g_TimImageBuffer__bitmap + 0x10000);
+    if ((unsigned int)DAT_00c2e93d != texId) {
+        DAT_00c2e93d = (unsigned char)texId;
+        LoadFile(path, loadBuffer, 0x20);
+        if (mode == 0) {
+            DAT_004af600 = 0;
+        } else if (mode != 1) {
+            LoadTexturePage(loadBuffer, 0x15, 0x1d, 0xe, 0, 0, 0, 0);
+            DAT_004af600 = 1;
+            return;
+        }
+        LoadTexturePage(loadBuffer, 0x15, 0x1c, 0xd, 0, 0, 0, 0);
+    }
+}
+
+// The shared book selector loads its cover through this; the JPN build resets
+// the reader's "page loaded" flag here (jpn_file_load_texture mode 0) so no
+// stale page is drawn while the reader fades in.
+static void file_load_book_cover(unsigned char book)
+{
+    if (GetAssetVersion() != 0) {
+        jpn_file_load_texture(g_fileCoverNames[book], book + 0x90, 0);
+    } else {
+        pickup_load_texture(g_fileCoverNames[book], book + 0x90, 0);
+    }
+}
+
+// 0x0042c080 - JPN file reading renderer/state machine. Same shape as the USA
+// pickup_screen_render (0x004823a0), but pages are per-page TEXTM TIMs and a
+// FILEI backdrop + frame is drawn behind the page.
+static void jpn_file_screen_render(unsigned char* state)
+{
+    switch (state[2]) {
+    case 0:
+        {
+            unsigned char entry = g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]];
+            unsigned char fi = g_jpnFileiIndex[entry];
+            jpn_file_load_texture(g_jpnFileiNames[fi], fi + 0x96, 1);
+        }
+        DAT_004af48c = 0;
+        *(unsigned short*)(state + 0xe) = 0;
+        state[2] = state[2] + 1;
+        *(unsigned short*)(state + 0xc) = 0x128;
+        state[9] = 1;
+        // fall through
+    case 1:
+        DAT_004af48c = DAT_004af48c + 8;
+        if (DAT_004af48c < 0x80) return;
+        DAT_004af48c = 0x80;
+        state[2] = state[2] + 1;
+        return;
+    case 2:
+        if (state[6] % 2 == 0) {
+            unsigned char entry = g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]];
+            int idx = state[6] / 2 + g_jpnFilePageStart[entry];
+            jpn_file_load_texture(g_jpnTextmNames[idx], idx + 0xb4, 2);
+        }
+        *(unsigned short*)(state + 0xc) = 0x128;
+        *(unsigned short*)(state + 0xa) = 300;
+        state[2] = state[2] + 1;
+        // fall through
+    case 3:
+        {
+            short sVar5 = *(short*)(state + 0xa) / 2;
+            short sVar4 = *(short*)(state + 0xc) - sVar5;
+            *(short*)(state + 0xa) = sVar5;
+            *(short*)(state + 0xc) = sVar4;
+            if (sVar4 < 1) {
+                *(unsigned short*)(state + 0xc) = 0;
+                *(unsigned short*)(state + 0xa) = 1;
+                state[2] = state[2] + 1;
+            }
+        }
+        break;
+    case 4:
+        state[9] = 0;
+        break;
+    case 5:
+        *(unsigned short*)(state + 0xc) = 0;
+        *(unsigned short*)(state + 0xa) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 6:
+        {
+            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xa);
+            *(short*)(state + 0xc) = sVar5;
+            *(short*)(state + 0xa) = *(short*)(state + 0xa) * 2;
+            if (sVar5 < -0x127) {
+                state[2] = state[2] + 1;
+                state[6] = state[6] + 1;
+            }
+        }
+        break;
+    case 7:
+        state[2] = 2;
+        break;
+    case 8:
+        *(unsigned short*)(state + 0xc) = 0;
+        *(unsigned short*)(state + 0xa) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 9:
+        {
+            short sVar5 = *(short*)(state + 0xc) + *(short*)(state + 0xa);
+            *(short*)(state + 0xc) = sVar5;
+            *(short*)(state + 0xa) = *(short*)(state + 0xa) * 2;
+            if (0x127 < sVar5) {
+                state[2] = state[2] + 1;
+                state[6] = state[6] - 1;
+            }
+        }
+        break;
+    case 0x0a:
+        state[2] = state[2] + 1;
+        break;
+    case 0x0b:
+        if (state[6] % 2 != 0) {
+            unsigned char entry = g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]];
+            int idx = state[6] / 2 + g_jpnFilePageStart[entry];
+            jpn_file_load_texture(g_jpnTextmNames[idx], idx + 0xb4, 2);
+        }
+        *(unsigned short*)(state + 0xc) = 0xfed8;
+        *(unsigned short*)(state + 0xa) = 300;
+        state[2] = state[2] + 1;
+        // fall through
+    case 0x0c:
+        {
+            short sVar5 = *(short*)(state + 0xa) / 2;
+            short sVar4 = *(short*)(state + 0xc) + sVar5;
+            *(short*)(state + 0xa) = sVar5;
+            *(short*)(state + 0xc) = sVar4;
+            if (-1 < sVar4) {
+                state[2] = 4;
+                *(unsigned short*)(state + 0xc) = 0;
+            }
+        }
+        break;
+    case 0x0d:
+        *(unsigned short*)(state + 0xc) = 0;
+        *(unsigned short*)(state + 0xa) = 1;
+        state[2] = state[2] + 1;
+        // fall through
+    case 0x0e:
+        {
+            short sVar5 = *(short*)(state + 0xc) - *(short*)(state + 0xa);
+            *(short*)(state + 0xc) = sVar5;
+            *(short*)(state + 0xa) = *(short*)(state + 0xa) * 2;
+            if (sVar5 < -0x127) {
+                state[2] = state[2] + 1;
+            }
+        }
+        break;
+    case 0x0f:
+        DAT_004af48c = DAT_004af48c - 8;
+        if (DAT_004af48c == 0) {
+            DAT_004af48c = 0;
+            state[2] = state[2] + 1;
+        }
+        break;
+    case 0x10:
+        state[2] = state[2] + 1;
+        break;
+    case 0x11:
+        // Reload the cover of the book the reader came from.
+        if (GetAssetVersion() != 0) {
+            jpn_file_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+        }
+        state[2] = state[2] + 1;
+        break;
+    case 0x12:
+        *(unsigned int*)state = 0x02010100;
+        break;
+    }
+
+    // Page texture follows the slide; texV selects the half of the TEXTM TIM.
+    *(short*)(DAT_004af450 + 4) = *(short*)(state + 0xc) + 0x18;
+    *(short*)(DAT_004af450 + 6) = *(short*)(state + 0xe) + 0x34;
+    if (DAT_004af600 != 0) {
+        if (state[6] % 2 == 0) {
+            DAT_004af450[0x0f] = 0;
+        } else {
+            DAT_004af450[0x0f] = 0x80;
+        }
+        display_texture((TextureDesc*)DAT_004af450, 0, 0xe, 1);
+    }
+
+    // Backdrop/frame pieces, faded in with DAT_004af48c.
+    for (int i = 0; i < 6; i++) {
+        unsigned char* desc = g_jpnReaderFrame[i];
+        desc[0x14] = DAT_004af48c;
+        desc[0x15] = DAT_004af48c;
+        desc[0x16] = DAT_004af48c;
+        display_texture((TextureDesc*)desc, 1, 0xd, 1);
+    }
+
+    if (state[2] == 4) {
+        unsigned char blink = state[0x12] + 1;
+        state[0x12] = blink;
+        state[0x11] = ((blink & 0x30) == 0);
+        if (state[0x10] == 1) {
+            state[0x12] = 0;
+            state[0x11] = 1;
+        }
+        DAT_004af550[0x0e] = (unsigned char)(state[0x11] * 8 - 0x20);
+        DAT_004af574[0x0e] = (unsigned char)(state[0x11] * 8 - 0x10);
+        if (state[6] != 0) {
+            display_texture((TextureDesc*)DAT_004af550, 0, 0xd, 1);
+        }
+        display_texture((TextureDesc*)DAT_004af574, 0, 0xd, 1);
+        if ((unsigned int)g_jpnFilePageCount[g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]]] -
+            (unsigned int)state[6] == 1) {
+            if (state[0x10] == 1) {
+                DAT_004af598[0x14] = 0x50;
+            } else {
+                DAT_004af598[0x14] = 0x20;
+            }
+            DAT_004af598[0x15] = DAT_004af598[0x14];
+            DAT_004af598[0x16] = DAT_004af598[0x14];
+            draw_texture((TextureDesc*)DAT_004af598, 1);
+        }
+    }
+}
+
+// 0x0042bf70 - JPN reader init: reset the half-page counter and last-page flag.
+static void jpn_file_list_init(unsigned char* state)
+{
+    state[6] = 0;
+    state[0x10] = 0;
+    jpn_file_screen_render(state);
+}
+
+// 0x0042bf90 - JPN reader input. Same as the USA pickup_list_input but the
+// length comes from g_jpnFilePageCount and is counted in half-pages.
+static void jpn_file_list_input(unsigned char* state)
+{
+    unsigned char count = g_jpnFilePageCount[g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]]];
+    unsigned char* hold;
+
+    if (state[9] != 0) goto jpn_input_draw;
+
+    hold = &state[0x13];
+    if (((unsigned short)g_button_pressed_id & 0xa000) == 0) {
+        *hold = 0;
+    } else {
+        *hold = *hold + 1;
+    }
+    if ((((unsigned short)g_PlayerPadHeld & 0x2000) != 0) ||
+        ((((unsigned short)g_button_pressed_id & 0x2000) != 0 && (0x14 < *hold)))) {
+        if ((int)state[6] + 1U < (unsigned int)count) {
+            state[9] = 1;
+            state[2] = 5;
+            play_sfx(3, 8, 0);
+        } else {
+            if (state[0x10] != 0) goto jpn_input_mark;
+            state[0x10] = 1;
+            play_sfx(3, 4, 0);
+        }
+    }
+jpn_input_mark:
+    if ((((unsigned short)g_PlayerPadHeld & 0x8000) != 0) ||
+        ((((unsigned short)g_button_pressed_id & 0x8000) != 0 && (0x14 < *hold)))) {
+        if (state[0x10] == 1) {
+            state[0x10] = 0;
+            play_sfx(3, 4, 0);
+        } else {
+            if ((int)state[6] - 1 < 0) {
+                state[6] = 0;
+                goto jpn_input_draw;
+            }
+            state[9] = 1;
+            state[2] = 8;
+            play_sfx(3, 8, 0);
+        }
+    }
+jpn_input_draw:
+    jpn_file_screen_render(state);
+}
+
+// 0x0042bf30 - JPN reader dispatch (hides the page behind the black overlay,
+// then init on the first call and input thereafter).
+static void jpn_file_list_advance(unsigned char* state)
+{
+    pickup_fade_update(2);
+    if (state[1] == 0) {
+        jpn_file_list_init(state);
+        state[1] = state[1] + 1;
+        return;
+    }
+    if (state[1] != 1) {
+        return;
+    }
+    jpn_file_list_input(state);
+}
+
+// Dispatch to the correct reader advance. The pause-menu File tab and the room
+// file pickup both drive the reader through here.
+static void file_reader_advance(unsigned char* state)
+{
+    if (GetAssetVersion() != 0) {
+        jpn_file_list_advance(state);
+    } else {
+        pickup_list_advance(state);
+    }
+}
+
+// 0x0042b7c0 / 0x0042b9e0 / 0x0042b870 / 0x0042b790 - the JPN book selector is
+// byte-identical to the USA one apart from its title x table and scroll-arrow x
+// (handled where FUN_00481d00 draws them), so the USA selector is reused. This
+// wrapper only marks the JPN entry point and reports which sub-step to run.
+static void jpn_file_book_advance(unsigned char* state)
+{
+    FUN_00481ab0(state);
 }
 
 // ============================================================================
@@ -4448,7 +4930,7 @@ static void FUN_00481d00(unsigned char* state)
         break;
     case 6:
         // Load the new book cover
-        pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+        file_load_book_cover(state[4]);
         state[2] = state[2] + 1;
         break;
     case 7:
@@ -4503,7 +4985,7 @@ static void FUN_00481d00(unsigned char* state)
         break;
     case 11:
         // Load the previous book cover
-        pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+        file_load_book_cover(state[4]);
         state[2] = state[2] + 1;
         break;
     case 12:
@@ -4575,18 +5057,26 @@ static void FUN_00481d00(unsigned char* state)
         display_texture((TextureDesc*)DAT_004d27d0, 0x27, 0xd, 1);
 
         if (state[2] == 1) {
-            // File title text (message id = filem index + 0x5f). The x
-            // offset table DAT_004d2630 aliases g_itemMaxCounts[0x10].
+            // File title text (message id = filem index + 0x5f). The x offset
+            // table DAT_004d2630 aliases g_itemMaxCounts[0x10] in the USA build;
+            // the JPN build has its own table (0x004af1f8) and draws the title
+            // one pixel higher (0xc0 vs 0xc1).
             unsigned char entry = g_pickupKeyItemList[((int)state[4] + state[7] * 2) * 8 + state[5]];
+            short titleX = (GetAssetVersion() != 0)
+                               ? (short)g_jpnFileTitleX[entry]
+                               : (short)g_itemMaxCounts[entry + 0x10];
+            short titleY = (GetAssetVersion() != 0) ? (short)0xc0 : (short)0xc1;
             FUN_00454fd0(entry + 0x5f, 0x80,
-                         (short)(g_itemMaxCounts[entry + 0x10] - g_ScreenOffsetX + 0x1e),
-                         0xc1 - g_ScreenOffsetY);
+                         (short)(titleX - g_ScreenOffsetX + 0x1e),
+                         titleY - g_ScreenOffsetY);
 
-            // Up/down scroll arrows (positions and blink texU)
-            *(short*)(DAT_004d283c + 4) = (short)(0x67 - g_ScreenOffsetX);
+            // Up/down scroll arrows (positions and blink texU). The JPN build
+            // places them at x 0x6f instead of 0x67.
+            short arrowX = (GetAssetVersion() != 0) ? (short)0x6f : (short)0x67;
+            *(short*)(DAT_004d283c + 4) = (short)(arrowX - g_ScreenOffsetX);
             DAT_004d283c[0x0e] = (unsigned char)(state[0x11] * 8 - 0x30);
             *(short*)(DAT_004d283c + 6) = (short)(0xb7 - g_ScreenOffsetY);
-            *(short*)(DAT_004d2860 + 4) = (short)(0x67 - g_ScreenOffsetX);
+            *(short*)(DAT_004d2860 + 4) = (short)(arrowX - g_ScreenOffsetX);
             DAT_004d2860[0x0e] = (unsigned char)(state[0x11] * 8 - 0x20);
             *(short*)(DAT_004d2860 + 6) = (short)(0xcf - g_ScreenOffsetY);
 
@@ -4640,7 +5130,7 @@ static void FUN_00481ae0(unsigned char* state)
     DAT_004d2a34 = 0;
     DAT_004d2a35 = 0;
     DAT_004d2a36 = 0;
-    pickup_load_texture(g_fileCoverNames[state[4]], state[4] + 0x90, 0);
+    file_load_book_cover(state[4]);
     FUN_00481d00(state);
 }
 
