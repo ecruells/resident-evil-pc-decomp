@@ -92,6 +92,19 @@ sudo apt install build-essential cmake g++-multilib libc6-dev-i386 \
                  libavutil-dev:i386 libswresample-dev:i386
 ```
 
+On Ubuntu 24.04 (noble) `libsdl2-dev:i386` cannot be resolved: it pulls
+`libpulse-dev:i386` and `libibus-1.0-dev:i386`, whose `libglib2.0-dev:i386`
+dependency has no i386 build there (the glib dev utilities are amd64-only).
+None of those headers are used, so install the rest and force the SDL2 dev
+package past its dependency check:
+```
+sudo apt install -y --no-install-recommends libgl-dev libsdl2-2.0-0:i386 \
+     libavformat-dev:i386 libavcodec-dev:i386 \
+     libavutil-dev:i386 libswresample-dev:i386
+cd /tmp && apt-get download libsdl2-dev:i386
+sudo dpkg -i --force-depends --force-overwrite libsdl2-dev_*_i386.deb
+```
+
 Arch/CachyOS (with `[multilib]` enabled in `/etc/pacman.conf`):
 ```
 sudo pacman -S --needed base-devel cmake lib32-glibc lib32-gcc-libs \

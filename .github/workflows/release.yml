@@ -118,17 +118,29 @@ jobs:
           # Build the tagged commit when releasing, otherwise the pushed commit.
           ref: ${{ needs.release-please.outputs.tag_name || github.sha }}
 
-      # The project is strictly 32-bit (-m32); these are the i386 packages from
-      # the CMakeLists dependency message. The amd64 dev packages are absent on
-      # a fresh runner, so the two sets do not conflict.
+      # The project is strictly 32-bit (-m32). libsdl2-dev:i386 cannot be
+      # installed through apt on noble: it depends on libpulse-dev:i386 and
+      # libibus-1.0-dev:i386, whose libglib2.0-dev:i386 dependency has no i386
+      # build in 24.04 (the glib dev utilities are amd64-only), so apt reports
+      # unmet dependencies. None of those headers are used here, so the SDL2
+      # runtime and the ffmpeg i386 dev files install normally and the SDL2 dev
+      # package is forced past its dependency check; libgl-dev (amd64) supplies
+      # the arch-independent GL/glcorearb.h the GL loader needs.
       - name: Install 32-bit dependencies
         run: |
           sudo dpkg --add-architecture i386
           sudo apt-get update
-          sudo apt-get install -y cmake g++-multilib libc6-dev-i386 zip \
-            libsdl2-dev:i386 \
+          sudo apt-get install -y --no-install-recommends \
+            cmake g++-multilib libc6-dev-i386 zip \
+            libgl-dev \
+            libsdl2-2.0-0:i386 \
             libavformat-dev:i386 libavcodec-dev:i386 \
             libavutil-dev:i386 libswresample-dev:i386
+          cd "$RUNNER_TEMP"
+          apt-get download libsdl2-dev:i386
+          # --force-overwrite: the image may already carry the amd64 package,
+          # whose arch-independent SDL2 headers occupy the same paths.
+          sudo dpkg -i --force-depends --force-overwrite libsdl2-dev_*_i386.deb
 
       - name: Build
         run: |

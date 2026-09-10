@@ -152,6 +152,12 @@ if(RE1_M32_LIBDIR STREQUAL "")
         "  Debian/Ubuntu: dpkg --add-architecture i386; apt install g++-multilib "
         "libc6-dev-i386 libsdl2-dev:i386 libavformat-dev:i386 libavcodec-dev:i386 "
         "libavutil-dev:i386 libswresample-dev:i386\n"
+        "    On 24.04/noble libsdl2-dev:i386 is unresolvable (its "
+        "libpulse-dev:i386/libibus-1.0-dev:i386 deps need an i386 "
+        "libglib2.0-dev noble does not ship). Install libgl-dev, "
+        "libsdl2-2.0-0:i386 and the ffmpeg :i386 dev packages, then "
+        "dpkg -i --force-depends the downloaded libsdl2-dev:i386 - see the "
+        "README's Linux section.\n"
         "  Arch/CachyOS:  enable [multilib] in /etc/pacman.conf; pacman -S "
         "lib32-glibc lib32-gcc-libs sdl2 lib32-sdl2 ffmpeg lib32-ffmpeg")
 endif()
