@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.1.1](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.1.0...residentevil-v1.1.1) (2026-09-10)
+
+
+### Bug Fixes
+
+* rename linux package to tar.gz ([e8f44e1](https://github.com/ecruells/resident-evil-pc-decomp/commit/e8f44e157b0e620b9f198ce2fa86d688bc98e6d0))
+
 ## [1.1.0](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.0.1...residentevil-v1.1.0) (2026-09-10)
 
 
