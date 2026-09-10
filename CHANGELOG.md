@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.1.0](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.0.1...residentevil-v1.1.0) (2026-09-10)
+
+
+### Features
+
+* linux ci fix ([394f588](https://github.com/ecruells/resident-evil-pc-decomp/commit/394f588f92c4139fe6ecdbac57ff336558fcc1d5))
+* linux port ([178bffe](https://github.com/ecruells/resident-evil-pc-decomp/commit/178bffe5db0bcd6b5159cd464743466608ba7f52))
+* update release ci to add linux build ([1232d0a](https://github.com/ecruells/resident-evil-pc-decomp/commit/1232d0a5141946a769b630bf49bb930dbd916776))
+
 ## [1.0.1](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.0.0...residentevil-v1.0.1) (2026-09-08)
 
 
