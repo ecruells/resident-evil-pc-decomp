@@ -131,7 +131,7 @@ jobs:
           sudo dpkg --add-architecture i386
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            cmake g++-multilib libc6-dev-i386 zip \
+            cmake g++-multilib libc6-dev-i386 \
             libgl-dev \
             libsdl2-2.0-0:i386 \
             libavformat-dev:i386 libavcodec-dev:i386 \
@@ -156,18 +156,18 @@ jobs:
           # initial settings file, same as the Windows package.
           cp config.ini.template "$bundle/config.ini"
           name="$(basename "$bundle")"
-          (cd dist && zip -rq "$name.zip" "$name")
-          echo "zip=dist/$name.zip" >> "$GITHUB_OUTPUT"
+          tar -C dist -czf "dist/$name.tar.gz" "$name"
+          echo "archive=dist/$name.tar.gz" >> "$GITHUB_OUTPUT"
           echo "name=$name" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.stage.outputs.name }}
-          path: ${{ steps.stage.outputs.zip }}
+          path: ${{ steps.stage.outputs.archive }}
 
       - name: Attach build to release
         if: needs.release-please.outputs.release_created == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh release upload "${{ needs.release-please.outputs.tag_name }}" "${{ steps.stage.outputs.zip }}" --clobber
+          gh release upload "${{ needs.release-please.outputs.tag_name }}" "${{ steps.stage.outputs.archive }}" --clobber
