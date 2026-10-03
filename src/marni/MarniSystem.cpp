@@ -252,7 +252,7 @@ static int VTable_HandleWindowMessage(void* self, HWND hwnd, UINT msg,
 
     switch (msg) {
     case WM_ACTIVATE:
-        pD3D->m_isActive = (LOWORD(wParam) != WA_INACTIVE);
+        pD3D->m_isActive = g_bRunInBackground || (LOWORD(wParam) != WA_INACTIVE);
         return 1;
     case WM_SIZE:
     case WM_DESTROY:

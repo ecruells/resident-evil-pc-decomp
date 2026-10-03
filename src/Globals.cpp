@@ -57,6 +57,8 @@ BOOL g_bFullScreen = FALSE;
 // Blocking on a vblank instead makes the display, not the limiter, set the
 // tick rate - see the note on MarniDX::Present.
 BOOL g_bVSync = FALSE;
+// config.ini [Display] RunInBackground. Allows the game to run in the background without interruption.
+BOOL g_bRunInBackground = FALSE;
 // 0x004d642c
 int g_dwBitDepth = 16;
 // 0x004d6430

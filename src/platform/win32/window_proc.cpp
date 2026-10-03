@@ -102,17 +102,21 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         // (0x900) press, which triggers the Option Mode menu combo. Writing it
         // here made every window focus change open the (stubbed) options menu.
         case WM_ACTIVATE:
-            g_bWindowFocused = FALSE;
-            if (LOWORD(wParam) == WA_INACTIVE) {
-                // 0x004411f4: Window deactivated
+            g_bWindowFocused = (LOWORD(wParam) != WA_INACTIVE);
+
+            if (!g_bWindowFocused) {
                 if (!g_bIsSoftwareRendering && g_mciVideoDeviceID == 1) {
                     g_bMCIVideoEvent = TRUE;
+                } 
+
+                if (!g_bRunInBackground) {
+                    PauseSounds();
                 }
-                PauseSounds();
-            } else {
-                // Window activated
-                g_bWindowFocused = TRUE;
-                ResumePausedSounds();
+            }
+            else {
+                if (!g_bRunInBackground) {
+                    ResumePausedSounds();
+                }
             }
             break;
         
