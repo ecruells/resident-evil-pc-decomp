@@ -150,6 +150,12 @@ DWORD ReadPadBoth(void)
 	if (g_DisablePad != 0) {
 		return 0;
 	}
+
+	// Keep polling devices, but ignore input while running unfocused in background mode.
+	if (g_bRunInBackground && !g_bWindowFocused) {
+		return 0;
+	}
+
 	return g_PadBtnWord;
 }
 

@@ -447,6 +447,7 @@ BOOL ConfigFile_Load(void)
     g_dwScreenHeight = (DWORD)ReadInt(path, "Display", "Height", (int)g_dwScreenHeight);
     g_dwBitDepth     = (DWORD)ReadInt(path, "Display", "BitDepth", (int)g_dwBitDepth);
     g_bVSync         = ReadInt(path, "Display", "VSync", g_bVSync ? 1 : 0) ? TRUE : FALSE;
+    g_bRunInBackground = ReadInt(path, "Display", "RunInBackground", g_bRunInBackground ? 1 : 0) ? TRUE : FALSE;
 
     // Same clamps the Windows build applied.
     if (g_dwScreenWidth < 320) g_dwScreenWidth = 640;

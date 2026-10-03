@@ -21,6 +21,8 @@ BitDepth=16
 ; Wait for vblank on present. 0 = off (default, and what the original did
 ; in a window): the engine paces itself to 33 ms per tick in software.
 VSync=0
+; Dont pause the game with game window out of focus
+RunInBackground=1
 
 [Assets]
 ; Folder that holds the USA/ and JPN/ data trees. Relative paths are resolved

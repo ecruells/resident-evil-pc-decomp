@@ -645,7 +645,7 @@ int RunMessageLoop(void)
         // Losing focus therefore stops main_loop() being called at all - that is
         // the pause. The port previously ORed the two flags together with an
         // always-TRUE g_bWindowActive, so it never paused.
-        if (!g_bQuitFlag && g_bWindowFocused) {
+        if (!g_bQuitFlag && (g_bWindowFocused || g_bRunInBackground)) {
             if (g_hWnd != NULL || g_bWindowActive) {
                 DWORD currentTime = timeGetTime();
                 
