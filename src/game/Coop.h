@@ -36,6 +36,13 @@ void Coop_SpawnPartner(void);
 // when she stands inside the door's action zone (record[0..3] = x, z, width,
 // depth, as cmd_door_set stores it) grown by a margin on every side.
 int Coop_PartnerNearDoor(const unsigned short* zone);
+// Is (x, z) inside the zone grown by the same margin?
+int Coop_PointNearZone(int x, int z, const unsigned short* zone);
+
+// PlayerAnimations.cpp - player 2 pressed action: if her reach probe is in a
+// door's action zone and player 1 is at that door too, take it (the player's
+// door_try_enter, so locks, keys and the transition all behave as for him).
+void coop_partner_try_door(Entity* partner);
 
 // ---- Partner inventory -------------------------------------------------------
 // Player 2 has her own item slots (g_RebeccaItemSlots, which the save already

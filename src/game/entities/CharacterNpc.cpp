@@ -2310,8 +2310,10 @@ void npc_coop_partner_control(void)
 
     // Locked exactly when the player is: game_loop masks the player's d-pad when
     // bit 0x100 of g_message_flags is clear (cutscene / scripted event running).
+    unsigned int pressed = g_CoopDpadPressed;
     if ((g_message_flags & 0x100) == 0) {
         held = 0;
+        pressed = 0;
     }
 
     if (!g_coopPartnerPlaced) {
@@ -2388,7 +2390,22 @@ void npc_coop_partner_control(void)
         (short)(0x1000 / (ENTITY->blend_counter + 1)));
     npc_walk_footstep_sound();
     SetEntityScaHitData(ENTITY);
-    ResolveEntityScaCollision((Entity*)&g_playerEntity, ENTITY);
+
+    // Neither player can shove the other. ResolveEntityScaCollision(a, b) moves
+    // b out of a, so push whoever walked into the other: her while she is
+    // moving, otherwise player 1 (he moved into her on his last update).
+    if ((held & 1) != 0) {
+        ResolveEntityScaCollision((Entity*)&g_playerEntity, ENTITY);
+    } else {
+        ResolveEntityScaCollision(ENTITY, (Entity*)&g_playerEntity);
+        g_playerEntity.position.x = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+        g_playerEntity.position.z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
+    }
+
+    // Action button (0x80, as player_input_to_behavior tests it): doors.
+    if ((pressed & 0x80) != 0) {
+        coop_partner_try_door(ENTITY);
+    }
 
     // Keep her inside the room: the same boundary push-out the player gets in
     // update_player_anim. The rollback point it uses is entity+0x6C, so mirror

@@ -7281,6 +7281,49 @@ int stairs_height_update(unsigned char* entry)
 // disables an entry. `mask` gates which entries participate this frame.
 // ============================================================================
 
+// Co-op (port addition): player 2's door. Same reach probe and zone tests as
+// check_action_object above - the action-press entries (flag bits 0x01 and
+// 0x80) - restricted to door entries (room_check_actions slot 1), and only when
+// player 1 stands at the same door.
+void coop_partner_try_door(Entity* partner)
+{
+    unsigned char* tail = (unsigned char*)g_RoomActionTail;
+    if (tail == NULL || tail < g_RoomActionTable) {
+        return;
+    }
+
+    SVECTOR fwd;
+    fwd.x = 600;
+    fwd.y = 0;
+    fwd.z = 0;
+    fwd.pad = 0;
+    MovePlayerXZ((int)(unsigned short)partner->angle, &fwd, &fwd);
+    VECTOR probe;
+    probe.x = fwd.x + partner->scaMatrixData.localMatrix.t[0];
+    probe.y = 0;
+    probe.z = fwd.z + partner->scaMatrixData.localMatrix.t[2];
+
+    for (unsigned char* entry = g_RoomActionTable; entry <= tail; entry += 12) {
+        unsigned char flags = entry[1];
+        if (entry[0] != 1 || (flags & 1) == 0 || (flags & 0x80) == 0) {
+            continue;
+        }
+        unsigned short* zone = *(unsigned short**)(entry + 8);
+        VECTOR* at = ((flags & 0x40) == 0) ? &probe
+                                            : (VECTOR*)partner->scaMatrixData.localMatrix.t;
+        if (is_point_in_action_zone(at, zone) == 0) {
+            continue;
+        }
+        if (Coop_PointNearZone(g_playerEntity.scaMatrixData.localMatrix.t[0],
+                               g_playerEntity.scaMatrixData.localMatrix.t[2], zone) == 0) {
+            return;   // player 1 is not at this door
+        }
+        dbg_printf("[COOP] player 2 takes the door at (%d,%d)\n", zone[0], zone[1]);
+        door_try_enter(entry);
+        return;
+    }
+}
+
 void update_player_position(PlayerEntity* ent, int mask)
 {
     int actionResult = 0;

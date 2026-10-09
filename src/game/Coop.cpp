@@ -144,8 +144,12 @@ int Coop_PartnerNearDoor(const unsigned short* zone)
 	if (g_coopPartner == nullptr) {
 		return 1;
 	}
-	int x = g_coopPartner->scaMatrixData.localMatrix.t[0];
-	int z = g_coopPartner->scaMatrixData.localMatrix.t[2];
+	return Coop_PointNearZone(g_coopPartner->scaMatrixData.localMatrix.t[0],
+	                          g_coopPartner->scaMatrixData.localMatrix.t[2], zone);
+}
+
+int Coop_PointNearZone(int x, int z, const unsigned short* zone)
+{
 	int x0 = (int)zone[0] - COOP_DOOR_MARGIN;
 	int z0 = (int)zone[1] - COOP_DOOR_MARGIN;
 	int x1 = (int)zone[0] + (int)zone[2] + COOP_DOOR_MARGIN;
