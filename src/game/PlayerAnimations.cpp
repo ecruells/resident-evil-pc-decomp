@@ -6652,6 +6652,38 @@ void update_player_anim(void)
 }
 
 // ============================================================================
+// coop_update_shadow_anim - co-op (port addition, not in the original)
+//
+// update_player_anim for player 2's stand-in player record while an enemy holds
+// her (Coop.cpp swaps the stand-in into g_playerEntity first). The state
+// machine, hit volumes and room collision only: the player-only extras are left
+// out - player_update_detached_joint reads joint 15, the player model's extra
+// weapon joint, which her 15-joint NPC skeleton does not have; the mirror pass,
+// the ground shadow (her NPC update draws hers) and the camera-zone bits are
+// player 1's.
+// ============================================================================
+void coop_update_shadow_anim(void)
+{
+    ENTITY = (Entity*)&g_playerEntity;
+
+    if ((g_message_flags & 1) != 0) {
+        if (g_playerEntity.animationId < 10) {
+            ((void(*)(void))g_playerStateFunctions[g_playerEntity.animationId])();
+        }
+        EntityUpdateLookAtAngles();
+    }
+
+    SetEntityScaHitData((Entity*)&g_playerEntity);
+
+    if ((g_playerEntity.animationId != 5) && (g_playerEntity.action_behavior != 0x11)) {
+        check_room_collision((VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t,
+                             *(short*)(g_playerEntity.Sca_info + 10));
+    }
+
+    g_playerEntity.scaMatrixData.field_00 = 0;
+}
+
+// ============================================================================
 // FUN_0041b3c0 (0x0041b3c0)
 // Is `pos` inside the axis-aligned box at `zone`? The zone is four uint16s:
 // x, z, width, depth. The original compares UNSIGNED, so a coordinate left of or

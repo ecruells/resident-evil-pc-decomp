@@ -22,6 +22,11 @@ WORD  g_CoopDpadPressed = 0;
 Entity* g_coopPartner = nullptr;
 int     g_coopPartnerPlaced = 0;
 
+// Bumped on every spawn: she lands in the same g_EnemiesList slot room after
+// room, so the pointer alone cannot tell a stand-in built for the last room's
+// skeleton (in that room's, since reused, load buffer) from a current one.
+static int s_spawnSerial = 0;
+
 // Mirrors parts 2-6 of PlayerPad_Update (0x0044e000) for the second pad.
 // The edge history always follows the real pad; while the game runs as her
 // (her menu or action, g_coopMenuOwner == 2) her pad drives player 1's words
@@ -85,7 +90,7 @@ void Coop_SpawnPartner(void)
 	g_coopPartner = nullptr;
 	g_coopPartnerPlaced = 0;
 
-	if (!g_coopEnabled) {
+	if (!g_coopEnabled || g_coopP2Down) {
 		return;
 	}
 	// Only while player 1 is Chris or Jill (Rebecca is playable herself for a
@@ -159,6 +164,7 @@ void Coop_SpawnPartner(void)
 	g_enemy_count++;
 
 	g_coopPartner = e;
+	s_spawnSerial++;
 	dbg_printf("[COOP] partner id 0x%02X spawned in enemy slot %d (stage %d room 0x%02X)\n",
 	           partnerId, slot, (int)g_stageId, (int)g_roomId);
 }
@@ -167,7 +173,7 @@ void Coop_SpawnPartner(void)
 
 int Coop_PartnerNearDoor(const unsigned short* zone)
 {
-	if (g_coopPartner == nullptr) {
+	if (g_coopPartner == nullptr || g_coopP2Down) {
 		return 1;
 	}
 	return Coop_PointNearZone(g_coopPartner->scaMatrixData.localMatrix.t[0],
@@ -228,6 +234,7 @@ static struct {
 // nothing equipped. Her slots get the Beretta and 15 rounds in SetInitialItems.
 void Coop_ResetPartnerState(void)
 {
+	g_coopP2Down = 0;
 	g_coopP2.valid = 1;
 	g_coopP2.health = 88;
 	g_coopP2.maxHealth = 88;
@@ -240,7 +247,8 @@ int Coop_P2WantsMenu(void)
 {
 	// Rebecca only for now: Barry would get Jill's 8-slot menu over the 6-slot
 	// array.
-	if (!g_coopEnabled || g_coopPartner == nullptr || g_coopPartner->id != NPC_REBECCA) {
+	if (!g_coopEnabled || g_coopPartner == nullptr || g_coopPartner->id != NPC_REBECCA ||
+	    g_coopP2Down) {
 		return 0;
 	}
 	// 0x800 in the raw word is the inventory button, as game_loop tests for P1.
@@ -563,4 +571,241 @@ unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weapon
 	g_playerEntity.id = id;
 	dbg_printf("[COOP] player 2 shot: result %d\n", hit);
 	return hit;
+}
+
+// ============================================================================
+// Enemies vs the partner (zombies first)
+// ============================================================================
+PlayerEntity g_coopP2Shadow;
+int          g_coopP2Down = 0;
+
+static unsigned char s_enemyTargetsP2[30];   // per enemy slot: 1 = after player 2
+static Entity* s_shadowOwner = nullptr;   // partner entity the stand-in was built for
+static int     s_shadowSerial = -1;       // ...and the spawn it was built for
+static int     s_shadowSwapped = 0;
+static DWORD   s_swapPadHeld;
+static WORD    s_swapDpadHeld, s_swapDpadPressed;
+
+static int enemy_is_zombie(const Entity* e)
+{
+	return e->id == ENEMY_ZOMBIE || e->id == ENEMY_ZOMBIE_NAKED || e->id == ENEMY_ZOMBIE_VARIANT;
+}
+
+// Fresh stand-in for this room's partner: player 1's record (weapon and room
+// animation pointers, flags), then her own body.
+static void shadow_build(Entity* partner)
+{
+	memcpy(&g_coopP2Shadow, &g_playerEntity, sizeof(PlayerEntity));
+	PlayerEntity* sh = &g_coopP2Shadow;
+	sh->id = 3;
+	sh->Sca_info = partner->Sca_info;
+	sh->pSca_hit_data = partner->pSca_hit_data;
+	sh->jointsStructs = partner->jointsStructs;
+	sh->jointCount = partner->jointCount;
+	sh->animHeader = partner->animHeader;
+	sh->animBase = partner->animBase;
+	sh->animationId = 1;          // player_state_01_control: free
+	sh->animFrameId = 0;
+	sh->action_behavior = 0;
+	sh->action_state = 0;
+	sh->isBeingAttackedFlag = 0;
+	sh->attackTimer = 0;
+	sh->lookAtFlags = 0;
+	s_shadowOwner = partner;
+	s_shadowSerial = s_spawnSerial;
+	for (int i = 0; i < 30; i++) {
+		s_enemyTargetsP2[i] = 0;
+	}
+}
+
+// Her free body -> the stand-in.
+static void shadow_from_partner(Entity* partner)
+{
+	PlayerEntity* sh = &g_coopP2Shadow;
+	memcpy(&sh->scaMatrixData, &partner->scaMatrixData, sizeof(sh->scaMatrixData));
+	sh->position = partner->position;
+	sh->directionAngle = partner->angle;
+	sh->health = g_coopP2.health;
+	sh->maxHealth = g_coopP2.maxHealth;
+	sh->healthStatusFlags = g_coopP2.healthStatusFlags;
+	sh->flags = (unsigned char)((g_playerEntity.flags & ~0xE0) | 0x40);
+	// The room's enemy reaction set (grabs) follows the room.
+	sh->emdScratchPtr1 = g_playerEntity.emdScratchPtr1;
+	sh->emdScratchPtr2 = g_playerEntity.emdScratchPtr2;
+	sh->jointMoveData2 = g_playerEntity.jointMoveData2;
+	sh->jointMoveData3 = g_playerEntity.jointMoveData3;
+}
+
+// The stand-in -> her body, after an enemy or the reaction code moved it.
+static void shadow_to_partner(Entity* partner)
+{
+	partner->scaMatrixData.localMatrix.t[0] = g_coopP2Shadow.scaMatrixData.localMatrix.t[0];
+	partner->scaMatrixData.localMatrix.t[1] = g_coopP2Shadow.scaMatrixData.localMatrix.t[1];
+	partner->scaMatrixData.localMatrix.t[2] = g_coopP2Shadow.scaMatrixData.localMatrix.t[2];
+	partner->position.x = (short)partner->scaMatrixData.localMatrix.t[0];
+	partner->position.z = (short)partner->scaMatrixData.localMatrix.t[2];
+	partner->angle = g_coopP2Shadow.directionAngle;
+	g_coopP2.health = g_coopP2Shadow.health;
+	g_coopP2.healthStatusFlags = g_coopP2Shadow.healthStatusFlags;
+}
+
+// Swap the stand-in and her pad words into player 1's place (and back).
+static void shadow_swap(void)
+{
+	PlayerEntity tmp;
+	memcpy(&tmp, &g_playerEntity, sizeof(PlayerEntity));
+	memcpy(&g_playerEntity, &g_coopP2Shadow, sizeof(PlayerEntity));
+	memcpy(&g_coopP2Shadow, &tmp, sizeof(PlayerEntity));
+
+	if (!s_shadowSwapped) {
+		s_swapPadHeld = g_PlayerPadHeld;
+		s_swapDpadHeld = g_PlayerDpadHeld;
+		s_swapDpadPressed = g_PlayerDpadPressed;
+		g_PlayerPadHeld = g_CoopPadPressed;     // edge-detected raw word, as P1's
+		g_PlayerDpadHeld = g_CoopDpadHeld;
+		g_PlayerDpadPressed = g_CoopDpadPressed;
+		s_shadowSwapped = 1;
+	} else {
+		g_PlayerPadHeld = s_swapPadHeld;
+		g_PlayerDpadHeld = s_swapDpadHeld;
+		g_PlayerDpadPressed = s_swapDpadPressed;
+		s_shadowSwapped = 0;
+	}
+}
+
+static int partner_targetable(void)
+{
+	return g_coopEnabled && g_coopPartner != nullptr && !g_coopP2Down &&
+	       g_coopPartnerPlaced && s_shadowOwner == g_coopPartner &&
+	       s_shadowSerial == s_spawnSerial;
+}
+
+static int shadow_dead(void)
+{
+	return g_coopP2Shadow.health < 0 || g_coopP2Shadow.action_behavior == 200;
+}
+
+static void partner_dies(void)
+{
+	if (g_coopP2Down) {
+		return;
+	}
+	g_coopP2Down = 1;
+	g_coopP2.health = -1;   // stays "dead" to the zombie feeding on her
+	dbg_printf("[COOP] player 2 is down until the next save\n");
+}
+
+void Coop_PreEnemyUpdate(void)
+{
+	if (!g_coopEnabled || g_coopPartner == nullptr || !g_coopPartnerPlaced) {
+		return;
+	}
+	if (s_shadowOwner != g_coopPartner || s_shadowSerial != s_spawnSerial) {
+		shadow_build(g_coopPartner);
+		shadow_from_partner(g_coopPartner);
+	} else if (!Coop_PartnerInReaction()) {
+		shadow_from_partner(g_coopPartner);
+	}
+}
+
+// Nearest living player, sticky while an attack holds one of them.
+
+int Coop_EnemyUpdate(void* updateFunc)
+{
+	if (!enemy_is_zombie(ENTITY)) {
+		return 0;
+	}
+	int slot = (int)(ENTITY - g_EnemiesList);
+	if (slot < 0 || slot >= 30) {
+		return 0;
+	}
+
+	// A zombie that killed her stays on her body (ignore_player_flag: the
+	// feeding behaviour zombie_attack sets on the kill) - its blood and wound
+	// tint belong on her, not on player 1.
+	if (g_coopP2Down && s_enemyTargetsP2[slot] && ENTITY->ignore_player_flag != 0 &&
+	    g_coopPartner != nullptr && s_shadowOwner == g_coopPartner &&
+	    s_shadowSerial == s_spawnSerial) {
+		Entity* self = ENTITY;
+		shadow_swap();
+		((void(*)(void))updateFunc)();
+		shadow_swap();
+		ENTITY = self;
+		return 1;
+	}
+	if (!partner_targetable()) {
+		s_enemyTargetsP2[slot] = 0;
+		return 0;
+	}
+
+	unsigned char toP2 = s_enemyTargetsP2[slot];
+	bool locked = toP2 ? g_coopP2Shadow.isBeingAttackedFlag != 0
+	                   : g_playerEntity.isBeingAttackedFlag != 0;
+	if (!locked) {
+		int ex = ENTITY->scaMatrixData.localMatrix.t[0];
+		int ez = ENTITY->scaMatrixData.localMatrix.t[2];
+		double d1x = g_playerEntity.scaMatrixData.localMatrix.t[0] - ex;
+		double d1z = g_playerEntity.scaMatrixData.localMatrix.t[2] - ez;
+		double d2x = g_coopP2Shadow.scaMatrixData.localMatrix.t[0] - ex;
+		double d2z = g_coopP2Shadow.scaMatrixData.localMatrix.t[2] - ez;
+		toP2 = (d2x * d2x + d2z * d2z) < (d1x * d1x + d1z * d1z) ? 1 : 0;
+		if (toP2 != s_enemyTargetsP2[slot]) {
+			dbg_printf("[COOP] zombie in slot %d now targets player %d\n", slot, toP2 + 1);
+		}
+		s_enemyTargetsP2[slot] = toP2;
+	}
+	if (!toP2) {
+		return 0;
+	}
+
+	Entity* self = ENTITY;
+	shadow_swap();
+	((void(*)(void))updateFunc)();
+	shadow_swap();
+	ENTITY = self;
+
+	shadow_to_partner(g_coopPartner);
+	if (shadow_dead()) {
+		partner_dies();
+	}
+	return 1;
+}
+
+int Coop_PartnerInReaction(void)
+{
+	if (s_shadowOwner == nullptr || s_shadowOwner != g_coopPartner ||
+	    s_shadowSerial != s_spawnSerial) {
+		return 0;
+	}
+	// Anything but free control (state 1, behaviour < 200): an enemy has her.
+	return g_coopP2Shadow.animationId != 1 || g_coopP2Shadow.isBeingAttackedFlag != 0;
+}
+
+void Coop_RunPartnerReaction(Entity* partner)
+{
+	static int s_logFrames = 0;
+	if (s_logFrames++ % 30 == 0) {
+		dbg_printf("[COOP] player 2 held: state %d frame-fn %d behaviour %d action %d anim %d health %d\n",
+		           g_coopP2Shadow.animationId, g_coopP2Shadow.animFrameId,
+		           g_coopP2Shadow.action_behavior, g_coopP2Shadow.action_state,
+		           g_coopP2Shadow.attackAnim, g_coopP2Shadow.health);
+	}
+	shadow_swap();
+	coop_update_shadow_anim();   // sets ENTITY = &g_playerEntity (the stand-in)
+	shadow_swap();
+	ENTITY = partner;
+
+	shadow_to_partner(partner);
+	if (shadow_dead()) {
+		partner_dies();
+	}
+}
+
+void Coop_OnSave(void)
+{
+	if (g_coopP2Down) {
+		g_coopP2Down = 0;
+		g_coopP2.health = g_coopP2.maxHealth;
+		dbg_printf("[COOP] the save brings player 2 back\n");
+	}
 }

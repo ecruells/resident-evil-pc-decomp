@@ -1768,6 +1768,9 @@ void update_entities(void)
         return;
     }
 
+    // Co-op (port addition): refresh player 2's stand-in player record.
+    Coop_PreEnemyUpdate();
+
     do {
         // 0x0048f10f: Safety guard - max 30 entities (array size)
         if (em_counter > 29) {
@@ -1784,7 +1787,11 @@ void update_entities(void)
                 updateFunc = NULL;
             }
             if (updateFunc != NULL) {
-                ((void(*)())updateFunc)();
+                // Co-op (port addition): an enemy after player 2 runs against
+                // her stand-in.
+                if (!Coop_EnemyUpdate(updateFunc)) {
+                    ((void(*)())updateFunc)();
+                }
             }
 
             // 0x0048f131-0x0048f197: the mirror pass. Bit 0 of g_main_state_flags

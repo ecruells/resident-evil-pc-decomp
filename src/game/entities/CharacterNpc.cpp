@@ -2582,6 +2582,29 @@ void npc_coop_partner_control(void)
         return;
     }
 
+    // Down: the fall (59), then lying still (58), until a save brings her back.
+    if (g_coopP2Down) {
+        if (ENTITY->animationId != 59 && ENTITY->animationId != 58) {
+            coop_partner_set_anim(59);
+        }
+        const unsigned short* slots = (const unsigned short*)ENTITY->animBase;
+        if (ENTITY->animationId == 59 &&
+            ENTITY->animation_frame_id >= slots[59 * 2] - 1) {
+            coop_partner_set_anim(58);
+        }
+        Joint_move(0, ENTITY->animHeader, ENTITY->animBase,
+                   (short)(0x1000 / (ENTITY->blend_counter + 1)));
+        ENTITY->lookAtFlags = 0;
+        return;
+    }
+
+    // Held by an enemy: the player's own reaction code drives her.
+    if (g_coopPartnerPlaced && Coop_PartnerInReaction()) {
+        Coop_RunPartnerReaction(ENTITY);
+        ENTITY->lookAtFlags = 0;
+        return;
+    }
+
     if (!g_coopPartnerPlaced) {
         // Stand beside player 1 on the first frame (the player's position is not
         // final yet when the partner is spawned during room_set): the first spot

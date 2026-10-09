@@ -108,6 +108,29 @@ unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weapon
 // SoundSystem.cpp - her own copy of a weapon's sound set, and playing from it.
 void Coop_LoadP2WeaponSounds(int weaponId);
 void Coop_PlayP2WeaponSnd(int soundId, int pos);
+// ---- Enemies vs the partner (zombies first) ----
+// Every enemy reads "the player" from g_playerEntity, so she gets a stand-in
+// player record of her own (g_coopP2Shadow: her position, facing, health,
+// collision volumes and skeleton). An enemy that targets her runs its update
+// with the stand-in swapped into g_playerEntity (and her pad into the player's
+// pad words); while an enemy holds her (grab, knock-back) the player's own
+// reaction code runs on the stand-in, animating her skeleton.
+extern PlayerEntity g_coopP2Shadow;
+extern int          g_coopP2Down;   // she died: Chris goes on alone until a save
+
+// update_entities, before the enemy loop: refresh the stand-in from her.
+void Coop_PreEnemyUpdate(void);
+// update_entities, per enemy: runs it against her when she is its target.
+// Returns 1 when it ran the update, 0 to let the caller run it as usual.
+int  Coop_EnemyUpdate(void* updateFunc);
+// Partner controller: is an enemy holding her (the player code drives her)?
+int  Coop_PartnerInReaction(void);
+// PlayerAnimations.cpp - update_player_anim without the player-only extras.
+void coop_update_shadow_anim(void);
+// Partner controller: one frame of the player's reaction code on her stand-in.
+void Coop_RunPartnerReaction(Entity* partner);
+// Save screen: a save brings her back.
+void Coop_OnSave(void);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.

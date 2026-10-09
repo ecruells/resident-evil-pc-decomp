@@ -1097,6 +1097,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
         // ================================================================
         case STATE_PERFORM_SAVE:
         {
+            Coop_OnSave();   // co-op: a save brings player 2 back
             EnsureDirectoryExists(GetSaveRoot());
             // (The original seeds the display string with a copy of the save
             // directory and truncates at a backslash — dead, the reveal
