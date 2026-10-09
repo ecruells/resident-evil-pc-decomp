@@ -16,6 +16,7 @@
 #include "../system/AssetPath.h"
 #include "../DebugPrint.h"
 #include "FileLoader.h"
+#include "Coop.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "../marni/MarniBits.h"
@@ -333,6 +334,9 @@ void main_menu(void)
     // use sites further down.
     unsigned char charBits;
     int hasFlag;
+
+    // Co-op (port addition): player 2's inventory request - run the menu as her.
+    Coop_BeginP2Menu();
 
     // 0x00463768-0x0046377d: Check if opening for message display (bit 8)
     if ((g_main_state_flags & MSF_PICKUP_SCREEN) != 0) {
@@ -697,6 +701,9 @@ static void menu_exit_cleanup(void)
 // (0x00463e10) - Restore game state after menu close
 static void menu_restore_game_state(void)
 {
+    // Co-op (port addition): hand the game back to player 1.
+    Coop_EndP2Menu();
+
     setMenuScreenOffset(320, 240, 0, 0, 0);
     CenterScreenOrigin();
     menu_update_fading_rect();

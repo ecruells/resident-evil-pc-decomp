@@ -37,6 +37,36 @@ void Coop_SpawnPartner(void);
 // depth, as cmd_door_set stores it) grown by a margin on every side.
 int Coop_PartnerNearDoor(const unsigned short* zone);
 
+// ---- Partner inventory -------------------------------------------------------
+// Player 2 has her own item slots (g_RebeccaItemSlots, which the save already
+// carries) and opens the ordinary item menu from her pad. While her menu is open
+// the game runs "as her": the player entity's id, health and equipped item are
+// swapped for hers, the item menu reads her slots and her pad drives it, and
+// everything is swapped back when the menu closes.
+extern int g_coopMenuOwner;          // 2 while player 2's item menu is open, else 0
+
+// Player 2's own status. Not in the save yet: a continued game resets it.
+struct CoopPartnerState {
+	int            valid;
+	short          health;
+	unsigned char  maxHealth;
+	unsigned char  healthStatusFlags;
+	unsigned char  equippedItemId;   // 1-based slot index, like g_EquippedItemId
+	unsigned char  equippedWeaponId; // item id, like PlayerEntity::equippedWeaponId
+};
+extern CoopPartnerState g_coopP2;
+
+// New game: Rebecca's starting status (her slots are set by SetInitialItems).
+void Coop_ResetPartnerState(void);
+// game_loop: player 2 pressed her inventory button this frame.
+int  Coop_P2WantsMenu(void);
+// game_loop: player 2 asked for the item menu (taken up when it opens).
+void Coop_RequestP2Menu(void);
+// main_menu entry: switch to player 2 if she asked for this menu.
+void Coop_BeginP2Menu(void);
+// menu_restore_game_state: switch back to player 1 as the menu closes.
+void Coop_EndP2Menu(void);
+
 // CharacterNpc.cpp - runs in place of the NPC dispatch for g_coopPartner.
 void npc_coop_partner_control(void);
 

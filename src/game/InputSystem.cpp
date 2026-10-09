@@ -154,6 +154,12 @@ DWORD ReadPadBoth(void)
 			g_CoopPadBtnWord = 0;
 			return 0;
 		}
+		if (g_coopMenuOwner == 2) {
+			// Player 2's item menu is open: her pad drives it, the keyboard waits.
+			DWORD p2 = g_CoopPadBtnWord;
+			g_CoopPadBtnWord = 0;
+			return p2;
+		}
 		return g_PadBtnWord;
 	}
 	if ((1 < g_NumControllers) && (g_pMasterInputState.joysticks[0].enabled != 0)) {

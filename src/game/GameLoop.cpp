@@ -14,6 +14,7 @@
 // Called by: game_start (0x00480710)
 // ============================================================================
 #include "../Globals.h"
+#include "Coop.h"
 #include "../marni/MarniInput.h"
 #include <cstdio>
 #include <cstdlib>
@@ -278,7 +279,11 @@ LAB_00480d7c:
                     else if (((g_PlayerPadHeld >> 8) & 8) == 0 &&
                              ((g_main_state_flags & MSF_MENU_PENDING) == 0))
                     {
-                        goto LAB_00480e89;
+                        // Co-op (port addition): player 2's inventory button.
+                        if (!Coop_P2WantsMenu()) {
+                            goto LAB_00480e89;
+                        }
+                        Coop_RequestP2Menu();
                     }
 
                     // Menu requested

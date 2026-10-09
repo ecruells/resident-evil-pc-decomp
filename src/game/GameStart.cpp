@@ -442,6 +442,7 @@ void InitializeGame(void)
 
         if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
             InitPlayerData();
+            Coop_ResetPartnerState();
             Coop_ApplyStartRoom();
             /*
             * chris: 140hp

@@ -176,3 +176,116 @@ void Coop_ApplyStartRoom(void)
 	Flg_on((int)g_ScenarioFlags2, 0xA7);
 	dbg_printf("[COOP] new game starts in the dining room, opening skipped\n");
 }
+
+// ============================================================================
+// Partner inventory
+// ============================================================================
+int g_coopMenuOwner = 0;
+CoopPartnerState g_coopP2 = { 0, 0, 0, 0, 0, 0 };
+
+// Player 1's state while player 2's menu is open.
+static struct {
+	unsigned char id;
+	short         health;
+	unsigned char maxHealth;
+	unsigned char healthStatusFlags;
+	unsigned char equippedItemId;
+	unsigned char equippedWeaponId;
+	void*         itemSlots;
+} s_p1;
+
+// Rebecca's numbers from room_set's character switch (RoomInit.cpp): 88 health,
+// nothing equipped. Her slots get the Beretta and 15 rounds in SetInitialItems.
+void Coop_ResetPartnerState(void)
+{
+	g_coopP2.valid = 1;
+	g_coopP2.health = 88;
+	g_coopP2.maxHealth = 88;
+	g_coopP2.healthStatusFlags = 0;
+	g_coopP2.equippedItemId = 0;
+	g_coopP2.equippedWeaponId = 0;
+}
+
+int Coop_P2WantsMenu(void)
+{
+	// Rebecca only for now: Barry would get Jill's 8-slot menu over the 6-slot
+	// array.
+	if (!g_coopEnabled || g_coopPartner == nullptr || g_coopPartner->id != NPC_REBECCA) {
+		return 0;
+	}
+	// 0x800 in the raw word is the inventory button, as game_loop tests for P1.
+	return ((g_CoopPadPressed >> 8) & 8) != 0;
+}
+
+static int s_p2MenuRequested = 0;
+
+void Coop_RequestP2Menu(void)
+{
+	s_p2MenuRequested = 1;
+}
+
+void Coop_BeginP2Menu(void)
+{
+	if (!s_p2MenuRequested) {
+		return;
+	}
+	s_p2MenuRequested = 0;
+	if (!g_coopP2.valid) {
+		Coop_ResetPartnerState();
+	}
+
+	s_p1.id = g_playerEntity.id;
+	s_p1.health = g_playerEntity.health;
+	s_p1.maxHealth = g_playerEntity.maxHealth;
+	s_p1.healthStatusFlags = g_playerEntity.healthStatusFlags;
+	s_p1.equippedItemId = g_EquippedItemId;
+	s_p1.equippedWeaponId = g_playerEntity.equippedWeaponId;
+	s_p1.itemSlots = g_ItemSlotsPointer;
+
+	g_playerEntity.id = 3;   // Rebecca: her portrait, 6 slots, her map rules
+	g_playerEntity.health = g_coopP2.health;
+	g_playerEntity.maxHealth = g_coopP2.maxHealth;
+	g_playerEntity.healthStatusFlags = g_coopP2.healthStatusFlags;
+	g_EquippedItemId = g_coopP2.equippedItemId;
+	g_playerEntity.equippedWeaponId = g_coopP2.equippedWeaponId;
+	g_ItemSlotsPointer = g_RebeccaItemSlots;
+	LoadHeldItemsImages();   // her item icons, count and slot indices
+
+	g_coopMenuOwner = 2;
+	dbg_printf("[COOP] player 2 opened her item menu\n");
+}
+
+void Coop_EndP2Menu(void)
+{
+	if (g_coopMenuOwner != 2) {
+		return;
+	}
+	g_coopMenuOwner = 0;
+
+	unsigned char newWeapon = g_playerEntity.equippedWeaponId;
+	g_coopP2.health = g_playerEntity.health;
+	g_coopP2.maxHealth = g_playerEntity.maxHealth;
+	g_coopP2.healthStatusFlags = g_playerEntity.healthStatusFlags;
+	g_coopP2.equippedItemId = g_EquippedItemId;
+
+	g_playerEntity.id = s_p1.id;
+	g_playerEntity.health = s_p1.health;
+	g_playerEntity.maxHealth = s_p1.maxHealth;
+	g_playerEntity.healthStatusFlags = s_p1.healthStatusFlags;
+	g_EquippedItemId = s_p1.equippedItemId;
+	g_playerEntity.equippedWeaponId = s_p1.equippedWeaponId;
+	g_ItemSlotsPointer = s_p1.itemSlots;
+	LoadHeldItemsImages();
+
+	// The menu loads a newly equipped weapon into the PLAYER's weapon model and
+	// sound bank. If she changed weapon, put player 1's back.
+	if (newWeapon != g_coopP2.equippedWeaponId) {
+		g_coopP2.equippedWeaponId = newWeapon;
+		LoadSoundBank(g_playerEntity.equippedWeaponId, g_TimImageBuffer__bitmap);
+		LoadEquippedWeaponAnimation(g_playerEntity.equippedWeaponId, 0xE,
+		                            (unsigned int)g_animationBuffer,
+		                            (unsigned int)g_animObjectBuffer);
+	}
+	dbg_printf("[COOP] player 2 closed her item menu (equipped item %d, weapon 0x%02X, health %d)\n",
+	           g_coopP2.equippedItemId, g_coopP2.equippedWeaponId, g_coopP2.health);
+}
