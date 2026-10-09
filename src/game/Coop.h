@@ -39,10 +39,12 @@ int Coop_PartnerNearDoor(const unsigned short* zone);
 // Is (x, z) inside the zone grown by the same margin?
 int Coop_PointNearZone(int x, int z, const unsigned short* zone);
 
-// PlayerAnimations.cpp - player 2 pressed action: if her reach probe is in a
-// door's action zone and player 1 is at that door too, take it (the player's
-// door_try_enter, so locks, keys and the transition all behave as for him).
-void coop_partner_try_door(Entity* partner);
+// PlayerAnimations.cpp - player 2 pressed action. The first action-press room
+// entry her reach probe hits runs as check_action_object would run it for
+// player 1: a door only when player 1 is at it too (door_try_enter, as player
+// 1, so the transition is his); anything else as her (Coop_BeginP2Action), so a
+// picked-up item lands in her slots.
+void coop_partner_try_action(Entity* partner);
 
 // ---- Partner inventory -------------------------------------------------------
 // Player 2 has her own item slots (g_RebeccaItemSlots, which the save already
@@ -50,7 +52,7 @@ void coop_partner_try_door(Entity* partner);
 // the game runs "as her": the player entity's id, health and equipped item are
 // swapped for hers, the item menu reads her slots and her pad drives it, and
 // everything is swapped back when the menu closes.
-extern int g_coopMenuOwner;          // 2 while player 2's item menu is open, else 0
+extern int g_coopMenuOwner;          // 2 while the game runs as player 2 (her menu / action), else 0
 
 // Player 2's own status. Not in the save yet: a continued game resets it.
 struct CoopPartnerState {
@@ -73,6 +75,11 @@ void Coop_RequestP2Menu(void);
 void Coop_BeginP2Menu(void);
 // menu_restore_game_state: switch back to player 1 as the menu closes.
 void Coop_EndP2Menu(void);
+// Player 2 pressed action at a room object (item, item box, typewriter...):
+// run the game as her until the message / prompt / menu it starts is over.
+void Coop_BeginP2Action(void);
+// game_loop, once per gameplay frame: ends her action when the game is free.
+void Coop_FrameUpdate(void);
 
 // CharacterNpc.cpp - runs in place of the NPC dispatch for g_coopPartner.
 void npc_coop_partner_control(void);

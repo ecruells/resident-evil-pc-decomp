@@ -19,21 +19,23 @@ Entity* g_coopPartner = nullptr;
 int     g_coopPartnerPlaced = 0;
 
 // Mirrors parts 2-6 of PlayerPad_Update (0x0044e000) for the second pad.
+// The edge history always follows the real pad; while the game runs as her
+// (her menu or action, g_coopMenuOwner == 2) her pad drives player 1's words
+// instead, so the published words are blanked - without breaking the history,
+// or a button still held when that ends would count as a fresh press.
 void CoopPad_Update(void)
 {
+	static DWORD s_rawHeld = 0;
+	static WORD  s_dpadHeld = 0;
+
 	if (!g_coopEnabled) {
 		return;
 	}
 
 	const WORD* pRemapTable = g_padRemapTable[g_controllerConfig & 3];
-	DWORD prevRaw = g_CoopRawPadHeld;
 
 	// Attract demo plays back player 1 only; player 2 stays idle.
 	DWORD newRaw = ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) ? g_CoopPadBtnWord : 0;
-
-	g_CoopDpadHeldPrev = g_CoopDpadHeld;
-	g_CoopRawPadHeld = newRaw;
-	g_CoopPadPressed = ~prevRaw & newRaw;
 
 	WORD held = 0;
 	WORD bit = 0x8000;
@@ -50,11 +52,23 @@ void CoopPad_Update(void)
 	if ((held & 2) != 0) {
 		held &= 0xFFF7;
 	}
-	g_CoopDpadHeld = held;
-	g_CoopDpadPressed = ~g_CoopDpadHeldPrev & held;
 
-	if (g_CoopDpadHeld != g_CoopDpadHeldPrev) {
-		dbg_printf("[COOP] P2 dpad held 0x%04X (raw 0x%04X)\n", g_CoopDpadHeld, g_CoopRawPadHeld);
+	DWORD rawPressed = ~s_rawHeld & newRaw;
+	WORD  dpadPressed = (WORD)(~s_dpadHeld & held);
+	s_rawHeld = newRaw;
+	s_dpadHeld = held;
+
+	g_CoopDpadHeldPrev = g_CoopDpadHeld;
+	if (g_coopMenuOwner == 2) {
+		g_CoopRawPadHeld = 0;
+		g_CoopPadPressed = 0;
+		g_CoopDpadHeld = 0;
+		g_CoopDpadPressed = 0;
+	} else {
+		g_CoopRawPadHeld = newRaw;
+		g_CoopPadPressed = rawPressed;
+		g_CoopDpadHeld = held;
+		g_CoopDpadPressed = dpadPressed;
 	}
 }
 
@@ -228,12 +242,14 @@ void Coop_RequestP2Menu(void)
 	s_p2MenuRequested = 1;
 }
 
-void Coop_BeginP2Menu(void)
+// What player 2 is doing while the game runs as her (g_coopMenuOwner == 2).
+enum { P2_SESSION_NONE, P2_SESSION_MENU, P2_SESSION_ACTION };
+static int s_p2Session = P2_SESSION_NONE;
+static int s_p2ActionFrames = 0;     // frames since her action started
+static int s_p2ActionBlocked = 0;    // a message / menu has taken over since
+
+static void p2_swap_in(void)
 {
-	if (!s_p2MenuRequested) {
-		return;
-	}
-	s_p2MenuRequested = 0;
 	if (!g_coopP2.valid) {
 		Coop_ResetPartnerState();
 	}
@@ -256,14 +272,10 @@ void Coop_BeginP2Menu(void)
 	LoadHeldItemsImages();   // her item icons, count and slot indices
 
 	g_coopMenuOwner = 2;
-	dbg_printf("[COOP] player 2 opened her item menu\n");
 }
 
-void Coop_EndP2Menu(void)
+static void p2_swap_out(void)
 {
-	if (g_coopMenuOwner != 2) {
-		return;
-	}
 	g_coopMenuOwner = 0;
 
 	unsigned char newWeapon = g_playerEntity.equippedWeaponId;
@@ -290,6 +302,72 @@ void Coop_EndP2Menu(void)
 		                            (unsigned int)g_animationBuffer,
 		                            (unsigned int)g_animObjectBuffer);
 	}
-	dbg_printf("[COOP] player 2 closed her item menu (equipped item %d, weapon 0x%02X, health %d)\n",
+	dbg_printf("[COOP] back to player 1 (P2: equipped item %d, weapon 0x%02X, health %d)\n",
 	           g_coopP2.equippedItemId, g_coopP2.equippedWeaponId, g_coopP2.health);
+}
+
+void Coop_BeginP2Menu(void)
+{
+	if (!s_p2MenuRequested) {
+		return;
+	}
+	s_p2MenuRequested = 0;
+	if (s_p2Session != P2_SESSION_NONE) {
+		return;
+	}
+	p2_swap_in();
+	s_p2Session = P2_SESSION_MENU;
+	dbg_printf("[COOP] player 2 opened her item menu\n");
+}
+
+void Coop_EndP2Menu(void)
+{
+	// A menu that opens during one of her actions (the item box, the pick-up
+	// screen) closes back into that action; Coop_FrameUpdate ends it.
+	if (s_p2Session != P2_SESSION_MENU) {
+		return;
+	}
+	s_p2Session = P2_SESSION_NONE;
+	p2_swap_out();
+}
+
+void Coop_BeginP2Action(void)
+{
+	if (s_p2Session != P2_SESSION_NONE) {
+		return;
+	}
+	p2_swap_in();
+	s_p2Session = P2_SESSION_ACTION;
+	s_p2ActionFrames = 0;
+	s_p2ActionBlocked = 0;
+}
+
+// Free = no message on screen (set_message_display raises g_menu_choice_id
+// bit 0x80 for as long as one is up, even when it does not pause the game),
+// player 1's input enabled (bit 0x100: no prompt or scripted event holds the
+// game), and no menu pending or open.
+static int gameplay_is_free(void)
+{
+	return (g_menu_choice_id & 0x80) == 0 &&
+	       (g_message_flags & 0x100) != 0 &&
+	       (g_main_state_flags & (MSF_MENU_ACTIVE | MSF_MENU_PENDING)) == 0 &&
+	       g_openMenuFlag == 0;
+}
+
+void Coop_FrameUpdate(void)
+{
+	if (s_p2Session != P2_SESSION_ACTION) {
+		return;
+	}
+	s_p2ActionFrames++;
+	if (!gameplay_is_free()) {
+		s_p2ActionBlocked = 1;
+		return;
+	}
+	// Done once whatever her action started (message, prompt, item box) has
+	// finished - or straight away if it never started anything.
+	if (s_p2ActionBlocked || s_p2ActionFrames > 4) {
+		s_p2Session = P2_SESSION_NONE;
+		p2_swap_out();
+	}
 }

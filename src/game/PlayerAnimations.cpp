@@ -7281,11 +7281,9 @@ int stairs_height_update(unsigned char* entry)
 // disables an entry. `mask` gates which entries participate this frame.
 // ============================================================================
 
-// Co-op (port addition): player 2's door. Same reach probe and zone tests as
-// check_action_object above - the action-press entries (flag bits 0x01 and
-// 0x80) - restricted to door entries (room_check_actions slot 1), and only when
-// player 1 stands at the same door.
-void coop_partner_try_door(Entity* partner)
+// Co-op (port addition): player 2's action press. Same reach probe and entry
+// test as check_action_object above (flag bits 0x01 and 0x80, first hit wins).
+void coop_partner_try_action(Entity* partner)
 {
     unsigned char* tail = (unsigned char*)g_RoomActionTail;
     if (tail == NULL || tail < g_RoomActionTable) {
@@ -7303,23 +7301,42 @@ void coop_partner_try_door(Entity* partner)
     probe.y = 0;
     probe.z = fwd.z + partner->scaMatrixData.localMatrix.t[2];
 
-    for (unsigned char* entry = g_RoomActionTable; entry <= tail; entry += 12) {
+    char index = 0;
+    for (unsigned char* entry = g_RoomActionTable; entry <= tail; entry += 12, index++) {
         unsigned char flags = entry[1];
-        if (entry[0] != 1 || (flags & 1) == 0 || (flags & 0x80) == 0) {
+        if (entry[0] == 0 || (flags & 1) == 0 || (flags & 0x80) == 0) {
             continue;
         }
         unsigned short* zone = *(unsigned short**)(entry + 8);
-        VECTOR* at = ((flags & 0x40) == 0) ? &probe
-                                            : (VECTOR*)partner->scaMatrixData.localMatrix.t;
+        bool atProbe = (flags & 0x40) == 0;
+        VECTOR* at = atProbe ? &probe : (VECTOR*)partner->scaMatrixData.localMatrix.t;
         if (is_point_in_action_zone(at, zone) == 0) {
             continue;
         }
-        if (Coop_PointNearZone(g_playerEntity.scaMatrixData.localMatrix.t[0],
-                               g_playerEntity.scaMatrixData.localMatrix.t[2], zone) == 0) {
-            return;   // player 1 is not at this door
+        void* handler = room_check_actions[entry[0]];
+        if (handler == NULL) {
+            return;
         }
-        dbg_printf("[COOP] player 2 takes the door at (%d,%d)\n", zone[0], zone[1]);
-        door_try_enter(entry);
+
+        if (entry[0] == 1) {
+            // Door: player 1 has to be at it as well.
+            if (Coop_PointNearZone(g_playerEntity.scaMatrixData.localMatrix.t[0],
+                                   g_playerEntity.scaMatrixData.localMatrix.t[2], zone) == 0) {
+                return;
+            }
+            dbg_printf("[COOP] player 2 takes the door at (%d,%d)\n", zone[0], zone[1]);
+            door_try_enter(entry);
+            return;
+        }
+
+        dbg_printf("[COOP] player 2 action: room entry type %d at (%d,%d)\n", entry[0], zone[0], zone[1]);
+        Coop_BeginP2Action();
+        if (atProbe) {
+            g_fwdPosActionId = (unsigned char)(index + 1);
+        } else {
+            g_entPosActionId = (unsigned char)(index + 1);
+        }
+        ((int(*)(unsigned char*))handler)(entry);
         return;
     }
 }

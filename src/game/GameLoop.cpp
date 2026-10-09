@@ -107,6 +107,7 @@ LAB_00480c33:
             g_itemUseFlags[0] = 0;
             g_itemUseFlags[1] = 0;
             g_PlayerHealthCopy = g_playerEntity.health;
+            Coop_FrameUpdate();   // co-op: end player 2's action once it is over
 
             // 0x00480c56-0x00480c65: Check interactive object states
             check_desk_state();

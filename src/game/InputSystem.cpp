@@ -155,10 +155,9 @@ DWORD ReadPadBoth(void)
 			return 0;
 		}
 		if (g_coopMenuOwner == 2) {
-			// Player 2's item menu is open: her pad drives it, the keyboard waits.
-			DWORD p2 = g_CoopPadBtnWord;
-			g_CoopPadBtnWord = 0;
-			return p2;
+			// The game runs as player 2 (her menu or action): her pad drives it,
+			// the keyboard waits. CoopPad_Update blanks her own words meanwhile.
+			return g_CoopPadBtnWord;
 		}
 		return g_PadBtnWord;
 	}

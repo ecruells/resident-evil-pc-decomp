@@ -2402,9 +2402,10 @@ void npc_coop_partner_control(void)
         g_playerEntity.position.z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
     }
 
-    // Action button (0x80, as player_input_to_behavior tests it): doors.
+    // Action button (0x80, as player_input_to_behavior tests it): doors,
+    // items, the item box, the typewriter...
     if ((pressed & 0x80) != 0) {
-        coop_partner_try_door(ENTITY);
+        coop_partner_try_action(ENTITY);
     }
 
     // Keep her inside the room: the same boundary push-out the player gets in
