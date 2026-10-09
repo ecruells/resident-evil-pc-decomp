@@ -601,8 +601,12 @@ static int enemy_is_zombie_id(unsigned char id)
 	return id == ENEMY_ZOMBIE || id == ENEMY_ZOMBIE_NAKED || id == ENEMY_ZOMBIE_VARIANT;
 }
 
-// Enemies that can go after her. Each one added here is checked for player-only
-// assumptions first (the player model's 16th joint, player 1's flags...).
+// Enemies that can go after her: the regular ones. Each was checked for
+// player-only assumptions (the player model's 16th joint, player 1's flags,
+// his inventory); kill behaviours that never end on their own (the original's
+// game is over by then) get a release in Coop_EnemyUpdate as they turn up, as
+// the dog's maul did. The bosses - Black Tiger, Plant 42, Neptune, Yawn, the
+// Tyrant - stay player 1's until each has had its own pass.
 static int enemy_targets_partner(const Entity* e)
 {
 	switch (e->id) {
@@ -610,6 +614,13 @@ static int enemy_targets_partner(const Entity* e)
 	case ENEMY_ZOMBIE_NAKED:
 	case ENEMY_ZOMBIE_VARIANT:
 	case ENEMY_CERBERUS:
+	case ENEMY_WEB_SPINNER:
+	case ENEMY_CROW:
+	case ENEMY_HUNTER:
+	case ENEMY_WASP:
+	case ENEMY_CHIMERA:
+	case ENEMY_ADDER:
+	case ENEMY_MONSTER_PLANT:
 		return 1;
 	default:
 		return 0;
