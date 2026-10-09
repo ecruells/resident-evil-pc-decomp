@@ -399,6 +399,9 @@ void ConfigFile_EnsureExists(void)
         "; 1 = two-player co-op mod: keyboard is player 1, the first pad is\n"
         "; player 2. 0 = original single-player input.\n"
         "Enable=%d\n"
+        "; 1 = a new game starts in the dining room with the opening cutscene,\n"
+        "; the go-back scene and the Tea Room zombie encounter already done.\n"
+        "SkipOpening=%d\n"
         "\n"
         "[Debug]\n"
         "; Master switch for the port-added debug features: F1 debug menu, F6\n"
@@ -422,6 +425,7 @@ void ConfigFile_EnsureExists(void)
         g_bPs1FmvSubtitles ? 1 : 0,
         g_bSkipUnskippableFmv ? 1 : 0,
         g_coopEnabled ? 1 : 0,
+        g_coopSkipOpening ? 1 : 0,
 #ifdef _DEBUG
         1,
 #else
@@ -501,6 +505,7 @@ BOOL ConfigFile_Load(void)
                                      );
 
     g_coopEnabled = ReadInt(path, "Coop", "Enable", 0) ? 1 : 0;
+    g_coopSkipOpening = ReadInt(path, "Coop", "SkipOpening", 0) ? 1 : 0;
 
     // Content mode. [Game] Mode is the single switch: it sets g_GameMode AND
     // the asset overlay folder.

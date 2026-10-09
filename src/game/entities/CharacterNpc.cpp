@@ -34,6 +34,7 @@
 #include "../BioCard.h"
 #include "EntityCommon.h"
 #include "../FileLoader.h"
+#include "../Coop.h"
 #include <cstdio>
 #include "../../DebugPrint.h"
 #include "../../system/AssetPath.h"
@@ -2284,6 +2285,66 @@ static void npc_state0_init(void)
 }
 
 // ============================================================================
+// npc_coop_partner_control - co-op mod (port addition, not in the original)
+//
+// Runs in place of the NPC state dispatch for g_coopPartner once her state 0
+// init has run. Reads the player 2 pad words (Coop.cpp) with the same bit
+// meanings the player's own steering uses (PlayerAnimations.cpp
+// player_ctrl_frame0): 0x01 forward, 0x02 / 0x08 turn, 0x200 run modifier.
+// Walk and run are the NPC animations 7 / 8 and speeds 0x5D / 0xD2 of the
+// "walk to the player" behaviours (npc_walk_behavior_01 / 02).
+// ============================================================================
+static void coop_partner_set_anim(unsigned char anim)
+{
+    if (ENTITY->animationId != anim) {
+        ENTITY->animationId        = anim;
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->blend_counter      = 7;
+    }
+}
+
+void npc_coop_partner_control(void)
+{
+    unsigned int held = g_CoopDpadHeld;
+
+    if (!g_coopPartnerPlaced) {
+        // Stand beside player 1 on the first frame (the player's position is not
+        // final yet when the partner is spawned during room_set).
+        g_coopPartnerPlaced = 1;
+        ENTITY->scaMatrixData.localMatrix.t[0] = g_playerEntity.scaMatrixData.localMatrix.t[0] + 600;
+        ENTITY->scaMatrixData.localMatrix.t[2] = g_playerEntity.scaMatrixData.localMatrix.t[2];
+        ENTITY->angle = g_playerEntity.directionAngle;
+        ENTITY->position.x = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+        ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
+    }
+
+    unsigned int a = (unsigned int)(unsigned short)ENTITY->angle;
+    a = (a + (held & 2) * 0x18) & 0xfff;
+    a = (a + (unsigned int)((int)(held & 8) * -6)) & 0xfff;
+    ENTITY->angle = (short)a;
+
+    if ((held & 1) != 0) {
+        bool run = (held & 0x200) != 0;
+        coop_partner_set_anim(run ? 8 : 7);
+        entity_apply_walk_speed(run ? 0xd2 : 0x5d);
+        npc_walk_advance_xz((short)ENTITY->move_speed_current);
+    } else {
+        coop_partner_set_anim(0);
+    }
+
+    // Keep her inside the room: the same boundary push-out the player gets in
+    // update_player_anim. The rollback point it uses is entity+0x6C, so mirror
+    // the result back into position every frame.
+    check_room_collision((VECTOR*)ENTITY->scaMatrixData.localMatrix.t,
+                         *(short*)(ENTITY->Sca_info + 10));
+    ENTITY->position.x = (short)ENTITY->scaMatrixData.localMatrix.t[0];
+    ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
+
+    FUN_00472330(0);
+}
+
+// ============================================================================
 // character_npc_update (0x0046acf0)
 // The shared per-frame driver for every character entity. Bit 1 of
 // g_message_flags is the "entities may think" gate, so during a message box the
@@ -2293,7 +2354,9 @@ void character_npc_update(void)
 {
     if ((g_message_flags & 2) != 0) {
         unsigned char state = ENTITY->state;
-        if (state < 10 && g_npcDispatch[state] != nullptr) {
+        if (ENTITY == g_coopPartner && state != 0) {
+            npc_coop_partner_control();
+        } else if (state < 10 && g_npcDispatch[state] != nullptr) {
             ((void(*)(void))g_npcDispatch[state])();
         } else {
             npc_report_missing("state slot");

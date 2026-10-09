@@ -2,6 +2,7 @@
 // game_start, InitializeGame and all player/inventory initialization.
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "Coop.h"
 #include "dc/ItemTables.h"
 #include "dc/Items.h"
 #include "../marni/MarniSystem.h"
@@ -441,6 +442,7 @@ void InitializeGame(void)
 
         if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
             InitPlayerData();
+            Coop_ApplyStartRoom();
             /*
             * chris: 140hp
             * jill: 96hp

@@ -3,6 +3,7 @@
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
+#include "Coop.h"
 #include "SpriteRenderer.h"
 #include "dc/ItemDescriptions.h"
 #include "dc/EntityModels.h"    // the arrange wardrobe's two outfit flags
@@ -610,6 +611,9 @@ void room_set(void)
 
     // 0x00477ca0: Reset enemy model cache and set up entity loop
     g_LastEnemyModelId = 0xff;
+
+    // Co-op (port addition): add player 2's character before the models load.
+    Coop_SpawnPartner();
 
     // 0x00477cc3: Enemy entity loading loop
     ENTITY = g_EnemiesList;
