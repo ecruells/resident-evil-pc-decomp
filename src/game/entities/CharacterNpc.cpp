@@ -2591,18 +2591,12 @@ void npc_coop_partner_control(void)
         return;
     }
 
-    // Down: the fall (59), then lying still (58), until a save brings her back.
+    // Down, until a save brings her back: the player's own death keeps running
+    // on her stand-in - player_state_01_control's death (model animation 4, her
+    // fall) or the paired kill the enemy is playing (a dog's maul) - and holds
+    // the last pose.
     if (g_coopP2Down) {
-        if (ENTITY->animationId != 59 && ENTITY->animationId != 58) {
-            coop_partner_set_anim(59);
-        }
-        const unsigned short* slots = (const unsigned short*)ENTITY->animBase;
-        if (ENTITY->animationId == 59 &&
-            ENTITY->animation_frame_id >= slots[59 * 2] - 1) {
-            coop_partner_set_anim(58);
-        }
-        Joint_move(0, ENTITY->animHeader, ENTITY->animBase,
-                   (short)(0x1000 / (ENTITY->blend_counter + 1)));
+        Coop_RunPartnerReaction(ENTITY);
         ENTITY->lookAtFlags = 0;
         return;
     }

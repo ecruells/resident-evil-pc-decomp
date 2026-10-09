@@ -589,16 +589,37 @@ PlayerEntity g_coopP2Shadow;
 int          g_coopP2Down = 0;
 
 static unsigned char s_enemyTargetsP2[30];   // per enemy slot: 1 = after player 2
+static short         s_deathHold[30];        // frames an enemy stays on her body
 static Entity* s_shadowOwner = nullptr;   // partner entity the stand-in was built for
 static int     s_shadowSerial = -1;       // ...and the spawn it was built for
 static int     s_shadowSwapped = 0;
 static DWORD   s_swapPadHeld;
 static WORD    s_swapDpadHeld, s_swapDpadPressed;
 
-static int enemy_is_zombie(const Entity* e)
+static int enemy_is_zombie_id(unsigned char id)
 {
-	return e->id == ENEMY_ZOMBIE || e->id == ENEMY_ZOMBIE_NAKED || e->id == ENEMY_ZOMBIE_VARIANT;
+	return id == ENEMY_ZOMBIE || id == ENEMY_ZOMBIE_NAKED || id == ENEMY_ZOMBIE_VARIANT;
 }
+
+// Enemies that can go after her. Each one added here is checked for player-only
+// assumptions first (the player model's 16th joint, player 1's flags...).
+static int enemy_targets_partner(const Entity* e)
+{
+	switch (e->id) {
+	case ENEMY_ZOMBIE:
+	case ENEMY_ZOMBIE_NAKED:
+	case ENEMY_ZOMBIE_VARIANT:
+	case ENEMY_CERBERUS:
+		return 1;
+	default:
+		return 0;
+	}
+}
+
+// After she dies, the enemies that were on her finish with her stand-in for
+// this many frames (a dog's maul, a zombie's feeding) instead of turning that
+// on player 1 mid-animation.
+#define P2_DEATH_HOLD_FRAMES 90   // 3 seconds
 
 // Fresh stand-in for this room's partner: player 1's record (weapon and room
 // animation pointers, flags), then her own body.
@@ -624,6 +645,7 @@ static void shadow_build(Entity* partner)
 	s_shadowSerial = s_spawnSerial;
 	for (int i = 0; i < 30; i++) {
 		s_enemyTargetsP2[i] = 0;
+		s_deathHold[i] = 0;
 	}
 }
 
@@ -700,7 +722,10 @@ static void partner_dies(void)
 		return;
 	}
 	g_coopP2Down = 1;
-	g_coopP2.health = -1;   // stays "dead" to the zombie feeding on her
+	g_coopP2.health = -1;   // stays "dead" to the enemy finishing with her
+	for (int i = 0; i < 30; i++) {
+		s_deathHold[i] = s_enemyTargetsP2[i] ? P2_DEATH_HOLD_FRAMES : 0;
+	}
 	dbg_printf("[COOP] player 2 is down until the next save\n");
 }
 
@@ -721,7 +746,7 @@ void Coop_PreEnemyUpdate(void)
 
 int Coop_EnemyUpdate(void* updateFunc)
 {
-	if (!enemy_is_zombie(ENTITY)) {
+	if (!enemy_targets_partner(ENTITY)) {
 		return 0;
 	}
 	int slot = (int)(ENTITY - g_EnemiesList);
@@ -729,17 +754,46 @@ int Coop_EnemyUpdate(void* updateFunc)
 		return 0;
 	}
 
-	// A zombie that killed her stays on her body (ignore_player_flag: the
-	// feeding behaviour zombie_attack sets on the kill) - its blood and wound
-	// tint belong on her, not on player 1.
-	if (g_coopP2Down && s_enemyTargetsP2[slot] && ENTITY->ignore_player_flag != 0 &&
+	// An enemy that was on her when she died stays on her body: a zombie for as
+	// long as it feeds (ignore_player_flag, set by zombie_attack on the kill),
+	// any of them for P2_DEATH_HOLD_FRAMES - its blood, tint and grab snap
+	// belong on her, not on player 1.
+	bool holdOnBody = s_deathHold[slot] > 0 ||
+	                  (enemy_is_zombie_id(ENTITY->id) && ENTITY->ignore_player_flag != 0);
+	if (g_coopP2Down && s_enemyTargetsP2[slot] && holdOnBody &&
 	    g_coopPartner != nullptr && s_shadowOwner == g_coopPartner &&
 	    s_shadowSerial == s_spawnSerial) {
+		if (s_deathHold[slot] > 0) {
+			s_deathHold[slot]--;
+			if (s_deathHold[slot] == 0 && ENTITY->id == ENEMY_CERBERUS) {
+				// The maul never ends on its own - the original's game is over by
+				// then. Back to the chase (behaviour 2, Entity+0x85), and drop the
+				// "busy" bit the kill set so it can be shot again.
+				ENTITY->ignore_player_flag = 2;
+				ENTITY->action_behavior = 0;
+				ENTITY->action_state = 0;
+				ENTITY->hit_state = 0;
+				ENTITY->status_flags &= ~2;
+				s_enemyTargetsP2[slot] = 0;
+				dbg_printf("[COOP] dog in slot %d leaves player 2's body\n", slot);
+				return 0;
+			}
+		}
 		Entity* self = ENTITY;
 		shadow_swap();
 		((void(*)(void))updateFunc)();
 		shadow_swap();
 		ENTITY = self;
+
+		// Busy with her body it carries status bit 2, which makes
+		// ResolveEntityScaCollision skip it - player 1 would walk through it.
+		// Keep it solid to him: one push with the bit dropped.
+		unsigned char status = ENTITY->status_flags;
+		ENTITY->status_flags &= ~2;
+		ResolveEntityScaCollision(ENTITY, (Entity*)&g_playerEntity);
+		ENTITY->status_flags = status;
+		g_playerEntity.position.x = (short)g_playerEntity.scaMatrixData.localMatrix.t[0];
+		g_playerEntity.position.z = (short)g_playerEntity.scaMatrixData.localMatrix.t[2];
 		return 1;
 	}
 	if (!partner_targetable()) {
@@ -759,7 +813,7 @@ int Coop_EnemyUpdate(void* updateFunc)
 		double d2z = g_coopP2Shadow.scaMatrixData.localMatrix.t[2] - ez;
 		toP2 = (d2x * d2x + d2z * d2z) < (d1x * d1x + d1z * d1z) ? 1 : 0;
 		if (toP2 != s_enemyTargetsP2[slot]) {
-			dbg_printf("[COOP] zombie in slot %d now targets player %d\n", slot, toP2 + 1);
+			dbg_printf("[COOP] enemy %02X in slot %d now targets player %d\n", ENTITY->id, slot, toP2 + 1);
 		}
 		s_enemyTargetsP2[slot] = toP2;
 	}
