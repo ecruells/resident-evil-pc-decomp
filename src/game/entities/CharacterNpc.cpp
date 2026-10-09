@@ -2359,9 +2359,12 @@ void npc_coop_partner_control(void)
     // Turn rate per frame, as the player's own behaviours apply it
     // (PlayerAnimations.cpp player_ctrl_frame2): 0x60 turning on the spot
     // (behaviours 4/5), 0x28 walking (2/3), 0x30 running (the 0x200 steering).
+    // 0x28 also backing up (behaviours 6/7).
     int turn = 0x60;
     if ((held & 1) != 0) {
         turn = ((held & 0x200) != 0) ? 0x30 : 0x28;
+    } else if ((held & 4) != 0) {
+        turn = 0x28;
     }
     unsigned int a = (unsigned int)(unsigned short)ENTITY->angle;
     if ((held & 2) != 0) a += turn;
@@ -2373,6 +2376,13 @@ void npc_coop_partner_control(void)
         coop_partner_set_anim(run ? 8 : 7);
         entity_apply_walk_speed(run ? 0xd2 : 0x5d);
         npc_walk_advance_xz((short)ENTITY->move_speed_current);
+    } else if ((held & 4) != 0) {
+        // Backing up, as the player's behaviour 8: 0x40 a frame, half a turn
+        // from the facing. Her NPC model has no back-step animation, so the walk
+        // cycle plays in reverse.
+        coop_partner_set_anim(7);
+        ENTITY->move_speed_current = 0x40;
+        npc_walk_advance_xz(-0x40);
     } else if ((held & 0xA) != 0) {
         // Turning on the spot plays the walk cycle without moving, like the
         // player's behaviours 4/5 (player_ctrl_behavior_back).
@@ -2384,8 +2394,9 @@ void npc_coop_partner_control(void)
     // Same tail as npc_state9_pathfind: step the animation (the return value,
     // "animation done", goes to attacking_direction), footsteps, then the hit
     // data and the collision against the player and the room.
+    bool backing = (held & 1) == 0 && (held & 4) != 0;
     ENTITY->attacking_direction = (unsigned char)Joint_move(
-        ENTITY->dir_control_flags & 1,
+        backing ? 1 : 0,
         ENTITY->animHeader, ENTITY->animBase,
         (short)(0x1000 / (ENTITY->blend_counter + 1)));
     npc_walk_footstep_sound();
@@ -2403,8 +2414,9 @@ void npc_coop_partner_control(void)
     }
 
     // Action button (0x80, as player_input_to_behavior tests it): doors,
-    // items, the item box, the typewriter...
-    if ((pressed & 0x80) != 0) {
+    // items, the item box, the typewriter... Not while a message box is up:
+    // that press pages the message (InputSystem.cpp ReadPadBoth).
+    if ((pressed & 0x80) != 0 && (g_menu_choice_id & 0x80) == 0) {
         coop_partner_try_action(ENTITY);
     }
 

@@ -193,6 +193,7 @@ static unsigned char s_dbgDoorRecord[0x18];     // synthetic door record (must o
 #define DBGKEY_CONFIRM 0x030   // ENTER or SPACE
 #define DBGKEY_ESC     0x040
 #define DBGKEY_F1      0x080
+#define DBGKEY_P       0x100   // co-op: inventory editor edits player 2's slots
 
 // ---------------------------------------------------------------------------
 // Game pad support
@@ -233,6 +234,7 @@ static int DebugMenu_SampleKeys(void)
     if (plat_key_state(VK_SPACE)  & 0x8000) keys |= DBGKEY_CONFIRM;
     if (plat_key_state(VK_ESCAPE) & 0x8000) keys |= DBGKEY_ESC;
     if (plat_key_state(VK_F1)     & 0x8000) keys |= DBGKEY_F1;
+    if (plat_key_state('P')       & 0x8000) keys |= DBGKEY_P;
 
     DWORD pad = g_RawPadHeld;
     if (pad & DBGPAD_LEFT)   keys |= DBGKEY_LEFT;
@@ -762,9 +764,21 @@ void DebugRoomChange_ApplyPendingPlacement(void)
 // Slot count for the active character: Jill (id & 3 == 1) gets 8 slots,
 // Chris and Rebecca 6 - the same rule as CountHeldItems (0x00451600) and
 // g_totalInventorySlots (0x00ae9f1a, main_menu 0x00463710).
+// Co-op (port addition): P switches the editor to player 2's slots
+// (g_RebeccaItemSlots, 6 of them).
+static int s_dbgInvP2 = 0;
+
 static int DebugInv_Capacity(void)
 {
+    if (s_dbgInvP2) {
+        return 6;
+    }
     return ((g_playerEntity.id & 3) == CHAR_JILL) ? 8 : 6;
+}
+
+static unsigned char* DebugInv_Slots(void)
+{
+    return s_dbgInvP2 ? (unsigned char*)g_RebeccaItemSlots : (unsigned char*)g_ItemSlotsPointer;
 }
 
 // Decode an item name from g_ItemNamePointers (0x004bf0a0, indexed by
@@ -817,7 +831,9 @@ static void DebugInv_ItemName(unsigned char itemId, char* out)
 // (LoadHeldItemsImages, 0x00451640).
 static void DebugInv_Apply(void)
 {
-    LoadHeldItemsImages();
+    if (!s_dbgInvP2) {
+        LoadHeldItemsImages();   // player 2's are rebuilt when the game switches to her
+    }
 }
 
 static void DebugInv_DrawRow(short y, int slot, unsigned char itemId, unsigned char qty)
@@ -846,15 +862,15 @@ static void DebugInv_DrawList(void)
     DebugMenu_PrintCentered(76, "- INVENTORY EDITOR -", DBGCOL_TEXT);
 
     char line[64];
-    sprintf(line, "INVENTORY CAPACITY [%d]", DebugInv_Capacity());
+    sprintf(line, "%s  CAPACITY [%d]", s_dbgInvP2 ? "PLAYER 2" : "PLAYER 1", DebugInv_Capacity());
     DebugMenu_PrintCentered(90, line, DBGCOL_RED);
 
-    if (g_ItemSlotsPointer == NULL) {
+    if (DebugInv_Slots() == NULL) {
         DebugMenu_PrintCentered(130, "NO INVENTORY", DBGCOL_DIM);
         return;
     }
 
-    unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
+    unsigned char* slots = DebugInv_Slots();
     short y = 102;
     for (int i = 0; i < DebugInv_Capacity(); i++) {
         DebugInv_DrawRow(y, i, slots[i * 2], slots[i * 2 + 1]);
@@ -862,6 +878,7 @@ static void DebugInv_DrawList(void)
     }
 
     DebugMenu_PrintCentered(190, "UP/DOWN: SLOT   LEFT/RIGHT: QTY", DBGCOL_TEXT);
+    DebugMenu_PrintCentered(201, "P: SWITCH PLAYER", DBGCOL_TEXT);
 }
 
 static void DebugInv_DrawPick(void)
@@ -1497,7 +1514,7 @@ int debug_menu_overlay(void)
                 }
             }
             if (newKeys & (DBGKEY_LEFT | DBGKEY_RIGHT)) {
-                unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
+                unsigned char* slots = DebugInv_Slots();
                 if (slots != NULL && slots[s_dbgInvSlot * 2] != ITEM_NONE) {
                     // Wraps: LEFT below 0 goes to the max quantity (0xFF) so a
                     // full stack can be set in one press, and vice versa.
@@ -1509,8 +1526,12 @@ int debug_menu_overlay(void)
                     DebugInv_Apply();
                 }
             }
+            if (newKeys & DBGKEY_P) {
+                s_dbgInvP2 = !s_dbgInvP2;
+                s_dbgInvSlot = 0;
+            }
             if (newKeys & DBGKEY_CONFIRM) {
-                unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
+                unsigned char* slots = DebugInv_Slots();
                 if (slots != NULL) {
                     s_dbgPickId = slots[s_dbgInvSlot * 2];
                     s_dbgInvPick = 1;
@@ -1549,7 +1570,7 @@ int debug_menu_overlay(void)
             }
         }
         if (newKeys & DBGKEY_CONFIRM) {
-            unsigned char* slots = (unsigned char*)g_ItemSlotsPointer;
+            unsigned char* slots = DebugInv_Slots();
             slots[s_dbgInvSlot * 2] = (unsigned char)s_dbgPickId;
             if (s_dbgPickId == ITEM_NONE) {
                 slots[s_dbgInvSlot * 2 + 1] = 0;    // empty slots carry no qty

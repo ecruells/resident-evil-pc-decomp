@@ -78,6 +78,12 @@ void Coop_EndP2Menu(void);
 // Player 2 pressed action at a room object (item, item box, typewriter...):
 // run the game as her until the message / prompt / menu it starts is over.
 void Coop_BeginP2Action(void);
+// Room actions player 2 leaves to player 1 - scripted room events, and items
+// that are his to find: returns 0 (and shows "Maybe Chris should check it
+// out.") when the room action entry is one of them.
+int  Coop_PartnerMayTake(const unsigned char* entry);
+// Does player 2 (Rebecca, in the room) carry this item?
+int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.
 void Coop_FrameUpdate(void);
 

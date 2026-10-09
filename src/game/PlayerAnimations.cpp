@@ -6783,6 +6783,12 @@ int door_try_enter(unsigned char* entry)
         return 0;
     } else {
         // 0x0041b4d7: needs a specific item.
+        // Co-op (port addition): a key only player 2 carries opens it too - the
+        // unlock then runs as her, so the key bookkeeping uses her slots.
+        if (get_item_slot(need) < 0 && Coop_PartnerHasItem((unsigned char)need)) {
+            Coop_BeginP2Action();
+            get_item_slot(need);
+        }
         if (get_item_slot(need) < 0) {
             unsigned int m = need - ITEM_SWORD_KEY; // diff keys to get index
             if (m > 9) {
@@ -7331,6 +7337,10 @@ void coop_partner_try_action(Entity* partner)
 
         dbg_printf("[COOP] player 2 action: room entry type %d at (%d,%d)\n", entry[0], zone[0], zone[1]);
         Coop_BeginP2Action();
+        // Some items are player 1's to pick up.
+        if (Coop_PartnerMayTake(entry) == 0) {
+            return;
+        }
         if (atProbe) {
             g_fwdPosActionId = (unsigned char)(index + 1);
         } else {

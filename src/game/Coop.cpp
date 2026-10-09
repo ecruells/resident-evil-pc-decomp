@@ -2,6 +2,7 @@
 #include "Coop.h"
 #include "BioCard.h"
 #include "entities/EntityCommon.h"
+#include "PrintText.h"
 
 extern void Flg_on(int baseAddr, unsigned int bitIndex);   // CmdFunctions.cpp - 0x00473ef0
 
@@ -354,20 +355,84 @@ static int gameplay_is_free(void)
 	       g_openMenuFlag == 0;
 }
 
+// The game has to stay free this many frames in a row before her action ends:
+// a multi-page message lets go for a frame or two between its pages.
+#define P2_ACTION_SETTLE_FRAMES 10
+
 void Coop_FrameUpdate(void)
 {
+	static int s_freeFrames = 0;
+
 	if (s_p2Session != P2_SESSION_ACTION) {
+		s_freeFrames = 0;
 		return;
 	}
 	s_p2ActionFrames++;
 	if (!gameplay_is_free()) {
 		s_p2ActionBlocked = 1;
+		s_freeFrames = 0;
 		return;
 	}
+	s_freeFrames++;
 	// Done once whatever her action started (message, prompt, item box) has
-	// finished - or straight away if it never started anything.
-	if (s_p2ActionBlocked || s_p2ActionFrames > 4) {
+	// finished and stayed finished - or if it never started anything.
+	if (s_freeFrames >= P2_ACTION_SETTLE_FRAMES) {
+		s_freeFrames = 0;
 		s_p2Session = P2_SESSION_NONE;
 		p2_swap_out();
 	}
+}
+
+int Coop_PartnerHasItem(unsigned char itemId)
+{
+	if (!g_coopEnabled || g_coopPartner == nullptr || g_coopPartner->id != NPC_REBECCA ||
+	    g_coopMenuOwner == 2) {
+		return 0;
+	}
+	for (int i = 0; i < 6; i++) {
+		if (g_RebeccaItemSlots[i].Id == itemId) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// Co-op's own line, shown through the global message table's spare last slot
+// (index 63 is NULL in both the USA and the JPN table).
+static constexpr auto s_msgChrisShouldCheck = STR("Maybe Chris should\\ncheck it out.");
+#define COOP_MSG_SLOT 63
+
+static void coop_show_message(const unsigned char* encoded)
+{
+	global_messages[COOP_MSG_SLOT] = (unsigned char*)encoded;
+	global_messages_jpn[COOP_MSG_SLOT] = (unsigned char*)encoded;
+	set_message_display(0x40 | COOP_MSG_SLOT, 0xff);
+}
+
+int Coop_PartnerMayTake(const unsigned char* entry)
+{
+	int slot = (int)(entry - g_RoomActionTable) / 12;
+	const unsigned char* record = *(const unsigned char* const*)(entry + 8);
+	unsigned char itemId = (record != nullptr) ? record[8] : 0;
+	if (g_coopPartner == nullptr) {
+		return 1;
+	}
+	// Scripted room events (room_check_actions 9, create_room_event) are written
+	// for the player character - the scene would play on player 1 - so only he
+	// starts them.
+	if (entry[0] == 9) {
+		coop_show_message(s_msgChrisShouldCheck.bytes);
+		return 0;
+	}
+	// Jill's handgun in the main hall: ROOM1060 item_model_set slot 6 (Beretta,
+	// 15 rounds). Its init script turns the slot into room event 0x0B - Chris
+	// crouches, "It's Jill's gun", then the pick-up prompt - so it is matched by
+	// slot, not by handler. It is his scene.
+	if (g_coopPartner != nullptr && g_coopPartner->id == NPC_REBECCA &&
+	    g_stageId == STAGE_MANSION_1F && g_roomId == ROOM_MAIN_HALL &&
+	    slot == 6 && itemId == ITEM_BERETTA) {
+		coop_show_message(s_msgChrisShouldCheck.bytes);
+		return 0;
+	}
+	return 1;
 }

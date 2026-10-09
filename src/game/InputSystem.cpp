@@ -159,6 +159,12 @@ DWORD ReadPadBoth(void)
 			// the keyboard waits. CoopPad_Update blanks her own words meanwhile.
 			return g_CoopPadBtnWord;
 		}
+		if ((g_menu_choice_id & 0x80) != 0) {
+			// A message box is up (set_message_display): either player can page
+			// through or answer it - follow-up and script messages do not
+			// always belong to the player whose action started them.
+			return g_PadBtnWord | g_CoopPadBtnWord;
+		}
 		return g_PadBtnWord;
 	}
 	if ((1 < g_NumControllers) && (g_pMasterInputState.joysticks[0].enabled != 0)) {
