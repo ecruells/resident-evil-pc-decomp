@@ -7,6 +7,7 @@
 extern void Flg_on(int baseAddr, unsigned int bitIndex);   // CmdFunctions.cpp - 0x00473ef0
 
 int   g_coopEnabled = 0;
+int   g_coopSharedInput = 0;
 int   g_coopSkipOpening = 0;
 
 DWORD g_CoopPadBtnWord = 0;
@@ -462,4 +463,39 @@ int Coop_UseSaveRibbon(void)
 	LoadHeldItemsImages();
 	dbg_printf("[COOP] save paid with player 2's ink ribbon\n");
 	return 1;
+}
+
+#define COOP_SAVE_VERSION 1
+
+void Coop_WriteSaveBlock(unsigned char* block)
+{
+	memset(block, 0, 16);
+	if (!g_coopP2.valid) {
+		return;
+	}
+	block[0] = 'C';
+	block[1] = 'O';
+	block[2] = COOP_SAVE_VERSION;
+	block[3] = g_coopP2.maxHealth;
+	block[4] = (unsigned char)(g_coopP2.health & 0xff);
+	block[5] = (unsigned char)((unsigned short)g_coopP2.health >> 8);
+	block[6] = g_coopP2.healthStatusFlags;
+	block[7] = g_coopP2.equippedItemId;
+	block[8] = g_coopP2.equippedWeaponId;
+}
+
+void Coop_ReadSaveBlock(const unsigned char* block)
+{
+	if (block[0] != 'C' || block[1] != 'O' || block[2] != COOP_SAVE_VERSION) {
+		Coop_ResetPartnerState();
+		return;
+	}
+	g_coopP2.valid = 1;
+	g_coopP2.maxHealth = block[3];
+	g_coopP2.health = (short)(block[4] | (block[5] << 8));
+	g_coopP2.healthStatusFlags = block[6];
+	g_coopP2.equippedItemId = block[7];
+	g_coopP2.equippedWeaponId = block[8];
+	dbg_printf("[COOP] save: player 2 health %d/%d, equipped item %d\n",
+	           g_coopP2.health, g_coopP2.maxHealth, g_coopP2.equippedItemId);
 }

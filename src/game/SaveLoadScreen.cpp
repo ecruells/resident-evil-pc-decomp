@@ -68,6 +68,8 @@ typedef enum {
 #define OFFSET_DC_MODE       0x233   // Director's Cut mode byte (g_DcGameMode)
 #define OFFSET_PAD_REMAP     0x41C   // 32 bytes  (g_padRemapSubTable3)
 #define OFFSET_CONTROLLER_CFG 0x43C  // 1 byte   (g_controllerConfig)
+#define OFFSET_COOP          0x700   // 16 bytes  co-op player 2 status (port addition, in the
+                                     //           unmodeled 0x43D..0x800 gap; zero in other saves)
 #define OFFSET_KEY_BINDINGS  0x800   // 32 bytes  (g_keyBindingData)
 #define OFFSET_JOY_REMAP     0x820   // 256 bytes (g_JoyRemapTbl)
 #define OFFSET_JOY_BACKUP    0x8A0   // 128 bytes (g_joyRemapBackupJoy)
@@ -736,6 +738,7 @@ static void RestoreSaveBlock(const char* fileBuffer, int fileSize)
     memcpy(g_padRemapSubTable3, fileBuffer + OFFSET_PAD_REMAP,
            sizeof(g_padRemapSubTable3));
     g_controllerConfig = fileBuffer[OFFSET_CONTROLLER_CFG];
+    Coop_ReadSaveBlock((const unsigned char*)fileBuffer + OFFSET_COOP);
     if (fileSize > SAVE_BLOCK_SIZE) {
         memcpy(g_keyBindingData, fileBuffer + OFFSET_KEY_BINDINGS, 0x20);
         memcpy(g_JoyRemapTbl, fileBuffer + OFFSET_JOY_REMAP, 0x100);
@@ -1136,6 +1139,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             memcpy(fileBuffer + OFFSET_PAD_REMAP, g_padRemapSubTable3,
                    sizeof(g_padRemapSubTable3));
             fileBuffer[OFFSET_CONTROLLER_CFG] = g_controllerConfig;
+            Coop_WriteSaveBlock((unsigned char*)fileBuffer + OFFSET_COOP);
             memcpy(fileBuffer + OFFSET_KEY_BINDINGS, g_keyBindingData, 0x20);
             memcpy(fileBuffer + OFFSET_JOY_REMAP, g_JoyRemapTbl, 0x100);
             memcpy(fileBuffer + OFFSET_ROOM_BGM, g_roomBgmState, 0xE0);

@@ -7,6 +7,7 @@
 #include "../Globals.h"
 
 extern int   g_coopEnabled;          // [Coop] Enable - 0 = original behaviour
+extern int   g_coopSharedInput;      // >0 while both pads drive player 1's input (save screen)
 extern int   g_coopSkipOpening;      // [Coop] SkipOpening - new games start in the dining room, opening done
 
 // Player 2 input, same layout and meaning as the player 1 globals:
@@ -89,6 +90,11 @@ int  Coop_PartnerMayTake(const unsigned char* entry);
 // did). check_typewriter clears the claim when player 1 starts one.
 void Coop_SetSaveRibbonFromP2(int fromP2);
 int  Coop_UseSaveRibbon(void);
+// Save file: player 2's status in a 16-byte block of the save's unused gap
+// ("CO" + version + fields). A save without it (older, or made with co-op
+// off) resets her status to a new game's.
+void Coop_WriteSaveBlock(unsigned char* block);
+void Coop_ReadSaveBlock(const unsigned char* block);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.

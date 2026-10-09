@@ -1,6 +1,7 @@
 // RoomEvents.cpp - SCD room event system (decompiled from Ghidra)
 // Implements room_events_check and all direct dependencies.
 #include "../Globals.h"
+#include "Coop.h"
 #include "../DebugPrint.h"
 #include "dc/Items.h"    // lockpick item id the DC moved to 0x0D
 #include <cstring>
@@ -1161,7 +1162,9 @@ void check_typewriter_state(void)
         break;
     case 3:
         if ((short)g_fading_state < 0) {
+            g_coopSharedInput++;   // co-op: either player drives the save screen
             LoadSaveGameState(0, (int)g_loadDataDestPointer, (int)g_typewriter_id + 1, 2, 0);
+            g_coopSharedInput--;
             g_loadSaveStateFlag = 0;
             cut_set();
             g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
