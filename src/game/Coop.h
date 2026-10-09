@@ -7,6 +7,7 @@
 #include "../Globals.h"
 
 extern int   g_coopEnabled;          // [Coop] Enable - 0 = original behaviour
+extern int   g_coopFreezeEnemies;    // [Coop] FreezeEnemies - dev tool: enemies stop after their init
 extern int   g_coopAnimBrowser;      // [Coop] AnimBrowser - dev tool: P2's pad steps her animations
 extern int   g_coopSharedInput;      // >0 while both pads drive player 1's input (save screen)
 extern int   g_coopSkipOpening;      // [Coop] SkipOpening - new games start in the dining room, opening done

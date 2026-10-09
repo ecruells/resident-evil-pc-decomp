@@ -14,6 +14,7 @@
 // All original addresses from Ghidra.
 // ============================================================================
 #include "EntityCommon.h"
+#include "../Coop.h"
 #include "../../Globals.h"
 #include <cstring>
 
@@ -1777,6 +1778,11 @@ void update_entities(void)
         if ((ENTITY->status_flags & 0x01) != 0) {
             // 0x0048f12b: Call per-type update function from dispatch table
             void* updateFunc = enemies_update_functions_tbl[ENTITY->id];
+            // Co-op dev tool ([Coop] FreezeEnemies): monsters run their state 0
+            // init (pose, model setup) and then stop - visible but harmless.
+            if (g_coopFreezeEnemies && ENTITY->id < NPC_ENTITIES_IDS && ENTITY->state != 0) {
+                updateFunc = NULL;
+            }
             if (updateFunc != NULL) {
                 ((void(*)())updateFunc)();
             }

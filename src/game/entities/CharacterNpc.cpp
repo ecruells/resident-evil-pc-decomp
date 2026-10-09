@@ -2446,21 +2446,101 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
 
 // ----------------------------------------------------------------------------
 // Animation browser (co-op dev tool, [Coop] AnimBrowser=1): player 2's d-pad
-// steps her through her model's animations - left/right one, up/down ten,
-// action restarts the current one - with the id drawn at the top left and
-// logged. The count is the first slot's frame-table offset / 4: animBase is
-// an array of { u16 frameCount, u16 frameTableOffset } that Joint_move indexes
-// by animationId, and the first frame table follows the array.
+// steps her through an animation set - left/right one, up/down ten, action
+// restarts the current one, aim switches set - with the set and id drawn at the
+// top left and logged.
+//
+// Every character model and player weapon file shares one animation header
+// layout (15 joints, 52 values a frame: EM1023/CHAR1x.EMD and the W*.EMW all
+// start 64 00 b0 00 0f 00 68 00), and Joint_move takes the set as parameters,
+// so she can play any of them: her own NPC set, the playable characters' weapon
+// sets (header = file start, animBase = the offset in the file's last 8 bytes,
+// as LoadEquippedWeaponAnimation reads them), the room's player set (the RDT's
+// pair that becomes jointMoveData2/3 - pushing, doors, ladders) and the
+// player's reactions carried by the room's enemy model (emdScratchPtr1/2 -
+// grabs, throws, deaths).
+//
+// An animBase is an array of { u16 frameCount, u16 frameTableOffset }; the
+// first frame table follows the array, so the count is the first offset / 4.
 // ----------------------------------------------------------------------------
+struct CoopAnimSet {
+    const char* name;
+    const char* file;        // NULL: not a weapon file
+};
+static const CoopAnimSet kCoopAnimSets[] = {
+    { "REBECCA NPC",      NULL },
+    { "W32 REBECCA GUN",  "players/w32.emw" },
+    { "W30 UNARMED",      "players/w30.emw" },
+    { "W11 KNIFE",        "players/w11.emw" },
+    { "W13 SHOTGUN",      "players/w13.emw" },
+    { "ROOM PLAYER SET",  NULL },
+    { "ENEMY REACTIONS",  NULL },
+};
+#define COOP_ANIM_SET_COUNT ((int)(sizeof(kCoopAnimSets) / sizeof(kCoopAnimSets[0])))
+static unsigned char s_coopAnimFile[COOP_ANIM_SET_COUNT][0x8000];   // EMW files are under 32KB
+static unsigned int  s_coopAnimFileBase[COOP_ANIM_SET_COUNT];
+static int           s_coopAnimSet = 0;
+
+// The header/base pair of set `set`, or 0 if it is not available.
+static int coop_anim_set_pair(int set, unsigned int* header, unsigned int* base)
+{
+    if (set == 0) {
+        *header = ENTITY->animHeader;
+        *base = ENTITY->animBase;
+    } else if (kCoopAnimSets[set].file != NULL) {
+        if (s_coopAnimFileBase[set] == 0) {
+            sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT, kCoopAnimSets[set].file);
+            size_t size = LoadFile(FILE_PATH, s_coopAnimFile[set], 0x20);
+            if (size < 16 || size > sizeof(s_coopAnimFile[set])) {
+                dbg_printf("[COOP-ANIM] could not load %s\n", kCoopAnimSets[set].file);
+                return 0;
+            }
+            unsigned int off = *(unsigned int*)(s_coopAnimFile[set] + (size & ~3u) - 8) & ~3u;
+            s_coopAnimFileBase[set] = (unsigned int)s_coopAnimFile[set] + off;
+        }
+        *header = (unsigned int)s_coopAnimFile[set];
+        *base = s_coopAnimFileBase[set];
+    } else if (set == COOP_ANIM_SET_COUNT - 1) {
+        // The extra set of the enemy model the room loaded last: the player's
+        // reactions to that enemy (grabs, throws, deaths). LoadEntityEMD points
+        // the player's emdScratchPtr1/2 at it.
+        if (g_playerEntity.emdScratchPtr1 == 0 || g_playerEntity.emdScratchPtr2 == 0) {
+            return 0;
+        }
+        *header = (unsigned int)g_playerEntity.emdScratchPtr1;
+        *base = (unsigned int)g_playerEntity.emdScratchPtr2;
+    } else {
+        if (g_RdtPointer == NULL || g_RdtPointer->player_anim_header == NULL ||
+            g_RdtPointer->player_anim_base == NULL) {
+            return 0;
+        }
+        *header = (unsigned int)g_RdtPointer->player_anim_header;
+        *base = (unsigned int)g_RdtPointer->player_anim_base;
+    }
+    return 1;
+}
+
 static void coop_partner_anim_browser(void)
 {
-    unsigned short* slots = (unsigned short*)ENTITY->animBase;
-    int count = (slots != NULL) ? (int)((slots[1] & 0xFFFC) / 4) : 0;
+    unsigned int pressed = g_CoopPadPressed;   // raw PSX word
+    if (pressed & 0x08) {                      // aim: next set
+        s_coopAnimSet = (s_coopAnimSet + 1) % COOP_ANIM_SET_COUNT;
+        ENTITY->animationId = 0;
+        pressed |= 0x80;                       // restart at animation 0
+    }
+
+    unsigned int header, base;
+    if (!coop_anim_set_pair(s_coopAnimSet, &header, &base)) {
+        sprintf(PRINT_TEXT_BUFFER, "P2 SET %s: NOT AVAILABLE", kCoopAnimSets[s_coopAnimSet].name);
+        PrintText8x8(8, 8, 0, 0);
+        return;
+    }
+    unsigned short* slots = (unsigned short*)base;
+    int count = (int)((slots[1] & 0xFFFC) / 4);
     if (count <= 0) {
         return;
     }
 
-    unsigned int pressed = g_CoopPadPressed;   // raw PSX word
     int id = ENTITY->animationId;
     int step = 0;
     if (pressed & 0x2000) step = 1;      // right
@@ -2473,14 +2553,15 @@ static void coop_partner_anim_browser(void)
         ENTITY->animation_frame_id = 0;
         ENTITY->timing_control     = 0;
         ENTITY->blend_counter      = 0;
-        dbg_printf("[COOP-ANIM] animation %d of %d (%d frames)\n", id, count, slots[id * 2]);
+        dbg_printf("[COOP-ANIM] %s animation %d of %d (%d frames)\n",
+                   kCoopAnimSets[s_coopAnimSet].name, id, count, slots[id * 2]);
     }
 
-    Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
+    Joint_move(0, header, base, 0x400);
     SetEntityScaHitData(ENTITY);
 
-    sprintf(PRINT_TEXT_BUFFER, "P2 ANIM %d / %d  FRAME %d", id, count - 1,
-            (int)ENTITY->animation_frame_id);
+    sprintf(PRINT_TEXT_BUFFER, "P2 %s  ANIM %d/%d  FRAME %d",
+            kCoopAnimSets[s_coopAnimSet].name, id, count - 1, (int)ENTITY->animation_frame_id);
     PrintText8x8(8, 8, 0, 0);
 }
 

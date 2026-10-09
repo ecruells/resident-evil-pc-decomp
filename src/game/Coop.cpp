@@ -9,6 +9,7 @@ extern void Flg_on(int baseAddr, unsigned int bitIndex);   // CmdFunctions.cpp -
 int   g_coopEnabled = 0;
 int   g_coopSharedInput = 0;
 int   g_coopAnimBrowser = 0;
+int   g_coopFreezeEnemies = 0;
 int   g_coopSkipOpening = 0;
 
 DWORD g_CoopPadBtnWord = 0;
