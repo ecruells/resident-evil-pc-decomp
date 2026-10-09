@@ -1035,6 +1035,56 @@ int CalcPanVolume(int panL, int panR) // 0x00480610
 // pos: pointer to a VECTOR containing the sound source world position
 //      (typically entity.transform.t)
 // ============================================================================
+// ============================================================================
+// Co-op (port addition): player 2's own weapon sounds. Bank 1 (g_SfxBanks) holds
+// player 1's weapon set, so her shots get a private copy of hers, loaded from
+// the same g_SoundBanksTable files LoadSoundBank uses and kept until her
+// weapon changes.
+// ============================================================================
+static int s_coopWeaponSnd[16];
+static int s_coopWeaponSndId = -1;
+
+void Coop_LoadP2WeaponSounds(int weaponId)
+{
+    if (weaponId == s_coopWeaponSndId) {
+        return;
+    }
+    for (int i = 0; i < 16; i++) {
+        if (s_coopWeaponSnd[i] != 0) {
+            destroySndBank(s_coopWeaponSnd[i]);
+            s_coopWeaponSnd[i] = 0;
+        }
+    }
+    s_coopWeaponSndId = weaponId;
+    if (weaponId < 0 || weaponId >= 16 || g_SoundBanksTable[weaponId] == NULL) {
+        return;
+    }
+    const char** subtable = g_SoundBanksTable[weaponId];
+    for (int i = 0; i < 16; i++) {
+        if (subtable[i] == NULL) {
+            continue;
+        }
+        char path[256];
+        sprintf(path, GAME_DATA_ROOT "sound\\%s.wav", subtable[i]);
+        s_coopWeaponSnd[i] = loadSndBankFromWav(path);
+    }
+}
+
+// Play3DSnd's bank-1 path, on her copy.
+void Coop_PlayP2WeaponSnd(int soundId, int pos)
+{
+    if (soundId < 0 || soundId >= 16) {
+        return;
+    }
+    int handle = s_coopWeaponSnd[soundId];
+    Calc3DSndPan((VECTOR*)pos);
+    if (handle != 0) {
+        int dsVol = CalcPanVolume(g_snd_pan_right, g_snd_pan_left);
+        set_volume(handle, dsVol);
+        SetSndSlot(handle, 0);
+    }
+}
+
 void Play3DSnd(int bank, int soundId, int vol, int pos) // 0x0047f9c0
 {
     VECTOR* soundPos = (VECTOR*)pos;

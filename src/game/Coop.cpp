@@ -125,7 +125,12 @@ void Coop_SpawnPartner(void)
 	// behavior_flags picks the weapon model her init loads into her hand
 	// (LoadCharacterWeaponTmd): 2 = the handgun, whose firing effects are the
 	// NPC tables' weapon index 0.
-	e->behavior_flags = Coop_PartnerHasHandgun() ? 2 : 0;
+	// Rebecca always gets it: the controller swaps the gun in and out of her
+	// hand as she equips it (npc_coop_partner_control).
+	e->behavior_flags = (partnerId == NPC_REBECCA) ? 2 : 0;
+	if (Coop_PartnerHasHandgun()) {
+		Coop_LoadP2WeaponSounds(ITEM_BERETTA);
+	}
 	e->scaMatrixData.localMatrix.t[0] = (unsigned int)(int)g_playerEntity.scaMatrixData.localMatrix.t[0];
 	e->scaMatrixData.localMatrix.t[1] = 0;
 	e->scaMatrixData.localMatrix.t[2] = (unsigned int)(int)g_playerEntity.scaMatrixData.localMatrix.t[2];
@@ -303,6 +308,9 @@ static void p2_swap_out(void)
 	// sound bank. If she changed weapon, put player 1's back.
 	if (newWeapon != g_coopP2.equippedWeaponId) {
 		g_coopP2.equippedWeaponId = newWeapon;
+		if (Coop_PartnerHasHandgun()) {
+			Coop_LoadP2WeaponSounds(ITEM_BERETTA);
+		}
 		LoadSoundBank(g_playerEntity.equippedWeaponId, g_TimImageBuffer__bitmap);
 		LoadEquippedWeaponAnimation(g_playerEntity.equippedWeaponId, 0xE,
 		                            (unsigned int)g_animationBuffer,

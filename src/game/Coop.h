@@ -104,6 +104,9 @@ int  Coop_PartnerUseAmmo(void);
 // apply_weapon_damage reads the shooter from g_playerEntity (position, facing,
 // aim bits in flags, id for the range table). Lend it hers for one shot.
 unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId);
+// SoundSystem.cpp - her own copy of a weapon's sound set, and playing from it.
+void Coop_LoadP2WeaponSounds(int weaponId);
+void Coop_PlayP2WeaponSnd(int soundId, int pos);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.

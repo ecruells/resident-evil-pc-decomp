@@ -211,6 +211,25 @@ static void char_init_common(unsigned int tint,
     ENTITY->Sca_info = (unsigned int)scaInfo;
 }
 
+// Co-op (port addition): the weapon joint block LoadCharacterWeaponTmd fills
+// (jointsStructs + 0x6c8: anim field at +0x0c, TMD at +0x14, anim object at
+// +0x18), saved before (0, the bare hand) and after (1, the gun) the load so the
+// partner controller can swap between them as she equips and unequips.
+static unsigned char s_coopHandBlock[2][16];
+
+static void coop_partner_keep_hand(int withGun)
+{
+    if (ENTITY != g_coopPartner) {
+        return;
+    }
+    memcpy(s_coopHandBlock[withGun], (unsigned char*)ENTITY->jointsStructs + 0x6c8 + 0x0c, 16);
+}
+
+static void coop_partner_show_gun(bool gun)
+{
+    memcpy((unsigned char*)ENTITY->jointsStructs + 0x6c8 + 0x0c, s_coopHandBlock[gun ? 1 : 0], 16);
+}
+
 // 0x0046adf0 - id 32, Chris
 static void char_init_chris(void)
 {
@@ -259,7 +278,11 @@ static void char_init_rebecca(void)
 
     Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
     ENTITY->Sca_info = (unsigned int)&g_charScaInfo[3];
+    // Co-op (port addition): keep her bare hand and her gun hand so the
+    // controller can show either.
+    coop_partner_keep_hand(0);
     LoadCharacterWeaponTmd();
+    coop_partner_keep_hand(1);
 }
 
 // 0x0046b100 - id 36, Wesker (also aliased by id 46)
@@ -2331,8 +2354,8 @@ static void coop_partner_fire_frame(void)
         Effect_CreateBillboard(a->type, a->depth, 0, weaponSpace, &g_playerPosScratch, 0);
 
         Coop_PartnerApplyWeaponDamage(ENTITY, ITEM_BERETTA);
-        Play3DSnd(1, g_weaponFireData[idx].sfx1, 0, (int)ENTITY->scaMatrixData.localMatrix.t);
-        Play3DSnd(1, g_weaponFireData[idx].sfx2, 0, (int)ENTITY->scaMatrixData.localMatrix.t);
+        Coop_PlayP2WeaponSnd(g_weaponFireData[idx].sfx1, (int)ENTITY->scaMatrixData.localMatrix.t);
+        Coop_PlayP2WeaponSnd(g_weaponFireData[idx].sfx2, (int)ENTITY->scaMatrixData.localMatrix.t);
     }
 
     const NpcFireFx* b = fire_fx_row(kFireFxShell, idx);
@@ -2603,6 +2626,11 @@ void npc_coop_partner_control(void)
     // No head wandering (FUN_00472330 is the NPCs' idle look-around): like the
     // player, she keeps her head still.
     ENTITY->lookAtFlags = 0;
+
+    // The gun is in her hand while she has one equipped.
+    if (ENTITY->behavior_flags != 0) {
+        coop_partner_show_gun(Coop_PartnerHasHandgun() != 0);
+    }
 }
 
 // ============================================================================
