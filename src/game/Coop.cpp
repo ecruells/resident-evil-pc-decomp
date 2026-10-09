@@ -3,6 +3,8 @@
 #include "BioCard.h"
 #include "entities/EntityCommon.h"
 #include "PrintText.h"
+#include "FileLoader.h"
+#include "../system/AssetPath.h"
 
 extern void Flg_on(int baseAddr, unsigned int bitIndex);   // CmdFunctions.cpp - 0x00473ef0
 
@@ -131,11 +133,12 @@ void Coop_SpawnPartner(void)
 	// behavior_flags picks the weapon model her init loads into her hand
 	// (LoadCharacterWeaponTmd): 2 = the handgun, whose firing effects are the
 	// NPC tables' weapon index 0.
-	// Rebecca always gets it: the controller swaps the gun in and out of her
-	// hand as she equips it (npc_coop_partner_control).
+	// Rebecca always gets it, and char_init_rebecca adds the shotgun
+	// (Coop_LoadPartnerWeaponModels): the controller swaps the bare hand, the
+	// handgun and the shotgun as she equips them (npc_coop_partner_control).
 	e->behavior_flags = (partnerId == NPC_REBECCA) ? 2 : 0;
-	if (Coop_PartnerHasHandgun()) {
-		Coop_LoadP2WeaponSounds(ITEM_BERETTA);
+	if (Coop_PartnerGunId() != 0) {
+		Coop_LoadP2WeaponSounds(Coop_PartnerGunId());
 	}
 	e->scaMatrixData.localMatrix.t[0] = (unsigned int)(int)g_playerEntity.scaMatrixData.localMatrix.t[0];
 	e->scaMatrixData.localMatrix.t[1] = 0;
@@ -317,8 +320,8 @@ static void p2_swap_out(void)
 	// sound bank. If she changed weapon, put player 1's back.
 	if (newWeapon != g_coopP2.equippedWeaponId) {
 		g_coopP2.equippedWeaponId = newWeapon;
-		if (Coop_PartnerHasHandgun()) {
-			Coop_LoadP2WeaponSounds(ITEM_BERETTA);
+		if (Coop_PartnerGunId() != 0) {
+			Coop_LoadP2WeaponSounds(Coop_PartnerGunId());
 		}
 		LoadSoundBank(g_playerEntity.equippedWeaponId, g_TimImageBuffer__bitmap);
 		LoadEquippedWeaponAnimation(g_playerEntity.equippedWeaponId, 0xE,
@@ -526,9 +529,20 @@ void Coop_ReadSaveBlock(const unsigned char* block)
 // ============================================================================
 extern unsigned char apply_weapon_damage(unsigned int weapon_id);   // WeaponDamage.cpp 0x0043c020
 
+int Coop_PartnerGunId(void)
+{
+	if (!g_coopP2.valid) {
+		return 0;
+	}
+	if (g_coopP2.equippedWeaponId == ITEM_BERETTA || g_coopP2.equippedWeaponId == ITEM_SHOTGUN) {
+		return g_coopP2.equippedWeaponId;
+	}
+	return 0;
+}
+
 int Coop_PartnerHasHandgun(void)
 {
-	return g_coopP2.valid && g_coopP2.equippedWeaponId == ITEM_BERETTA;
+	return Coop_PartnerGunId() == ITEM_BERETTA;
 }
 
 int Coop_PartnerAmmo(void)
@@ -554,7 +568,8 @@ int Coop_PartnerUseAmmo(void)
 	return 1;
 }
 
-unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId)
+unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId,
+                                            unsigned char aimBits)
 {
 	int  t0 = g_playerEntity.scaMatrixData.localMatrix.t[0];
 	int  t1 = g_playerEntity.scaMatrixData.localMatrix.t[1];
@@ -567,7 +582,7 @@ unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weapon
 	g_playerEntity.scaMatrixData.localMatrix.t[1] = partner->scaMatrixData.localMatrix.t[1];
 	g_playerEntity.scaMatrixData.localMatrix.t[2] = partner->scaMatrixData.localMatrix.t[2];
 	g_playerEntity.directionAngle = partner->angle;
-	g_playerEntity.flags = (unsigned char)((flags & ~0xE0) | 0x40);   // aiming straight ahead
+	g_playerEntity.flags = (unsigned char)((flags & ~0xE0) | aimBits);
 	g_playerEntity.id = 3;                                             // Rebecca's weapon ranges
 
 	unsigned char hit = apply_weapon_damage(weaponId);
@@ -882,4 +897,81 @@ void Coop_OnSave(void)
 		g_coopP2.health = g_coopP2.maxHealth;
 		dbg_printf("[COOP] the save brings player 2 back\n");
 	}
+}
+
+// ============================================================================
+// Partner weapon models
+//
+// Rebecca's sheet has no shotgun. Her NPC texture (EM1023.EMD's TIM) and
+// playable Rebecca's (CHAR13.EMD's) are the same image, and her unreferenced
+// W33.EMW shotgun mesh, drawn from it, comes out a solid red slab: the art was
+// never made (the original never shows her holding one, and g_weaponPathTable
+// sends her to Jill's W13). So she holds Jill's - W13's hand-and-shotgun mesh
+// on Jill's sheet (CHAR11.EMD's TIM, 2 texture banks, loaded into the next free
+// ones as LoadEntityEMD loads a model's) - or, when the room has no two banks
+// to spare below the player's 0x16, player 1's own shotgun on his sheet (bank
+// 0x16 page 7, as LoadEquippedWeaponAnimation draws his).
+// ============================================================================
+extern void ProcessTmdAsync(unsigned int param1);                                         // TmdAnimation.cpp 0x004838e0
+extern unsigned int ProcessTmdTextures(char mode, unsigned int* tmd, int bank, int page);  // TmdAnimation.cpp 0x00473da0
+extern void SetSpriteBufferFlag(void);
+
+static unsigned char s_p2SheetFile[0x20000];    // CHAR11.EMD (~104KB), for its TIM
+static unsigned char s_p2ShotgunFile[0x8000];   // W13.EMW / W03.EMW (~28KB)
+static unsigned int  s_p2ShotgunMesh = 0;
+
+// The weapon mesh of a loaded .EMW: the second of the two dwords at its end.
+static unsigned int* emw_mesh(unsigned char* file, size_t size)
+{
+	return (unsigned int*)(file + (*(unsigned int*)(file + (size & ~3u) - 4) & ~3u));
+}
+
+void Coop_LoadPartnerWeaponModels(void)
+{
+	s_p2ShotgunMesh = 0;
+	if (g_coopPartner == nullptr || g_coopPartner->id != NPC_REBECCA) {
+		return;
+	}
+
+	size_t size;
+	if ((int)g_TextureBankID + 2 <= 0x16) {
+		sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT, "enemy/char11.emd");
+		SetSpriteBufferFlag();
+		size_t sheetSize = LoadFile(FILE_PATH, s_p2SheetFile, 0x20);
+		sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT, "players/w13.emw");
+		size = LoadFile(FILE_PATH, s_p2ShotgunFile, 0x20);
+		if (sheetSize >= 0x20 && sheetSize <= sizeof(s_p2SheetFile) &&
+		    size >= 0x20 && size <= sizeof(s_p2ShotgunFile)) {
+			// The bank/page the TIM lands in are the counters before
+			// ProcessTmdAsync advances them; the TIM offset is the last dword.
+			unsigned char bank = g_TextureBankID;
+			unsigned char page = g_TextureCurrentPage;
+			ProcessTmdAsync((unsigned int)s_p2SheetFile +
+			                (*(unsigned int*)(s_p2SheetFile + (sheetSize & ~3u) - 4) & ~3u));
+			unsigned int* mesh = emw_mesh(s_p2ShotgunFile, size);
+			ProcessTmdTextures(2, mesh, bank, page);
+			s_p2ShotgunMesh = (unsigned int)mesh + 0xc;
+			dbg_printf("[COOP] player 2's shotgun: Jill's, sheet in bank %d page %d\n", bank, page);
+			return;
+		}
+	}
+
+	// Fallback: player 1's own shotgun on his sheet.
+	sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT,
+	        (g_playerEntity.id & 1) ? "players/w13.emw" : "players/w03.emw");
+	size = LoadFile(FILE_PATH, s_p2ShotgunFile, 0x20);
+	if (size < 0x20 || size > sizeof(s_p2ShotgunFile)) {
+		dbg_printf("[COOP] could not load player 2's shotgun model\n");
+		return;
+	}
+	unsigned int* mesh = emw_mesh(s_p2ShotgunFile, size);
+	ProcessTmdTextures(2, mesh, 0x16, 7);
+	s_p2ShotgunMesh = (unsigned int)mesh + 0xc;
+	dbg_printf("[COOP] player 2's shotgun: player 1's (no texture bank to spare, next %d)\n",
+	           (int)g_TextureBankID);
+}
+
+unsigned int Coop_PartnerShotgunMesh(void)
+{
+	return s_p2ShotgunMesh;
 }

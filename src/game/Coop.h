@@ -97,7 +97,10 @@ int  Coop_UseSaveRibbon(void);
 // off) resets her status to a new game's.
 void Coop_WriteSaveBlock(unsigned char* block);
 void Coop_ReadSaveBlock(const unsigned char* block);
-// ---- Partner combat (handgun prototype) ----
+// ---- Partner combat ----
+// The gun she has equipped that she can use - ITEM_BERETTA or ITEM_SHOTGUN -
+// or 0.
+int  Coop_PartnerGunId(void);
 // Is a handgun equipped in her slots?
 int  Coop_PartnerHasHandgun(void);
 // Spend one round from her equipped weapon's slot; 0 when it is empty.
@@ -105,8 +108,10 @@ int  Coop_PartnerUseAmmo(void);
 // Rounds left in her equipped weapon's slot.
 int  Coop_PartnerAmmo(void);
 // apply_weapon_damage reads the shooter from g_playerEntity (position, facing,
-// aim bits in flags, id for the range table). Lend it hers for one shot.
-unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId);
+// aim bits in flags - 0x40 ahead, 0x80 up, 0x20 down, as weaponAimFlags - and
+// id for the range table). Lend it hers for one shot.
+unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId,
+                                            unsigned char aimBits);
 // SoundSystem.cpp - her own copy of a weapon's sound set, and playing from it.
 void Coop_LoadP2WeaponSounds(int weaponId);
 void Coop_PlayP2WeaponSnd(int soundId, int pos);
@@ -133,6 +138,13 @@ void coop_update_shadow_anim(void);
 void Coop_RunPartnerReaction(Entity* partner);
 // Save screen: a save brings her back.
 void Coop_OnSave(void);
+// room_set, after the enemy models: her shotgun hand mesh, textured. Her own
+// sheet has no shotgun art, so it is Jill's (W13 on CHAR11's TIM, loaded into
+// the next 2 free texture banks), or player 1's own on his sheet when the room
+// has no banks to spare.
+void Coop_LoadPartnerWeaponModels(void);
+// That mesh, ready for JointStruct::anim_slot_ptr, or 0.
+unsigned int Coop_PartnerShotgunMesh(void);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.

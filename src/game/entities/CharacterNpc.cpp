@@ -213,21 +213,24 @@ static void char_init_common(unsigned int tint,
 
 // Co-op (port addition): the weapon joint block LoadCharacterWeaponTmd fills
 // (jointsStructs + 0x6c8: anim field at +0x0c, TMD at +0x14, anim object at
-// +0x18), saved before (0, the bare hand) and after (1, the gun) the load so the
-// partner controller can swap between them as she equips and unequips.
-static unsigned char s_coopHandBlock[2][16];
+// +0x18), kept for the bare hand (0), the handgun (1, behavior_flags 2 =
+// WS232) and the shotgun (2, Coop_LoadPartnerWeaponModels' - there is no NPC
+// shotgun model, WS236 is item 6, the flamethrower, and her sheet has no
+// shotgun art)
+// so the partner controller can show whichever she has equipped.
+static unsigned char s_coopHandBlock[3][16];
 
-static void coop_partner_keep_hand(int withGun)
+static void coop_partner_keep_hand(int which)
 {
     if (ENTITY != g_coopPartner) {
         return;
     }
-    memcpy(s_coopHandBlock[withGun], (unsigned char*)ENTITY->jointsStructs + 0x6c8 + 0x0c, 16);
+    memcpy(s_coopHandBlock[which], (unsigned char*)ENTITY->jointsStructs + 0x6c8 + 0x0c, 16);
 }
 
-static void coop_partner_show_gun(bool gun)
+static void coop_partner_show_gun(int which)
 {
-    memcpy((unsigned char*)ENTITY->jointsStructs + 0x6c8 + 0x0c, s_coopHandBlock[gun ? 1 : 0], 16);
+    memcpy((unsigned char*)ENTITY->jointsStructs + 0x6c8 + 0x0c, s_coopHandBlock[which], 16);
 }
 
 // 0x0046adf0 - id 32, Chris
@@ -283,6 +286,21 @@ static void char_init_rebecca(void)
     coop_partner_keep_hand(0);
     LoadCharacterWeaponTmd();
     coop_partner_keep_hand(1);
+    if (ENTITY == g_coopPartner) {
+        // The shotgun: the mesh Coop_LoadPartnerWeaponModels prepared, set up
+        // in her hand as LoadEquippedWeaponAnimation sets up the player's.
+        static unsigned int s_shotgunObject[0x100];
+        unsigned int mesh = Coop_PartnerShotgunMesh();
+        if (mesh != 0) {
+            JointStruct* hand = &ENTITY->jointsStructs[14];
+            hand->anim_slot_ptr = (int)mesh;
+            hand->anim_object = s_shotgunObject;
+            CreateAnimObject((int)&hand->anim_field, (unsigned int*)s_shotgunObject);
+            coop_partner_keep_hand(2);
+        } else {
+            memcpy(s_coopHandBlock[2], s_coopHandBlock[1], 16);   // no room for it: the handgun
+        }
+    }
 }
 
 // 0x0046b100 - id 36, Wesker (also aliased by id 46)
@@ -2328,132 +2346,6 @@ static void coop_partner_set_anim(unsigned char anim)
 }
 
 // ----------------------------------------------------------------------------
-// Partner handgun (co-op prototype). Her model's animations, found with the
-// animation browser and the frame counts in animBase: 16 raises the gun (13
-// frames, ending in the aiming pose), 17 fires (15 frames). 15 is a single
-// waist-level frame, not the aim. The muzzle
-// flash, flash and shell are the NPC firing state's handgun rows (npc_scd_08,
-// weapon index 0); the report is the player's (g_weaponFireData[0], weapon
-// sound bank 1) and the damage goes through the player's apply_weapon_damage
-// with her as the shooter.
-// ----------------------------------------------------------------------------
-enum { P2_AIM_NONE, P2_AIM_RAISE, P2_AIM_HOLD, P2_AIM_FIRE };
-enum { P2_ANIM_RAISE = 16, P2_ANIM_FIRE = 17 };
-static int s_p2Aim = P2_AIM_NONE;
-
-static void coop_partner_fire_frame(void)
-{
-    const int idx = 0;   // handgun
-    void* weaponSpace = (void*)((char*)ENTITY->jointsStructs + 0x70C);   // joint 14 world
-
-    const NpcFireFx* a = fire_fx_row(kFireFxMuzzle, idx);
-    if (a != NULL && ENTITY->animation_frame_id == a->frame) {
-        g_playerPosScratch.x = (int)a->x;
-        g_playerPosScratch.y = (int)a->y;
-        g_playerPosScratch.z = (int)a->z;
-        Effect_CreateBillboard(a->type, a->depth, 0, weaponSpace, &g_playerPosScratch, 0);
-
-        Coop_PartnerApplyWeaponDamage(ENTITY, ITEM_BERETTA);
-        Coop_PlayP2WeaponSnd(g_weaponFireData[idx].sfx1, (int)ENTITY->scaMatrixData.localMatrix.t);
-        Coop_PlayP2WeaponSnd(g_weaponFireData[idx].sfx2, (int)ENTITY->scaMatrixData.localMatrix.t);
-    }
-
-    const NpcFireFx* b = fire_fx_row(kFireFxShell, idx);
-    if (b != NULL && ENTITY->animation_frame_id == b->frame) {
-        g_playerPosScratch.x = (int)b->x;
-        g_playerPosScratch.z = (int)b->z;
-        g_playerPosScratch.y = (int)(ENTITY->id & 1) * (1 - idx) * 300 + (int)b->y;
-        unsigned char slot = Effect_CreateBillboard(
-            b->type, b->depth, (short)0x555,
-            &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
-        fire_fx_tag(slot, 3, (unsigned char)idx);
-    }
-
-    const NpcFireFx* c = fire_fx_row(kFireFxFlash2, idx);
-    if (c != NULL && ENTITY->animation_frame_id == c->frame) {
-        g_playerPosScratch.x = (int)c->x;
-        g_playerPosScratch.y = (int)c->y;
-        g_playerPosScratch.z = (int)c->z;
-        unsigned char slot = Effect_CreateBillboard(
-            c->type, c->depth, 0, weaponSpace, &g_playerPosScratch, 0);
-        fire_fx_tag(slot, 0, (unsigned char)idx);
-    }
-}
-
-// Aim (0x100 held, as player_input_to_behavior tests it) and fire (action).
-// Returns true while she is aiming, which holds her feet still.
-// Hold the aim: the raise animation's last frame is the aiming pose, so it is
-// pinned there - Joint_move draws the frame it is given and steps past it,
-// and the next frame pins it back.
-static void coop_partner_hold_aim(void)
-{
-    const unsigned short* slots = (const unsigned short*)ENTITY->animBase;
-    int frameCount = (slots != NULL) ? (int)slots[P2_ANIM_RAISE * 2] : 1;
-    if (ENTITY->animationId != P2_ANIM_RAISE) {
-        coop_partner_set_anim(P2_ANIM_RAISE);   // blend back in from the shot
-    }
-    ENTITY->animation_frame_id = (unsigned char)(frameCount - 1);
-    ENTITY->timing_control = 0;
-}
-
-static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
-{
-    if ((held & 0x100) == 0 || !Coop_PartnerHasHandgun()) {
-        s_p2Aim = P2_AIM_NONE;
-        return false;
-    }
-
-    // Done once the animation reaches its last frame (or wrapped since the last
-    // frame). The frame count is the slot's first u16 in animBase.
-    static int s_lastFrame = 0;
-    int frame = ENTITY->animation_frame_id;
-    const unsigned short* slots = (const unsigned short*)ENTITY->animBase;
-    int frameCount = (slots != NULL) ? (int)slots[ENTITY->animationId * 2] : 0;
-    bool animDone = frame < s_lastFrame || (frameCount > 0 && frame >= frameCount - 1);
-    s_lastFrame = frame;
-
-    switch (s_p2Aim) {
-    case P2_AIM_NONE:
-        coop_partner_set_anim(P2_ANIM_RAISE);
-        s_p2Aim = P2_AIM_RAISE;
-        s_lastFrame = 0;
-        break;
-    case P2_AIM_RAISE:
-        if (animDone) {
-            s_p2Aim = P2_AIM_HOLD;
-            coop_partner_hold_aim();
-        }
-        break;
-    case P2_AIM_HOLD:
-        if ((pressed & 0x80) != 0 && Coop_PartnerUseAmmo()) {
-            coop_partner_set_anim(P2_ANIM_FIRE);
-            s_p2Aim = P2_AIM_FIRE;
-            s_lastFrame = 0;
-        } else {
-            if ((pressed & 0x80) != 0) {
-                // Empty: the click, weapon sound 9, as the player's aim hold
-                // plays it (player_behavior_13 / autoaim state 2).
-                Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);
-            }
-            coop_partner_hold_aim();
-        }
-        break;
-    case P2_AIM_FIRE:
-        coop_partner_fire_frame();
-        if (animDone) {
-            s_p2Aim = P2_AIM_HOLD;
-            coop_partner_hold_aim();
-            if (Coop_PartnerAmmo() == 0) {
-                // The shot that emptied it clicks as it settles, as the player's does.
-                Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);
-            }
-        }
-        break;
-    }
-    return true;
-}
-
-// ----------------------------------------------------------------------------
 // Animation browser (co-op dev tool, [Coop] AnimBrowser=1): player 2's d-pad
 // steps her through an animation set - left/right one, up/down ten, action
 // restarts the current one, aim switches set - with the set and id drawn at the
@@ -2481,7 +2373,7 @@ static const CoopAnimSet kCoopAnimSets[] = {
     { "W32 REBECCA GUN",  "players/w32.emw" },
     { "W30 UNARMED",      "players/w30.emw" },
     { "W11 KNIFE",        "players/w11.emw" },
-    { "W13 SHOTGUN",      "players/w13.emw" },
+    { "W33 REBECCA SHOTGUN", "players/w33.emw" },
     { "ROOM PLAYER SET",  NULL },
     { "ENEMY REACTIONS",  NULL },
 };
@@ -2574,6 +2466,186 @@ static void coop_partner_anim_browser(void)
     PrintText8x8(8, 8, 0, 0);
 }
 
+// ----------------------------------------------------------------------------
+// Partner guns (co-op). She plays the playable characters' weapon sets on her
+// skeleton (see coop_anim_set_pair): W32 for the Beretta, W33 for the shotgun
+// (her own files - W13 is Jill's, laid out the same),
+// rows as docs/COOP_ANIMATIONS.md lists them - 5 raise; per aim direction
+// (ahead / up / down) fire 6 / 9 / 12 and the still aim 7 / 10 / 13; 8 and 11
+// move from ahead to up and to down (played backwards to come back).
+//
+// The direction follows player_behavior_12_gun_aim: stick forward (d-pad 0x01)
+// aims up = weaponAimFlags 0x80, back (0x04) aims down = 0x20, neither ahead =
+// 0x40 - the bits apply_weapon_damage reads. The flashes, report and damage are
+// the player's per-weapon tables (player_behavior_14_autoaim_fire), keyed on
+// the same frames of the same animations, at her hand (joint 14).
+// ----------------------------------------------------------------------------
+enum { P2_AIM_NONE, P2_AIM_RAISE, P2_AIM_HOLD, P2_AIM_TURN, P2_AIM_FIRE };
+enum { P2_DIR_AHEAD, P2_DIR_UP, P2_DIR_DOWN };
+static const unsigned char kAimBits[3]   = { 0x40, 0x80, 0x20 };
+static const unsigned char kFireAnim[3]  = { 6, 9, 12 };
+static const unsigned char kStillAnim[3] = { 7, 10, 13 };
+#define P2_ANIM_RAISE 5
+
+static int  s_aim = P2_AIM_NONE;
+static int  s_aimDir = P2_DIR_AHEAD;
+static int  s_aimTurnTo = P2_DIR_AHEAD;
+static int  s_aimLastFrame = 0;
+static bool s_aimReverse = false;
+static unsigned int s_aimHeader = 0, s_aimBase = 0;   // the weapon set in use
+
+static int coop_weapon_set(int gunId, unsigned int* header, unsigned int* base)
+{
+    if (gunId == ITEM_BERETTA) return coop_anim_set_pair(1, header, base);   // W32
+    if (gunId == ITEM_SHOTGUN) return coop_anim_set_pair(4, header, base);   // W33
+    return 0;
+}
+
+static void coop_aim_play(unsigned char anim, bool reverse)
+{
+    ENTITY->animationId        = anim;
+    ENTITY->animation_frame_id = 0;
+    ENTITY->timing_control     = 0;
+    ENTITY->blend_counter      = 3;
+    s_aimReverse   = reverse;
+    s_aimLastFrame = 0;
+}
+
+static void coop_partner_fire_frame(int weaponIdx)
+{
+    unsigned char frame = ENTITY->animation_frame_id;
+    void* hand = (void*)((char*)ENTITY->jointsStructs + 0x70C);   // joint 14's world matrix
+    int pos = (int)ENTITY->scaMatrixData.localMatrix.t;
+
+    const WeaponFxEntry* bb = &g_weaponFireBillboard[weaponIdx];
+    if (bb->b0 == frame) {
+        g_playerPosScratch.x = bb->x;
+        g_playerPosScratch.y = bb->y;
+        g_playerPosScratch.z = bb->z;
+        Effect_CreateBillboard(bb->type, bb->data, 0, hand, &g_playerPosScratch, 0);
+    }
+
+    const WeaponFireData* fd = &g_weaponFireData[weaponIdx];
+    if (fd->fireFrame == frame) {
+        Coop_PartnerApplyWeaponDamage(ENTITY, fd->weaponId, kAimBits[s_aimDir]);
+        Coop_PlayP2WeaponSnd(fd->sfx1, pos);
+        Coop_PlayP2WeaponSnd(fd->sfx2, pos);
+    }
+
+    const WeaponFxEntry* mf = &g_weaponMuzzleFlash[weaponIdx];
+    if (mf->b0 == frame) {
+        g_playerPosScratch.x = mf->x;
+        g_playerPosScratch.y = (1 - weaponIdx) * 300 + mf->y;   // (id & 1) = 1 for her
+        g_playerPosScratch.z = mf->z;
+        int yaw = weaponIdx - 8;
+        yaw += ((unsigned short)yaw < 1) ? 1 : 0;
+        yaw -= 1;
+        int fx = (int)(char)Effect_CreateBillboard(mf->type, mf->data, (short)(yaw & 0x555),
+                                                   &ENTITY->scaMatrixData.localMatrix,
+                                                   &g_playerPosScratch, 0);
+        if (fx >= 0 && fx < MAX_EFFECTS) {
+            g_effectPool[fx].animHeader[3] = (unsigned char)weaponIdx;
+        }
+    }
+
+    const WeaponFxEntry* f2 = &g_weaponFlash2[weaponIdx];
+    if (f2->b0 == frame) {
+        g_playerPosScratch.x = f2->x;
+        g_playerPosScratch.y = f2->y;
+        g_playerPosScratch.z = f2->z;
+        int fx = (int)(char)Effect_CreateBillboard(f2->type, f2->data, 0, hand,
+                                                   &g_playerPosScratch, 0);
+        if (fx >= 0 && fx < MAX_EFFECTS) {
+            g_effectPool[fx].animHeader[0] = (unsigned char)weaponIdx;
+        }
+    }
+
+    // The shotgun spreads: two more hits, frames 7 and 9.
+    if (weaponIdx == 1 && (frame == 7 || frame == 9)) {
+        Coop_PartnerApplyWeaponDamage(ENTITY, fd->weaponId, kAimBits[s_aimDir]);
+    }
+}
+
+// Aim (0x100 held) and fire (action). Returns true while she is aiming, which
+// holds her feet still; the controller's tail then steps s_aimHeader/s_aimBase.
+static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
+{
+    int gun = Coop_PartnerGunId();
+    if ((held & 0x100) == 0 || gun == 0 || !coop_weapon_set(gun, &s_aimHeader, &s_aimBase)) {
+        s_aim = P2_AIM_NONE;
+        return false;
+    }
+
+    int want = ((held & 1) != 0) ? P2_DIR_UP : ((held & 4) != 0) ? P2_DIR_DOWN : P2_DIR_AHEAD;
+
+    // Done once the animation reaches its last frame (or wrapped since).
+    const unsigned short* slots = (const unsigned short*)s_aimBase;
+    int frame = ENTITY->animation_frame_id;
+    int frameCount = (int)slots[ENTITY->animationId * 2];
+    bool animDone = frame < s_aimLastFrame || frame >= frameCount - 1;
+    s_aimLastFrame = frame;
+
+    switch (s_aim) {
+    case P2_AIM_NONE:
+        s_aimDir = P2_DIR_AHEAD;
+        coop_aim_play(P2_ANIM_RAISE, false);
+        ENTITY->blend_counter = 7;              // from her walk/idle pose
+        s_aim = P2_AIM_RAISE;
+        break;
+
+    case P2_AIM_RAISE:
+        if (animDone) {
+            coop_aim_play(kStillAnim[s_aimDir], false);
+            s_aim = P2_AIM_HOLD;
+        }
+        break;
+
+    case P2_AIM_HOLD:
+        if ((pressed & 0x80) != 0) {
+            if (Coop_PartnerUseAmmo()) {
+                coop_aim_play(kFireAnim[s_aimDir], false);
+                s_aim = P2_AIM_FIRE;
+                break;
+            }
+            Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);   // empty: click
+        }
+        if (want != s_aimDir) {
+            // One step at a time through "ahead": 8 / 11 forwards to go up /
+            // down, backwards to come back.
+            if (s_aimDir == P2_DIR_AHEAD) {
+                s_aimTurnTo = want;
+                coop_aim_play(want == P2_DIR_UP ? 8 : 11, false);
+            } else {
+                s_aimTurnTo = P2_DIR_AHEAD;
+                coop_aim_play(s_aimDir == P2_DIR_UP ? 8 : 11, true);
+            }
+            s_aim = P2_AIM_TURN;
+        }
+        break;
+
+    case P2_AIM_TURN:
+        if (animDone) {
+            s_aimDir = s_aimTurnTo;
+            coop_aim_play(kStillAnim[s_aimDir], false);
+            s_aim = P2_AIM_HOLD;
+        }
+        break;
+
+    case P2_AIM_FIRE:
+        coop_partner_fire_frame(gun - 2);
+        if (animDone) {
+            coop_aim_play(kStillAnim[s_aimDir], false);
+            s_aim = P2_AIM_HOLD;
+            if (Coop_PartnerAmmo() == 0) {
+                // The shot that emptied it clicks as it settles, as the player's does.
+                Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);
+            }
+        }
+        break;
+    }
+    return true;
+}
+
 void npc_coop_partner_control(void)
 {
     unsigned int held = g_CoopDpadHeld;
@@ -2615,7 +2687,7 @@ void npc_coop_partner_control(void)
         // clear - side by side first, then the diagonals, behind, in front.
         // Forward is +X rotated by the angle, as npc_walk_advance_xz moves.
         g_coopPartnerPlaced = 1;
-        s_p2Aim = P2_AIM_NONE;
+        s_aim = P2_AIM_NONE;
         static const short kSpots[8][2] = {   // { forward, sideways }
             { 0, 900 }, { 0, -900 }, { -600, 700 }, { -600, -700 },
             { 600, 700 }, { 600, -700 }, { -900, 0 }, { 900, 0 },
@@ -2660,7 +2732,8 @@ void npc_coop_partner_control(void)
         pressed &= ~0x80u;
     }
 
-    int turn = aiming ? 0x28 : 0x60;
+    // Aiming: the player's aim turn, (id & 1) * -0x10 + 0x48 = 0x38 for her.
+    int turn = aiming ? 0x38 : 0x60;
     if ((held & 1) != 0) {
         turn = ((held & 0x200) != 0) ? 0x30 : 0x28;
     } else if ((held & 4) != 0) {
@@ -2698,8 +2771,9 @@ void npc_coop_partner_control(void)
     // data and the collision against the player and the room.
     bool backing = (held & 1) == 0 && (held & 4) != 0;
     ENTITY->attacking_direction = (unsigned char)Joint_move(
-        backing ? 1 : 0,
-        ENTITY->animHeader, ENTITY->animBase,
+        aiming ? (s_aimReverse ? 1 : 0) : (backing ? 1 : 0),
+        aiming ? s_aimHeader : ENTITY->animHeader,
+        aiming ? s_aimBase : ENTITY->animBase,
         (short)(0x1000 / (ENTITY->blend_counter + 1)));
     npc_walk_footstep_sound();
     SetEntityScaHitData(ENTITY);
@@ -2734,9 +2808,10 @@ void npc_coop_partner_control(void)
     // player, she keeps her head still.
     ENTITY->lookAtFlags = 0;
 
-    // The gun is in her hand while she has one equipped.
+    // The gun she has equipped is in her hand.
     if (ENTITY->behavior_flags != 0) {
-        coop_partner_show_gun(Coop_PartnerHasHandgun() != 0);
+        int gun = Coop_PartnerGunId();
+        coop_partner_show_gun(gun == ITEM_BERETTA ? 1 : gun == ITEM_SHOTGUN ? 2 : 0);
     }
 }
 

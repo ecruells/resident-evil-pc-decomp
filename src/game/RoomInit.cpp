@@ -644,6 +644,9 @@ void room_set(void)
         } while (i < (unsigned int)g_enemy_count);
     }
 
+    // Co-op (port addition): player 2's weapon models, after the room's.
+    Coop_LoadPartnerWeaponModels();
+
     // 0x00477c89: Setup texture bank data
     SetupTextureBankData((short)g_TextureCurrentPage);
     // 0x00477ca0: Save current texture bank ID for cutscene restoration

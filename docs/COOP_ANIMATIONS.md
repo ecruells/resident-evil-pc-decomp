@@ -90,7 +90,12 @@ The same rows in every weapon file; confirmed with the animation browser.
 
 Playable Rebecca's weapon table (`g_weaponPathTable`, Rebecca block) uses her
 own `W30` (no weapon) and `W32` (Beretta) and Jill's files for the rest
-(`W11` knife, `W13` shotgun, ...).
+(`W11` knife, `W13` shotgun, ...). But `W31` (knife, 15 animations), `W33`
+(shotgun, 14 - the W13 layout without the reload) and `W34` / `W35` also exist
+for her, unreferenced. Her sheet (CHAR13's TIM, the same image as her NPC
+EM1023's) has no shotgun art, though: `W33`'s mesh drawn from it is a solid red
+slab, as is Jill's `W13` drawn from it. The co-op partner holds Jill's shotgun
+(`W13` on CHAR11's TIM) and plays `W33`'s animations.
 
 ## Rebecca's NPC model (EM1023)
 
