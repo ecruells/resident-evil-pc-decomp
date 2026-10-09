@@ -1,5 +1,6 @@
 // PlayerAnimations.cpp - Player animation state machines (decompiled from Ghidra)
 #include "../Globals.h"
+#include "Coop.h"
 #include "../marni/MarniSystem.h"
 #include <cstdio>
 #include <cstdlib>
@@ -6752,6 +6753,10 @@ int door_try_enter(unsigned char* entry)
 
     // 0x0041b441: unlocked outright, or its lock flag is already raised.
     if ((lock & 0x80) == 0 || Flg_ck((int)g_LocksFlags, lock & 0x3f) != 0) {
+        // Co-op (port addition): the partner has to be at the door too.
+        if (Coop_PartnerNearDoor((const unsigned short*)record) == 0) {
+            return 0;
+        }
         door_begin_transition(record);
         return 0;
     }

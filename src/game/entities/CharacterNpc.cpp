@@ -2316,10 +2316,39 @@ void npc_coop_partner_control(void)
 
     if (!g_coopPartnerPlaced) {
         // Stand beside player 1 on the first frame (the player's position is not
-        // final yet when the partner is spawned during room_set).
+        // final yet when the partner is spawned during room_set): the first spot
+        // around him, relative to his facing, that the room's boundaries leave
+        // clear - side by side first, then the diagonals, behind, in front.
+        // Forward is +X rotated by the angle, as npc_walk_advance_xz moves.
         g_coopPartnerPlaced = 1;
-        ENTITY->scaMatrixData.localMatrix.t[0] = g_playerEntity.scaMatrixData.localMatrix.t[0] + 600;
-        ENTITY->scaMatrixData.localMatrix.t[2] = g_playerEntity.scaMatrixData.localMatrix.t[2];
+        static const short kSpots[8][2] = {   // { forward, sideways }
+            { 0, 900 }, { 0, -900 }, { -600, 700 }, { -600, -700 },
+            { 600, 700 }, { 600, -700 }, { -900, 0 }, { 900, 0 },
+        };
+        int baseX = g_playerEntity.scaMatrixData.localMatrix.t[0];
+        int baseZ = g_playerEntity.scaMatrixData.localMatrix.t[2];
+        int spotX = baseX, spotZ = baseZ;
+        for (int i = 0; i < 8; i++) {
+            SVECTOR off, rot;
+            off.x = kSpots[i][0];
+            off.y = 0;
+            off.z = kSpots[i][1];
+            off.pad = 0;
+            MovePlayerXZ((int)(unsigned short)g_playerEntity.directionAngle, &off, &rot);
+            VECTOR probe;
+            probe.x = baseX + rot.x;
+            probe.y = 0;
+            probe.z = baseZ + rot.z;
+            ENTITY->position.x = (short)probe.x;
+            ENTITY->position.z = (short)probe.z;
+            if (check_room_collision(&probe, *(short*)(ENTITY->Sca_info + 10)) == 0) {
+                spotX = baseX + rot.x;
+                spotZ = baseZ + rot.z;
+                break;
+            }
+        }
+        ENTITY->scaMatrixData.localMatrix.t[0] = spotX;
+        ENTITY->scaMatrixData.localMatrix.t[2] = spotZ;
         ENTITY->angle = g_playerEntity.directionAngle;
         ENTITY->position.x = (short)ENTITY->scaMatrixData.localMatrix.t[0];
         ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];

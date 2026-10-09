@@ -60,7 +60,8 @@ void CoopPad_Update(void)
 
 // Spawns the partner the same way cmd_enemy_set (0x004617d0) spawns a script
 // actor: fill a free g_EnemiesList slot and bump g_enemy_count, and room_set's
-// model loop does the rest. First version: Mansion 1F main hall and dining room only.
+// model loop does the rest. Runs on every room load, so she follows player 1
+// through doors; she is placed beside him on her first control frame.
 void Coop_SpawnPartner(void)
 {
 	g_coopPartner = nullptr;
@@ -69,13 +70,27 @@ void Coop_SpawnPartner(void)
 	if (!g_coopEnabled) {
 		return;
 	}
-	if (g_stageId != STAGE_MANSION_1F ||
-	    (g_roomId != ROOM_MAIN_HALL && g_roomId != ROOM_DINING_ROOM)) {
+	// Only while player 1 is Chris or Jill (Rebecca is playable herself for a
+	// stretch of Chris's game), and never during the attract-mode demo.
+	if ((g_playerEntity.id & 3) >= 2 || (g_main_state_flags2 & MSF2_ATTRACT_DEMO) != 0) {
 		return;
 	}
 
-	int slot = -1;
+	// Chris is paired with Rebecca, Jill with Barry.
+	unsigned char partnerId = ((g_playerEntity.id & 1) != 0) ? NPC_BARRY : NPC_REBECCA;
+
+	// A room script that already put this character in the room wins.
 	for (int i = 0; i < 30; i++) {
+		if ((g_EnemiesList[i].status_flags & 1) != 0 && g_EnemiesList[i].id == partnerId) {
+			dbg_printf("[COOP] room already has character 0x%02X, no partner\n", partnerId);
+			return;
+		}
+	}
+
+	// Highest free slot: scripts fill the low ones, and an event that runs later
+	// may still cmd_enemy_set into any of them.
+	int slot = -1;
+	for (int i = 29; i >= 0; i--) {
 		if ((g_EnemiesList[i].status_flags & 1) == 0) {
 			slot = i;
 			break;
@@ -85,9 +100,6 @@ void Coop_SpawnPartner(void)
 		dbg_printf("[COOP] no free enemy slot for the partner\n");
 		return;
 	}
-
-	// Chris is paired with Rebecca, Jill with Barry.
-	unsigned char partnerId = ((g_playerEntity.id & 1) != 0) ? NPC_BARRY : NPC_REBECCA;
 
 	Entity* e = &g_EnemiesList[slot];
 	memset(e, 0, sizeof(*e));
@@ -121,7 +133,24 @@ void Coop_SpawnPartner(void)
 	g_enemy_count++;
 
 	g_coopPartner = e;
-	dbg_printf("[COOP] partner id 0x%02X spawned in enemy slot %d\n", partnerId, slot);
+	dbg_printf("[COOP] partner id 0x%02X spawned in enemy slot %d (stage %d room 0x%02X)\n",
+	           partnerId, slot, (int)g_stageId, (int)g_roomId);
+}
+
+#define COOP_DOOR_MARGIN 3000
+
+int Coop_PartnerNearDoor(const unsigned short* zone)
+{
+	if (g_coopPartner == nullptr) {
+		return 1;
+	}
+	int x = g_coopPartner->scaMatrixData.localMatrix.t[0];
+	int z = g_coopPartner->scaMatrixData.localMatrix.t[2];
+	int x0 = (int)zone[0] - COOP_DOOR_MARGIN;
+	int z0 = (int)zone[1] - COOP_DOOR_MARGIN;
+	int x1 = (int)zone[0] + (int)zone[2] + COOP_DOOR_MARGIN;
+	int z1 = (int)zone[1] + (int)zone[3] + COOP_DOOR_MARGIN;
+	return (x >= x0 && x <= x1 && z >= z0 && z <= z1) ? 1 : 0;
 }
 
 // Scenario flags 2 (bank 1) bit numbers, read with tools/mine_room_scd.py and

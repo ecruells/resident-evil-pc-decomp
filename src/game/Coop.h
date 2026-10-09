@@ -32,6 +32,11 @@ extern int     g_coopPartnerPlaced;  // 0 until the first control frame position
 // loop. Resets g_coopPartner and spawns her if this room supports it.
 void Coop_SpawnPartner(void);
 
+// Doors need both players: returns 1 when there is no partner in the room, or
+// when she stands inside the door's action zone (record[0..3] = x, z, width,
+// depth, as cmd_door_set stores it) grown by a margin on every side.
+int Coop_PartnerNearDoor(const unsigned short* zone);
+
 // CharacterNpc.cpp - runs in place of the NPC dispatch for g_coopPartner.
 void npc_coop_partner_control(void);
 
