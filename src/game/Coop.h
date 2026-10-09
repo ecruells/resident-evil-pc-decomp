@@ -82,6 +82,13 @@ void Coop_BeginP2Action(void);
 // that are his to find: returns 0 (and shows "Maybe Chris should check it
 // out.") when the room action entry is one of them.
 int  Coop_PartnerMayTake(const unsigned char* entry);
+// Typewriter: the save itself always runs as player 1 (it records the main
+// character), but the ink ribbon can be player 2's. coop_partner_try_action
+// starts the typewriter with her ribbon (Coop_SetSaveRibbonFromP2); the save
+// screen then spends it from her slots (Coop_UseSaveRibbon returns 1 when it
+// did). check_typewriter clears the claim when player 1 starts one.
+void Coop_SetSaveRibbonFromP2(int fromP2);
+int  Coop_UseSaveRibbon(void);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.

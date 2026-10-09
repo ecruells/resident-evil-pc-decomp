@@ -436,3 +436,30 @@ int Coop_PartnerMayTake(const unsigned char* entry)
 	}
 	return 1;
 }
+
+static int s_saveRibbonFromP2 = 0;
+
+void Coop_SetSaveRibbonFromP2(int fromP2)
+{
+	s_saveRibbonFromP2 = fromP2;
+}
+
+int Coop_UseSaveRibbon(void)
+{
+	if (!s_saveRibbonFromP2) {
+		return 0;
+	}
+	s_saveRibbonFromP2 = 0;
+
+	// use_room_action_item works on the active slots: point them at hers for
+	// the one call, then back.
+	void* p1Slots = g_ItemSlotsPointer;
+	g_ItemSlotsPointer = g_RebeccaItemSlots;
+	LoadHeldItemsImages();
+	g_selectedItemId = ITEM_INK_RIBBONS;
+	use_room_action_item();
+	g_ItemSlotsPointer = p1Slots;
+	LoadHeldItemsImages();
+	dbg_printf("[COOP] save paid with player 2's ink ribbon\n");
+	return 1;
+}

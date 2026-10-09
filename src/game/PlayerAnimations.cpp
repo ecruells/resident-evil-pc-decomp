@@ -7229,6 +7229,7 @@ int check_typewriter(unsigned char* entry)
         ((g_main_state_flags & MSF_MENU_PENDING) == 0) &&
         ((unsigned short)g_message_flags & 0x40) != 0) {
         int ribbonSlot = get_item_slot(ITEM_INK_RIBBONS);
+        Coop_SetSaveRibbonFromP2(0);   // co-op: player 1's own ribbon
         if (ribbonSlot >= 0) {
             g_pRoomActionEntry = entry;
             *(unsigned short*)(entry + 2) = (unsigned short)ribbonSlot;
@@ -7336,6 +7337,26 @@ void coop_partner_try_action(Entity* partner)
         }
 
         dbg_printf("[COOP] player 2 action: room entry type %d at (%d,%d)\n", entry[0], zone[0], zone[1]);
+
+        if (entry[0] == 0x10) {
+            // Typewriter: the save runs as player 1 (it records the main
+            // character). With her ink ribbon, start it as check_typewriter
+            // does and let the save screen spend hers; without, it is his.
+            if (Coop_PartnerHasItem(ITEM_INK_RIBBONS) &&
+                g_typewriter_state == 0 &&
+                (g_main_state_flags & MSF_MENU_PENDING) == 0 &&
+                ((unsigned short)g_message_flags & 0x40) != 0) {
+                g_pRoomActionEntry = entry;
+                *(unsigned short*)(entry + 2) = 0;
+                g_typewriter_state = 1;
+                g_message_flags = (unsigned short)g_message_flags & 0xffba;
+                Coop_SetSaveRibbonFromP2(1);
+            } else {
+                check_typewriter(entry);
+            }
+            return;
+        }
+
         Coop_BeginP2Action();
         // Some items are player 1's to pick up.
         if (Coop_PartnerMayTake(entry) == 0) {

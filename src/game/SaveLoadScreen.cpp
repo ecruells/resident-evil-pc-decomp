@@ -7,6 +7,7 @@
 //               rearrange_item_slots(0x00451510), cut_set(0x004628c0),
 //               StMask(0x00497690), Task_sleep(0x004201e0), Task_chain(0x00420210)
 #include "../Globals.h"
+#include "Coop.h"
 #include "../platform/platform.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
@@ -1103,8 +1104,11 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             if ((useInkRibbon != 0) &&
                 (((g_playerEntityPointer.id & 3) != 1) ||
                  (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) != 0))) {
-                g_selectedItemId = ITEM_INK_RIBBONS;
-                use_room_action_item();
+                // Co-op (port addition): the ribbon may be player 2's.
+                if (!Coop_UseSaveRibbon()) {
+                    g_selectedItemId = ITEM_INK_RIBBONS;
+                    use_room_action_item();
+                }
             }
 
             // Snapshot the current player state into the save block
