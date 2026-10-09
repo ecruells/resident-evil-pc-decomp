@@ -5,6 +5,7 @@
 #include "../Globals.h"
 #include "../DebugPrint.h"
 #include "../platform/platform.h"
+#include "../game/Coop.h"
 #include "AssetPath.h"   // SetAssetBase / SetSaveRoot / SetAssetVersion
 
 #include <stdio.h>
@@ -394,6 +395,11 @@ void ConfigFile_EnsureExists(void)
         "; cutscenes unskippable; set this to 1 to make those skippable too.\n"
         "SkipUnskippableFmv=%d\n"
         "\n"
+        "[Coop]\n"
+        "; 1 = two-player co-op mod: keyboard is player 1, the first pad is\n"
+        "; player 2. 0 = original single-player input.\n"
+        "Enable=%d\n"
+        "\n"
         "[Debug]\n"
         "; Master switch for the port-added debug features: F1 debug menu, F6\n"
         "; texture viewer, F8 collision overlay. 0 = off, 1 = on.\n"
@@ -415,6 +421,7 @@ void ConfigFile_EnsureExists(void)
         g_bPs1EndingCredits ? 1 : 0,
         g_bPs1FmvSubtitles ? 1 : 0,
         g_bSkipUnskippableFmv ? 1 : 0,
+        g_coopEnabled ? 1 : 0,
 #ifdef _DEBUG
         1,
 #else
@@ -492,6 +499,8 @@ BOOL ConfigFile_Load(void)
                                      0
 #endif
                                      );
+
+    g_coopEnabled = ReadInt(path, "Coop", "Enable", 0) ? 1 : 0;
 
     // Content mode. [Game] Mode is the single switch: it sets g_GameMode AND
     // the asset overlay folder.

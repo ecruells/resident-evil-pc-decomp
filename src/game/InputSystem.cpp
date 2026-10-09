@@ -5,6 +5,7 @@
 #include "../platform/platform.h"
 #include "../marni/MarniInput.h"
 #include "../marni/MarniXInput.h"
+#include "Coop.h"
 #include <cstring>
 
 // ============================================================================
@@ -142,6 +143,18 @@ DWORD ReadPadBoth(void)
 
 	if (g_pMasterInputState.frameFlag != 0) {
 		g_PadBtnWord = JoyToPSX(g_pMasterInputState.keyboardPrev, 0);
+	}
+	if (g_coopEnabled) {
+		// Co-op (port addition): keyboard is player 1 only, the pad is player 2.
+		g_CoopPadBtnWord = 0;
+		if ((1 < g_NumControllers) && (g_pMasterInputState.joysticks[0].enabled != 0)) {
+			g_CoopPadBtnWord = JoyToPSX(g_pMasterInputState.joysticks[0].currPress, 1);
+		}
+		if (g_DisablePad != 0) {
+			g_CoopPadBtnWord = 0;
+			return 0;
+		}
+		return g_PadBtnWord;
 	}
 	if ((1 < g_NumControllers) && (g_pMasterInputState.joysticks[0].enabled != 0)) {
 		tmp = JoyToPSX(g_pMasterInputState.joysticks[0].currPress, 1);
@@ -336,6 +349,13 @@ DWORD PlayerPad_Update(void)
 		g_PlayerPadHeld = 0;
 		g_PlayerDpadHeld = 0;
 		g_PlayerDpadPressed = 0;
+	}
+
+	CoopPad_Update();
+	if (g_coopEnabled && g_debugMenuOpen != 0) {
+		g_CoopPadPressed = 0;
+		g_CoopDpadHeld = 0;
+		g_CoopDpadPressed = 0;
 	}
 
 	return g_button_pressed_id;

@@ -57,6 +57,7 @@ set(RE1_SOURCES
     src/game/Ps1EndingCredits.cpp
     src/game/Ps1FmvSubtitles.cpp
     src/game/EntityModelLoader.cpp
+    src/game/Coop.cpp
     src/game/FadeSprite.cpp
     src/game/FileLoader.cpp
     src/game/GameInit.cpp

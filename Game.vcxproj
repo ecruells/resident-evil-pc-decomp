@@ -196,6 +196,7 @@
     <ClCompile Include="src\game\SpriteRenderer.cpp" />
     <ClCompile Include="src\marni\Marni3DObject.cpp" />
     <ClCompile Include="src\game\InputSystem.cpp" />
+    <ClCompile Include="src\game\Coop.cpp" />
     <ClCompile Include="src\marni\MarniInput.cpp" />
     <ClCompile Include="src\marni\MarniXInput.cpp" />
     <ClCompile Include="src\game\SoundSystem.cpp" />
