@@ -2308,6 +2308,12 @@ void npc_coop_partner_control(void)
 {
     unsigned int held = g_CoopDpadHeld;
 
+    // Locked exactly when the player is: game_loop masks the player's d-pad when
+    // bit 0x100 of g_message_flags is clear (cutscene / scripted event running).
+    if ((g_message_flags & 0x100) == 0) {
+        held = 0;
+    }
+
     if (!g_coopPartnerPlaced) {
         // Stand beside player 1 on the first frame (the player's position is not
         // final yet when the partner is spawned during room_set).
@@ -2319,19 +2325,41 @@ void npc_coop_partner_control(void)
         ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
     }
 
+    // Turn rate per frame, as the player's own behaviours apply it
+    // (PlayerAnimations.cpp player_ctrl_frame2): 0x60 turning on the spot
+    // (behaviours 4/5), 0x28 walking (2/3), 0x30 running (the 0x200 steering).
+    int turn = 0x60;
+    if ((held & 1) != 0) {
+        turn = ((held & 0x200) != 0) ? 0x30 : 0x28;
+    }
     unsigned int a = (unsigned int)(unsigned short)ENTITY->angle;
-    a = (a + (held & 2) * 0x18) & 0xfff;
-    a = (a + (unsigned int)((int)(held & 8) * -6)) & 0xfff;
-    ENTITY->angle = (short)a;
+    if ((held & 2) != 0) a += turn;
+    if ((held & 8) != 0) a -= turn;
+    ENTITY->angle = (short)(a & 0xfff);
 
     if ((held & 1) != 0) {
         bool run = (held & 0x200) != 0;
         coop_partner_set_anim(run ? 8 : 7);
         entity_apply_walk_speed(run ? 0xd2 : 0x5d);
         npc_walk_advance_xz((short)ENTITY->move_speed_current);
+    } else if ((held & 0xA) != 0) {
+        // Turning on the spot plays the walk cycle without moving, like the
+        // player's behaviours 4/5 (player_ctrl_behavior_back).
+        coop_partner_set_anim(7);
     } else {
         coop_partner_set_anim(0);
     }
+
+    // Same tail as npc_state9_pathfind: step the animation (the return value,
+    // "animation done", goes to attacking_direction), footsteps, then the hit
+    // data and the collision against the player and the room.
+    ENTITY->attacking_direction = (unsigned char)Joint_move(
+        ENTITY->dir_control_flags & 1,
+        ENTITY->animHeader, ENTITY->animBase,
+        (short)(0x1000 / (ENTITY->blend_counter + 1)));
+    npc_walk_footstep_sound();
+    SetEntityScaHitData(ENTITY);
+    ResolveEntityScaCollision((Entity*)&g_playerEntity, ENTITY);
 
     // Keep her inside the room: the same boundary push-out the player gets in
     // update_player_anim. The rollback point it uses is entity+0x6C, so mirror
@@ -2341,7 +2369,9 @@ void npc_coop_partner_control(void)
     ENTITY->position.x = (short)ENTITY->scaMatrixData.localMatrix.t[0];
     ENTITY->position.z = (short)ENTITY->scaMatrixData.localMatrix.t[2];
 
-    FUN_00472330(0);
+    // No head wandering (FUN_00472330 is the NPCs' idle look-around): like the
+    // player, she keeps her head still.
+    ENTITY->lookAtFlags = 0;
 }
 
 // ============================================================================
