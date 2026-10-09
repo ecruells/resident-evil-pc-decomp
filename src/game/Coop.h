@@ -102,6 +102,8 @@ void Coop_ReadSaveBlock(const unsigned char* block);
 int  Coop_PartnerHasHandgun(void);
 // Spend one round from her equipped weapon's slot; 0 when it is empty.
 int  Coop_PartnerUseAmmo(void);
+// Rounds left in her equipped weapon's slot.
+int  Coop_PartnerAmmo(void);
 // apply_weapon_damage reads the shooter from g_playerEntity (position, facing,
 // aim bits in flags, id for the range table). Lend it hers for one shot.
 unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId);

@@ -2430,6 +2430,11 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
             s_p2Aim = P2_AIM_FIRE;
             s_lastFrame = 0;
         } else {
+            if ((pressed & 0x80) != 0) {
+                // Empty: the click, weapon sound 9, as the player's aim hold
+                // plays it (player_behavior_13 / autoaim state 2).
+                Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);
+            }
             coop_partner_hold_aim();
         }
         break;
@@ -2438,6 +2443,10 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
         if (animDone) {
             s_p2Aim = P2_AIM_HOLD;
             coop_partner_hold_aim();
+            if (Coop_PartnerAmmo() == 0) {
+                // The shot that emptied it clicks as it settles, as the player's does.
+                Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);
+            }
         }
         break;
     }

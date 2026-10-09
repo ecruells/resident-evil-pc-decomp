@@ -531,6 +531,15 @@ int Coop_PartnerHasHandgun(void)
 	return g_coopP2.valid && g_coopP2.equippedWeaponId == ITEM_BERETTA;
 }
 
+int Coop_PartnerAmmo(void)
+{
+	unsigned char slot = g_coopP2.equippedItemId;
+	if (slot == 0 || slot > 6) {
+		return 0;
+	}
+	return g_RebeccaItemSlots[slot - 1].qty;
+}
+
 int Coop_PartnerUseAmmo(void)
 {
 	unsigned char slot = g_coopP2.equippedItemId;
