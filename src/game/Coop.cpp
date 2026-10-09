@@ -8,6 +8,7 @@ extern void Flg_on(int baseAddr, unsigned int bitIndex);   // CmdFunctions.cpp -
 
 int   g_coopEnabled = 0;
 int   g_coopSharedInput = 0;
+int   g_coopAnimBrowser = 0;
 int   g_coopSkipOpening = 0;
 
 DWORD g_CoopPadBtnWord = 0;
@@ -121,7 +122,10 @@ void Coop_SpawnPartner(void)
 	memset(e, 0, sizeof(*e));
 
 	e->status_flags = 1;
-	e->behavior_flags = 0;
+	// behavior_flags picks the weapon model her init loads into her hand
+	// (LoadCharacterWeaponTmd): 2 = the handgun, whose firing effects are the
+	// NPC tables' weapon index 0.
+	e->behavior_flags = Coop_PartnerHasHandgun() ? 2 : 0;
 	e->scaMatrixData.localMatrix.t[0] = (unsigned int)(int)g_playerEntity.scaMatrixData.localMatrix.t[0];
 	e->scaMatrixData.localMatrix.t[1] = 0;
 	e->scaMatrixData.localMatrix.t[2] = (unsigned int)(int)g_playerEntity.scaMatrixData.localMatrix.t[2];
@@ -498,4 +502,56 @@ void Coop_ReadSaveBlock(const unsigned char* block)
 	g_coopP2.equippedWeaponId = block[8];
 	dbg_printf("[COOP] save: player 2 health %d/%d, equipped item %d\n",
 	           g_coopP2.health, g_coopP2.maxHealth, g_coopP2.equippedItemId);
+}
+
+// ============================================================================
+// Partner combat (handgun prototype)
+// ============================================================================
+extern unsigned char apply_weapon_damage(unsigned int weapon_id);   // WeaponDamage.cpp 0x0043c020
+
+int Coop_PartnerHasHandgun(void)
+{
+	return g_coopP2.valid && g_coopP2.equippedWeaponId == ITEM_BERETTA;
+}
+
+int Coop_PartnerUseAmmo(void)
+{
+	unsigned char slot = g_coopP2.equippedItemId;
+	if (slot == 0 || slot > 6) {
+		return 0;
+	}
+	ItemSlot* s = &g_RebeccaItemSlots[slot - 1];
+	if (s->qty == 0) {
+		return 0;
+	}
+	s->qty--;
+	return 1;
+}
+
+unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId)
+{
+	int  t0 = g_playerEntity.scaMatrixData.localMatrix.t[0];
+	int  t1 = g_playerEntity.scaMatrixData.localMatrix.t[1];
+	int  t2 = g_playerEntity.scaMatrixData.localMatrix.t[2];
+	short angle = g_playerEntity.directionAngle;
+	unsigned char flags = g_playerEntity.flags;
+	unsigned char id = g_playerEntity.id;
+
+	g_playerEntity.scaMatrixData.localMatrix.t[0] = partner->scaMatrixData.localMatrix.t[0];
+	g_playerEntity.scaMatrixData.localMatrix.t[1] = partner->scaMatrixData.localMatrix.t[1];
+	g_playerEntity.scaMatrixData.localMatrix.t[2] = partner->scaMatrixData.localMatrix.t[2];
+	g_playerEntity.directionAngle = partner->angle;
+	g_playerEntity.flags = (unsigned char)((flags & ~0xE0) | 0x40);   // aiming straight ahead
+	g_playerEntity.id = 3;                                             // Rebecca's weapon ranges
+
+	unsigned char hit = apply_weapon_damage(weaponId);
+
+	g_playerEntity.scaMatrixData.localMatrix.t[0] = t0;
+	g_playerEntity.scaMatrixData.localMatrix.t[1] = t1;
+	g_playerEntity.scaMatrixData.localMatrix.t[2] = t2;
+	g_playerEntity.directionAngle = angle;
+	g_playerEntity.flags = flags;
+	g_playerEntity.id = id;
+	dbg_printf("[COOP] player 2 shot: result %d\n", hit);
+	return hit;
 }

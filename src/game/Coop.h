@@ -7,6 +7,7 @@
 #include "../Globals.h"
 
 extern int   g_coopEnabled;          // [Coop] Enable - 0 = original behaviour
+extern int   g_coopAnimBrowser;      // [Coop] AnimBrowser - dev tool: P2's pad steps her animations
 extern int   g_coopSharedInput;      // >0 while both pads drive player 1's input (save screen)
 extern int   g_coopSkipOpening;      // [Coop] SkipOpening - new games start in the dining room, opening done
 
@@ -95,6 +96,14 @@ int  Coop_UseSaveRibbon(void);
 // off) resets her status to a new game's.
 void Coop_WriteSaveBlock(unsigned char* block);
 void Coop_ReadSaveBlock(const unsigned char* block);
+// ---- Partner combat (handgun prototype) ----
+// Is a handgun equipped in her slots?
+int  Coop_PartnerHasHandgun(void);
+// Spend one round from her equipped weapon's slot; 0 when it is empty.
+int  Coop_PartnerUseAmmo(void);
+// apply_weapon_damage reads the shooter from g_playerEntity (position, facing,
+// aim bits in flags, id for the range table). Lend it hers for one shot.
+unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weaponId);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.

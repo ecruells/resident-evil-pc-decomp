@@ -2304,6 +2304,163 @@ static void coop_partner_set_anim(unsigned char anim)
     }
 }
 
+// ----------------------------------------------------------------------------
+// Partner handgun (co-op prototype). Her model's animations, found with the
+// animation browser and the frame counts in animBase: 16 raises the gun (13
+// frames, ending in the aiming pose), 17 fires (15 frames). 15 is a single
+// waist-level frame, not the aim. The muzzle
+// flash, flash and shell are the NPC firing state's handgun rows (npc_scd_08,
+// weapon index 0); the report is the player's (g_weaponFireData[0], weapon
+// sound bank 1) and the damage goes through the player's apply_weapon_damage
+// with her as the shooter.
+// ----------------------------------------------------------------------------
+enum { P2_AIM_NONE, P2_AIM_RAISE, P2_AIM_HOLD, P2_AIM_FIRE };
+enum { P2_ANIM_RAISE = 16, P2_ANIM_FIRE = 17 };
+static int s_p2Aim = P2_AIM_NONE;
+
+static void coop_partner_fire_frame(void)
+{
+    const int idx = 0;   // handgun
+    void* weaponSpace = (void*)((char*)ENTITY->jointsStructs + 0x70C);   // joint 14 world
+
+    const NpcFireFx* a = fire_fx_row(kFireFxMuzzle, idx);
+    if (a != NULL && ENTITY->animation_frame_id == a->frame) {
+        g_playerPosScratch.x = (int)a->x;
+        g_playerPosScratch.y = (int)a->y;
+        g_playerPosScratch.z = (int)a->z;
+        Effect_CreateBillboard(a->type, a->depth, 0, weaponSpace, &g_playerPosScratch, 0);
+
+        Coop_PartnerApplyWeaponDamage(ENTITY, ITEM_BERETTA);
+        Play3DSnd(1, g_weaponFireData[idx].sfx1, 0, (int)ENTITY->scaMatrixData.localMatrix.t);
+        Play3DSnd(1, g_weaponFireData[idx].sfx2, 0, (int)ENTITY->scaMatrixData.localMatrix.t);
+    }
+
+    const NpcFireFx* b = fire_fx_row(kFireFxShell, idx);
+    if (b != NULL && ENTITY->animation_frame_id == b->frame) {
+        g_playerPosScratch.x = (int)b->x;
+        g_playerPosScratch.z = (int)b->z;
+        g_playerPosScratch.y = (int)(ENTITY->id & 1) * (1 - idx) * 300 + (int)b->y;
+        unsigned char slot = Effect_CreateBillboard(
+            b->type, b->depth, (short)0x555,
+            &ENTITY->scaMatrixData.localMatrix, &g_playerPosScratch, 0);
+        fire_fx_tag(slot, 3, (unsigned char)idx);
+    }
+
+    const NpcFireFx* c = fire_fx_row(kFireFxFlash2, idx);
+    if (c != NULL && ENTITY->animation_frame_id == c->frame) {
+        g_playerPosScratch.x = (int)c->x;
+        g_playerPosScratch.y = (int)c->y;
+        g_playerPosScratch.z = (int)c->z;
+        unsigned char slot = Effect_CreateBillboard(
+            c->type, c->depth, 0, weaponSpace, &g_playerPosScratch, 0);
+        fire_fx_tag(slot, 0, (unsigned char)idx);
+    }
+}
+
+// Aim (0x100 held, as player_input_to_behavior tests it) and fire (action).
+// Returns true while she is aiming, which holds her feet still.
+// Hold the aim: the raise animation's last frame is the aiming pose, so it is
+// pinned there - Joint_move draws the frame it is given and steps past it,
+// and the next frame pins it back.
+static void coop_partner_hold_aim(void)
+{
+    const unsigned short* slots = (const unsigned short*)ENTITY->animBase;
+    int frameCount = (slots != NULL) ? (int)slots[P2_ANIM_RAISE * 2] : 1;
+    if (ENTITY->animationId != P2_ANIM_RAISE) {
+        coop_partner_set_anim(P2_ANIM_RAISE);   // blend back in from the shot
+    }
+    ENTITY->animation_frame_id = (unsigned char)(frameCount - 1);
+    ENTITY->timing_control = 0;
+}
+
+static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
+{
+    if ((held & 0x100) == 0 || !Coop_PartnerHasHandgun()) {
+        s_p2Aim = P2_AIM_NONE;
+        return false;
+    }
+
+    // Done once the animation reaches its last frame (or wrapped since the last
+    // frame). The frame count is the slot's first u16 in animBase.
+    static int s_lastFrame = 0;
+    int frame = ENTITY->animation_frame_id;
+    const unsigned short* slots = (const unsigned short*)ENTITY->animBase;
+    int frameCount = (slots != NULL) ? (int)slots[ENTITY->animationId * 2] : 0;
+    bool animDone = frame < s_lastFrame || (frameCount > 0 && frame >= frameCount - 1);
+    s_lastFrame = frame;
+
+    switch (s_p2Aim) {
+    case P2_AIM_NONE:
+        coop_partner_set_anim(P2_ANIM_RAISE);
+        s_p2Aim = P2_AIM_RAISE;
+        s_lastFrame = 0;
+        break;
+    case P2_AIM_RAISE:
+        if (animDone) {
+            s_p2Aim = P2_AIM_HOLD;
+            coop_partner_hold_aim();
+        }
+        break;
+    case P2_AIM_HOLD:
+        if ((pressed & 0x80) != 0 && Coop_PartnerUseAmmo()) {
+            coop_partner_set_anim(P2_ANIM_FIRE);
+            s_p2Aim = P2_AIM_FIRE;
+            s_lastFrame = 0;
+        } else {
+            coop_partner_hold_aim();
+        }
+        break;
+    case P2_AIM_FIRE:
+        coop_partner_fire_frame();
+        if (animDone) {
+            s_p2Aim = P2_AIM_HOLD;
+            coop_partner_hold_aim();
+        }
+        break;
+    }
+    return true;
+}
+
+// ----------------------------------------------------------------------------
+// Animation browser (co-op dev tool, [Coop] AnimBrowser=1): player 2's d-pad
+// steps her through her model's animations - left/right one, up/down ten,
+// action restarts the current one - with the id drawn at the top left and
+// logged. The count is the first slot's frame-table offset / 4: animBase is
+// an array of { u16 frameCount, u16 frameTableOffset } that Joint_move indexes
+// by animationId, and the first frame table follows the array.
+// ----------------------------------------------------------------------------
+static void coop_partner_anim_browser(void)
+{
+    unsigned short* slots = (unsigned short*)ENTITY->animBase;
+    int count = (slots != NULL) ? (int)((slots[1] & 0xFFFC) / 4) : 0;
+    if (count <= 0) {
+        return;
+    }
+
+    unsigned int pressed = g_CoopPadPressed;   // raw PSX word
+    int id = ENTITY->animationId;
+    int step = 0;
+    if (pressed & 0x2000) step = 1;      // right
+    if (pressed & 0x8000) step = -1;     // left
+    if (pressed & 0x1000) step = 10;     // up
+    if (pressed & 0x4000) step = -10;    // down
+    if (step != 0 || (pressed & 0x80) != 0 || id >= count) {
+        id = ((id + step) % count + count) % count;
+        ENTITY->animationId        = (unsigned char)id;
+        ENTITY->animation_frame_id = 0;
+        ENTITY->timing_control     = 0;
+        ENTITY->blend_counter      = 0;
+        dbg_printf("[COOP-ANIM] animation %d of %d (%d frames)\n", id, count, slots[id * 2]);
+    }
+
+    Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x400);
+    SetEntityScaHitData(ENTITY);
+
+    sprintf(PRINT_TEXT_BUFFER, "P2 ANIM %d / %d  FRAME %d", id, count - 1,
+            (int)ENTITY->animation_frame_id);
+    PrintText8x8(8, 8, 0, 0);
+}
+
 void npc_coop_partner_control(void)
 {
     unsigned int held = g_CoopDpadHeld;
@@ -2316,6 +2473,11 @@ void npc_coop_partner_control(void)
         pressed = 0;
     }
 
+    if (g_coopAnimBrowser && g_coopPartnerPlaced) {
+        coop_partner_anim_browser();
+        return;
+    }
+
     if (!g_coopPartnerPlaced) {
         // Stand beside player 1 on the first frame (the player's position is not
         // final yet when the partner is spawned during room_set): the first spot
@@ -2323,6 +2485,7 @@ void npc_coop_partner_control(void)
         // clear - side by side first, then the diagonals, behind, in front.
         // Forward is +X rotated by the angle, as npc_walk_advance_xz moves.
         g_coopPartnerPlaced = 1;
+        s_p2Aim = P2_AIM_NONE;
         static const short kSpots[8][2] = {   // { forward, sideways }
             { 0, 900 }, { 0, -900 }, { -600, 700 }, { -600, -700 },
             { 600, 700 }, { 600, -700 }, { -900, 0 }, { 900, 0 },
@@ -2360,7 +2523,14 @@ void npc_coop_partner_control(void)
     // (PlayerAnimations.cpp player_ctrl_frame2): 0x60 turning on the spot
     // (behaviours 4/5), 0x28 walking (2/3), 0x30 running (the 0x200 steering).
     // 0x28 also backing up (behaviours 6/7).
-    int turn = 0x60;
+    bool aiming = coop_partner_aim_update(held, pressed);
+    if (aiming) {
+        // Feet planted while aiming: only turning (at the walking rate).
+        held &= 0xA;
+        pressed &= ~0x80u;
+    }
+
+    int turn = aiming ? 0x28 : 0x60;
     if ((held & 1) != 0) {
         turn = ((held & 0x200) != 0) ? 0x30 : 0x28;
     } else if ((held & 4) != 0) {
@@ -2383,6 +2553,8 @@ void npc_coop_partner_control(void)
         coop_partner_set_anim(7);
         ENTITY->move_speed_current = 0x40;
         npc_walk_advance_xz(-0x40);
+    } else if (aiming) {
+        // coop_partner_aim_update picked the animation.
     } else if ((held & 0xA) != 0) {
         // Turning on the spot plays the walk cycle without moving, like the
         // player's behaviours 4/5 (player_ctrl_behavior_back).

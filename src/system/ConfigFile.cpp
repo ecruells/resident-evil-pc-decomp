@@ -506,6 +506,7 @@ BOOL ConfigFile_Load(void)
 
     g_coopEnabled = ReadInt(path, "Coop", "Enable", 0) ? 1 : 0;
     g_coopSkipOpening = ReadInt(path, "Coop", "SkipOpening", 0) ? 1 : 0;
+    g_coopAnimBrowser = ReadInt(path, "Coop", "AnimBrowser", 0) ? 1 : 0;
 
     // Content mode. [Game] Mode is the single switch: it sets g_GameMode AND
     // the asset overlay folder.
