@@ -15,6 +15,7 @@
 // ============================================================================
 #include "../Globals.h"
 #include "Coop.h"
+#include "Netplay.h"
 #include "../marni/MarniInput.h"
 #include <cstdio>
 #include <cstdlib>
@@ -271,8 +272,10 @@ LAB_00480d7c:
                      ((g_main_state_flags & MSF_MENU_ACTIVE) == 0)))
                 {
                     // Check START+bit8 combo (Option Mode)
+                    // Co-op netplay: no options menu - its key and pad
+                    // rebinding reads this machine's devices directly.
                     if ((((g_button_pressed_id >> 8) & 0xFF) & 9) == 9 &&
-                        ((g_main_state_flags & MSF_MENU_PENDING) == 0))
+                        ((g_main_state_flags & MSF_MENU_PENDING) == 0) && !Netplay_IsActive())
                     {
                         // Enable Option Mode menu
                         g_main_state_flags |= MSF_OPTIONS_REQUEST;
@@ -320,8 +323,14 @@ LAB_00480e89:
                 // presented frame) and nothing draws on top of the menu.
                 // g_debugMenuOpen stays 0 while debug features are disabled.
                 if (g_debugMenuOpen == 0) {
+                    // Co-op netplay: the joiner draws through player 2's camera
+                    // (Netplay_ViewBegin/End wrap only the drawing; the room
+                    // objects update on player 1's, as the shared game must).
+                    Netplay_ViewBegin();
                     DrawFadeSpr();
+                    Netplay_ViewEnd();
                     update_room_objects();
+                    Netplay_ViewBegin();
 
                     // 0x00480ed4: Draw the room's own 3D objects (omodels + item models)
                     if (g_dwRoomObjectRenderEnabled != 0) {
@@ -358,6 +367,7 @@ LAB_00480e89:
                     // 0x00480f6e-0x00480f70: 2D effects and room sprites
                     update_2d_effects();
                     DrawRoomSpr();
+                    Netplay_ViewEnd();
                 }
 
                 // 0x00480f70-0x00480f90: Debug save menu

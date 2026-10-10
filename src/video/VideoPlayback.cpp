@@ -6,6 +6,7 @@
 // skip grace period and the prologue scenario cut.
 
 #include "../Globals.h"
+#include "../game/Netplay.h"
 #include "../game/Ps1EndingCredits.h"
 #include "../game/Ps1FmvSubtitles.h"
 #include "../platform/platform.h"
@@ -370,7 +371,10 @@ void UpdateVideoPlayback(void)
             plat_video_tick();
 
             InputUpdate();
-            g_videoSkipInput = (WORD)PlayerPad_Update();
+            // Co-op netplay: the skip check reads this machine's own pad and
+            // leaves the shared input (and its lockstep ticks) alone.
+            g_videoSkipInput = Netplay_IsActive() ? (WORD)Netplay_LocalPadWord()
+                                                  : (WORD)PlayerPad_Update();
             g_videoSkipCounter = 100;
         }
         break;
@@ -384,7 +388,8 @@ void UpdateVideoPlayback(void)
             }
 
             InputUpdate();
-            WORD currentInput = (WORD)PlayerPad_Update();
+            WORD currentInput = Netplay_IsActive() ? (WORD)Netplay_LocalPadWord()
+                                                   : (WORD)PlayerPad_Update();
 
             // Check for skip input (per-FMV skip mask from g_FMVTable[i].isSkippable)
             WORD skipMask = GetFmvSkipMask(g_CurrentFMVID);

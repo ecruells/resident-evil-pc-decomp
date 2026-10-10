@@ -42,5 +42,25 @@ int  Netplay_Connect(void);
 // leaves or stops answering, the session ends and this game closes too.
 void Netplay_ExchangeInputs(DWORD localWord, DWORD* p1Word, DWORD* p2Word);
 
+// This machine's own pad word, read without touching the shared input state or
+// using up a tick - for a movie's skip check, which in netplay must not run a
+// lockstep tick (movies end at different moments on the two machines).
+DWORD Netplay_LocalPadWord(void);
+
 // Platform main loop, on exit: tell the other game this one is leaving.
 void Netplay_Shutdown(void);
+
+// ---- Player 2's camera (on the joining machine) ----
+// The shared game always runs on player 1's camera: g_roomCameraId and its
+// zone group are game state (entities test the camera zone, room scripts test
+// the cut), so they stay the same on both machines. On the joiner the drawing
+// alone follows player 2: game_loop wraps its draw calls in
+// Netplay_ViewBegin/End, which swap in her camera's matrix, background and
+// masks when she stands in a different camera zone and put his matrix back.
+// cut_set calls Netplay_OnSimCutSet when the shared game reloads its camera.
+void Netplay_ViewBegin(void);
+void Netplay_ViewEnd(void);
+void Netplay_OnSimCutSet(void);
+// The fov FlushTmdObjects projects this frame's 3D with: her camera's when the
+// frame was drawn through it, otherwise g_sceneRenderParam.
+int  Netplay_FrameFov(void);

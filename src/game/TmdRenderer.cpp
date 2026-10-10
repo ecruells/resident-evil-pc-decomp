@@ -29,6 +29,7 @@
 #include "TmdRenderer.h"
 #include "SpriteRenderer.h"
 #include "../Globals.h"
+#include "Netplay.h"
 #include "../marni/MarniDX.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/Marni3DObject.h"
@@ -384,7 +385,8 @@ void FlushTmdObjects(void)
         // fullscreen backbuffer (models render ~1.33x too tall, i.e. "closer
         // to the camera"). The pre-rendered backgrounds stretch anisotropically,
         // so the models must too.
-        float fg = (float)g_sceneRenderParam;
+        float fg = (float)Netplay_FrameFov();   // co-op netplay: the drawn camera's
+
 
         // Near plane. The original marks a vertex clipped when its view-space Z
         // is under TWICE the projection distance (0x00447023-0x0044703c):
@@ -406,7 +408,7 @@ void FlushTmdObjects(void)
         // vz is in world units, so this must use the UNSCALED parameter: f
         // above carries the render-resolution scale purely to turn view space
         // into pixels.
-        float nearZ = 2.0f * (float)g_sceneRenderParam;
+        float nearZ = 2.0f * fg;
         if (nearZ < TMD_NEAR_Z) nearZ = TMD_NEAR_Z;   // fov never read / zero
 
         // Is the original's OWN per-texel path aimed at something this frame?

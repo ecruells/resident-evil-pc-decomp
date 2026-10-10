@@ -1,6 +1,7 @@
 // Room.cpp - Room sprite, camera, and background management
 // Decompiled from Ghidra
 #include "../Globals.h"
+#include "Netplay.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
 #include <cstdio>
@@ -39,6 +40,7 @@ void cut_set(void) // 0x004628c0
         Room_SetupCamera();
         load_room_bg_image();
         Room_ApplySpriteFlags();
+        Netplay_OnSimCutSet();   // co-op netplay: player 2's view reloads hers
     }
     printf("cut set  end\n");
 }

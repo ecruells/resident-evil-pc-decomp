@@ -4,6 +4,8 @@
 #include "Coop.h"
 #include "../platform/platform.h"
 #include "../system/AssetPath.h"
+#include "BioCard.h"
+extern int is_entity_in_switch_zone(VECTOR* position, void* zoneData);   // Room.cpp 0x00462d90
 #include <cstdio>
 #include <cstring>
 #include <cstdarg>
@@ -371,6 +373,18 @@ void Netplay_ExchangeInputs(DWORD localWord, DWORD* p1Word, DWORD* p2Word)
 		plat_sleep_ms(1);
 	}
 
+	DWORD waited = plat_time_ms() - waitStart;
+	if (waited > 60) {
+		net_log("[NET] tick %u waited %u ms for the other player\n", s_tick, waited);
+	}
+	static DWORD s_lastTickTime = 0;
+	DWORD nowT = plat_time_ms();
+	if (s_lastTickTime != 0 && nowT - s_lastTickTime > 100 && waited <= 60) {
+		net_log("[NET] tick %u came %u ms after the last (this machine was busy)\n", s_tick,
+		        nowT - s_lastTickTime);
+	}
+	s_lastTickTime = nowT;
+
 	DWORD mine = s_local[slot];
 	DWORD theirs = s_remote[slot];
 	*p1Word = (g_netMode == NET_MODE_HOST) ? mine : theirs;
@@ -387,4 +401,179 @@ void Netplay_Shutdown(void)
 		send_packet(PKT_BYE);
 	}
 	s_state = -1;
+}
+
+// ============================================================================
+// Player 2's camera (joiner only)
+// ============================================================================
+static int  s_viewCam = -1;           // her camera id; -1 = not tracked yet
+static int  s_viewAssetsCam = -1;     // the camera whose background/masks are loaded for the view; -1 = the shared game's
+static int  s_viewSerial = -1;        // the partner spawn the tracking belongs to
+static int  s_viewSimCam = -1;
+static void* s_viewSimZones = nullptr;
+static unsigned char s_viewSimInZone[31];   // byte 3 of each entity (30 + the player) under his camera
+static bool s_viewSwapped = false;
+static int  s_viewFrameFov = -1;      // her camera's fov for this frame's 3D pass; -1 = the shared game's
+
+static CAM_SWITCH_ZONE* view_group(int cam)
+{
+	CAM_SWITCH_ZONE* zone = (CAM_SWITCH_ZONE*)g_RdtPointer->cam_switch_zones;
+	for (int guard = 0; guard < 256 && (unsigned short)zone->camFrom != (unsigned short)cam; guard++) {
+		zone++;
+	}
+	return ((unsigned short)zone->camFrom == (unsigned short)cam) ? zone : nullptr;
+}
+
+// check_camera_switch for her: one zone crossing per frame, as his.
+static void view_track(void)
+{
+	if (s_viewCam < 0) {
+		s_viewCam = g_roomCameraId;
+	}
+	CAM_SWITCH_ZONE* group = view_group(s_viewCam);
+	if (group == nullptr) {
+		s_viewCam = g_roomCameraId;
+		return;
+	}
+	VECTOR* pos = (VECTOR*)g_coopPartner->scaMatrixData.localMatrix.t;
+	for (CAM_SWITCH_ZONE* zone = group + 1; (unsigned short)zone->camFrom == (unsigned short)s_viewCam; zone++) {
+		if (is_entity_in_switch_zone(pos, zone) != 0) {
+			s_viewCam = (unsigned short)zone->camTo;
+			return;
+		}
+	}
+	// A group's header is the area its camera draws characters in (render_entity
+	// culls against it). The player never leaves it without crossing a switch
+	// zone; she can (placed beside him on entry, a zone missed between frames),
+	// and would then be invisible on her own screen. Take the first camera
+	// whose area holds her.
+	if (is_entity_in_switch_zone(pos, group) == 0) {
+		for (int cam = 0; cam < g_RdtPointer->cameras_count; cam++) {
+			CAM_SWITCH_ZONE* header = view_group(cam);
+			if (header != nullptr && is_entity_in_switch_zone(pos, header) != 0) {
+				net_log("[NET] view: she is outside camera %d's area, now camera %d\n", s_viewCam, cam);
+				s_viewCam = cam;
+				return;
+			}
+		}
+	}
+}
+
+// Put camera `cam`'s background and masks on screen, as cut_set does, without
+// its sprite-flag pass (that queue belongs to the shared game) and leaving the
+// texture counters as they were.
+static void view_load_assets(int cam)
+{
+	DWORD start = plat_time_ms();
+	TextureBankCell cell = g_TextureBankCell;
+	unsigned char simCam = g_roomCameraId;
+	g_roomCameraId = (unsigned char)cam;
+	*(unsigned short*)&g_TextureBankCell = g_SavedTextureBankID;
+	Room_LoadCameraSprites();
+	load_room_bg_image();
+	g_roomCameraId = simCam;
+	g_TextureBankCell = cell;
+	net_log("[NET] view: camera %d's background/masks at tick %u (%u ms, his camera %d)\n",
+	        cam, s_tick, plat_time_ms() - start, simCam);
+}
+
+void Netplay_OnSimCutSet(void)
+{
+	s_viewAssetsCam = -1;   // the shared game just put its own camera's on screen
+}
+
+void Netplay_ViewBegin(void)
+{
+	if (!Netplay_IsActive() || g_netMode != NET_MODE_JOIN || g_RdtPointer == nullptr) {
+		s_viewFrameFov = -1;
+		return;
+	}
+	extern int Coop_PartnerSpawnSerial(void);
+	if (s_viewSerial != Coop_PartnerSpawnSerial()) {
+		s_viewSerial = Coop_PartnerSpawnSerial();
+		s_viewCam = -1;   // a new room
+	}
+
+	// Her camera when she is up and about; his during cutscenes (the camera is
+	// locked to the scene) or when she is not in the room.
+	int want = g_roomCameraId;
+	if (g_coopPartner != nullptr && g_coopPartnerPlaced && !g_coopP2Down &&
+	    (g_main_state_flags & MSF_CAMERA_LOCK) == 0) {
+		view_track();
+		want = s_viewCam;
+	} else {
+		s_viewCam = -1;
+	}
+
+	if (want == g_roomCameraId) {
+		s_viewFrameFov = -1;
+		if (s_viewAssetsCam != -1) {
+			view_load_assets(g_roomCameraId);   // back to his background/masks
+			s_viewAssetsCam = -1;
+		}
+		return;
+	}
+	if (s_viewAssetsCam != want) {
+		view_load_assets(want);
+		s_viewAssetsCam = want;
+	}
+	s_viewSimCam = g_roomCameraId;
+	g_roomCameraId = (unsigned char)want;
+	Room_SetupCamera();
+	// Entities and room objects are culled against the current camera's zone
+	// group (render_entity, RoomObjectRender): hers while drawing.
+	s_viewSimZones = g_CurrentRdtDataTypePtr;
+	if (CAM_SWITCH_ZONE* group = view_group(want)) {
+		g_CurrentRdtDataTypePtr = group;
+	}
+	// Byte 3 of every character is "inside the current camera's area", set
+	// each tick against his camera (character_npc_update, the enemy updates,
+	// the player's zoneFlags); render_entity skips a character whose low seven
+	// bits are clear. Redo it against hers for the drawing, put his back after.
+	for (int i = 0; i < 31; i++) {
+		unsigned char* e = (i < 30) ? (unsigned char*)&g_EnemiesList[i] : (unsigned char*)&g_playerEntity;
+		s_viewSimInZone[i] = e[3];
+		if ((e[0] & 1) == 0) continue;
+		if (is_entity_in_switch_zone((VECTOR*)((Entity*)e)->scaMatrixData.localMatrix.t, g_CurrentRdtDataTypePtr) != 0) {
+			if ((e[3] & 0x7f) == 0) e[3] |= 1;
+		} else {
+			e[3] &= 0x80;
+		}
+	}
+	s_viewSwapped = true;
+}
+
+void Netplay_ViewEnd(void)
+{
+	if (!s_viewSwapped) {
+		return;
+	}
+	for (int i = 0; i < 31; i++) {
+		unsigned char* e = (i < 30) ? (unsigned char*)&g_EnemiesList[i] : (unsigned char*)&g_playerEntity;
+		e[3] = s_viewSimInZone[i];
+	}
+	s_viewSwapped = false;
+	// The 3D queue is projected when the frame is presented, after this: keep
+	// her fov for it (Netplay_FrameFov) while the shared game gets his back.
+	s_viewFrameFov = g_sceneRenderParam;
+	g_roomCameraId = (unsigned char)s_viewSimCam;
+	g_CurrentRdtDataTypePtr = s_viewSimZones;
+	Room_SetupCamera();
+}
+
+int Netplay_FrameFov(void)
+{
+	return (s_viewFrameFov >= 0) ? s_viewFrameFov : g_sceneRenderParam;
+}
+
+DWORD Netplay_LocalPadWord(void)
+{
+	DWORD word = 0;
+	if (g_pMasterInputState.frameFlag != 0) {
+		word |= JoyToPSX(g_pMasterInputState.keyboardPrev, 0);
+	}
+	if ((1 < g_NumControllers) && (g_pMasterInputState.joysticks[0].enabled != 0)) {
+		word |= JoyToPSX(g_pMasterInputState.joysticks[0].currPress, 1);
+	}
+	return word;
 }

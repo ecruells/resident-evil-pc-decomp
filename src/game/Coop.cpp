@@ -1160,3 +1160,8 @@ unsigned char Coop_EffectFlags(int slot, unsigned char playerFlags)
 	}
 	return (unsigned char)((playerFlags & 0x1f) | (s_effectP2Flags[slot] & 0xe0));
 }
+
+int Coop_PartnerSpawnSerial(void)
+{
+	return s_spawnSerial;
+}

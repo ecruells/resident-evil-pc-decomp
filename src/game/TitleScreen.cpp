@@ -292,6 +292,11 @@ void fade_update(void)
 // ============================================================================
 int read_sidewinder_pad(void)
 {
+    // Co-op netplay (port addition): a direct read of this machine's pad would
+    // steer one game and not the other - the screens run on the shared input.
+    if (Netplay_IsActive()) {
+        return 0;
+    }
     return g_pMasterInputState.joysticks[0].currPress;
 }
 
