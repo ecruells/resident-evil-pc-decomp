@@ -17,6 +17,8 @@
 
 #include <SDL2/SDL.h>
 
+extern BOOL g_bKeepAspect;   // config.ini [Display] KeepAspect (Globals.cpp)
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -33,9 +35,33 @@
 struct MarniDX::Impl {
     SDL_Window*   window = nullptr;
     SDL_GLContext ctx    = nullptr;
-    int  width  = 0;
+    int  width  = 0;       // the picture: the whole drawable, or its centred 4:3 part
     int  height = 0;
+    int  offX = 0, offY = 0;   // where the picture sits in the drawable (GL, bottom-left)
+    int  fullW = 0, fullH = 0; // the whole drawable
     bool ready  = false;
+
+    // [Display] KeepAspect: the game's 4:3 picture, centred, with black bars
+    // on the sides (or top and bottom) instead of stretched over the window.
+    // Everything sizes itself from GetBackBufferSize, so reporting the 4:3
+    // part as the backbuffer is all the renderer needs.
+    void SetDrawable(int dw, int dh) {
+        fullW = dw;
+        fullH = dh;
+        width = dw;
+        height = dh;
+        offX = offY = 0;
+        if (g_bKeepAspect && dw > 0 && dh > 0) {
+            if (dw * 3 > dh * 4) {
+                width = dh * 4 / 3;
+                offX = (dw - width) / 2;
+            } else if (dw * 3 < dh * 4) {
+                height = dw * 3 / 4;
+                offY = (dh - height) / 2;
+            }
+        }
+        glViewport(offX, offY, width, height);
+    }
 
     GLuint program = 0;
     GLuint vao     = 0;
@@ -326,8 +352,7 @@ BOOL MarniDX::Create(HWND hWnd, int width, int height, BOOL fullScreen,
 
     int dw = 0, dh = 0;
     SDL_GL_GetDrawableSize(p->window, &dw, &dh);
-    p->width  = (dw > 0) ? dw : width;
-    p->height = (dh > 0) ? dh : height;
+    p->SetDrawable((dw > 0) ? dw : width, (dh > 0) ? dh : height);
 
     if (!BuildPipeline(p)) return FALSE;
 
@@ -382,8 +407,7 @@ int MarniDX::ChangeDisplayMode(DWORD newWidth, DWORD newHeight, BOOL fullScreen)
 
     int dw = 0, dh = 0;
     SDL_GL_GetDrawableSize(p->window, &dw, &dh);
-    if (dw > 0) p->width = dw;
-    if (dh > 0) p->height = dh;
+    if (dw > 0 && dh > 0) p->SetDrawable(dw, dh);
     return 1;
 }
 
@@ -394,8 +418,7 @@ int MarniDX::HandleWindowMessage(HWND, UINT msg, WPARAM, LPARAM)
     if (msg == WM_SIZE && m_pImpl != nullptr && m_pImpl->window != nullptr) {
         int dw = 0, dh = 0;
         SDL_GL_GetDrawableSize(m_pImpl->window, &dw, &dh);
-        if (dw > 0) m_pImpl->width = dw;
-        if (dh > 0) m_pImpl->height = dh;
+        if (dw > 0 && dh > 0) m_pImpl->SetDrawable(dw, dh);
     }
     return 1;
 }
@@ -445,7 +468,16 @@ void MarniDX::Clear(float r, float g, float b, float a)
 {
     Impl* p = m_pImpl;
     if (p == nullptr || !p->ready) return;
-    glViewport(0, 0, p->width, p->height);
+    // The bars, then the picture.
+    glDepthMask(GL_TRUE);
+    if (p->width != p->fullW || p->height != p->fullH) {
+        glViewport(0, 0, p->fullW, p->fullH);
+        glClearColor(0.0f, 0.0f, 0.0f, 1.0f);
+        glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(p->offX, p->offY, p->width, p->height);
+    }
+    glViewport(p->offX, p->offY, p->width, p->height);
     glClearColor(r, g, b, a);
     // glClear is masked by the depth write mask. The 2D path leaves it GL_FALSE
     // (DrawBatch disables it for every non-depth draw), so without forcing it
@@ -456,6 +488,7 @@ void MarniDX::Clear(float r, float g, float b, float a)
     // fragments that happened to be no farther than last frame's surface.
     glDepthMask(GL_TRUE);
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+    glDisable(GL_SCISSOR_TEST);
 }
 
 void MarniDX::Present()
@@ -704,7 +737,7 @@ BOOL MarniDX::CaptureBackbufferToRGBA(void** outPixels, DWORD* outWidth, DWORD* 
     if (buf == nullptr) return FALSE;
 
     glPixelStorei(GL_PACK_ALIGNMENT, 1);
-    glReadPixels(0, 0, p->width, p->height, GL_RGBA, GL_UNSIGNED_BYTE, buf);
+    glReadPixels(p->offX, p->offY, p->width, p->height, GL_RGBA, GL_UNSIGNED_BYTE, buf);
 
     // GL reads bottom-up; the callers expect top-down.
     unsigned char* row = (unsigned char*)malloc((size_t)p->width * 4);

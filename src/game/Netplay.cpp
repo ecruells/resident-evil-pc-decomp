@@ -7,6 +7,7 @@
 #include "BioCard.h"
 extern int is_entity_in_switch_zone(VECTOR* position, void* zoneData);   // Room.cpp 0x00462d90
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <cstdarg>
 #include <cstddef>
@@ -17,7 +18,7 @@ int  g_netPort = 27015;
 int  g_netDelay = 3;
 int  g_netLocalInput = NET_INPUT_BOTH;
 
-#define NETPLAY_PROTOCOL     2
+#define NETPLAY_PROTOCOL     3
 #define NETPLAY_MAGIC        0x4E314552u   // "RE1N"
 #define NETPLAY_RING         256           // ticks of input kept (power of two)
 #define NETPLAY_SEND_SPAN    16            // inputs per packet (redundancy against loss)
@@ -26,7 +27,8 @@ int  g_netLocalInput = NET_INPUT_BOTH;
 #define NETPLAY_STALL_LOG_MS 3000
 #define NETPLAY_TIMEOUT_MS   10000
 
-enum { PKT_HELLO = 1, PKT_WELCOME = 2, PKT_INPUT = 3, PKT_BYE = 4, PKT_SKIP = 5 };
+enum { PKT_HELLO = 1, PKT_WELCOME = 2, PKT_INPUT = 3, PKT_BYE = 4, PKT_SKIP = 5,
+       PKT_SAVE = 6, PKT_SAVE_DONE = 7 };
 
 #pragma pack(push, 1)
 struct NetPacket {
@@ -42,6 +44,22 @@ struct NetPacket {
 	unsigned int   inputs[NETPLAY_SEND_SPAN];
 	unsigned int   checks[NETPLAY_SEND_SPAN];   // state hashes at the start of those ticks
 	unsigned int   skipSerial;     // the last movie this machine skipped (Netplay_FmvSkip)
+};
+
+// The host's save files, sent once at the start (PKT_SAVE). Same first eight
+// bytes as NetPacket.
+#define NETPLAY_SAVE_CHUNK   1024
+#define NETPLAY_SAVE_SLOTS   8
+#define NETPLAY_SAVE_MAX     (64 * NETPLAY_SAVE_CHUNK)
+struct NetSavePacket {
+	unsigned int   magic;
+	unsigned char  type;
+	unsigned char  pad0;
+	unsigned short protocol;
+	unsigned int   totalSize;      // the whole blob
+	unsigned short chunk;          // this chunk
+	unsigned short chunks;         // how many
+	unsigned char  data[NETPLAY_SAVE_CHUNK];
 };
 #pragma pack(pop)
 
@@ -77,6 +95,19 @@ static unsigned int s_remoteCheckTick[NETPLAY_RING];      // +1; 0 = none
 static int          s_desynced = 0;
 static DWORD        s_lastSend = 0;
 static DWORD        s_lastHello = 0;
+
+// ---- Save sync (state 3, between connecting and the first tick) ----
+// Both games must load the same saves, so the joiner plays on the host's: the
+// host sends every savedat<N>.dat and the joiner keeps them in SAVE/netplay/
+// (its own saves stay where they are) and uses that folder for the session.
+// Saves made during the session then land on both machines, the same.
+// Blob: for each slot 1..8, a u32 size (0 = no file) and the file.
+static unsigned char  s_saveBlob[NETPLAY_SAVE_MAX];
+static unsigned int   s_saveSize = 0;
+static unsigned short s_saveChunks = 0;
+static unsigned char  s_saveHave[64];
+static unsigned int   s_saveHaveCount = 0;
+static DWORD          s_saveLastSend = 0;
 
 // ----------------------------------------------------------------------------
 static void net_log(const char* fmt, ...)
@@ -190,11 +221,136 @@ static void compare_check(unsigned int t)
 	}
 }
 
+static void send_save_packet(unsigned char type, unsigned short chunk)
+{
+	NetSavePacket pkt;
+	memset(&pkt, 0, sizeof(pkt));
+	pkt.magic = NETPLAY_MAGIC;
+	pkt.type = type;
+	pkt.protocol = NETPLAY_PROTOCOL;
+	pkt.totalSize = s_saveSize;
+	pkt.chunk = chunk;
+	pkt.chunks = s_saveChunks;
+	if (type == PKT_SAVE) {
+		unsigned int off = (unsigned int)chunk * NETPLAY_SAVE_CHUNK;
+		unsigned int len = (s_saveSize - off < NETPLAY_SAVE_CHUNK) ? s_saveSize - off : NETPLAY_SAVE_CHUNK;
+		memcpy(pkt.data, s_saveBlob + off, len);
+	}
+	plat_net_send(&pkt, sizeof(pkt));
+}
+
+// Host: gather savedat1..8 from the save folder.
+static void save_build_blob(void)
+{
+	char path[300];
+	char list[64] = "";
+	s_saveSize = 0;
+	for (int slot = 1; slot <= NETPLAY_SAVE_SLOTS; slot++) {
+		snprintf(path, sizeof(path), "%ssavedat%d.dat", GetSaveRoot(), slot);
+		size_t size = 0;
+		void* data = plat_file_read_all(path, &size);
+		if (data != nullptr && s_saveSize + 4 + size > NETPLAY_SAVE_MAX) {
+			net_log("[NET] save slot %d does not fit, not sent\n", slot);
+			free(data);
+			data = nullptr;
+		}
+		unsigned int sz = (data != nullptr) ? (unsigned int)size : 0;
+		memcpy(s_saveBlob + s_saveSize, &sz, 4);
+		s_saveSize += 4;
+		if (data != nullptr) {
+			memcpy(s_saveBlob + s_saveSize, data, sz);
+			s_saveSize += sz;
+			free(data);
+			snprintf(list + strlen(list), sizeof(list) - strlen(list), " %d", slot);
+		}
+	}
+	s_saveChunks = (unsigned short)((s_saveSize + NETPLAY_SAVE_CHUNK - 1) / NETPLAY_SAVE_CHUNK);
+	net_log("[NET] sending save slots%s (%u bytes) to player 2\n", list[0] ? list : " - none", s_saveSize);
+}
+
+// Joiner: all chunks are in - write SAVE/netplay/ and play from it.
+static void save_write_blob(void)
+{
+	char dir[300];
+	char path[320];
+	char list[64] = "";
+	snprintf(dir, sizeof(dir), "%snetplay", GetSaveRoot());
+	plat_mkdir(dir);
+	unsigned int off = 0;
+	for (int slot = 1; slot <= NETPLAY_SAVE_SLOTS && off + 4 <= s_saveSize; slot++) {
+		unsigned int sz;
+		memcpy(&sz, s_saveBlob + off, 4);
+		off += 4;
+		snprintf(path, sizeof(path), "%s/savedat%d.dat", dir, slot);
+		if (sz == 0 || off + sz > s_saveSize) {
+			remove(path);
+			continue;
+		}
+		plat_file_write(path, s_saveBlob + off, sz);
+		off += sz;
+		snprintf(list + strlen(list), sizeof(list) - strlen(list), " %d", slot);
+	}
+	SetSaveRoot(dir);
+	net_log("[NET] got the host's save slots%s, playing from %s\n", list[0] ? list : " - none", GetSaveRoot());
+}
+
+static void save_receive(const NetSavePacket* pkt, unsigned char type)
+{
+	if (type == PKT_SAVE_DONE) {
+		if (g_netMode == NET_MODE_HOST && s_state == 3) {
+			s_state = 2;
+			net_log("[NET] player 2 has the saves\n");
+		}
+		return;
+	}
+	if (g_netMode != NET_MODE_JOIN) {
+		return;
+	}
+	if (s_state == 2) {
+		send_save_packet(PKT_SAVE_DONE, 0);   // the host missed our last one
+		return;
+	}
+	if (s_state != 3 || pkt->chunks > 64 || pkt->chunk >= pkt->chunks || pkt->totalSize > NETPLAY_SAVE_MAX) {
+		return;
+	}
+	if (s_saveChunks != pkt->chunks || s_saveSize != pkt->totalSize) {
+		s_saveChunks = pkt->chunks;
+		s_saveSize = pkt->totalSize;
+		memset(s_saveHave, 0, sizeof(s_saveHave));
+		s_saveHaveCount = 0;
+	}
+	if (!s_saveHave[pkt->chunk]) {
+		unsigned int off = (unsigned int)pkt->chunk * NETPLAY_SAVE_CHUNK;
+		unsigned int len = (s_saveSize - off < NETPLAY_SAVE_CHUNK) ? s_saveSize - off : NETPLAY_SAVE_CHUNK;
+		memcpy(s_saveBlob + off, pkt->data, len);
+		s_saveHave[pkt->chunk] = 1;
+		s_saveHaveCount++;
+	}
+	if (s_saveHaveCount == s_saveChunks) {
+		save_write_blob();
+		for (int i = 0; i < 3; i++) {
+			send_save_packet(PKT_SAVE_DONE, 0);
+		}
+		s_state = 2;
+	}
+}
+
 static void receive_all(void)
 {
-	NetPacket pkt;
+	union {
+		NetPacket     pkt;
+		NetSavePacket save;
+	} buf;
+	NetPacket& pkt = buf.pkt;
 	int n;
-	while ((n = plat_net_recv(&pkt, sizeof(pkt))) >= 0) {
+	while ((n = plat_net_recv(&buf, sizeof(buf))) >= 0) {
+		if (n >= 8 && pkt.magic == NETPLAY_MAGIC && pkt.protocol == NETPLAY_PROTOCOL &&
+		    (pkt.type == PKT_SAVE || pkt.type == PKT_SAVE_DONE)) {
+			if (n == (int)sizeof(NetSavePacket) || pkt.type == PKT_SAVE_DONE) {
+				save_receive(&buf.save, pkt.type);
+			}
+			continue;
+		}
 		if (n != (int)sizeof(pkt) || pkt.magic != NETPLAY_MAGIC || pkt.protocol != NETPLAY_PROTOCOL) {
 			continue;
 		}
@@ -212,9 +368,12 @@ static void receive_all(void)
 				send_packet(PKT_WELCOME);
 			}
 			if (s_state == 1) {
-				s_state = 2;
+				s_state = 3;
 				net_log("[NET] connected (%s), input delay %d ticks\n",
 				        g_netMode == NET_MODE_HOST ? "host, player 1" : "joined, player 2", g_netDelay);
+				if (g_netMode == NET_MODE_HOST) {
+					save_build_blob();
+				}
 			}
 			continue;
 		}
@@ -266,6 +425,24 @@ int Netplay_Connect(void)
 		s_state = 1;
 		net_log("[NET] %s on port %d...\n",
 		        g_netMode == NET_MODE_HOST ? "hosting, waiting for player 2" : "joining", g_netPort);
+	}
+	if (s_state == 3) {
+		// Host: send every chunk every 30 ms until player 2 has them all.
+		if (g_netMode == NET_MODE_HOST && plat_time_ms() - s_saveLastSend >= 30) {
+			for (unsigned short c = 0; c < s_saveChunks; c++) {
+				send_save_packet(PKT_SAVE, c);
+			}
+			if (s_saveChunks == 0) {
+				send_save_packet(PKT_SAVE, 0);   // no saves: one empty chunk says so
+			}
+			s_saveLastSend = plat_time_ms();
+		}
+		if (g_netMode == NET_MODE_JOIN && plat_time_ms() - s_lastHello > 250) {
+			send_packet(PKT_HELLO);   // the host may not have our first one
+			s_lastHello = plat_time_ms();
+		}
+		receive_all();
+		return s_state == 2 ? 1 : (s_state == -1 ? -1 : 0);
 	}
 	if (s_state != 1) {
 		return s_state == 2 ? 1 : -1;
@@ -475,37 +652,86 @@ static CAM_SWITCH_ZONE* view_group(int cam)
 	return ((unsigned short)zone->camFrom == (unsigned short)cam) ? zone : nullptr;
 }
 
+static bool s_viewResync = false;   // a cutscene held her camera: check it still fits her
+
+// Can a switch zone lead to this camera? Cutscene-only shots usually have no
+// way in, and are no place to leave her when the scene is over.
+static bool view_reachable(int cam)
+{
+	for (int from = 0; from < g_RdtPointer->cameras_count; from++) {
+		CAM_SWITCH_ZONE* group = view_group(from);
+		if (group == nullptr) {
+			continue;
+		}
+		for (CAM_SWITCH_ZONE* zone = group + 1; (unsigned short)zone->camFrom == (unsigned short)from; zone++) {
+			if ((unsigned short)zone->camTo == (unsigned short)cam) {
+				return true;
+			}
+		}
+	}
+	return false;
+}
+
+// The camera to show her at `pos`: `prefer` when its area (a group's header -
+// what render_entity culls against) holds her, else a camera a switch zone
+// leads to whose area does, else any camera whose area does.
+static int view_pick(VECTOR* pos, int prefer)
+{
+	CAM_SWITCH_ZONE* header = view_group(prefer);
+	if (header != nullptr && is_entity_in_switch_zone(pos, header) != 0) {
+		return prefer;
+	}
+	int any = -1;
+	for (int cam = 0; cam < g_RdtPointer->cameras_count; cam++) {
+		header = view_group(cam);
+		if (header == nullptr || is_entity_in_switch_zone(pos, header) == 0) {
+			continue;
+		}
+		if (view_reachable(cam)) {
+			return cam;
+		}
+		if (any < 0) {
+			any = cam;
+		}
+	}
+	return (any >= 0) ? any : prefer;
+}
+
 // check_camera_switch for her: one zone crossing per frame, as his.
 static void view_track(void)
 {
-	if (s_viewCam < 0) {
-		s_viewCam = g_roomCameraId;
-	}
-	CAM_SWITCH_ZONE* group = view_group(s_viewCam);
-	if (group == nullptr) {
-		s_viewCam = g_roomCameraId;
+	VECTOR* pos = (VECTOR*)g_coopPartner->scaMatrixData.localMatrix.t;
+	if (s_viewCam < 0 || view_group(s_viewCam) == nullptr) {
+		s_viewCam = view_pick(pos, g_roomCameraId);   // a new room: his camera if it shows her
+		s_viewResync = false;
 		return;
 	}
-	VECTOR* pos = (VECTOR*)g_coopPartner->scaMatrixData.localMatrix.t;
+	if (s_viewResync) {
+		// After a cutscene: her camera from before it, if it still shows her
+		// (the scene may have moved her).
+		s_viewResync = false;
+		int cam = view_pick(pos, s_viewCam);
+		if (cam != s_viewCam) {
+			net_log("[NET] view: after the cutscene camera %d, not %d\n", cam, s_viewCam);
+			s_viewCam = cam;
+		}
+		return;
+	}
+	CAM_SWITCH_ZONE* group = view_group(s_viewCam);
 	for (CAM_SWITCH_ZONE* zone = group + 1; (unsigned short)zone->camFrom == (unsigned short)s_viewCam; zone++) {
 		if (is_entity_in_switch_zone(pos, zone) != 0) {
 			s_viewCam = (unsigned short)zone->camTo;
 			return;
 		}
 	}
-	// A group's header is the area its camera draws characters in (render_entity
-	// culls against it). The player never leaves it without crossing a switch
+	// The player never leaves his camera's area without crossing a switch
 	// zone; she can (placed beside him on entry, a zone missed between frames),
-	// and would then be invisible on her own screen. Take the first camera
-	// whose area holds her.
+	// and would then be invisible on her own screen.
 	if (is_entity_in_switch_zone(pos, group) == 0) {
-		for (int cam = 0; cam < g_RdtPointer->cameras_count; cam++) {
-			CAM_SWITCH_ZONE* header = view_group(cam);
-			if (header != nullptr && is_entity_in_switch_zone(pos, header) != 0) {
-				net_log("[NET] view: she is outside camera %d's area, now camera %d\n", s_viewCam, cam);
-				s_viewCam = cam;
-				return;
-			}
+		int cam = view_pick(pos, s_viewCam);
+		if (cam != s_viewCam) {
+			net_log("[NET] view: she is outside camera %d's area, now camera %d\n", s_viewCam, cam);
+			s_viewCam = cam;
 		}
 	}
 }
@@ -548,12 +774,13 @@ void Netplay_ViewBegin(void)
 	// Her camera when she is up and about; his during cutscenes (the camera is
 	// locked to the scene) or when she is not in the room.
 	int want = g_roomCameraId;
-	if (g_coopPartner != nullptr && g_coopPartnerPlaced && !g_coopP2Down &&
-	    (g_main_state_flags & MSF_CAMERA_LOCK) == 0) {
+	if (g_coopPartner == nullptr || !g_coopPartnerPlaced || g_coopP2Down) {
+		s_viewCam = -1;
+	} else if ((g_main_state_flags & MSF_CAMERA_LOCK) != 0) {
+		s_viewResync = true;   // keep hers for after the scene
+	} else {
 		view_track();
 		want = s_viewCam;
-	} else {
-		s_viewCam = -1;
 	}
 
 	if (want == g_roomCameraId) {

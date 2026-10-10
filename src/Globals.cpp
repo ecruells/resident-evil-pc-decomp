@@ -57,6 +57,7 @@ BOOL g_bFullScreen = FALSE;
 // Blocking on a vblank instead makes the display, not the limiter, set the
 // tick rate - see the note on MarniDX::Present.
 BOOL g_bVSync = FALSE;
+BOOL g_bKeepAspect = TRUE;   // config.ini [Display] KeepAspect (port addition)
 // 0x004d642c
 int g_dwBitDepth = 16;
 // 0x004d6430

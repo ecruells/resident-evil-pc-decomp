@@ -45,6 +45,7 @@ const OwnedKey kOwnedKeys[] = {
     { "Player",  "ClearCount" },
     { "Input",   "KeyDef" },
     { "Input",   "SideDef" },
+    { "Display", "KeepAspect" },
 };
 const int kOwnedKeyCount = (int)(sizeof(kOwnedKeys) / sizeof(kOwnedKeys[0]));
 
@@ -355,6 +356,9 @@ void ConfigFile_EnsureExists(void)
         "; Wait for vblank on present. 0 = off (default, and what the original did\n"
         "; in a window): the engine paces itself to 33 ms per tick in software.\n"
         "VSync=%d\n"
+        "; 1 = keep the game's 4:3 picture (black bars on a wide screen or window),\n"
+        "; 0 = stretch it over the whole window\n"
+        "KeepAspect=%d\n"
         "\n"
         "[Assets]\n"
         "; Folder that holds the USA/ and JPN/ data trees. Relative paths are\n"
@@ -431,7 +435,7 @@ void ConfigFile_EnsureExists(void)
         "SideDef=%s\n",
         g_bFullScreen ? 1 : 0,
         (unsigned)g_dwScreenWidth, (unsigned)g_dwScreenHeight,
-        (unsigned)g_dwBitDepth, g_bVSync ? 1 : 0,
+        (unsigned)g_dwBitDepth, g_bVSync ? 1 : 0, g_bKeepAspect ? 1 : 0,
         (GetAssetVersion() == 1) ? "JPN" : "USA",
         GameModeName(g_GameMode),
         g_bPs1EndingCredits ? 1 : 0,
@@ -471,6 +475,7 @@ BOOL ConfigFile_Load(void)
     g_dwScreenHeight = (DWORD)ReadInt(path, "Display", "Height", (int)g_dwScreenHeight);
     g_dwBitDepth     = (DWORD)ReadInt(path, "Display", "BitDepth", (int)g_dwBitDepth);
     g_bVSync         = ReadInt(path, "Display", "VSync", g_bVSync ? 1 : 0) ? TRUE : FALSE;
+    g_bKeepAspect    = ReadInt(path, "Display", "KeepAspect", g_bKeepAspect ? 1 : 0) ? TRUE : FALSE;
 
     // Same clamps the Windows build applied.
     if (g_dwScreenWidth < 320) g_dwScreenWidth = 640;
@@ -629,6 +634,7 @@ void ConfigFile_Save(void)
     snprintf(values[6], sizeof(values[6]), "%u", (unsigned)g_dwClearCount);
     snprintf(values[7], sizeof(values[7]), "%s", keyHex);
     snprintf(values[8], sizeof(values[8]), "%s", sideHex);
+    snprintf(values[9], sizeof(values[9]), "%d", g_bKeepAspect ? 1 : 0);
 
     for (int i = 0; i < kOwnedKeyCount; ++i) {
         SetValue(kOwnedKeys[i].section, kOwnedKeys[i].key, values[i], lines, &count);
