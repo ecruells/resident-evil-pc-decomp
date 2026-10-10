@@ -362,6 +362,7 @@ void UpdateVideoPlayback(void)
             int playTo = UsesScenarioCut() ? GetPrologueCutStartMs() : 0;
 
             Ps1EndingCredits_StartVideo();
+            Netplay_FmvStarted();
             if (!plat_video_open_and_play(g_videoFilePath, playTo)) {
                 g_FMVPlaybackState = 3;
                 break;
@@ -393,7 +394,9 @@ void UpdateVideoPlayback(void)
 
             // Check for skip input (per-FMV skip mask from g_FMVTable[i].isSkippable)
             WORD skipMask = GetFmvSkipMask(g_CurrentFMVID);
-            if (((skipMask & ~g_videoSkipInput & currentInput) != 0) && (g_videoSkipCounter == 0)) {
+            // Co-op netplay: a skip on either machine ends it on both.
+            int skipPressed = ((skipMask & ~g_videoSkipInput & currentInput) != 0) && (g_videoSkipCounter == 0);
+            if (Netplay_FmvSkip(skipPressed)) {
                 // Skip requested - stop playback
                 plat_video_stop();
             }

@@ -64,3 +64,20 @@ void Netplay_OnSimCutSet(void);
 // The fov FlushTmdObjects projects this frame's 3D with: her camera's when the
 // frame was drawn through it, otherwise g_sceneRenderParam.
 int  Netplay_FrameFov(void);
+
+// ---- Cutscene voice waits ----
+// Scripts wait on MSF_VOICE_PLAYING, which the original clears when the line's
+// audio stops - a different tick on each machine. In netplay each pad word
+// carries "my line is still playing" and UpdateMusicWaitState clears the flag
+// on the first tick where neither is, counting only words made after the line
+// began. VoiceStarted: a line was started (play_sound_and_voice_effect).
+void Netplay_VoiceStarted(void);
+int  Netplay_VoiceWaitDone(int flagSet);
+
+// ---- Movies ----
+// Each machine plays a movie on its own (no ticks run meanwhile); a skip on
+// either ends it on both. FmvStarted: a movie begins (both count the same
+// movies). FmvSkip: this frame's local skip press; returns whether to stop,
+// which is also when the other player skipped this movie.
+void Netplay_FmvStarted(void);
+int  Netplay_FmvSkip(int localPressed);

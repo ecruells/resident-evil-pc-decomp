@@ -17,7 +17,7 @@ int  g_netPort = 27015;
 int  g_netDelay = 3;
 int  g_netLocalInput = NET_INPUT_BOTH;
 
-#define NETPLAY_PROTOCOL     1
+#define NETPLAY_PROTOCOL     2
 #define NETPLAY_MAGIC        0x4E314552u   // "RE1N"
 #define NETPLAY_RING         256           // ticks of input kept (power of two)
 #define NETPLAY_SEND_SPAN    16            // inputs per packet (redundancy against loss)
@@ -26,7 +26,7 @@ int  g_netLocalInput = NET_INPUT_BOTH;
 #define NETPLAY_STALL_LOG_MS 3000
 #define NETPLAY_TIMEOUT_MS   10000
 
-enum { PKT_HELLO = 1, PKT_WELCOME = 2, PKT_INPUT = 3, PKT_BYE = 4 };
+enum { PKT_HELLO = 1, PKT_WELCOME = 2, PKT_INPUT = 3, PKT_BYE = 4, PKT_SKIP = 5 };
 
 #pragma pack(push, 1)
 struct NetPacket {
@@ -41,9 +41,13 @@ struct NetPacket {
 	unsigned char  pad[3];
 	unsigned int   inputs[NETPLAY_SEND_SPAN];
 	unsigned int   checks[NETPLAY_SEND_SPAN];   // state hashes at the start of those ticks
+	unsigned int   skipSerial;     // the last movie this machine skipped (Netplay_FmvSkip)
 };
 #pragma pack(pop)
 
+static unsigned int s_fmvSerial = 0;      // movies started this session (the same count on both)
+static unsigned int s_localSkip = 0;      // the last movie skipped here
+static unsigned int s_remoteSkip = 0;     // ... and there
 static int          s_state = 0;       // 0 not started, 1 waiting, 2 active, -1 failed
 static unsigned int s_tick = 0;        // the tick about to run
 static unsigned int s_local[NETPLAY_RING];
@@ -136,6 +140,7 @@ static void send_packet(unsigned char type)
 	pkt.type = type;
 	pkt.protocol = NETPLAY_PROTOCOL;
 	pkt.settingsHash = settings_hash();
+	pkt.skipSerial = s_localSkip;
 	if (type == PKT_INPUT) {
 		unsigned int last = s_localNewest;   // one past the newest
 		unsigned int first = (last > NETPLAY_SEND_SPAN) ? last - NETPLAY_SEND_SPAN : 0;
@@ -192,6 +197,9 @@ static void receive_all(void)
 	while ((n = plat_net_recv(&pkt, sizeof(pkt))) >= 0) {
 		if (n != (int)sizeof(pkt) || pkt.magic != NETPLAY_MAGIC || pkt.protocol != NETPLAY_PROTOCOL) {
 			continue;
+		}
+		if ((pkt.type == PKT_INPUT || pkt.type == PKT_SKIP) && pkt.skipSerial > s_remoteSkip) {
+			s_remoteSkip = pkt.skipSerial;
 		}
 		if (pkt.type == PKT_HELLO || pkt.type == PKT_WELCOME) {
 			if (pkt.settingsHash != settings_hash()) {
@@ -320,8 +328,48 @@ static void take_snapshot(NetSnapshot* n)
 	n->hash = fnv(2166136261u, n, offsetof(NetSnapshot, hash));
 }
 
+// Bit 31 of a pad word (no button uses it): this machine's voice line was still
+// playing when the word was made.
+#define NET_WORD_VOICE_BUSY 0x80000000u
+static bool         s_voiceBusy = false;       // either machine's, for the last exchanged tick
+static unsigned int s_voiceArmTick = 0;        // first tick whose words were made after the line began
+static bool         s_voiceFlagSeen = false;
+
+void Netplay_VoiceStarted(void)
+{
+	// Sim tick s_tick - 1 is running; the word for tick X was made at the start
+	// of tick X - delay, so words from tick s_tick + delay on know of this line.
+	s_voiceArmTick = s_tick + (unsigned int)g_netDelay;
+}
+
+int Netplay_VoiceWaitDone(int flagSet)
+{
+	if (!flagSet) {
+		s_voiceFlagSeen = false;
+		return 1;
+	}
+	if (!s_voiceFlagSeen) {
+		s_voiceFlagSeen = true;
+		if ((int)(s_voiceArmTick - s_tick) < 0) {
+			Netplay_VoiceStarted();   // raised without a line (scripted waits)
+		}
+	}
+	if ((int)(s_tick - s_voiceArmTick) > 0 && !s_voiceBusy) {
+		net_log("[NET] voice wait ended at tick %u\n", s_tick - 1);
+		s_voiceFlagSeen = false;
+		return 1;
+	}
+	return 0;
+}
+
 void Netplay_ExchangeInputs(DWORD localWord, DWORD* p1Word, DWORD* p2Word)
 {
+	extern int Sound_VoiceBusy(void);
+	localWord &= ~NET_WORD_VOICE_BUSY;
+	if (Sound_VoiceBusy()) {
+		localWord |= NET_WORD_VOICE_BUSY;
+	}
+
 	// Our word for the tick `delay` ahead.
 	s_local[s_localNewest & (NETPLAY_RING - 1)] = localWord;
 	s_localNewest++;
@@ -387,6 +435,9 @@ void Netplay_ExchangeInputs(DWORD localWord, DWORD* p1Word, DWORD* p2Word)
 
 	DWORD mine = s_local[slot];
 	DWORD theirs = s_remote[slot];
+	s_voiceBusy = ((mine | theirs) & NET_WORD_VOICE_BUSY) != 0;
+	mine &= ~NET_WORD_VOICE_BUSY;
+	theirs &= ~NET_WORD_VOICE_BUSY;
 	*p1Word = (g_netMode == NET_MODE_HOST) ? mine : theirs;
 	*p2Word = (g_netMode == NET_MODE_HOST) ? theirs : mine;
 	s_tick++;
@@ -564,6 +615,32 @@ void Netplay_ViewEnd(void)
 int Netplay_FrameFov(void)
 {
 	return (s_viewFrameFov >= 0) ? s_viewFrameFov : g_sceneRenderParam;
+}
+
+void Netplay_FmvStarted(void)
+{
+	s_fmvSerial++;
+}
+
+int Netplay_FmvSkip(int localPressed)
+{
+	if (!Netplay_IsActive()) {
+		return localPressed;
+	}
+	if (localPressed && s_localSkip < s_fmvSerial) {
+		s_localSkip = s_fmvSerial;
+		net_log("[NET] movie %u skipped here\n", s_fmvSerial);
+		for (int i = 0; i < 3; i++) {
+			send_packet(PKT_SKIP);
+		}
+	}
+	receive_all();
+	if (s_remoteSkip == s_fmvSerial && !localPressed) {
+		net_log("[NET] movie %u skipped by the other player\n", s_fmvSerial);
+		s_localSkip = s_fmvSerial;
+		return 1;
+	}
+	return localPressed;
 }
 
 DWORD Netplay_LocalPadWord(void)

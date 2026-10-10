@@ -1,6 +1,7 @@
 // SoundSystem.cpp - Sound system implementation
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "Netplay.h"
 #include "../platform/platform.h"
 #include "../marni/MarniSound.h"
 #include "Entities.h"
@@ -299,9 +300,20 @@ void UpdateSoundDecay(void)
 // UpdateMusicWaitState (0x0047b...)
 // Checks if BGM has finished playing; clears wait flag if done.
 // ============================================================================
+int Sound_VoiceBusy(void)
+{
+    return (g_BgmSoundBank != 0 && getSndStat(g_BgmSoundBank) == 1) ? 1 : 0;
+}
+
 void UpdateMusicWaitState(void)
 {
-    if (g_BgmSoundBank != 0 && getSndStat(g_BgmSoundBank) == 1) {
+    // Co-op netplay: when a line ends is up to each machine's audio, so the
+    // wait ends on the tick both machines' lines are done (Netplay.h).
+    if (Netplay_IsActive()) {
+        if (!Netplay_VoiceWaitDone((g_main_state_flags & MSF_VOICE_PLAYING) != 0)) {
+            return;
+        }
+    } else if (Sound_VoiceBusy()) {
         return;
     }
     g_main_state_flags &= ~MSF_VOICE_PLAYING;
@@ -1306,6 +1318,7 @@ void play_sound_and_voice_effect(int type, int id)
 {
     if (type == 1) {
         voice_load_and_play((unsigned int)id);
+        Netplay_VoiceStarted();
         return;
     }
     if (type != 2) {
