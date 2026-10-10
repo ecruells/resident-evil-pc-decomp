@@ -506,6 +506,7 @@ extern int           g_DcDifficulty;           // DC_DIFFICULTY_*
 extern "C" {
 void re1_srand(unsigned int seed);
 int  re1_rand(void);
+unsigned int re1_rand_state(void);   // co-op netplay: the stream's state, for the desync check
 }
 #if !defined(__linux__)
 #define rand(...)  re1_rand(__VA_ARGS__)

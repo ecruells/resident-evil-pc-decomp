@@ -1,6 +1,7 @@
 // TitleScreen.cpp - Title screen rendering and state management
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "Netplay.h"
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
@@ -741,6 +742,11 @@ void title_state(void)
     switch (g_titleSelectionId) {
     case 0:
         nullsub_0047eb80();
+        if (Netplay_IsActive()) {
+            // Co-op netplay (port addition): no attract demo - back to the title.
+            Task_chain((void*)title_state);
+            return;
+        }
         g_main_state_flags2 |= MSF2_ATTRACT_DEMO;
         Task_chain((void*)game_start);
         Task_chain((void*)logos_state);

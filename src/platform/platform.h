@@ -197,3 +197,31 @@ BOOL plat_single_instance_check(void);
 // Windows implements these in system/CrashLog.cpp; see crash.cpp here.
 void crashlog_install(void);
 void crashlog_mark(const char* step);
+
+// ---------------------------------------------------------------------------
+// Networking - one UDP socket for co-op netplay (port addition, src/game/
+// Netplay.cpp). Datagrams, non-blocking, to/from a single peer.
+// ---------------------------------------------------------------------------
+
+// Open the socket on `port` (0 = any free port). FALSE on failure.
+BOOL plat_net_open(unsigned short port);
+
+// Set the peer: a host name (a Tailscale machine name works) or an address.
+BOOL plat_net_set_peer(const char* host, unsigned short port);
+
+// Send one datagram to the peer. FALSE when there is no peer or it failed.
+BOOL plat_net_send(const void* data, int size);
+
+// Receive one pending datagram, or -1 when none is waiting. With no peer set,
+// the sender becomes the peer (the host learns who joined); datagrams from
+// anyone else are dropped.
+int  plat_net_recv(void* buffer, int capacity);
+
+void plat_net_close(void);
+
+// Sleep for at least `ms` milliseconds.
+void plat_sleep_ms(DWORD ms);
+
+// Handle pending window events (key state, focus, close) from inside a wait
+// that blocks the main loop. FALSE once the window has been closed.
+BOOL plat_pump_events(void);

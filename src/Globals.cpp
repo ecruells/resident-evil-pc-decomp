@@ -2023,6 +2023,11 @@ extern "C" void re1_srand(unsigned int seed)
     g_randState = seed;
 }
 
+extern "C" unsigned int re1_rand_state(void)
+{
+    return g_randState;
+}
+
 extern "C" int re1_rand(void)
 {
     if (g_GameMode == GAME_MODE_DC) {

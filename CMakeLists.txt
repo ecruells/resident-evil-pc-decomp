@@ -58,6 +58,7 @@ set(RE1_SOURCES
     src/game/Ps1FmvSubtitles.cpp
     src/game/EntityModelLoader.cpp
     src/game/Coop.cpp
+    src/game/Netplay.cpp
     src/game/FadeSprite.cpp
     src/game/FileLoader.cpp
     src/game/GameInit.cpp
@@ -136,6 +137,7 @@ list(APPEND RE1_SOURCES
     src/platform/linux/crash.cpp
     src/platform/linux/stubs.cpp
     src/platform/linux/main.cpp
+    src/platform/linux/net.cpp
     src/marni/MarniDX_GL.cpp
     src/marni/MarniGLFuncs.cpp
 )

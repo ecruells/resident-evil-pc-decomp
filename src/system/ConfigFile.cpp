@@ -6,6 +6,7 @@
 #include "../DebugPrint.h"
 #include "../platform/platform.h"
 #include "../game/Coop.h"
+#include "../game/Netplay.h"
 #include "AssetPath.h"   // SetAssetBase / SetSaveRoot / SetAssetVersion
 
 #include <stdio.h>
@@ -403,6 +404,18 @@ void ConfigFile_EnsureExists(void)
         "; the go-back scene and the Tea Room zombie encounter already done.\n"
         "SkipOpening=%d\n"
         "\n"
+        "[Net]\n"
+        "; Co-op over the network (both players need this same build and game data).\n"
+        "; Mode = off, host (player 1, Chris) or join (player 2, Rebecca).\n"
+        "; Peer = the host's address or Tailscale name (join only). Port = UDP port.\n"
+        "; Delay = input delay in ticks (30 a second; raise it on slow links).\n"
+        "; LocalInput = both, keyboard or pad: which devices on this machine play.\n"
+        "Mode=off\n"
+        "Peer=\n"
+        "Port=27015\n"
+        "Delay=3\n"
+        "LocalInput=both\n"
+        "\n"
         "[Debug]\n"
         "; Master switch for the port-added debug features: F1 debug menu, F6\n"
         "; texture viewer, F8 collision overlay. 0 = off, 1 = on.\n"
@@ -508,6 +521,34 @@ BOOL ConfigFile_Load(void)
     g_coopSkipOpening = ReadInt(path, "Coop", "SkipOpening", 0) ? 1 : 0;
     g_coopAnimBrowser = ReadInt(path, "Coop", "AnimBrowser", 0) ? 1 : 0;
     g_coopFreezeEnemies = ReadInt(path, "Coop", "FreezeEnemies", 0) ? 1 : 0;
+
+    // [Net] - co-op netplay (Netplay.h).
+    {
+        char v[128];
+        if (ReadValue(path, "Net", "Mode", v, sizeof(v))) {
+            g_netMode = (strcmp(v, "host") == 0 || strcmp(v, "HOST") == 0) ? NET_MODE_HOST
+                      : (strcmp(v, "join") == 0 || strcmp(v, "JOIN") == 0) ? NET_MODE_JOIN
+                      : NET_MODE_OFF;
+        }
+        if (ReadValue(path, "Net", "Peer", v, sizeof(v))) {
+            strncpy(g_netPeer, v, sizeof(g_netPeer) - 1);
+        }
+        g_netPort  = ReadInt(path, "Net", "Port", g_netPort);
+        g_netDelay = ReadInt(path, "Net", "Delay", g_netDelay);
+        if (g_netDelay < 1) g_netDelay = 1;
+        if (g_netDelay > 12) g_netDelay = 12;
+        if (ReadValue(path, "Net", "LocalInput", v, sizeof(v))) {
+            g_netLocalInput = (strcmp(v, "keyboard") == 0) ? NET_INPUT_KEYBOARD
+                            : (strcmp(v, "pad") == 0) ? NET_INPUT_PAD : NET_INPUT_BOTH;
+        }
+        if (g_netMode != NET_MODE_OFF) {
+            // Netplay is co-op, and the debug tools change one game but not the other.
+            g_coopEnabled = 1;
+            g_debugFeaturesEnabled = 0;
+            g_coopAnimBrowser = 0;
+            g_coopFreezeEnemies = 0;
+        }
+    }
 
     // Content mode. [Game] Mode is the single switch: it sets g_GameMode AND
     // the asset overlay folder.

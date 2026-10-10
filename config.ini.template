@@ -56,6 +56,18 @@ Enable=0
 ; the go-back scene and the Tea Room zombie encounter already done.
 SkipOpening=0
 
+[Net]
+; Co-op over the network (both players need this same build and game data).
+; Mode = off, host (player 1, Chris) or join (player 2, Rebecca).
+; Peer = the host's address or Tailscale name (join only). Port = UDP port.
+; Delay = input delay in ticks (30 a second; raise it on slow links).
+; LocalInput = both, keyboard or pad: which devices on this machine play.
+Mode=off
+Peer=
+Port=27015
+Delay=3
+LocalInput=both
+
 [Debug]
 ; Master switch for the port-added debug features: F1 debug menu, F6
 ; texture viewer, F8 collision overlay. 0 = off, 1 = on.

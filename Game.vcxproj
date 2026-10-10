@@ -107,6 +107,7 @@
     <ClCompile Include="src\platform\win32\window_proc.cpp" />
     <ClCompile Include="src\platform\win32\platform.cpp" />
     <ClCompile Include="src\platform\win32\video.cpp" />
+    <ClCompile Include="src\platform\win32\net.cpp" />
     <ClCompile Include="src\system\ConfigFile.cpp" />
     <ClCompile Include="src\Globals.cpp" />
     <ClCompile Include="src\game\SoundApi.cpp" />
@@ -197,6 +198,7 @@
     <ClCompile Include="src\marni\Marni3DObject.cpp" />
     <ClCompile Include="src\game\InputSystem.cpp" />
     <ClCompile Include="src\game\Coop.cpp" />
+    <ClCompile Include="src\game\Netplay.cpp" />
     <ClCompile Include="src\marni\MarniInput.cpp" />
     <ClCompile Include="src\marni\MarniXInput.cpp" />
     <ClCompile Include="src\game\SoundSystem.cpp" />

@@ -6,6 +6,7 @@
 #include "../marni/MarniInput.h"
 #include "../marni/MarniXInput.h"
 #include "Coop.h"
+#include "Netplay.h"
 #include <cstring>
 
 // ============================================================================
@@ -149,6 +150,17 @@ DWORD ReadPadBoth(void)
 		g_CoopPadBtnWord = 0;
 		if ((1 < g_NumControllers) && (g_pMasterInputState.joysticks[0].enabled != 0)) {
 			g_CoopPadBtnWord = JoyToPSX(g_pMasterInputState.joysticks[0].currPress, 1);
+		}
+		if (Netplay_IsActive()) {
+			// Netplay: this machine's devices make its own player's word, and
+			// both words come back the same on both machines (Netplay.cpp).
+			DWORD local = 0;
+			if (g_netLocalInput != NET_INPUT_PAD) local |= g_PadBtnWord;
+			if (g_netLocalInput != NET_INPUT_KEYBOARD) local |= g_CoopPadBtnWord;
+			DWORD p1, p2;
+			Netplay_ExchangeInputs(local, &p1, &p2);
+			g_PadBtnWord = p1;
+			g_CoopPadBtnWord = p2;
 		}
 		if (g_DisablePad != 0) {
 			g_CoopPadBtnWord = 0;

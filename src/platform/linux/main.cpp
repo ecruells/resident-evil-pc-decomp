@@ -6,6 +6,7 @@
 // Windows (see src/platform/win32/main.cpp:706-757 for the
 // instruction-for-instruction commentary on that limiter).
 #include <SDL2/SDL.h>
+#include "../../game/Netplay.h"
 
 #include <limits.h>
 #include <stdio.h>
@@ -29,6 +30,36 @@ static const BOOL kFrameLimiterEnabled = TRUE;
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
+
+// The window's events: key state, focus, close. The main loop calls it once a
+// frame; netplay calls it from inside its waits (platform.h).
+static BOOL s_windowClosed = FALSE;
+
+BOOL plat_pump_events(void)
+{
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) {
+        switch (e.type) {
+        case SDL_QUIT:
+            s_windowClosed = TRUE;
+            break;
+        case SDL_WINDOWEVENT:
+            if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) g_bWindowFocused = TRUE;
+            else if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) g_bWindowFocused = FALSE;
+            else if (e.window.event == SDL_WINDOWEVENT_CLOSE) s_windowClosed = TRUE;
+            break;
+        case SDL_KEYDOWN:
+            plat_key_event(e.key.keysym.scancode, TRUE);
+            break;
+        case SDL_KEYUP:
+            plat_key_event(e.key.keysym.scancode, FALSE);
+            break;
+        default:
+            break;
+        }
+    }
+    return !s_windowClosed;
+}
 
 int main(int argc, char** argv)
 {
@@ -153,6 +184,29 @@ int main(int argc, char** argv)
     g_bWindowActive  = TRUE;
     g_bQuitFlag      = FALSE;
 
+    // Co-op netplay: meet the other player before the first tick, keeping the
+    // window responsive meanwhile.
+    if (Netplay_Configured()) {
+        int net = 0;
+        while (net == 0) {
+            SDL_Event ev;
+            while (SDL_PollEvent(&ev)) {
+                if (ev.type == SDL_QUIT ||
+                    (ev.type == SDL_WINDOWEVENT && ev.window.event == SDL_WINDOWEVENT_CLOSE)) {
+                    SDL_GL_DeleteContext(ctx);
+                    SDL_DestroyWindow(window);
+                    SDL_Quit();
+                    return 0;
+                }
+            }
+            net = Netplay_Connect();
+            SDL_Delay(5);
+        }
+        if (net < 0) {
+            fprintf(stderr, "[RE1] netplay could not start - see netplay.log; playing locally\n");
+        }
+    }
+
     DWORD lastTick = plat_time_ms();
     g_dwGameTimer1 = lastTick;
     int running = 1;
@@ -181,30 +235,14 @@ int main(int argc, char** argv)
             }
         }
 
-        SDL_Event e;
-        while (SDL_PollEvent(&e)) {
-            switch (e.type) {
-            case SDL_QUIT:
-                running = 0;
-                break;
-            case SDL_WINDOWEVENT:
-                if (e.window.event == SDL_WINDOWEVENT_FOCUS_GAINED) g_bWindowFocused = TRUE;
-                else if (e.window.event == SDL_WINDOWEVENT_FOCUS_LOST) g_bWindowFocused = FALSE;
-                else if (e.window.event == SDL_WINDOWEVENT_CLOSE) running = 0;
-                break;
-            case SDL_KEYDOWN:
-                plat_key_event(e.key.keysym.scancode, TRUE);
-                break;
-            case SDL_KEYUP:
-                plat_key_event(e.key.keysym.scancode, FALSE);
-                break;
-            default:
-                break;
-            }
+        if (!plat_pump_events()) {
+            running = 0;
         }
 
         if (!running || g_bQuitFlag) break;
-        if (!g_bWindowFocused) { SDL_Delay(1); continue; }
+        // Unfocused, the game pauses - except in netplay, where the other
+        // player's game is waiting on this one.
+        if (!g_bWindowFocused && !Netplay_IsActive()) { SDL_Delay(1); continue; }
 
         DWORD now = plat_time_ms();
 
@@ -284,6 +322,9 @@ int main(int argc, char** argv)
         }
         (void)lastTick;
     }
+
+    // Co-op netplay: tell the other game we are gone.
+    Netplay_Shutdown();
 
     // Write the session's settings back, exactly where the Windows build's
     // message loop calls it on exit.
