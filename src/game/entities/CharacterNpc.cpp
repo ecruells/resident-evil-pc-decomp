@@ -2392,6 +2392,7 @@ static const CoopAnimSet kCoopAnimSets[] = {
     { "W30 UNARMED",      "players/w30.emw" },
     { "W31 REBECCA KNIFE", "players/w31.emw" },
     { "W33 REBECCA SHOTGUN", "players/w33.emw" },
+    { "W13 JILL SHOTGUN", "players/w13.emw" },
     { "ROOM PLAYER SET",  NULL },
     { "ENEMY REACTIONS",  NULL },
 };
@@ -2498,7 +2499,7 @@ static void coop_partner_anim_browser(void)
 // the player's per-weapon tables (player_behavior_14_autoaim_fire), keyed on
 // the same frames of the same animations, at her hand (joint 14).
 // ----------------------------------------------------------------------------
-enum { P2_AIM_NONE, P2_AIM_RAISE, P2_AIM_HOLD, P2_AIM_TURN, P2_AIM_FIRE };
+enum { P2_AIM_NONE, P2_AIM_RAISE, P2_AIM_HOLD, P2_AIM_TURN, P2_AIM_FIRE, P2_AIM_RELOAD };
 enum { P2_DIR_AHEAD, P2_DIR_UP, P2_DIR_DOWN };
 static const unsigned char kAimBits[3]   = { 0x40, 0x80, 0x20 };
 static const unsigned char kFireAnim[3]  = { 6, 9, 12 };
@@ -2509,6 +2510,7 @@ static int  s_aim = P2_AIM_NONE;
 static int  s_aimDir = P2_DIR_AHEAD;
 static int  s_aimTurnTo = P2_DIR_AHEAD;
 static int  s_aimLastFrame = 0;
+static int  s_aimLastEvent = -1;   // the reload's last frame with its events done
 static bool s_aimReverse = false;
 static unsigned int s_aimHeader = 0, s_aimBase = 0;   // the weapon set in use
 
@@ -2712,6 +2714,14 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
                 break;
             }
             Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);   // empty: click
+            // Empty with its ammo on her: the reload, as the player's
+            // player_behavior_18_hold_fire (entered from the same click).
+            if (Coop_PartnerHasAmmoFor(gun)) {
+                coop_aim_play(14, false);
+                s_aimLastEvent = -1;
+                s_aim = P2_AIM_RELOAD;
+                break;
+            }
         }
         if (want != s_aimDir) {
             // One step at a time through "ahead": 8 / 11 forwards to go up /
@@ -2734,6 +2744,37 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
             s_aim = P2_AIM_HOLD;
         }
         break;
+
+    case P2_AIM_RELOAD: {
+        // Motion 14 of the weapon set - Jill's W13 for the shotgun, her W33
+        // stops at 13. The transfer and sounds on fire_weapon_fx's frames:
+        // the Beretta takes the clip at 0x11 (sound 5), the shotgun loads at
+        // 0xF with its clacks at 0xF / 0x19 / 0x23 (sound 9).
+        if (gun == ITEM_SHOTGUN) {
+            coop_anim_set_pair(5, &s_aimHeader, &s_aimBase);   // W13
+            slots = (const unsigned short*)s_aimBase;
+            animDone = frame < s_aimLastFrame || frame >= (int)slots[14 * 2] - 1;
+        }
+        if (frame != s_aimLastEvent) {
+            s_aimLastEvent = frame;
+            int pos = (int)ENTITY->scaMatrixData.localMatrix.t;
+            if (gun == ITEM_BERETTA && frame == 0x11) {
+                Coop_PartnerReloadFromStack(gun);
+                Coop_PlayP2WeaponSnd(5, pos);
+            }
+            if (gun == ITEM_SHOTGUN && (frame == 0xf || frame == 0x19 || frame == 0x23)) {
+                if (frame == 0xf) {
+                    Coop_PartnerReloadFromStack(gun);
+                }
+                Coop_PlayP2WeaponSnd(9, pos);
+            }
+        }
+        if (animDone) {
+            coop_aim_play(kStillAnim[s_aimDir], false);
+            s_aim = P2_AIM_HOLD;
+        }
+        break;
+    }
 
     case P2_AIM_FIRE:
         coop_partner_fire_frame(gun - 2);

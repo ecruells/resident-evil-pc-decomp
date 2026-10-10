@@ -109,6 +109,11 @@ int  Coop_PartnerHasHandgun(void);
 int  Coop_PartnerUseAmmo(void);
 // Rounds left in her equipped weapon's slot.
 int  Coop_PartnerAmmo(void);
+// Does she carry ammo for her equipped gun (item weaponId + 9)?
+int  Coop_PartnerHasAmmoFor(int weaponId);
+// The reload's transfer: her gun from her fullest stack of its ammo, capped at
+// the gun's maximum (fire_consume_ammo_stack, on her slots).
+void Coop_PartnerReloadFromStack(int weaponId);
 // apply_weapon_damage reads the shooter from g_playerEntity (position, facing,
 // aim bits in flags - 0x40 ahead, 0x80 up, 0x20 down, as weaponAimFlags - and
 // id for the range table). Lend it hers for one shot.

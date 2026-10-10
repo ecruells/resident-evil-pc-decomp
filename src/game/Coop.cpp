@@ -1042,3 +1042,60 @@ unsigned int Coop_PartnerShotgunMesh(void)
 {
 	return s_p2ShotgunMesh;
 }
+
+// ============================================================================
+// Partner reload
+// ============================================================================
+int Coop_PartnerHasAmmoFor(int weaponId)
+{
+	unsigned char ammo = (unsigned char)(weaponId + 9);   // weapon_ammo_item_id
+	for (int i = 0; i < 6; i++) {
+		if (g_RebeccaItemSlots[i].Id == ammo && g_RebeccaItemSlots[i].qty != 0) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+// fire_consume_ammo_stack (PlayerAnimations.cpp, 0x0045a580) on her 6 slots.
+void Coop_PartnerReloadFromStack(int weaponId)
+{
+	unsigned char ammo = (unsigned char)(weaponId + 9);
+	unsigned char maxQty = g_ItemMaxQty[(unsigned int)ammo * 4];
+	unsigned char gunSlot = g_coopP2.equippedItemId;
+	if (gunSlot == 0 || gunSlot > 6) {
+		return;
+	}
+	int best = -1;
+	unsigned char bestQty = 0;
+	for (int i = 0; i < 6; i++) {
+		if (g_RebeccaItemSlots[i].Id == ammo && g_RebeccaItemSlots[i].qty > bestQty) {
+			best = i;
+			bestQty = g_RebeccaItemSlots[i].qty;
+		}
+	}
+	if (best < 0) {
+		return;
+	}
+	if (maxQty < bestQty) {
+		g_RebeccaItemSlots[gunSlot - 1].qty = maxQty;
+		g_RebeccaItemSlots[best].qty = (unsigned char)(bestQty - maxQty);
+		return;
+	}
+	g_RebeccaItemSlots[gunSlot - 1].qty = bestQty;
+	g_RebeccaItemSlots[best].Id = 0;
+	g_RebeccaItemSlots[best].qty = 0;
+
+	// rearrange_item_slots closes the gap in the active slots and keeps the
+	// equipped index on its item: point it at hers for the one call.
+	void* p1Slots = g_ItemSlotsPointer;
+	unsigned char p1Equipped = g_EquippedItemId;
+	g_ItemSlotsPointer = g_RebeccaItemSlots;
+	g_EquippedItemId = g_coopP2.equippedItemId;
+	LoadHeldItemsImages();
+	rearrange_item_slots();
+	g_coopP2.equippedItemId = g_EquippedItemId;
+	g_ItemSlotsPointer = p1Slots;
+	g_EquippedItemId = p1Equipped;
+	LoadHeldItemsImages();
+}
