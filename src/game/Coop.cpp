@@ -24,6 +24,35 @@ WORD  g_CoopDpadPressed = 0;
 Entity* g_coopPartner = nullptr;
 int     g_coopPartnerPlaced = 0;
 
+// Texture banks. room_set hands them out from 6 upward (enemy models in
+// g_EnemiesList order, 2 banks each, a run of the same model sharing one load),
+// and load_room_masks then puts the camera's occlusion masks into the next ones.
+// Room textures have to stay below bank 16: 16 and up is the second VRAM row
+// (TexturePage_SetupFull maps them to y = 256), where the fixed sheets live -
+// the player's own is 0x16. Pushed up there, the masks stop occluding and
+// everything behind the room's walls shows through. Keep this many banks free
+// for them.
+#define COOP_MODEL_BANKS 2
+#define COOP_MASK_BANKS  2
+#define COOP_ROOM_BANK_LIMIT 16
+
+// Banks the enemy loop will have used once it has loaded every model now in
+// g_EnemiesList, counting from where the room script left the counter.
+static int room_banks_after_models(void)
+{
+	int bank = g_TextureBankID;
+	int last = -1;
+	for (int i = 0; i < 30; i++) {
+		if ((g_EnemiesList[i].status_flags & 1) != 0) {
+			if (g_EnemiesList[i].id != last) {
+				bank += COOP_MODEL_BANKS;
+			}
+			last = g_EnemiesList[i].id;
+		}
+	}
+	return bank;
+}
+
 // Bumped on every spawn: she lands in the same g_EnemiesList slot room after
 // room, so the pointer alone cannot tell a stand-in built for the last room's
 // skeleton (in that room's, since reused, load buffer) from a current one.
@@ -112,6 +141,15 @@ void Coop_SpawnPartner(void)
 		}
 	}
 
+	// Her model takes 2 texture banks of its own. In a room so full of models
+	// that they would push the occlusion masks out of the room's banks, she
+	// sits it out rather than break the walls for both of them.
+	if (room_banks_after_models() + COOP_MODEL_BANKS + COOP_MASK_BANKS > COOP_ROOM_BANK_LIMIT) {
+		dbg_printf("[COOP] no texture banks left for player 2 in this room (models up to %d)\n",
+		           room_banks_after_models());
+		return;
+	}
+
 	// Highest free slot: scripts fill the low ones, and an event that runs later
 	// may still cmd_enemy_set into any of them.
 	int slot = -1;
@@ -137,8 +175,8 @@ void Coop_SpawnPartner(void)
 	// (Coop_LoadPartnerWeaponModels): the controller swaps the bare hand, the
 	// handgun and the shotgun as she equips them (npc_coop_partner_control).
 	e->behavior_flags = (partnerId == NPC_REBECCA) ? 2 : 0;
-	if (Coop_PartnerGunId() != 0) {
-		Coop_LoadP2WeaponSounds(Coop_PartnerGunId());
+	if (Coop_PartnerWeaponId() != 0) {
+		Coop_LoadP2WeaponSounds(Coop_PartnerWeaponId());
 	}
 	e->scaMatrixData.localMatrix.t[0] = (unsigned int)(int)g_playerEntity.scaMatrixData.localMatrix.t[0];
 	e->scaMatrixData.localMatrix.t[1] = 0;
@@ -320,8 +358,8 @@ static void p2_swap_out(void)
 	// sound bank. If she changed weapon, put player 1's back.
 	if (newWeapon != g_coopP2.equippedWeaponId) {
 		g_coopP2.equippedWeaponId = newWeapon;
-		if (Coop_PartnerGunId() != 0) {
-			Coop_LoadP2WeaponSounds(Coop_PartnerGunId());
+		if (Coop_PartnerWeaponId() != 0) {
+			Coop_LoadP2WeaponSounds(Coop_PartnerWeaponId());
 		}
 		LoadSoundBank(g_playerEntity.equippedWeaponId, g_TimImageBuffer__bitmap);
 		LoadEquippedWeaponAnimation(g_playerEntity.equippedWeaponId, 0xE,
@@ -540,6 +578,17 @@ int Coop_PartnerGunId(void)
 	return 0;
 }
 
+int Coop_PartnerWeaponId(void)
+{
+	if (!g_coopP2.valid) {
+		return 0;
+	}
+	if (g_coopP2.equippedWeaponId == ITEM_KNIFE) {
+		return ITEM_KNIFE;
+	}
+	return Coop_PartnerGunId();
+}
+
 int Coop_PartnerHasHandgun(void)
 {
 	return Coop_PartnerGunId() == ITEM_BERETTA;
@@ -577,6 +626,7 @@ unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weapon
 	short angle = g_playerEntity.directionAngle;
 	unsigned char flags = g_playerEntity.flags;
 	unsigned char id = g_playerEntity.id;
+	JointStruct* joints = g_playerEntity.jointsStructs;
 
 	g_playerEntity.scaMatrixData.localMatrix.t[0] = partner->scaMatrixData.localMatrix.t[0];
 	g_playerEntity.scaMatrixData.localMatrix.t[1] = partner->scaMatrixData.localMatrix.t[1];
@@ -584,6 +634,7 @@ unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weapon
 	g_playerEntity.directionAngle = partner->angle;
 	g_playerEntity.flags = (unsigned char)((flags & ~0xE0) | aimBits);
 	g_playerEntity.id = 3;                                             // Rebecca's weapon ranges
+	g_playerEntity.jointsStructs = partner->jointsStructs;             // the knife's reach: her hand
 
 	unsigned char hit = apply_weapon_damage(weaponId);
 
@@ -593,7 +644,8 @@ unsigned char Coop_PartnerApplyWeaponDamage(Entity* partner, unsigned int weapon
 	g_playerEntity.directionAngle = angle;
 	g_playerEntity.flags = flags;
 	g_playerEntity.id = id;
-	dbg_printf("[COOP] player 2 shot: result %d\n", hit);
+	g_playerEntity.jointsStructs = joints;
+	dbg_printf("[COOP] player 2 hit check (weapon %d): result %d\n", weaponId, hit);
 	return hit;
 }
 
@@ -908,9 +960,9 @@ void Coop_OnSave(void)
 // never made (the original never shows her holding one, and g_weaponPathTable
 // sends her to Jill's W13). So she holds Jill's - W13's hand-and-shotgun mesh
 // on Jill's sheet (CHAR11.EMD's TIM, 2 texture banks, loaded into the next free
-// ones as LoadEntityEMD loads a model's) - or, when the room has no two banks
-// to spare below the player's 0x16, player 1's own shotgun on his sheet (bank
-// 0x16 page 7, as LoadEquippedWeaponAnimation draws his).
+// ones as LoadEntityEMD loads a model's) - or, when that would leave no room
+// below bank 16 for the masks, player 1's own shotgun on his sheet (bank 0x16
+// page 7, as LoadEquippedWeaponAnimation draws his).
 // ============================================================================
 extern void ProcessTmdAsync(unsigned int param1);                                         // TmdAnimation.cpp 0x004838e0
 extern unsigned int ProcessTmdTextures(char mode, unsigned int* tmd, int bank, int page);  // TmdAnimation.cpp 0x00473da0
@@ -918,7 +970,24 @@ extern void SetSpriteBufferFlag(void);
 
 static unsigned char s_p2SheetFile[0x20000];    // CHAR11.EMD (~104KB), for its TIM
 static unsigned char s_p2ShotgunFile[0x8000];   // W13.EMW / W03.EMW (~28KB)
+static unsigned char s_p2KnifeFile[0x8000];     // W11.EMW / W01.EMW (~21KB)
 static unsigned int  s_p2ShotgunMesh = 0;
+static unsigned int  s_p2KnifeMesh = 0;
+
+// Load an .EMW and put its weapon mesh on texture (bank, page); 0 on failure.
+static unsigned int emw_load_mesh(const char* file, unsigned char* buf, size_t cap,
+                                  int bank, int page)
+{
+	sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT, file);
+	size_t size = LoadFile(FILE_PATH, buf, 0x20);
+	if (size < 0x20 || size > cap) {
+		dbg_printf("[COOP] could not load %s\n", file);
+		return 0;
+	}
+	unsigned int* mesh = (unsigned int*)(buf + (*(unsigned int*)(buf + (size & ~3u) - 4) & ~3u));
+	ProcessTmdTextures(2, mesh, bank, page);
+	return (unsigned int)mesh + 0xc;
+}
 
 // The weapon mesh of a loaded .EMW: the second of the two dwords at its end.
 static unsigned int* emw_mesh(unsigned char* file, size_t size)
@@ -929,46 +998,44 @@ static unsigned int* emw_mesh(unsigned char* file, size_t size)
 void Coop_LoadPartnerWeaponModels(void)
 {
 	s_p2ShotgunMesh = 0;
+	s_p2KnifeMesh = 0;
 	if (g_coopPartner == nullptr || g_coopPartner->id != NPC_REBECCA) {
 		return;
 	}
 
-	size_t size;
-	if ((int)g_TextureBankID + 2 <= 0x16) {
+	if ((int)g_TextureBankID + COOP_MODEL_BANKS + COOP_MASK_BANKS <= COOP_ROOM_BANK_LIMIT) {
 		sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT, "enemy/char11.emd");
 		SetSpriteBufferFlag();
 		size_t sheetSize = LoadFile(FILE_PATH, s_p2SheetFile, 0x20);
-		sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT, "players/w13.emw");
-		size = LoadFile(FILE_PATH, s_p2ShotgunFile, 0x20);
-		if (sheetSize >= 0x20 && sheetSize <= sizeof(s_p2SheetFile) &&
-		    size >= 0x20 && size <= sizeof(s_p2ShotgunFile)) {
+		if (sheetSize >= 0x20 && sheetSize <= sizeof(s_p2SheetFile)) {
 			// The bank/page the TIM lands in are the counters before
 			// ProcessTmdAsync advances them; the TIM offset is the last dword.
 			unsigned char bank = g_TextureBankID;
 			unsigned char page = g_TextureCurrentPage;
 			ProcessTmdAsync((unsigned int)s_p2SheetFile +
 			                (*(unsigned int*)(s_p2SheetFile + (sheetSize & ~3u) - 4) & ~3u));
-			unsigned int* mesh = emw_mesh(s_p2ShotgunFile, size);
-			ProcessTmdTextures(2, mesh, bank, page);
-			s_p2ShotgunMesh = (unsigned int)mesh + 0xc;
-			dbg_printf("[COOP] player 2's shotgun: Jill's, sheet in bank %d page %d\n", bank, page);
+			s_p2ShotgunMesh = emw_load_mesh("players/w13.emw", s_p2ShotgunFile,
+			                                sizeof(s_p2ShotgunFile), bank, page);
+			s_p2KnifeMesh = emw_load_mesh("players/w11.emw", s_p2KnifeFile,
+			                              sizeof(s_p2KnifeFile), bank, page);
+			dbg_printf("[COOP] player 2's weapons: Jill's, sheet in bank %d page %d\n", bank, page);
 			return;
 		}
 	}
 
-	// Fallback: player 1's own shotgun on his sheet.
-	sprintf(FILE_PATH, "%s%s", GAME_DATA_ROOT,
-	        (g_playerEntity.id & 1) ? "players/w13.emw" : "players/w03.emw");
-	size = LoadFile(FILE_PATH, s_p2ShotgunFile, 0x20);
-	if (size < 0x20 || size > sizeof(s_p2ShotgunFile)) {
-		dbg_printf("[COOP] could not load player 2's shotgun model\n");
-		return;
-	}
-	unsigned int* mesh = emw_mesh(s_p2ShotgunFile, size);
-	ProcessTmdTextures(2, mesh, 0x16, 7);
-	s_p2ShotgunMesh = (unsigned int)mesh + 0xc;
-	dbg_printf("[COOP] player 2's shotgun: player 1's (no texture bank to spare, next %d)\n",
+	// Fallback: player 1's own, on his sheet.
+	bool jill = (g_playerEntity.id & 1) != 0;
+	s_p2ShotgunMesh = emw_load_mesh(jill ? "players/w13.emw" : "players/w03.emw",
+	                                s_p2ShotgunFile, sizeof(s_p2ShotgunFile), 0x16, 7);
+	s_p2KnifeMesh = emw_load_mesh(jill ? "players/w11.emw" : "players/w01.emw",
+	                              s_p2KnifeFile, sizeof(s_p2KnifeFile), 0x16, 7);
+	dbg_printf("[COOP] player 2's weapons: player 1's (no texture bank to spare, next %d)\n",
 	           (int)g_TextureBankID);
+}
+
+unsigned int Coop_PartnerKnifeMesh(void)
+{
+	return s_p2KnifeMesh;
 }
 
 unsigned int Coop_PartnerShotgunMesh(void)

@@ -214,11 +214,11 @@ static void char_init_common(unsigned int tint,
 // Co-op (port addition): the weapon joint block LoadCharacterWeaponTmd fills
 // (jointsStructs + 0x6c8: anim field at +0x0c, TMD at +0x14, anim object at
 // +0x18), kept for the bare hand (0), the handgun (1, behavior_flags 2 =
-// WS232) and the shotgun (2, Coop_LoadPartnerWeaponModels' - there is no NPC
-// shotgun model, WS236 is item 6, the flamethrower, and her sheet has no
-// shotgun art)
+// WS232), the shotgun (2) and the knife (3) - the last two
+// Coop_LoadPartnerWeaponModels' (there is no NPC shotgun or knife model,
+// WS236 is item 6, the flamethrower, and her sheet has no art for them)
 // so the partner controller can show whichever she has equipped.
-static unsigned char s_coopHandBlock[3][16];
+static unsigned char s_coopHandBlock[4][16];
 
 static void coop_partner_keep_hand(int which)
 {
@@ -289,16 +289,18 @@ static void char_init_rebecca(void)
     if (ENTITY == g_coopPartner) {
         // The shotgun: the mesh Coop_LoadPartnerWeaponModels prepared, set up
         // in her hand as LoadEquippedWeaponAnimation sets up the player's.
-        static unsigned int s_shotgunObject[0x100];
-        unsigned int mesh = Coop_PartnerShotgunMesh();
-        if (mesh != 0) {
-            JointStruct* hand = &ENTITY->jointsStructs[14];
-            hand->anim_slot_ptr = (int)mesh;
-            hand->anim_object = s_shotgunObject;
-            CreateAnimObject((int)&hand->anim_field, (unsigned int*)s_shotgunObject);
-            coop_partner_keep_hand(2);
-        } else {
-            memcpy(s_coopHandBlock[2], s_coopHandBlock[1], 16);   // no room for it: the handgun
+        static unsigned int s_weaponObject[2][0x100];
+        const unsigned int meshes[2] = { Coop_PartnerShotgunMesh(), Coop_PartnerKnifeMesh() };
+        for (int w = 0; w < 2; w++) {
+            if (meshes[w] != 0) {
+                JointStruct* hand = &ENTITY->jointsStructs[14];
+                hand->anim_slot_ptr = (int)meshes[w];
+                hand->anim_object = s_weaponObject[w];
+                CreateAnimObject((int)&hand->anim_field, (unsigned int*)s_weaponObject[w]);
+                coop_partner_keep_hand(2 + w);
+            } else {
+                memcpy(s_coopHandBlock[2 + w], s_coopHandBlock[w == 0 ? 1 : 0], 16);
+            }
         }
     }
 }
@@ -2335,6 +2337,22 @@ static void npc_state0_init(void)
 // Walk and run are the NPC animations 7 / 8 and speeds 0x5D / 0xD2 of the
 // "walk to the player" behaviours (npc_walk_behavior_01 / 02).
 // ============================================================================
+// Which set her current animation id is from: the same id means a different
+// motion on her NPC set and on a weapon set, so a switch restarts it.
+static bool s_animOnWeapon = false;
+static int  s_idleFrames = 0;
+
+static void coop_partner_set_anim(unsigned char anim);
+
+static void coop_partner_set_anim_on(unsigned char anim, bool onWeapon)
+{
+    if (s_animOnWeapon != onWeapon) {
+        s_animOnWeapon = onWeapon;
+        ENTITY->animationId = 0xff;
+    }
+    coop_partner_set_anim(anim);
+}
+
 static void coop_partner_set_anim(unsigned char anim)
 {
     if (ENTITY->animationId != anim) {
@@ -2372,7 +2390,7 @@ static const CoopAnimSet kCoopAnimSets[] = {
     { "REBECCA NPC",      NULL },
     { "W32 REBECCA GUN",  "players/w32.emw" },
     { "W30 UNARMED",      "players/w30.emw" },
-    { "W11 KNIFE",        "players/w11.emw" },
+    { "W31 REBECCA KNIFE", "players/w31.emw" },
     { "W33 REBECCA SHOTGUN", "players/w33.emw" },
     { "ROOM PLAYER SET",  NULL },
     { "ENEMY REACTIONS",  NULL },
@@ -2498,11 +2516,13 @@ static int coop_weapon_set(int gunId, unsigned int* header, unsigned int* base)
 {
     if (gunId == ITEM_BERETTA) return coop_anim_set_pair(1, header, base);   // W32
     if (gunId == ITEM_SHOTGUN) return coop_anim_set_pair(4, header, base);   // W33
+    if (gunId == ITEM_KNIFE)   return coop_anim_set_pair(3, header, base);   // W31
     return 0;
 }
 
 static void coop_aim_play(unsigned char anim, bool reverse)
 {
+    s_animOnWeapon             = true;
     ENTITY->animationId        = anim;
     ENTITY->animation_frame_id = 0;
     ENTITY->timing_control     = 0;
@@ -2566,10 +2586,94 @@ static void coop_partner_fire_frame(int weaponIdx)
     }
 }
 
+// ----------------------------------------------------------------------------
+// Partner knife (co-op): her W31 set, the player's knife behaviours
+// (player_behavior_12_knife_aim .. 14_knife_swing). 5 readies it; the stance is
+// held on motion dir + 9 after blending through dir + 10 (dir: ahead 0, up 2,
+// down 4, as ((flags & 0xbf) >> 6) + ((flags & 0x20) >> 3) builds it); the
+// swing is 6 ahead, 7 up, 8 down. It hits once per swing, inside the player's
+// per-motion frame window for her (kFireWindow, (id & 1) = 1).
+// ----------------------------------------------------------------------------
+enum { P2_KNIFE_READY = 1, P2_KNIFE_HOLD, P2_KNIFE_SWING };
+static bool s_knifeHit = false;
+
+static bool coop_partner_knife_update(unsigned int held, unsigned int pressed)
+{
+    static const unsigned char kFireWindow[12] = { 6, 7, 4, 2, 4, 4, 3, 8, 4, 2, 4, 4 };
+    static const unsigned char kStanceDir[3] = { 0, 2, 4 };      // ahead, up, down
+    static const unsigned char kSwing[3]     = { 6, 7, 8 };
+
+    int want = ((held & 1) != 0) ? P2_DIR_UP : ((held & 4) != 0) ? P2_DIR_DOWN : P2_DIR_AHEAD;
+    const unsigned short* slots = (const unsigned short*)s_aimBase;
+    int frame = ENTITY->animation_frame_id;
+    int frameCount = (int)slots[ENTITY->animationId * 2];
+    bool animDone = frame < s_aimLastFrame || frame >= frameCount - 1;
+    s_aimLastFrame = frame;
+
+    switch (s_aim) {
+    case P2_AIM_NONE:
+        coop_aim_play(P2_ANIM_RAISE, false);
+        ENTITY->blend_counter = 7;
+        s_aim = P2_KNIFE_READY;
+        break;
+    case P2_KNIFE_READY:
+        if (animDone) {
+            s_aimDir = want;
+            coop_aim_play((unsigned char)(kStanceDir[s_aimDir] + 10), false);
+            ENTITY->blend_counter = 15;
+            s_aim = P2_KNIFE_HOLD;
+        }
+        break;
+    case P2_KNIFE_HOLD:
+        if ((pressed & 0x80) != 0) {
+            s_aimDir = want;
+            coop_aim_play(kSwing[s_aimDir], false);
+            s_knifeHit = false;
+            s_aim = P2_KNIFE_SWING;
+            break;
+        }
+        if (want != s_aimDir) {
+            s_aimDir = want;
+            coop_aim_play((unsigned char)(kStanceDir[s_aimDir] + 10), false);
+            ENTITY->blend_counter = 15;
+        } else if (ENTITY->blend_counter == 0 &&
+                   ENTITY->animationId == kStanceDir[s_aimDir] + 10) {
+            coop_aim_play((unsigned char)(kStanceDir[s_aimDir] + 9), false);
+            ENTITY->blend_counter = 15;
+        }
+        break;
+    case P2_KNIFE_SWING: {
+        if (frame == 7) {
+            Coop_PlayP2WeaponSnd(0, (int)ENTITY->scaMatrixData.localMatrix.t);   // the swish
+        }
+        int e = (3 + (int)ENTITY->animationId) * 2 - 12;
+        if (!s_knifeHit && (unsigned char)(frame - kFireWindow[e]) < kFireWindow[e + 1]) {
+            if (Coop_PartnerApplyWeaponDamage(ENTITY, ITEM_KNIFE, kAimBits[s_aimDir]) != 0) {
+                s_knifeHit = true;
+            }
+        }
+        if (animDone) {
+            coop_aim_play((unsigned char)(kStanceDir[s_aimDir] + 9), false);
+            ENTITY->blend_counter = 15;
+            s_aim = P2_KNIFE_HOLD;
+        }
+        break;
+    }
+    }
+    return true;
+}
+
 // Aim (0x100 held) and fire (action). Returns true while she is aiming, which
 // holds her feet still; the controller's tail then steps s_aimHeader/s_aimBase.
 static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
 {
+    if ((held & 0x100) != 0 && Coop_PartnerWeaponId() == ITEM_KNIFE) {
+        if (!coop_weapon_set(ITEM_KNIFE, &s_aimHeader, &s_aimBase)) {
+            s_aim = P2_AIM_NONE;
+            return false;
+        }
+        return coop_partner_knife_update(held, pressed);
+    }
     int gun = Coop_PartnerGunId();
     if ((held & 0x100) == 0 || gun == 0 || !coop_weapon_set(gun, &s_aimHeader, &s_aimBase)) {
         s_aim = P2_AIM_NONE;
@@ -2744,38 +2848,75 @@ void npc_coop_partner_control(void)
     if ((held & 8) != 0) a -= turn;
     ENTITY->angle = (short)(a & 0xfff);
 
+    // Which set each motion plays from follows the player's own behaviours:
+    //   walk / run / turn on the spot - the weapon set's 2 / 3 / 2 with a
+    //     weapon equipped (player_ctrl_behavior_walk, _0d_run), else her NPC
+    //     set's 7 / 8 / 7;
+    //   back-step - the model set's 3 (player_ctrl_behavior_run, which is the
+    //     back-step), her NPC set's 3 being the same motion;
+    //   idle - the model set's 0 for 100 frames, then, armed, the weapon set's
+    //     0 into its 1 loop (player_behavior_00_idle).
+    unsigned int weaponHeader = 0, weaponBase = 0;
+    int weaponId = Coop_PartnerWeaponId();
+    bool armed = !aiming && weaponId != 0 &&
+                 coop_weapon_set(weaponId, &weaponHeader, &weaponBase);
+    bool onWeaponSet = false;
+
     if ((held & 1) != 0) {
         bool run = (held & 0x200) != 0;
-        coop_partner_set_anim(run ? 8 : 7);
+        onWeaponSet = armed;
+        coop_partner_set_anim_on(armed ? (run ? 3 : 2) : (run ? 8 : 7), onWeaponSet);
         entity_apply_walk_speed(run ? 0xd2 : 0x5d);
         npc_walk_advance_xz((short)ENTITY->move_speed_current);
+        s_idleFrames = 0;
     } else if ((held & 4) != 0) {
         // Backing up, as the player's behaviour 8: 0x40 a frame, half a turn
-        // from the facing. Her NPC model has no back-step animation, so the walk
-        // cycle plays in reverse.
-        coop_partner_set_anim(7);
+        // from the facing.
+        coop_partner_set_anim_on(3, false);
         ENTITY->move_speed_current = 0x40;
         npc_walk_advance_xz(-0x40);
+        s_idleFrames = 0;
     } else if (aiming) {
         // coop_partner_aim_update picked the animation.
+        s_idleFrames = 0;
     } else if ((held & 0xA) != 0) {
         // Turning on the spot plays the walk cycle without moving, like the
         // player's behaviours 4/5 (player_ctrl_behavior_back).
-        coop_partner_set_anim(7);
+        onWeaponSet = armed;
+        coop_partner_set_anim_on(armed ? 2 : 7, onWeaponSet);
+        s_idleFrames = 0;
+    } else if (!armed || s_idleFrames < 100) {
+        s_idleFrames++;
+        coop_partner_set_anim_on(0, false);
     } else {
-        coop_partner_set_anim(0);
+        onWeaponSet = true;
+        if (!s_animOnWeapon || (ENTITY->animationId != 0 && ENTITY->animationId != 1)) {
+            coop_partner_set_anim_on(0, true);
+            ENTITY->blend_counter = 3;
+        } else if (ENTITY->animationId == 0 && (ENTITY->attacking_direction & 1) != 0) {
+            coop_partner_set_anim_on(1, true);   // 0 finished: the idle loop
+            ENTITY->blend_counter = 3;
+        }
     }
 
     // Same tail as npc_state9_pathfind: step the animation (the return value,
     // "animation done", goes to attacking_direction), footsteps, then the hit
     // data and the collision against the player and the room.
-    bool backing = (held & 1) == 0 && (held & 4) != 0;
     ENTITY->attacking_direction = (unsigned char)Joint_move(
-        aiming ? (s_aimReverse ? 1 : 0) : (backing ? 1 : 0),
-        aiming ? s_aimHeader : ENTITY->animHeader,
-        aiming ? s_aimBase : ENTITY->animBase,
+        aiming ? (s_aimReverse ? 1 : 0) : 0,
+        aiming ? s_aimHeader : onWeaponSet ? weaponHeader : ENTITY->animHeader,
+        aiming ? s_aimBase : onWeaponSet ? weaponBase : ENTITY->animBase,
         (short)(0x1000 / (ENTITY->blend_counter + 1)));
-    npc_walk_footstep_sound();
+    if (onWeaponSet) {
+        // The player's footfalls on these: walk frames 8 / 0x16, run 0 / 0xA.
+        unsigned char f = ENTITY->animation_frame_id;
+        if ((ENTITY->animationId == 2 && (f == 8 || f == 0x16)) ||
+            (ENTITY->animationId == 3 && (f == 0 || f == 0xA))) {
+            PlayEntitySnd(ENTITY->animationId == 3 ? 1 : 0);
+        }
+    } else if (!aiming) {
+        npc_walk_footstep_sound();
+    }
     SetEntityScaHitData(ENTITY);
 
     // Neither player can shove the other. ResolveEntityScaCollision(a, b) moves
@@ -2808,10 +2949,10 @@ void npc_coop_partner_control(void)
     // player, she keeps her head still.
     ENTITY->lookAtFlags = 0;
 
-    // The gun she has equipped is in her hand.
+    // The weapon she has equipped is in her hand.
     if (ENTITY->behavior_flags != 0) {
-        int gun = Coop_PartnerGunId();
-        coop_partner_show_gun(gun == ITEM_BERETTA ? 1 : gun == ITEM_SHOTGUN ? 2 : 0);
+        int w = Coop_PartnerWeaponId();
+        coop_partner_show_gun(w == ITEM_BERETTA ? 1 : w == ITEM_SHOTGUN ? 2 : w == ITEM_KNIFE ? 3 : 0);
     }
 }
 

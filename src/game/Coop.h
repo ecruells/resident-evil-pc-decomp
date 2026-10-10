@@ -101,6 +101,8 @@ void Coop_ReadSaveBlock(const unsigned char* block);
 // The gun she has equipped that she can use - ITEM_BERETTA or ITEM_SHOTGUN -
 // or 0.
 int  Coop_PartnerGunId(void);
+// Any weapon she can use - ITEM_KNIFE, ITEM_BERETTA, ITEM_SHOTGUN - or 0.
+int  Coop_PartnerWeaponId(void);
 // Is a handgun equipped in her slots?
 int  Coop_PartnerHasHandgun(void);
 // Spend one round from her equipped weapon's slot; 0 when it is empty.
@@ -138,13 +140,15 @@ void coop_update_shadow_anim(void);
 void Coop_RunPartnerReaction(Entity* partner);
 // Save screen: a save brings her back.
 void Coop_OnSave(void);
-// room_set, after the enemy models: her shotgun hand mesh, textured. Her own
-// sheet has no shotgun art, so it is Jill's (W13 on CHAR11's TIM, loaded into
-// the next 2 free texture banks), or player 1's own on his sheet when the room
-// has no banks to spare.
+// room_set, after the enemy models: her shotgun and knife hand meshes,
+// textured. Her own sheet has no art for them, so they are Jill's (W13 / W11 on
+// CHAR11's TIM, loaded into the next 2 free texture banks), or player 1's own on
+// his sheet when that would leave the room's occlusion masks no banks below 16.
 void Coop_LoadPartnerWeaponModels(void);
-// That mesh, ready for JointStruct::anim_slot_ptr, or 0.
+// That mesh, ready for JointStruct::anim_slot_ptr, or 0. The knife likewise
+// (Jill's W11, or player 1's own).
 unsigned int Coop_PartnerShotgunMesh(void);
+unsigned int Coop_PartnerKnifeMesh(void);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.
