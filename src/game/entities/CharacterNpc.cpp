@@ -214,11 +214,12 @@ static void char_init_common(unsigned int tint,
 // Co-op (port addition): the weapon joint block LoadCharacterWeaponTmd fills
 // (jointsStructs + 0x6c8: anim field at +0x0c, TMD at +0x14, anim object at
 // +0x18), kept for the bare hand (0), the handgun (1, behavior_flags 2 =
-// WS232), the shotgun (2) and the knife (3) - the last two
-// Coop_LoadPartnerWeaponModels' (there is no NPC shotgun or knife model,
-// WS236 is item 6, the flamethrower, and her sheet has no art for them)
+// WS232) and, from 2 on, Coop_LoadPartnerWeaponModels' meshes in its order -
+// shotgun, knife, Colt Python, flamethrower, rocket launcher (there are no
+// NPC models for those, WS236 is an unused flamethrower, and her sheet has no
+// art for them)
 // so the partner controller can show whichever she has equipped.
-static unsigned char s_coopHandBlock[4][16];
+static unsigned char s_coopHandBlock[2 + COOP_WEAPON_MODELS][16];
 
 static void coop_partner_keep_hand(int which)
 {
@@ -289,17 +290,19 @@ static void char_init_rebecca(void)
     if (ENTITY == g_coopPartner) {
         // The shotgun: the mesh Coop_LoadPartnerWeaponModels prepared, set up
         // in her hand as LoadEquippedWeaponAnimation sets up the player's.
-        static unsigned int s_weaponObject[2][0x100];
-        const unsigned int meshes[2] = { Coop_PartnerShotgunMesh(), Coop_PartnerKnifeMesh() };
-        for (int w = 0; w < 2; w++) {
-            if (meshes[w] != 0) {
+        static unsigned int s_weaponObject[COOP_WEAPON_MODELS][0x100];
+        for (int w = 0; w < COOP_WEAPON_MODELS; w++) {
+            unsigned char item;
+            unsigned int mesh = Coop_PartnerWeaponMesh(w, &item);
+            if (mesh != 0) {
                 JointStruct* hand = &ENTITY->jointsStructs[14];
-                hand->anim_slot_ptr = (int)meshes[w];
+                hand->anim_slot_ptr = (int)mesh;
                 hand->anim_object = s_weaponObject[w];
                 CreateAnimObject((int)&hand->anim_field, (unsigned int*)s_weaponObject[w]);
                 coop_partner_keep_hand(2 + w);
             } else {
-                memcpy(s_coopHandBlock[2 + w], s_coopHandBlock[w == 0 ? 1 : 0], 16);
+                // No model: the knife shows the bare hand, the guns the handgun.
+                memcpy(s_coopHandBlock[2 + w], s_coopHandBlock[item == ITEM_KNIFE ? 0 : 1], 16);
             }
         }
     }
@@ -2393,6 +2396,9 @@ static const CoopAnimSet kCoopAnimSets[] = {
     { "W31 REBECCA KNIFE", "players/w31.emw" },
     { "W33 REBECCA SHOTGUN", "players/w33.emw" },
     { "W13 JILL SHOTGUN", "players/w13.emw" },
+    { "W14 JILL PYTHON",  "players/w14.emw" },
+    { "W15 JILL FLAMETHROWER", "players/w15.emw" },
+    { "W17 JILL ROCKET",  "players/w17.emw" },
     { "ROOM PLAYER SET",  NULL },
     { "ENEMY REACTIONS",  NULL },
 };
@@ -2519,6 +2525,9 @@ static int coop_weapon_set(int gunId, unsigned int* header, unsigned int* base)
     if (gunId == ITEM_BERETTA) return coop_anim_set_pair(1, header, base);   // W32
     if (gunId == ITEM_SHOTGUN) return coop_anim_set_pair(4, header, base);   // W33
     if (gunId == ITEM_KNIFE)   return coop_anim_set_pair(3, header, base);   // W31
+    if (gunId == ITEM_COLT_PYTHON_MAG) return coop_anim_set_pair(6, header, base);   // W14
+    if (gunId == ITEM_FLAMETHROWER)    return coop_anim_set_pair(7, header, base);   // W15
+    if (gunId == ITEM_ROCKET_LAUNCHER) return coop_anim_set_pair(8, header, base);   // W17
     return 0;
 }
 
@@ -2538,18 +2547,34 @@ static void coop_partner_fire_frame(int weaponIdx)
     unsigned char frame = ENTITY->animation_frame_id;
     void* hand = (void*)((char*)ENTITY->jointsStructs + 0x70C);   // joint 14's world matrix
     int pos = (int)ENTITY->scaMatrixData.localMatrix.t;
+    // The rocket launcher (index 8) reads its billboards at 8 + (rounds & 3).
+    int special = (weaponIdx == 8) ? 8 + (Coop_PartnerAmmo() & 3) : weaponIdx;
 
     const WeaponFxEntry* bb = &g_weaponFireBillboard[weaponIdx];
     if (bb->b0 == frame) {
-        g_playerPosScratch.x = bb->x;
-        g_playerPosScratch.y = bb->y;
-        g_playerPosScratch.z = bb->z;
-        Effect_CreateBillboard(bb->type, bb->data, 0, hand, &g_playerPosScratch, 0);
+        const WeaponFxEntry* e = &g_weaponFireBillboard[special];
+        if (weaponIdx == 8) {
+            g_collPushDepthZHi = special;
+        }
+        g_playerPosScratch.x = e->x;
+        g_playerPosScratch.y = e->y;
+        g_playerPosScratch.z = e->z;
+        Effect_CreateBillboard(e->type, e->data, 0, hand, &g_playerPosScratch, 0);
+        if (weaponIdx == 2 || weaponIdx == 3) {
+            // Python: the extra spark / the magnum's big flash at the joint.
+            g_playerPosScratch.x = 0x96;
+            g_playerPosScratch.y = 0x17c;
+            g_playerPosScratch.z = 0;
+            Effect_CreateBillboard(0x11, weaponIdx == 2 ? 0x03 : 0x0b, 0, hand,
+                                   &g_playerPosScratch, 0);
+        }
     }
 
     const WeaponFireData* fd = &g_weaponFireData[weaponIdx];
     if (fd->fireFrame == frame) {
-        Coop_PartnerApplyWeaponDamage(ENTITY, fd->weaponId, kAimBits[s_aimDir]);
+        if (weaponIdx < 6) {   // the rocket's damage is its projectile's
+            Coop_PartnerApplyWeaponDamage(ENTITY, fd->weaponId, kAimBits[s_aimDir]);
+        }
         Coop_PlayP2WeaponSnd(fd->sfx1, pos);
         Coop_PlayP2WeaponSnd(fd->sfx2, pos);
     }
@@ -2557,7 +2582,7 @@ static void coop_partner_fire_frame(int weaponIdx)
     const WeaponFxEntry* mf = &g_weaponMuzzleFlash[weaponIdx];
     if (mf->b0 == frame) {
         g_playerPosScratch.x = mf->x;
-        g_playerPosScratch.y = (1 - weaponIdx) * 300 + mf->y;   // (id & 1) = 1 for her
+        g_playerPosScratch.y = (weaponIdx == 8 ? 500 : (1 - weaponIdx) * 300) + mf->y;   // (id & 1) = 1
         g_playerPosScratch.z = mf->z;
         int yaw = weaponIdx - 8;
         yaw += ((unsigned short)yaw < 1) ? 1 : 0;
@@ -2566,17 +2591,21 @@ static void coop_partner_fire_frame(int weaponIdx)
                                                    &ENTITY->scaMatrixData.localMatrix,
                                                    &g_playerPosScratch, 0);
         if (fx >= 0 && fx < MAX_EFFECTS) {
-            g_effectPool[fx].animHeader[3] = (unsigned char)weaponIdx;
+            g_effectPool[fx].animHeader[weaponIdx == 8 ? 0 : 3] = (unsigned char)weaponIdx;
         }
     }
 
     const WeaponFxEntry* f2 = &g_weaponFlash2[weaponIdx];
     if (f2->b0 == frame) {
-        g_playerPosScratch.x = f2->x;
-        g_playerPosScratch.y = f2->y;
-        g_playerPosScratch.z = f2->z;
-        int fx = (int)(char)Effect_CreateBillboard(f2->type, f2->data, 0, hand,
+        const WeaponFxEntry* e = &g_weaponFlash2[special];
+        g_playerPosScratch.x = e->x;
+        g_playerPosScratch.y = e->y;
+        g_playerPosScratch.z = e->z;
+        int fx = (int)(char)Effect_CreateBillboard(e->type, e->data, 0, hand,
                                                    &g_playerPosScratch, 0);
+        if (weaponIdx == 8) {
+            g_collPushDepthZLo = fx;
+        }
         if (fx >= 0 && fx < MAX_EFFECTS) {
             g_effectPool[fx].animHeader[0] = (unsigned char)weaponIdx;
         }
@@ -2585,6 +2614,29 @@ static void coop_partner_fire_frame(int weaponIdx)
     // The shotgun spreads: two more hits, frames 7 and 9.
     if (weaponIdx == 1 && (frame == 7 || frame == 9)) {
         Coop_PartnerApplyWeaponDamage(ENTITY, fd->weaponId, kAimBits[s_aimDir]);
+    }
+}
+
+// The flamethrower while fire is held (player_behavior_14_autoaim_holdfire,
+// normal weapons): a unit of fuel a frame, the hiss every 15, a flame at the
+// nozzle every 4 - each flame (effect behaviour 37) does its own damage, with
+// her aim bits (Coop_BeginP2Effects: behaviour 40 latches them while it flies).
+static void coop_partner_flame_frame(void)
+{
+    unsigned char frame = ENTITY->animation_frame_id;
+    int pos = (int)ENTITY->scaMatrixData.localMatrix.t;
+    if (frame % 0xf == 0) {
+        Coop_PlayP2WeaponSnd(3, pos);
+        Coop_PlayP2WeaponSnd(4, pos);
+    }
+    if ((frame & 3) == 0) {
+        g_playerPosScratch.x = 0x21c;
+        g_playerPosScratch.y = 0x4ec;
+        g_playerPosScratch.z = 0;
+        Coop_BeginP2Effects(kAimBits[s_aimDir]);
+        Effect_CreateBillboard(0xc, 0, 0, (void*)((char*)ENTITY->jointsStructs + 0x70C),
+                               &g_playerPosScratch, 0);
+        Coop_EndP2Effects();
     }
 }
 
@@ -2716,7 +2768,7 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
             Coop_PlayP2WeaponSnd(9, (int)ENTITY->scaMatrixData.localMatrix.t);   // empty: click
             // Empty with its ammo on her: the reload, as the player's
             // player_behavior_18_hold_fire (entered from the same click).
-            if (Coop_PartnerHasAmmoFor(gun)) {
+            if (gun < ITEM_FLAMETHROWER && Coop_PartnerHasAmmoFor(gun)) {   // the player's gate: id < 6
                 coop_aim_play(14, false);
                 s_aimLastEvent = -1;
                 s_aim = P2_AIM_RELOAD;
@@ -2749,7 +2801,8 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
         // Motion 14 of the weapon set - Jill's W13 for the shotgun, her W33
         // stops at 13. The transfer and sounds on fire_weapon_fx's frames:
         // the Beretta takes the clip at 0x11 (sound 5), the shotgun loads at
-        // 0xF with its clacks at 0xF / 0x19 / 0x23 (sound 9).
+        // 0xF with its clacks at 0xF / 0x19 / 0x23 (sound 9), the Python drops
+        // its cases at 0xC and loads at 0x1C (sound 9).
         if (gun == ITEM_SHOTGUN) {
             coop_anim_set_pair(5, &s_aimHeader, &s_aimBase);   // W13
             slots = (const unsigned short*)s_aimBase;
@@ -2768,6 +2821,15 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
                 }
                 Coop_PlayP2WeaponSnd(9, pos);
             }
+            if (gun == ITEM_COLT_PYTHON_MAG && frame == 0xc) {
+                // The spent cases tumbling out of the cylinder.
+                Effect_CreateBillboard(5, 4, 0, NULL,
+                                       ((JointStruct*)ENTITY->jointsStructs)[14].world.t, 5);
+            }
+            if (gun == ITEM_COLT_PYTHON_MAG && frame == 0x1c) {
+                Coop_PartnerReloadFromStack(gun);
+                Coop_PlayP2WeaponSnd(9, pos);
+            }
         }
         if (animDone) {
             coop_aim_play(kStillAnim[s_aimDir], false);
@@ -2777,6 +2839,20 @@ static bool coop_partner_aim_update(unsigned int held, unsigned int pressed)
     }
 
     case P2_AIM_FIRE:
+        if (gun == ITEM_FLAMETHROWER) {
+            // Held: keep burning (the fire motion loops); released or dry: back
+            // to the aim, with the dry click.
+            if ((held & 0x80) == 0 || !Coop_PartnerUseAmmo()) {
+                if (Coop_PartnerAmmo() == 0) {
+                    Coop_PlayP2WeaponSnd(3, (int)ENTITY->scaMatrixData.localMatrix.t);
+                }
+                coop_aim_play(kStillAnim[s_aimDir], false);
+                s_aim = P2_AIM_HOLD;
+                break;
+            }
+            coop_partner_flame_frame();
+            break;
+        }
         coop_partner_fire_frame(gun - 2);
         if (animDone) {
             coop_aim_play(kStillAnim[s_aimDir], false);
@@ -2993,7 +3069,15 @@ void npc_coop_partner_control(void)
     // The weapon she has equipped is in her hand.
     if (ENTITY->behavior_flags != 0) {
         int w = Coop_PartnerWeaponId();
-        coop_partner_show_gun(w == ITEM_BERETTA ? 1 : w == ITEM_SHOTGUN ? 2 : w == ITEM_KNIFE ? 3 : 0);
+        int block = (w == ITEM_BERETTA) ? 1 : 0;
+        for (int i = 0; i < COOP_WEAPON_MODELS && w != 0 && block == 0; i++) {
+            unsigned char item;
+            Coop_PartnerWeaponMesh(i, &item);
+            if (item == w) {
+                block = 2 + i;
+            }
+        }
+        coop_partner_show_gun(block);
     }
 }
 

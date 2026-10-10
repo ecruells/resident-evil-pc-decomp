@@ -98,10 +98,10 @@ int  Coop_UseSaveRibbon(void);
 void Coop_WriteSaveBlock(unsigned char* block);
 void Coop_ReadSaveBlock(const unsigned char* block);
 // ---- Partner combat ----
-// The gun she has equipped that she can use - ITEM_BERETTA or ITEM_SHOTGUN -
-// or 0.
+// The gun she has equipped that she can use - Beretta, shotgun, Colt Python,
+// flamethrower, rocket launcher - or 0.
 int  Coop_PartnerGunId(void);
-// Any weapon she can use - ITEM_KNIFE, ITEM_BERETTA, ITEM_SHOTGUN - or 0.
+// Any weapon she can use - the knife or one of the guns - or 0.
 int  Coop_PartnerWeaponId(void);
 // Is a handgun equipped in her slots?
 int  Coop_PartnerHasHandgun(void);
@@ -150,10 +150,20 @@ void Coop_OnSave(void);
 // CHAR11's TIM, loaded into the next 2 free texture banks), or player 1's own on
 // his sheet when that would leave the room's occlusion masks no banks below 16.
 void Coop_LoadPartnerWeaponModels(void);
-// That mesh, ready for JointStruct::anim_slot_ptr, or 0. The knife likewise
-// (Jill's W11, or player 1's own).
-unsigned int Coop_PartnerShotgunMesh(void);
-unsigned int Coop_PartnerKnifeMesh(void);
+// Her weapon models beyond the handgun: shotgun, knife, Colt Python,
+// flamethrower, rocket launcher. Mesh `index` (ready for
+// JointStruct::anim_slot_ptr, or 0) and the item it is.
+#define COOP_WEAPON_MODELS 5
+unsigned int Coop_PartnerWeaponMesh(int index, unsigned char* itemId);
+// Effects player 2 spawns (her flamethrower's flames) do their damage with
+// "the player's" aim bits, which effect behaviour 40 latches from
+// g_playerEntity.flags while they fly. Effect slots taken between Begin and End
+// are hers, with her bits; Effect_CreateBillboard notes every slot it takes.
+void Coop_BeginP2Effects(unsigned char aimFlags);
+void Coop_EndP2Effects(void);
+void Coop_NoteEffectSlot(int slot);
+// The flags behaviour 40 should latch for effect `slot`.
+unsigned char Coop_EffectFlags(int slot, unsigned char playerFlags);
 // Does player 2 (Rebecca, in the room) carry this item?
 int  Coop_PartnerHasItem(unsigned char itemId);
 // game_loop, once per gameplay frame: ends her action when the game is free.

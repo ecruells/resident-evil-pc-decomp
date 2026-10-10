@@ -572,10 +572,16 @@ int Coop_PartnerGunId(void)
 	if (!g_coopP2.valid) {
 		return 0;
 	}
-	if (g_coopP2.equippedWeaponId == ITEM_BERETTA || g_coopP2.equippedWeaponId == ITEM_SHOTGUN) {
+	switch (g_coopP2.equippedWeaponId) {
+	case ITEM_BERETTA:
+	case ITEM_SHOTGUN:
+	case ITEM_COLT_PYTHON_MAG:
+	case ITEM_FLAMETHROWER:
+	case ITEM_ROCKET_LAUNCHER:
 		return g_coopP2.equippedWeaponId;
+	default:
+		return 0;
 	}
-	return 0;
 }
 
 int Coop_PartnerWeaponId(void)
@@ -969,10 +975,24 @@ extern unsigned int ProcessTmdTextures(char mode, unsigned int* tmd, int bank, i
 extern void SetSpriteBufferFlag(void);
 
 static unsigned char s_p2SheetFile[0x20000];    // CHAR11.EMD (~104KB), for its TIM
-static unsigned char s_p2ShotgunFile[0x8000];   // W13.EMW / W03.EMW (~28KB)
-static unsigned char s_p2KnifeFile[0x8000];     // W11.EMW / W01.EMW (~21KB)
-static unsigned int  s_p2ShotgunMesh = 0;
-static unsigned int  s_p2KnifeMesh = 0;
+// Her weapons beyond the handgun, with Jill's file and player 1's (Chris's) -
+// g_weaponPathTable's Jill and Chris blocks. Jill's sheet only has art for the
+// weapons Jill's story gives her: the flamethrower is Chris's alone (W15 drawn
+// from her sheet is a pale tube), so it is always player 1's own.
+struct CoopWeaponModel {
+	unsigned char itemId;
+	const char*   jillFile;    // NULL: Jill's sheet has no art for it
+	const char*   chrisFile;
+};
+static const CoopWeaponModel kP2WeaponModels[COOP_WEAPON_MODELS] = {
+	{ ITEM_SHOTGUN,         "players/w13.emw", "players/w03.emw" },
+	{ ITEM_KNIFE,           "players/w11.emw", "players/w01.emw" },
+	{ ITEM_COLT_PYTHON_MAG, "players/w14.emw", "players/w04.emw" },
+	{ ITEM_FLAMETHROWER,    NULL,              "players/w05.emw" },
+	{ ITEM_ROCKET_LAUNCHER, "players/w17.emw", "players/w07.emw" },
+};
+static unsigned char s_p2WeaponFile[COOP_WEAPON_MODELS][0x8000];   // each .EMW is under 32KB
+static unsigned int  s_p2WeaponMesh[COOP_WEAPON_MODELS];
 
 // Load an .EMW and put its weapon mesh on texture (bank, page); 0 on failure.
 static unsigned int emw_load_mesh(const char* file, unsigned char* buf, size_t cap,
@@ -997,8 +1017,9 @@ static unsigned int* emw_mesh(unsigned char* file, size_t size)
 
 void Coop_LoadPartnerWeaponModels(void)
 {
-	s_p2ShotgunMesh = 0;
-	s_p2KnifeMesh = 0;
+	for (int i = 0; i < COOP_WEAPON_MODELS; i++) {
+		s_p2WeaponMesh[i] = 0;
+	}
 	if (g_coopPartner == nullptr || g_coopPartner->id != NPC_REBECCA) {
 		return;
 	}
@@ -1014,10 +1035,12 @@ void Coop_LoadPartnerWeaponModels(void)
 			unsigned char page = g_TextureCurrentPage;
 			ProcessTmdAsync((unsigned int)s_p2SheetFile +
 			                (*(unsigned int*)(s_p2SheetFile + (sheetSize & ~3u) - 4) & ~3u));
-			s_p2ShotgunMesh = emw_load_mesh("players/w13.emw", s_p2ShotgunFile,
-			                                sizeof(s_p2ShotgunFile), bank, page);
-			s_p2KnifeMesh = emw_load_mesh("players/w11.emw", s_p2KnifeFile,
-			                              sizeof(s_p2KnifeFile), bank, page);
+			for (int i = 0; i < COOP_WEAPON_MODELS; i++) {
+				const CoopWeaponModel* m = &kP2WeaponModels[i];
+				s_p2WeaponMesh[i] = (m->jillFile != NULL)
+					? emw_load_mesh(m->jillFile, s_p2WeaponFile[i], sizeof(s_p2WeaponFile[i]), bank, page)
+					: emw_load_mesh(m->chrisFile, s_p2WeaponFile[i], sizeof(s_p2WeaponFile[i]), 0x16, 7);
+			}
 			dbg_printf("[COOP] player 2's weapons: Jill's, sheet in bank %d page %d\n", bank, page);
 			return;
 		}
@@ -1025,22 +1048,24 @@ void Coop_LoadPartnerWeaponModels(void)
 
 	// Fallback: player 1's own, on his sheet.
 	bool jill = (g_playerEntity.id & 1) != 0;
-	s_p2ShotgunMesh = emw_load_mesh(jill ? "players/w13.emw" : "players/w03.emw",
-	                                s_p2ShotgunFile, sizeof(s_p2ShotgunFile), 0x16, 7);
-	s_p2KnifeMesh = emw_load_mesh(jill ? "players/w11.emw" : "players/w01.emw",
-	                              s_p2KnifeFile, sizeof(s_p2KnifeFile), 0x16, 7);
+	for (int i = 0; i < COOP_WEAPON_MODELS; i++) {
+		const CoopWeaponModel* m = &kP2WeaponModels[i];
+		const char* file = (jill && m->jillFile != NULL) ? m->jillFile : m->chrisFile;
+		s_p2WeaponMesh[i] = emw_load_mesh(file, s_p2WeaponFile[i], sizeof(s_p2WeaponFile[i]), 0x16, 7);
+	}
 	dbg_printf("[COOP] player 2's weapons: player 1's (no texture bank to spare, next %d)\n",
 	           (int)g_TextureBankID);
 }
 
-unsigned int Coop_PartnerKnifeMesh(void)
+unsigned int Coop_PartnerWeaponMesh(int index, unsigned char* itemId)
 {
-	return s_p2KnifeMesh;
-}
-
-unsigned int Coop_PartnerShotgunMesh(void)
-{
-	return s_p2ShotgunMesh;
+	if (index < 0 || index >= COOP_WEAPON_MODELS) {
+		return 0;
+	}
+	if (itemId != nullptr) {
+		*itemId = kP2WeaponModels[index].itemId;
+	}
+	return s_p2WeaponMesh[index];
 }
 
 // ============================================================================
@@ -1098,4 +1123,40 @@ void Coop_PartnerReloadFromStack(int weaponId)
 	g_ItemSlotsPointer = p1Slots;
 	g_EquippedItemId = p1Equipped;
 	LoadHeldItemsImages();
+}
+
+// ============================================================================
+// Player 2's effects
+// ============================================================================
+static unsigned char s_effectP2Flags[64];   // per effect slot: bit 0 = hers, 0xE0 = her aim bits
+static int           s_spawningP2Effects = 0;
+static unsigned char s_spawningFlags = 0;
+
+void Coop_BeginP2Effects(unsigned char aimFlags)
+{
+	s_spawningP2Effects = 1;
+	s_spawningFlags = aimFlags;
+}
+
+void Coop_EndP2Effects(void)
+{
+	s_spawningP2Effects = 0;
+}
+
+void Coop_NoteEffectSlot(int slot)
+{
+	if (slot < 0 || slot >= 64) {
+		return;
+	}
+	// Bit 0 marks "hers"; flags only ever use bits 1..7 here (the aim bits are
+	// 0x20/0x40/0x80, and behaviour 37 reads only those through the 0xE0 mask).
+	s_effectP2Flags[slot] = s_spawningP2Effects ? (unsigned char)(s_spawningFlags | 1) : 0;
+}
+
+unsigned char Coop_EffectFlags(int slot, unsigned char playerFlags)
+{
+	if (slot < 0 || slot >= 64 || (s_effectP2Flags[slot] & 1) == 0) {
+		return playerFlags;
+	}
+	return (unsigned char)((playerFlags & 0x1f) | (s_effectP2Flags[slot] & 0xe0));
 }

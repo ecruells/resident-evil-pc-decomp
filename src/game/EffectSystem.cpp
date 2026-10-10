@@ -25,6 +25,7 @@
 #include "BioCard.h"
 #include "dc/ArrangeStages.h"   // room_effect_page_entry()
 #include "../DebugPrint.h"
+#include "Coop.h"
 #include <cstring>
 #include <cstdlib>
 
@@ -1823,7 +1824,9 @@ static void effect_behavior_pair_timer(void)
 static void effect_behavior_timer_flags(void)
 {
     effect_behavior_timer_refresh();
-    g_effectPool[g_activeEffectIndex].animHeader[2] = g_playerEntity.flags;
+    // Co-op (port addition): player 2's flames take her aim bits, not his.
+    g_effectPool[g_activeEffectIndex].animHeader[2] =
+        Coop_EffectFlags(g_activeEffectIndex, g_playerEntity.flags);
 }
 
 // ============================================================================

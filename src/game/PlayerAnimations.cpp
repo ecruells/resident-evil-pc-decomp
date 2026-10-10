@@ -1348,6 +1348,7 @@ unsigned char Effect_CreateBillboard(
         } while (slotIdx != 0 && noFreeSlot);
 
         if (noFreeSlot) break;
+        Coop_NoteEffectSlot(slotIdx);   // co-op: whose effect this slot now is
 
         Effect* eff = &g_effectPool[slotIdx];
         VECTOR* vPos = (VECTOR*)pos;
