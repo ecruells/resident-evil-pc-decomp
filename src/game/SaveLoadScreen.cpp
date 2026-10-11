@@ -13,6 +13,7 @@
 #include "SFXIds.h"
 #include "PrintText.h"
 #include "dc/Items.h"    // lockpick item id (is_lockpick_item)
+#include "Difficulty.h"   // g_DifficultyId saved with the game
 #include <cstdio>
 #include <cstring>
 #include "../system/AssetPath.h"
@@ -776,6 +777,9 @@ static void RestoreSaveBlock(const char* fileBuffer, int fileSize)
         // recognised and left as it was saved.
         InstallPadDefaultBindings();
     }
+
+    // difficulty.ini mode (0x7FC..0x7FF, inside the discarded block tail).
+    Difficulty_ReadSave(fileBuffer, fileSize);
 }
 
 // ============================================================================
@@ -1139,6 +1143,7 @@ void LoadSaveGameState(int mode, int flags, int useInkRibbon, int sfxBank, int c
             fileBuffer[OFFSET_COSTUME_VARIANT]   = (char)g_bCostumeVariant;
             memcpy(fileBuffer + OFFSET_JOY_BACKUP, g_joyRemapBackupJoy, 0x80);
             memcpy(fileBuffer + OFFSET_KEY_BACKUP, g_joyRemapBackupKey, 0x80);
+            Difficulty_WriteSave(fileBuffer);   // difficulty.ini mode
             FileWrite(g_saveFileName, fileBuffer, SAVE_FILE_SIZE);
 
             // Build the save-animation reveal string:

@@ -62,6 +62,7 @@ set(RE1_SOURCES
     src/game/GameInit.cpp
     src/game/GameLoop.cpp
     src/game/GameStart.cpp
+    src/game/Difficulty.cpp
     src/game/GteMatrix.cpp
     src/game/InputSystem.cpp
     src/game/InteractiveScreen.cpp

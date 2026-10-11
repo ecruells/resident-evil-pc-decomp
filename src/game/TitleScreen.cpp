@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <cstring>          // memcpy, for the DC title sheet assembly
 #include "../system/AssetPath.h"
+#include "Difficulty.h"      // ini-driven NEW GAME difficulty modes
 
 extern void logos_state(void);
 
@@ -373,6 +374,50 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
 }
 
 // ============================================================================
+// ini-driven difficulty menu helpers
+// ============================================================================
+// The DC art submenu (state 10) only has pictures for STANDARD / TRAINING /
+// ADVANCED, so it is used only while difficulty.ini still lists exactly that
+// trio in that order. Any other list (extra modes, renamed modes) is drawn as
+// a text menu (state 11), which works in both the OG and the DC build.
+static const char* const g_diffTrioNames[3] = { "STANDARD", "TRAINING", "ADVANCED" };
+
+static bool DiffArtMenuUsable(void)
+{
+    if (Difficulty_Count() != 3) return false;
+    for (int i = 0; i < 3; i++) {
+        const DifficultyMode* m = Difficulty_Get(i);
+        if (m == NULL || m->dcDifficulty != i || strcmp(m->name, g_diffTrioNames[i]) != 0)
+            return false;
+    }
+    return true;
+}
+
+// Text menu layout / colours. PrintText8x14 takes the same coordinate space as
+// the save screen; these are the values to tune if the list lands in the wrong
+// place or colour on your build.
+#define DIFF_MENU_X        110
+#define DIFF_MENU_Y        150
+#define DIFF_MENU_STEP      18
+#define DIFF_MENU_COLOR_NORMAL  0
+#define DIFF_MENU_COLOR_SELECT  3
+
+static int s_diffCursor = 0;   // highlighted entry while state 11 is active
+
+static void DrawDifficultyTextMenu(void)
+{
+    const int count = Difficulty_Count();
+    for (int i = 0; i < count; i++) {
+        const DifficultyMode* m = Difficulty_Get(i);
+        if (m == NULL) continue;
+        sprintf(PRINT_TEXT_BUFFER, "%c %s", (i == s_diffCursor) ? '>' : ' ', m->name);
+        PrintText8x14((short)DIFF_MENU_X, (short)(DIFF_MENU_Y + i * DIFF_MENU_STEP),
+                      (unsigned char)((i == s_diffCursor) ? DIFF_MENU_COLOR_SELECT
+                                                          : DIFF_MENU_COLOR_NORMAL), 0);
+    }
+}
+
+// ============================================================================
 // update_title_options (0x00430810)
 // ============================================================================
 void update_title_options(void)
@@ -409,6 +454,8 @@ void update_title_options(void)
             if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
                 play_sfx(SFX_BANKS, SFX_TITLE_EVIL01);
                 play_sfx(SFX_BANKS, 1); // null sfx
+                // ini mode index (art menu rows 3..5 are modes 0..2).
+                g_DifficultyId = (g_titleSelectionId >= 3) ? (g_titleSelectionId - 3) : 0;
                 // The PS1 keys ADVANCED* off the hold timer, not the choice (it
                 // drops the choice back to 5 after drawing the green cell).
                 if (g_titleSelectionId == 5) {
@@ -451,6 +498,50 @@ void update_title_options(void)
             }
             return;
 
+        case 11:
+            // ini-driven text difficulty menu (OG build, or DC with a custom
+            // difficulty.ini). Same controls as the DC art submenu. g_titleSelectionId
+            // stays 1 (NEW GAME), so the exit goes through the original NEW GAME path
+            // and the fade-out keeps drawing the NEW GAME cell.
+            if (g_PlayerPadPressed & 0x5100) {
+                const int n = Difficulty_Count();
+                if (!(g_PlayerPadPressed & 0x1000)) {
+                    s_diffCursor = (s_diffCursor + 1 < n) ? s_diffCursor + 1 : 0;
+                } else {
+                    s_diffCursor = (s_diffCursor > 0) ? s_diffCursor - 1 : n - 1;
+                }
+                g_titleDemoTime = 0x708;
+            }
+
+            if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
+                play_sfx(SFX_BANKS, SFX_TITLE_EVIL01);
+                play_sfx(SFX_BANKS, 1); // null sfx
+                g_DifficultyId = s_diffCursor;
+                if (g_bDcMode) {
+                    // DC build: also drive the DC difficulty (the OG build must
+                    // not - its save loader refuses saves with a DC game mode).
+                    const DifficultyMode* m = Difficulty_Get(s_diffCursor);
+                    g_DcDifficulty = (m != NULL) ? m->dcDifficulty : DC_DIFFICULTY_STANDARD;
+                }
+                g_titleOptionsFading = 6;
+                g_fade_type_id = 1;
+                g_fading_counter = 0x7F00;
+                fade_update();
+                g_bGameActive = 2;
+                return;
+            }
+
+            DrawDifficultyTextMenu();
+
+            g_titleDemoTime--;
+            if (g_titleDemoTime == 0) {
+                g_titleOptionsFading = 3;
+                g_fade_type_id = 2;
+                g_fading_counter = 0x400;
+                fade_update();
+            }
+            return;
+
         case 0:
             g_titleOptionsFading = 1;
             g_fade_type_id = 2;
@@ -474,13 +565,29 @@ void update_title_options(void)
 		// (state 10 below) instead of starting the game. The PS1 is silent here:
 		// the title sfx plays on the *submenu* confirm, or on LOAD GAME, which
 		// falls through to the original path below.
-		if (g_bDcMode && ((g_PlayerPadPressed & 0xeff) || sidewinderPress) &&
+		// With difficulty.ini this applies to both builds: NEW GAME opens the
+		// difficulty menu - the DC art one (state 10) when the ini still holds the
+		// STANDARD/TRAINING/ADVANCED trio, otherwise the text one (state 11).
+		if (((g_PlayerPadPressed & 0xeff) || sidewinderPress) &&
 		    g_titleSelectionId == 1) {
-			g_titleOptionsFading = 10;
-			g_titleSelectionId = 3;          // STANDARD
-			g_titleDemoTime = 0x708;
-			g_titleHoldTimer = 0x5A;
-			return;
+			if (Difficulty_MenuEnabled()) {
+				g_titleDemoTime = 0x708;
+				if (g_bDcMode && DiffArtMenuUsable()) {
+					g_titleOptionsFading = 10;
+					g_titleSelectionId = 3 + Difficulty_DefaultId();   // default mode
+					g_titleHoldTimer = 0x5A;
+				} else {
+					g_titleOptionsFading = 11;
+					s_diffCursor = Difficulty_DefaultId();
+				}
+				return;
+			}
+			// Menu disabled in the ini: start the default mode straight away.
+			g_DifficultyId = Difficulty_DefaultId();
+			if (g_bDcMode) {
+				const DifficultyMode* m = Difficulty_Get(g_DifficultyId);
+				g_DcDifficulty = (m != NULL) ? m->dcDifficulty : DC_DIFFICULTY_STANDARD;
+			}
 		}
 
 		if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
@@ -689,6 +796,8 @@ void title_state(void)
     g_SpecialRoomLightState = 0xFFFF;
     g_titleMode = 0;
     g_titleOptionsFading = 0;
+
+    Difficulty_Reload();    // pick up edits to difficulty.ini each time the title opens
 
     init_title_screen();
 

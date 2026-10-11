@@ -36,6 +36,7 @@
 #include "../Globals.h"
 #include "../DebugPrint.h"
 #include "../system/AssetPath.h"
+#include "Difficulty.h"      // difficulty.ini mode saved with the game
 #include <cstdio>
 #include <cstring>
 
@@ -118,6 +119,9 @@ static void DebugRestoreSaveBlock(const char* fileBuffer, int fileSize)
 
         InstallPadDefaultBindings();
     }
+
+    // difficulty.ini mode, same as SaveLoadScreen.cpp's RestoreSaveBlock.
+    Difficulty_ReadSave(fileBuffer, fileSize);
 }
 
 // Assemble the full 0xA82 save file image. Mirror of STATE_PERFORM_SAVE's
@@ -140,6 +144,7 @@ static void DebugAssembleSaveFile(char* fileBuffer)
     fileBuffer[DBG_OFFSET_COSTUME]    = (char)g_bCostumeVariant;
     memcpy(fileBuffer + DBG_OFFSET_JOY_BACKUP, g_joyRemapBackupJoy, 0x80);
     memcpy(fileBuffer + DBG_OFFSET_KEY_BACKUP, g_joyRemapBackupKey, 0x80);
+    Difficulty_WriteSave(fileBuffer);   // difficulty.ini mode (0x7FC)
 }
 
 // Adopt the character recorded in the restored card: player entity id plus

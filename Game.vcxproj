@@ -133,6 +133,7 @@
     <ClCompile Include="src\game\DebugMenu.cpp" />
     <ClCompile Include="src\game\DebugSaveLoad.cpp" />
     <ClCompile Include="src\game\GameStart.cpp" />
+    <ClCompile Include="src\game\Difficulty.cpp" />
     <ClCompile Include="src\game\GameLoop.cpp" />
     <ClCompile Include="src\game\MainMenu.cpp" />
     <ClCompile Include="src\game\OptionsMenu.cpp" />
@@ -215,6 +216,7 @@
     <ClInclude Include="src\marni\MarniXInput.h" />
     <ClInclude Include="src\marni\MarniSound.h" />
     <ClInclude Include="src\game\SpriteRenderer.h" />
+    <ClInclude Include="src\game\Difficulty.h" />
     <ClInclude Include="src\game\Ps1EndingCredits.h" />
     <ClInclude Include="src\game\Ps1FmvSubtitles.h" />
     <ClInclude Include="src\game\Ps1FmvSubtitleData.h" />

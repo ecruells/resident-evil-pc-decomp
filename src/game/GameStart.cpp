@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <cstring>
 #include "../system/AssetPath.h"
+#include "Difficulty.h"      // ini-driven difficulty modes
 
 extern void setSomeColor(int r, int g, int b);              // 0x00470a50
 extern void empty_40ae40(int);                              // 0x0040ae40 RoomInit.cpp
@@ -164,6 +165,24 @@ void SetInitialItems(void)
         }
         if (g_RebeccaItemSlots[0].Id == ITEM_BERETTA) {
             g_RebeccaItemSlots[0].Id = DC_ITEM_BERETTA_CUSTOM;
+        }
+    }
+
+    // difficulty.ini: scale the starting handgun ammo (Jill's slot and the
+    // Rebecca slot). 100% leaves the 15 rounds alone; the attract demo keeps
+    // the stock loadout.
+    if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
+        for (slot_index = 0; slot_index < total_items_slots; slot_index++) {
+            if (g_ItemsSlots[slot_index].Id == ITEM_BERETTA ||
+                g_ItemsSlots[slot_index].Id == DC_ITEM_BERETTA_CUSTOM) {
+                g_ItemsSlots[slot_index].qty =
+                    (unsigned char)Difficulty_ScaleAmmo(g_ItemsSlots[slot_index].qty);
+            }
+        }
+        if (g_RebeccaItemSlots[0].Id == ITEM_BERETTA ||
+            g_RebeccaItemSlots[0].Id == DC_ITEM_BERETTA_CUSTOM) {
+            g_RebeccaItemSlots[0].qty =
+                (unsigned char)Difficulty_ScaleAmmo(g_RebeccaItemSlots[0].qty);
         }
     }
 }
@@ -460,6 +479,17 @@ void InitializeGame(void)
                     g_PlayerHealthCopy = g_playerEntity.health;
                 }
             }
+
+            // difficulty.ini: the chosen mode's starting health (0 = keep the
+            // value above). The built-in TRAINING/ADVANCED numbers equal the DC
+            // ones, so this changes nothing in the DC unless the ini edits them.
+            {
+                const int startHealth = Difficulty_StartHealth(g_playerEntity.id & 1);
+                if (startHealth > 0) {
+                    g_playerEntity.health = (short)startHealth;
+                    g_PlayerHealthCopy = g_playerEntity.health;
+                }
+            }
         } else {
             LoadAttractModePlayerData();
             if (g_bDcMode) {
@@ -555,6 +585,17 @@ void InitializeGame(void)
             g_playerEntity.maxHealth = (unsigned char)((g_playerEntity.id & 1) * -30 + 180);
         } else if (g_DcDifficulty >= DC_DIFFICULTY_ADVANCED) {
             g_playerEntity.maxHealth = (unsigned char)((g_playerEntity.id & 1) * -30 + 100);
+        }
+    }
+
+    // difficulty.ini: max health follows the mode's starting health (same
+    // reason as the DC block above - the EKG is derived from it). Runs for
+    // continued games too: g_DifficultyId comes back from the save. The
+    // attract demo keeps the stock value. maxHealth is a byte, so cap at 255.
+    if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
+        const int startHealth = Difficulty_StartHealth(g_playerEntity.id & 1);
+        if (startHealth > 0) {
+            g_playerEntity.maxHealth = (unsigned char)(startHealth > 255 ? 255 : startHealth);
         }
     }
 
