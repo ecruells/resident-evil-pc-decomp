@@ -21,6 +21,7 @@
 #include <cstdarg>
 #include "../DebugPrint.h"
 #include "../system/AssetPath.h"
+#include "Addon.h"            // add-on code hooks
 
 // Forward declarations for functions only used within game_loop
 extern void FUN_00473f10(int* baseAddr, unsigned int bitIndex);
@@ -106,6 +107,7 @@ LAB_00480c33:
             g_itemUseFlags[0] = 0;
             g_itemUseFlags[1] = 0;
             g_PlayerHealthCopy = g_playerEntity.health;
+            Addon_RunFrame();       // add-ons: once per gameplay frame
 
             // 0x00480c56-0x00480c65: Check interactive object states
             check_desk_state();

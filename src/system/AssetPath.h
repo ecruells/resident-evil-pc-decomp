@@ -111,6 +111,18 @@ void         SetAssetMode(const char* mode);
 // The active overlay's folder name, "" when none (OG).
 const char*  GetAssetModeName(void);
 
+// Add-on layers (config.ini [Addon] Name=a,b,c). Each add-on is a folder
+// "<asset base>/Addons/<Name>/" laid out like a base tree (Stage1/, Players/,
+// Sound/, Data/ ...). ResolveAssetRoot searches ADD-ONS FIRST (in the order
+// listed), then the content-mode overlay, then the base tree, so an add-on can
+// add or replace characters, rooms, music and menu art without touching
+// anything else. With no add-on set the probe does not run at all.
+// Pass NULL or "" to clear. At most ASSET_MAX_ADDONS names are kept.
+#define ASSET_MAX_ADDONS 4
+void         SetAddons(const char* commaSeparatedNames);
+int          GetAddonCount(void);
+const char*  GetAddonName(int index);   // NULL when out of range
+
 // Rewrites whichever known asset-root form a path was compiled with (debug
 // ".\assets\USA\" or retail ".\usa\") to the current runtime root, writing the
 // result into `out` (outSize bytes) and returning `out`. Returns `path`

@@ -67,6 +67,13 @@ static char s_modeName[16] = "";
 static char s_overlayRootBuf[260] = "";
 static const char* s_overlayRoot = NULL;
 
+// Add-on layers (config.ini [Addon] Name=...), searched BEFORE the mode overlay.
+// Each is "<base>/Addons/<Name>/" (see ComposeAddonRoots). Empty = no add-ons and
+// ResolveAssetRoot skips the probe entirely.
+static char s_addonNames[ASSET_MAX_ADDONS][32];
+static char s_addonRoots[ASSET_MAX_ADDONS][260];
+static int  s_addonCount = 0;
+
 // Which top-level folders a non-OG mode is allowed to take from the BASE tree.
 //
 // The intent is that a mode's own tree is authoritative for its content, so
@@ -140,6 +147,31 @@ static void LogOverlayDecision(const char* tail, int hit)
                hit ? "overlay" : "BASE TREE");
 }
 
+// Once per (add-on, top-level folder): the first file an add-on supplies from it.
+static char s_addonLogged[24][52];
+static int  s_addonLoggedCount = 0;
+
+static void LogAddonHit(const char* addon, const char* tail)
+{
+    char key[52];
+    int n = 0;
+    while (addon[n] != '\0' && n < 31) { key[n] = addon[n]; n++; }
+    key[n++] = '/';
+    int t = 0;
+    while (tail[t] != '\0' && tail[t] != '/' && tail[t] != '\\' && n < (int)sizeof(key) - 1) {
+        char c = tail[t++];
+        key[n++] = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    }
+    key[n] = '\0';
+    for (int i = 0; i < s_addonLoggedCount; i++) {
+        if (strcmp(s_addonLogged[i], key) == 0) return;
+    }
+    if (s_addonLoggedCount < (int)(sizeof(s_addonLogged) / sizeof(s_addonLogged[0]))) {
+        strcpy(s_addonLogged[s_addonLoggedCount++], key);
+    }
+    dbg_printf("[assets] add-on %s supplies %s\n", addon, key);
+}
+
 static int FallbackIsExpected(const char* tail)
 {
     for (int i = 0; i < kBaseFallbackCount; i++) {
@@ -203,6 +235,63 @@ static void ComposeOverlayRoot(void)
     s_overlayRoot = s_overlayRootBuf;
 }
 
+// Rebuild every add-on root from the configured base. Same shape as the other
+// roots: "<base>/Addons/<Name>/", or beside the executable when no base is set.
+static void ComposeAddonRoots(void)
+{
+    for (int i = 0; i < s_addonCount; i++) {
+        if (s_base[0] != '\0') {
+            sprintf_s(s_addonRoots[i], sizeof(s_addonRoots[i]), "%s%cAddons%c%s%c",
+                      s_base, PATH_SEP, PATH_SEP, s_addonNames[i], PATH_SEP);
+        } else {
+#if !defined(_WIN32)
+            sprintf_s(s_addonRoots[i], sizeof(s_addonRoots[i]),
+                      "./assets/Addons/%s/", s_addonNames[i]);
+#elif defined(_DEBUG)
+            sprintf_s(s_addonRoots[i], sizeof(s_addonRoots[i]),
+                      ".\\assets\\Addons\\%s\\", s_addonNames[i]);
+#else
+            sprintf_s(s_addonRoots[i], sizeof(s_addonRoots[i]),
+                      ".\\Addons\\%s\\", s_addonNames[i]);
+#endif
+        }
+    }
+}
+
+void SetAddons(const char* names)
+{
+    s_addonCount = 0;
+    if (names != NULL) {
+        const char* p = names;
+        while (*p != '\0' && s_addonCount < ASSET_MAX_ADDONS) {
+            while (*p == ' ' || *p == '\t' || *p == ',' || *p == ';') p++;
+            int n = 0;
+            char* dst = s_addonNames[s_addonCount];
+            while (*p != '\0' && *p != ',' && *p != ';' && n < (int)sizeof(s_addonNames[0]) - 1) {
+                dst[n++] = *p++;
+            }
+            while (n > 0 && (dst[n - 1] == ' ' || dst[n - 1] == '\t')) n--;
+            dst[n] = '\0';
+            while (*p != '\0' && *p != ',' && *p != ';') p++;   // skip an over-long tail
+            if (n > 0) s_addonCount++;
+        }
+    }
+    ComposeAddonRoots();
+    for (int i = 0; i < s_addonCount; i++) {
+        dbg_printf("[assets] add-on %d: %s -> %s\n", i + 1, s_addonNames[i], s_addonRoots[i]);
+    }
+}
+
+int GetAddonCount(void)
+{
+    return s_addonCount;
+}
+
+const char* GetAddonName(int index)
+{
+    return (index >= 0 && index < s_addonCount) ? s_addonNames[index] : NULL;
+}
+
 void SetAssetMode(const char* mode)
 {
     if (mode == NULL || mode[0] == '\0') {
@@ -225,6 +314,7 @@ void SetAssetBase(const char* base)
         s_base[0] = '\0';
         ComposeAssetRoot();
         ComposeOverlayRoot();
+        ComposeAddonRoots();
         return;
     }
 
@@ -237,6 +327,7 @@ void SetAssetBase(const char* base)
     }
     ComposeAssetRoot();
     ComposeOverlayRoot();
+    ComposeAddonRoots();
 }
 
 const char* GetAssetBase(void)
@@ -349,7 +440,25 @@ const char* ResolveAssetRoot(const char* path, char* out, size_t outSize)
 
     const char* tail = path + matchLen;
 
-    // Content-mode overlay first (config.ini [Game] Mode). A non-OG mode ships
+    // Add-ons come before everything else (config.ini [Addon] Name=). A miss is
+    // the normal case - an add-on carries only what it adds or replaces - and
+    // falls through to the next add-on, the mode overlay and the base tree. The
+    // hit is logged once per top-level folder so "is my add-on live?" has an
+    // answer in the log.
+    for (int i = 0; i < s_addonCount; i++) {
+        char candidate[260];
+        if (sprintf_s(candidate, sizeof(candidate), "%s%s", s_addonRoots[i], tail) < 0) continue;
+        char probeBuf[260];
+        const char* probe = plat_normalize_path(candidate, probeBuf, sizeof(probeBuf));
+        FILE* fp = fopen(probe, "rb");
+        if (fp == NULL) continue;
+        fclose(fp);
+        if (sprintf_s(out, outSize, "%s%s", s_addonRoots[i], tail) < 0) continue;
+        LogAddonHit(s_addonNames[i], tail);
+        return out;
+    }
+
+    // Content-mode overlay next (config.ini [Game] Mode). A non-OG mode ships
     // only the files it changes or adds, so a miss here is the normal case and
     // falls through to the base tree below - which is what keeps the base tree
     // authoritative for everything the mode did not touch, and what lets

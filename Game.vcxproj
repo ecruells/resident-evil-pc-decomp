@@ -68,7 +68,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <PreprocessorDefinitions>WIN32;_DEBUG;_WINDOWS;DIRECT3D_VERSION=0x0b00;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)addons</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
       <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
@@ -89,7 +89,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <PreprocessorDefinitions>WIN32;NDEBUG;_WINDOWS;DIRECT3D_VERSION=0x0b00;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
-      <AdditionalIncludeDirectories>$(ProjectDir)src</AdditionalIncludeDirectories>
+      <AdditionalIncludeDirectories>$(ProjectDir)src;$(ProjectDir)addons</AdditionalIncludeDirectories>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <MultiProcessorCompilation>true</MultiProcessorCompilation>
       <AdditionalOptions>/FS %(AdditionalOptions)</AdditionalOptions>
@@ -134,6 +134,9 @@
     <ClCompile Include="src\game\DebugSaveLoad.cpp" />
     <ClCompile Include="src\game\GameStart.cpp" />
     <ClCompile Include="src\game\Difficulty.cpp" />
+    <ClCompile Include="src\game\Addon.cpp" />
+    <!-- Add-on code: every addons\<Name>\src\*.cpp is built in (src\game\Addon.h). -->
+    <ClCompile Include="addons\*\src\*.cpp" />
     <ClCompile Include="src\game\GameLoop.cpp" />
     <ClCompile Include="src\game\MainMenu.cpp" />
     <ClCompile Include="src\game\OptionsMenu.cpp" />
@@ -217,6 +220,7 @@
     <ClInclude Include="src\marni\MarniSound.h" />
     <ClInclude Include="src\game\SpriteRenderer.h" />
     <ClInclude Include="src\game\Difficulty.h" />
+    <ClInclude Include="src\game\Addon.h" />
     <ClInclude Include="src\game\Ps1EndingCredits.h" />
     <ClInclude Include="src\game\Ps1FmvSubtitles.h" />
     <ClInclude Include="src\game\Ps1FmvSubtitleData.h" />

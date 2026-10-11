@@ -394,6 +394,15 @@ void ConfigFile_EnsureExists(void)
         "; cutscenes unskippable; set this to 1 to make those skippable too.\n"
         "SkipUnskippableFmv=%d\n"
         "\n"
+        "[Addon]\n"
+        "; Add-ons: folders of extra characters, rooms, music, menu art... Each name\n"
+        "; is a folder <Assets Path>/Addons/<Name>/ laid out like USA/. Several can\n"
+        "; be listed, separated by commas; the first one that has a file wins, then\n"
+        "; the [Game] Mode overlay, then the USA/JPN tree. An add-on that also ships\n"
+        "; code (addons/<Name>/src, built with the game) is switched on by its name\n"
+        "; here too. Leave empty for none. See addons/README.md.\n"
+        "Name=\n"
+        "\n"
         "[Debug]\n"
         "; Master switch for the port-added debug features: F1 debug menu, F6\n"
         "; texture viewer, F8 collision overlay. 0 = off, 1 = on.\n"
@@ -514,6 +523,13 @@ BOOL ConfigFile_Load(void)
     // Port-added: overrides the per-FMV skip mask so the movies the original
     // marks unskippable can be skipped too. Off unless the key is set.
     g_bSkipUnskippableFmv = ReadInt(path, "Game", "SkipUnskippableFmv", 0) != 0;
+    // Add-on asset layers, searched ahead of the mode overlay and the base tree.
+    char addonNames[128];
+    if (ReadValue(path, "Addon", "Name", addonNames, sizeof(addonNames))) {
+        SetAddons(addonNames);
+    } else {
+        SetAddons("");
+    }
     dbg_printf("[CONFIG] mode=%s overlay=%s ps1_credits=%d\n", GameModeName(g_GameMode),
                GetAssetModeName()[0] ? GetAssetModeName() : "(none)",
                g_bPs1EndingCredits ? 1 : 0);

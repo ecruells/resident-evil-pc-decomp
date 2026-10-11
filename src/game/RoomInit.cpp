@@ -7,6 +7,7 @@
 #include "dc/ItemDescriptions.h"
 #include "dc/EntityModels.h"    // the arrange wardrobe's two outfit flags
 #include "../system/AssetPath.h"
+#include "Addon.h"            // add-on code hooks
 #include <cstdio>
 
 // Forward declarations for helpers defined in other files
@@ -816,6 +817,8 @@ void LoadRoomRdt(void)
 
     // 0x00477f6e: empty_40ae40(0)
     empty_40ae40(0);
+
+    Addon_RunRoomLoad();    // add-ons: the room is fully loaded
 }
 
 // (0x0040ada0) - Set background clear color

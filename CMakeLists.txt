@@ -63,6 +63,7 @@ set(RE1_SOURCES
     src/game/GameLoop.cpp
     src/game/GameStart.cpp
     src/game/Difficulty.cpp
+    src/game/Addon.cpp
     src/game/GteMatrix.cpp
     src/game/InputSystem.cpp
     src/game/InteractiveScreen.cpp
@@ -140,9 +141,14 @@ list(APPEND RE1_SOURCES
     src/marni/MarniGLFuncs.cpp
 )
 
+# Add-on code: every addons/<Name>/src/*.cpp is built into the game. A hook only
+# runs when its add-on is listed in config.ini [Addon] Name= (src/game/Addon.h).
+file(GLOB RE1_ADDON_SOURCES CONFIGURE_DEPENDS ${CMAKE_SOURCE_DIR}/addons/*/src/*.cpp)
+list(APPEND RE1_SOURCES ${RE1_ADDON_SOURCES})
+
 add_executable(residentevil ${RE1_SOURCES})
 
-target_include_directories(residentevil PRIVATE src)
+target_include_directories(residentevil PRIVATE src addons)
 
 # ---------------------------------------------------------------------------
 # 32-bit x86: the game's layout and the scheduler assume it.

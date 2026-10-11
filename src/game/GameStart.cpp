@@ -11,6 +11,7 @@
 #include <cstring>
 #include "../system/AssetPath.h"
 #include "Difficulty.h"      // ini-driven difficulty modes
+#include "Addon.h"           // add-on code hooks
 
 extern void setSomeColor(int r, int g, int b);              // 0x00470a50
 extern void empty_40ae40(int);                              // 0x0040ae40 RoomInit.cpp
@@ -660,7 +661,9 @@ void game_start(void)
 
     g_message_flags = g_message_flags & 0xfdff;
 
+    Addon_RunInit();          // add-ons: once, before the first session
     InitializeGame();
+    Addon_RunGameStart();     // add-ons: every session start
 
     end_game_status = game_loop();
 

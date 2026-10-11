@@ -48,6 +48,15 @@ Ps1EndingCredits=0
 ; staff rolls, DMF and DME) be skipped with the usual buttons like any other FMV.
 SkipUnskippableFmv=0
 
+[Addon]
+; Add-ons: folders of extra characters, rooms, music, menu art... Each name is a
+; folder <Assets Path>/Addons/<Name>/ laid out like USA/. Several can be listed,
+; separated by commas; the first one that has a file wins, then the [Game] Mode
+; overlay, then the USA/JPN tree. An add-on that also ships code
+; (addons/<Name>/src, built with the game) is switched on by its name here too.
+; Leave empty for none. See addons/README.md.
+Name=
+
 [Debug]
 ; Master switch for the port-added debug features: F1 debug menu, F6
 ; texture viewer, F8 collision overlay. 0 = off, 1 = on.
