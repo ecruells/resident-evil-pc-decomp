@@ -295,7 +295,14 @@ def segments(mask, axis_len, other_len, get):
 def main():
     if len(sys.argv) < 3:
         sys.exit(__doc__)
-    d = open(sys.argv[1], 'rb').read()
+    try:
+        d = open(sys.argv[1], 'rb').read()
+    except OSError as e:
+        sys.exit('cannot open %s: %s' % (sys.argv[1], e))
+    if len(d) != 7 * CHUNK:
+        sys.exit('%s is %d bytes, but the Director\'s Cut menu sheet is %d bytes (7 cells of 256x80).\n'
+                 'This is a different file - use BT367OAB.TIM from the DC disc, or use the ready-made MENUFONT.FNT.'
+                 % (sys.argv[1], len(d), 7 * CHUNK))
     glyphs = {}   # char -> (bitmap rows list, width)
     for c, lines in LINES.items():
         px = cell_pixels(d, c)
