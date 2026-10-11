@@ -11,6 +11,7 @@
 #include <cstring>          // memcpy, for the DC title sheet assembly
 #include "../system/AssetPath.h"
 #include "Difficulty.h"      // ini-driven NEW GAME difficulty modes
+#include "MenuFont.h"
 
 extern void logos_state(void);
 
@@ -239,6 +240,8 @@ void init_title_screen(void)
         g_titleTexturePageData[6] = 9;
     }
 
+    MenuFont_Load();   // optional; no file = no change
+
     {
         char dbg[256];
         sprintf(dbg, "[INIT] LoadTexturePage done, SRV[27]=%p\n", g_TexturePageSRV[27]);
@@ -404,16 +407,27 @@ static bool DiffArtMenuUsable(void)
 
 static int s_diffCursor = 0;   // highlighted entry while state 11 is active
 
+// Optional DATA\\MENUFONT.FNT (tools/make_menu_font.py): when present, each entry
+// whose letters the font has is drawn with the DC's own menu lettering, centred.
+// Entries it cannot spell (the sheet has no F H J K Q X Z or digits) fall back
+// to the normal text routine, so nothing is ever left blank.
+#define DIFF_FONT_Y     40      /* top of first entry (guess - tune)      */
+#define DIFF_FONT_STEP  20
 static void DrawDifficultyTextMenu(void)
 {
     const int count = Difficulty_Count();
     for (int i = 0; i < count; i++) {
         const DifficultyMode* m = Difficulty_Get(i);
         if (m == NULL) continue;
-        sprintf(PRINT_TEXT_BUFFER, "%c %s", (i == s_diffCursor) ? '>' : ' ', m->name);
+        const bool sel = (i == s_diffCursor);
+        if (MenuFont_CanDraw(m->name)) {
+            MenuFont_Draw(-MenuFont_Width(m->name) / 2, DIFF_FONT_Y + i * DIFF_FONT_STEP,
+                          m->name, (unsigned char)(sel ? 0x80 : 0x40));
+            continue;
+        }
+        sprintf(PRINT_TEXT_BUFFER, "%c %s", sel ? '>' : ' ', m->name);
         PrintText8x14((short)DIFF_MENU_X, (short)(DIFF_MENU_Y + i * DIFF_MENU_STEP),
-                      (unsigned char)((i == s_diffCursor) ? DIFF_MENU_COLOR_SELECT
-                                                          : DIFF_MENU_COLOR_NORMAL), 0);
+                      (unsigned char)(sel ? DIFF_MENU_COLOR_SELECT : DIFF_MENU_COLOR_NORMAL), 0);
     }
 }
 
