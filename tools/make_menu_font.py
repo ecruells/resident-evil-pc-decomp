@@ -7,8 +7,9 @@ The sheet (7 cells of 256x80, 4bpp) is the only place the DC keeps its menu
 lettering.  Every bright (colour 1) glyph in it is cut out and re-packed on a
 256-wide 4bpp texture page as 16x16 cells in ASCII order, so the game can draw
 arbitrary menu text with it.  Only the big menu letters the sheet really contains
-exist: A B C D E G I L M N O P R S T U V W Y (the small copyright-line glyphs
-are left out: they are a different size).  Missing characters are drawn by the game's normal text routine.
+exist: A B C D E G I L M N O P R S T U V W Y. F H J K Q X Z, 0-9, '-' and '.'
+are hand-drawn in the same style (SYNTH_ART below); the sheet's own small
+copyright-line glyphs are a different size and are not used.  Missing characters are drawn by the game's normal text routine.
 
 File layout (little endian), read by src/game/MenuFont.cpp:
   +0x00 'MFNT'
@@ -29,6 +30,248 @@ LINES = {
     1: ["NEW GAME"], 2: ["LOAD GAME"],
     3: ["STANDARD"], 4: ["TRAINING"], 5: ["ADVANCED"],
 }
+
+# Letters the sheet never prints (F H J K Q X Z, digits, - and .) hand-drawn on the
+# same grid: 11 rows, 3-pixel stems, to match the extracted menu letters.
+SYNTH_ART = r'''
+F:
+#########
+#########
+###......
+###......
+########.
+########.
+###......
+###......
+###......
+###......
+###......
+H:
+###....###
+###....###
+###....###
+###....###
+##########
+##########
+###....###
+###....###
+###....###
+###....###
+###....###
+J:
+.....###
+.....###
+.....###
+.....###
+.....###
+.....###
+.....###
+###..###
+###..###
+.#######
+..#####.
+K:
+###....###
+###...###.
+###..###..
+###.###...
+######....
+#####.....
+######....
+###.###...
+###..###..
+###...###.
+###....###
+Q:
+...#####...
+.#########.
+.##.....##.
+###.....###
+###.....###
+###.....###
+###...#.###
+###....####
+.##....###.
+.#########.
+...#######.
+X:
+###.....###
+###.....###
+.###...###.
+..###.###..
+...#####...
+....###....
+...#####...
+..###.###..
+.###...###.
+###.....###
+###.....###
+Z:
+#########
+#########
+......###
+.....###.
+....###..
+...###...
+..###....
+.###.....
+###......
+#########
+#########
+0:
+..######..
+.########.
+###....###
+###....###
+###....###
+###....###
+###....###
+###....###
+###....###
+.########.
+..######..
+1:
+..###
+.####
+#####
+..###
+..###
+..###
+..###
+..###
+..###
+..###
+..###
+2:
+.########.
+##########
+###....###
+.......###
+.....####.
+...####...
+.####.....
+###.......
+###.......
+##########
+##########
+3:
+.########.
+##########
+###....###
+.......###
+..######..
+..######..
+.......###
+###....###
+###....###
+##########
+.########.
+4:
+......###.
+.....####.
+....#####.
+...######.
+..###.###.
+.###..###.
+###...###.
+##########
+##########
+......###.
+......###.
+5:
+##########
+##########
+###.......
+###.......
+########..
+##########
+.......###
+.......###
+###....###
+##########
+.########.
+6:
+..#######.
+.#########
+###.......
+###.......
+########..
+##########
+###....###
+###....###
+###....###
+.#########
+..#######.
+7:
+#########
+#########
+......###
+.....###.
+....###..
+....###..
+...###...
+...###...
+...###...
+...###...
+...###...
+8:
+.########.
+##########
+###....###
+###....###
+.########.
+.########.
+###....###
+###....###
+###....###
+##########
+.########.
+9:
+.########.
+##########
+###....###
+###....###
+##########
+.#########
+.......###
+.......###
+......####
+##########
+.#######..
+-:
+.......
+.......
+.......
+.......
+#######
+#######
+.......
+.......
+.......
+.......
+.......
+.:
+...
+...
+...
+...
+...
+...
+...
+...
+...
+###
+###
+'''
+
+def synth_glyphs():
+    out, cur = {}, None
+    for line in SYNTH_ART.strip().splitlines():
+        if line.endswith(':') and len(line) == 2:
+            cur = line[0]; out[cur] = []
+        else:
+            out[cur].append([1 if c == '#' else 0 for c in line])
+    return {c: (rows, len(rows[0]), len(rows), True) for c, rows in out.items()}
 
 def cell_pixels(d, c):
     b = c * CHUNK + 0x40
@@ -93,6 +336,9 @@ def main():
     # the page may only hold glyphs <= 16 wide; the small copyright-line glyphs and
     # the big menu letters share chars (C, A, P, O, M ...): the tallest wins above.
     tall = max(g[2] for g in glyphs.values())
+    for ch, g in synth_glyphs().items():
+        if ch not in glyphs or glyphs[ch][2] < tall:
+            glyphs[ch] = g
     page = [[0] * 256 for _ in range(96)]
     adv = [0] * COUNT
     for ch, (rows, w, h, _cl) in glyphs.items():
