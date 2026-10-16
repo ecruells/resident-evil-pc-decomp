@@ -15,3 +15,6 @@ dist/
 # so it is no longer tracked; re1.lock is the single-instance guard.
 config.ini
 re1.lock
+# Source artwork for the generated main-menu GUIDE texture.
+!infested/images/guide.png
+tmp/

@@ -358,6 +358,72 @@ why this pair was chosen over Back+Start (options + inventory would both fire).
 
 ---
 
+## 6a. Modifier buttons (zombie mod, port addition)
+
+With `[Mods] PlayInfested` on, `ReadPadBoth` raises two new bits above the PSX
+word: `PAD_MOD1` (`0x10000`) and `PAD_MOD2` (`0x20000`, `src/game/Types.h`).
+
+| | Pad | Keyboard |
+|---|---|---|
+| `PAD_MOD1` | LB / L1 (button 5) | Shift (Linux: left Shift) |
+| `PAD_MOD2` | RB / R1 (button 6) | Tab |
+
+- They are read **past** the remap tables: LB / RB straight off the hardware
+  mask (and taken out of it, so they no longer aim - X and RT still do),
+  Shift / Tab with `plat_key_state`. No save file, `config.ini` key string or
+  `g_JoyRemapTbl` entry changes, so nothing needs migrating and they cannot be
+  rebound yet.
+- They reach the raw words (`g_RawPadHeld`, `g_button_pressed_id`,
+  `g_PlayerPadPressed`) only. `g_PlayerDpadHeld` is built from the low 16 bits,
+  so gameplay never sees them. "Any button" checks (FMV skip) do.
+- Each screen decides what they mean. The director's map: previous / next
+  monster type. A survivor in play: MOD1 + a direction says a voice line
+  (`ZombieVoice.cpp`); `zombie_mode_pad_filter`, called from
+  `PlayerPad_Update` after its edge detection, drops the directions from that
+  frame's words before the remap, so held MOD1 keeps them from gameplay.
+- With debug features on, LB + RB together still opens the F1 overlay
+  (`read_sidewinder_pad`, the raw mask).
+- Off the mod, nothing changes: LB / RB stay aim.
+
+A survivor aiming a gun reloads with **cancel / run** (B or LT; keyboard V,
+Ctrl or Esc): the raw `0x40` rising edge in the gun aim hold
+(`player_behavior_13_gun_hold_input`), which in the original switches to the
+next target (behaviour 0x1A). In the mode it plays the empty gun's reload on
+a part-loaded handgun, shotgun or Python instead, and never switches targets.
+
+The director can hold LB (Shift on keyboard) to show a monster shortcut
+D-pad: Up spawns a zombie, Down a dog (Cerberus), Left a hunter, and Right
+a chimera in the current room. Each fresh direction press requests one
+placement through the map's rules, including price, unlock, room capacity,
+and reinforcement restrictions. Directions do not move or turn the possessed
+monster while LB is held. The map keeps its existing LB/RB controls.
+
+Survivor voice lines are grouped by purpose: LB (Shift) for teamwork,
+RB (Tab) for supplies and social lines.
+
+| Button | LB / Shift: teamwork | RB / Tab: supplies / social |
+|---|---|---|
+| Up | Help | Joke |
+| Down | Watch out | Good job |
+| Left | Guard me | I need ammo |
+| Right | Lead the way | I need health / I'm hurt / I'm dying |
+| X / Aim | Follow me | Take this |
+| Y / Inventory | Stay here | We're screwed |
+| A / Action | Use that (world interaction) | Thanks |
+| B / Run | Run away | Taunt |
+
+The duplicate Wait here category is removed; use `stayhere` recordings.
+Existing filenames remain unchanged. Recordings go in
+`<exe dir>/infested/voices/<character>/<category>_<n>.wav` (or `.ogg`),
+numbered consecutively from 1 through at most 16. Jokes cycle in order;
+other categories pick a random take. The 1.5-second cooldown and
+room/adjacent-room playback rules still apply.
+
+RB + Right selects a health subcategory using the speaker's current HP:
+full health uses `needhealth`; damage above the red band uses `hurt`;
+red/Danger health (HP at or below `maxHealth >> 2`) uses `dying`.
+The overlay shows the currently selected category.
+
 ## 7. Files
 
 | File | Role |

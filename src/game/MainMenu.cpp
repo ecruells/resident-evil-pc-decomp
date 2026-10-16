@@ -16,6 +16,7 @@
 #include "../system/AssetPath.h"
 #include "../DebugPrint.h"
 #include "FileLoader.h"
+#include "mods/ZombieMode.h"   // port-added mod hooks
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "../marni/MarniBits.h"
@@ -310,7 +311,9 @@ void main_menu(void)
     OutputDebugStringA("[MENU] main_menu: entered\n");
 
     // 0x00463710-0x0046373e: Suspend gameplay task and set up menu environment
-    g_bGameActive = 0;
+    const bool liveMenu = zombie_mode_live_menu();
+    bool interrupted = false;
+    g_bGameActive = liveMenu ? 2 : 0;
     Task_suspend(0);
     // empty_00470a20(): empty in the original - call dropped
     TexturePage_ClearAll();
@@ -327,6 +330,10 @@ void main_menu(void)
     g_fade_type_id = 2;
     g_fading_counter = 0xE800;
     fade_update();
+    if (liveMenu) {
+        g_fading_state = -1;
+        g_main_state_flags &= ~MSF_FADE_ACTIVE;
+    }
 
     // Declared before the goto below so the jump cannot cross an
     // initialisation (GCC rejects that; MSVC allowed it). Assigned at their
@@ -378,7 +385,8 @@ LAB_0046381c:
 
     // 0x0046381c-0x00463880: Set character display flags
     charBits = ((g_playerEntity.id + 1) & 2);
-    g_totalInventorySlots = charBits + 6;
+    g_totalInventorySlots = (unsigned char)zombie_mode_inventory_slots(charBits + 6);
+    charBits = g_totalInventorySlots - 6; // select the matching six/eight-slot frame
     DAT_00ae9f19 = charBits | (g_playerEntity.id & 1);
 
     // 0x00463880-0x004638e3: Check if map is available
@@ -425,6 +433,7 @@ LAB_00463966:
     // Main menu frame loop
     // ====================================================================
     do {
+        zombie_mode_reconnect_wait();
         Game_timer = Game_timer + 1;
 
         // 0x00463973-0x0046398a: Handle game reset
@@ -441,6 +450,34 @@ LAB_00463966:
         g_TextureDesc.pivotY = 0;
         g_TextureDesc.colorMulG = 0x80;
         g_TextureDesc.colorMulB = 0x80;
+
+        if (liveMenu && g_MainMenuState != 7 && zombie_mode_menu_frame()) {
+            interrupted = true;
+            g_menu_choice_id = 0;
+            menu_exit_cleanup();
+        }
+
+        if (liveMenu && g_MainMenuState != 7 && zm_piano_menu_finished()) {
+            // An accepted USE of the sheet music: the piano starts playing
+            // once the menu is closed (ZombiePiano.cpp).
+            g_menu_choice_id = 0;
+            menu_exit_cleanup();
+        }
+
+        if (liveMenu && g_MainMenuState != 7 && zm_access_menu_finished()) {
+            // An accepted USE of the battery: it goes in once the menu is
+            // closed (ZombieKeypad.cpp).
+            g_menu_choice_id = 0;
+            menu_exit_cleanup();
+        }
+
+        if (liveMenu && g_MainMenuState != 7 && zm_shotgun_menu_finished()) {
+            // A host-confirmed placement/rescue returns to the room through
+            // normal cleanup. Do not treat it as damage: preserve the usual
+            // idle-pose restoration and let the puzzle consume/transition there.
+            g_menu_choice_id = 0;
+            menu_exit_cleanup();
+        }
 
         // 0x004639b5: Menu state machine
         switch (g_MainMenuState) {
@@ -562,46 +599,49 @@ LAB_00463a53:
             // Exit animation: restore player state
             if ((DAT_00ae9f1e & 0x80) != 0) {
                 ENTITY = (Entity*)&g_playerEntity;
-                SetupJointStructures(&g_entityModelBuffer2);
+                SetupJointStructures(PlayerJointAnimationBuffer());
             }
 
-            g_playerEntity.unk_8c = 0;
-            g_playerEntity.animation_frame_id = 0;
-            g_playerEntity.unk_bf = 0;
-            g_playerEntity.isBeingAttackedFlag = 0;
+            if (!interrupted) {
+                g_playerEntity.unk_8c = 0;
+                g_playerEntity.animation_frame_id = 0;
+                g_playerEntity.unk_bf = 0;
+                g_playerEntity.isBeingAttackedFlag = 0;
 
-            if ((((DAT_00ae9f13 & 0x80) == 0) || (g_usedItemId < 0x1D)) || (0x1E < g_usedItemId)) {
-                g_playerEntity.attackAnim = 0;
-                g_playerEntity.animationId = 1;
-                g_playerEntity.animFrameId = 0;
-                g_playerEntity.action_behavior = 0;
-                g_playerEntity.action_state = 0;
-                // 0x00463c10/c16 set slot 0 (+0xBD) / ctrl id 1 (+0x84), then
-                // 0x00463c21 runs ONE Joint_move over animBase before control
-                // returns to gameplay. This pre-applies the first idle pose and
-                // its frame timing while the menu-close fade still covers the
-                // screen; leaving it out left the last BENT reach pose frozen
-                // into the first visible post-close frames (the pickup "no
-                // stand-up" look).
-                Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
-            } else {
-                g_playerEntity.animationId = 8;
-                g_playerEntity.animFrameId = 0;
-                g_playerEntity.action_behavior = 1;
-                g_playerEntity.action_state = 0;
-                g_playerEntity.attackAnim = 0x37;
-                // 0x00463bc8: the crank-use exit also raises the completion flag the
-                // room SCD event script spins on: MOV EAX,0x20 /
-                // MOV [0x00be63bf],AL (unk_db = 0x20). player_scd_behavior_01's
-                // completion then does Flg_on(g_SysFlags, unk_db) = SysFlags bit
-                // 0x20, which the courtyard drain scripts (room3010 script 1/2's
-                // FC/FD wait) test before the FMV. Without it the wait never
-                // resolves and the player is stuck in the crank pose forever.
-                g_playerEntity.scd_anim_param = 0x20;
-                // 0x00463bd8/bde/decompile: the crank branch feeds the SAME shared
-                // 0x00463c21 Joint_move from jointMoveData2/jointMoveData3.
-                Joint_move(0, g_playerEntity.jointMoveData2, g_playerEntity.jointMoveData3, 0x400);
-            }
+                if ((((DAT_00ae9f13 & 0x80) == 0) || (g_usedItemId < 0x1D)) || (0x1E < g_usedItemId)) {
+                    g_playerEntity.attackAnim = 0;
+                    g_playerEntity.animationId = 1;
+                    g_playerEntity.animFrameId = 0;
+                    g_playerEntity.action_behavior = 0;
+                    g_playerEntity.action_state = 0;
+                    // 0x00463c10/c16 set slot 0 (+0xBD) / ctrl id 1 (+0x84), then
+                    // 0x00463c21 runs ONE Joint_move over animBase before control
+                    // returns to gameplay. This pre-applies the first idle pose and
+                    // its frame timing while the menu-close fade still covers the
+                    // screen; leaving it out left the last BENT reach pose frozen
+                    // into the first visible post-close frames (the pickup "no
+                    // stand-up" look).
+                    Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
+                } else {
+                    g_playerEntity.animationId = 8;
+                    g_playerEntity.animFrameId = 0;
+                    g_playerEntity.action_behavior = 1;
+                    g_playerEntity.action_state = 0;
+                    g_playerEntity.attackAnim = 0x37;
+                    // 0x00463bc8: the crank-use exit also raises the completion flag the
+                    // room SCD event script spins on: MOV EAX,0x20 /
+                    // MOV [0x00be63bf],AL (unk_db = 0x20). player_scd_behavior_01's
+                    // completion then does Flg_on(g_SysFlags, unk_db) = SysFlags bit
+                    // 0x20, which the courtyard drain scripts (room3010 script 1/2's
+                    // FC/FD wait) test before the FMV. Without it the wait never
+                    // resolves and the player is stuck in the crank pose forever.
+                    g_playerEntity.scd_anim_param = 0x20;
+                    // 0x00463bd8/bde/decompile: the crank branch feeds the SAME shared
+                    // 0x00463c21 Joint_move from jointMoveData2/jointMoveData3.
+                    Joint_move(0, g_playerEntity.jointMoveData2, g_playerEntity.jointMoveData3, 0x400);
+                }
+
+            } // An interrupted menu must preserve the monster's hurt/grab state.
 
             // 0x00463c35: Handle weapon equip/unequip.
             // Original disassembly: mode 0 with the used-item flag set only
@@ -642,7 +682,7 @@ LAB_00463a53:
             }
 
             // Wait for fade transitions
-            while (((g_main_state_flags & MSF_FADE_ACTIVE) != 0) || (g_spriteAnimActive != 0)) {
+            while (!liveMenu && (((g_main_state_flags & MSF_FADE_ACTIVE) != 0) || (g_spriteAnimActive != 0))) {
                 Task_sleep(1);
             }
 
@@ -654,6 +694,13 @@ LAB_00463a53:
             // Exit wait (message display mode)
             menu_reset_status_state();
             while (menu_update_status_screen() == 0) {
+                if (liveMenu && zombie_mode_menu_frame()) {
+                    g_menu_choice_id = 0;
+                    menu_exit_cleanup();
+                    menu_restore_game_state();
+                    Task_exit();
+                    return;
+                }
                 Task_sleep(1);
             }
             if (g_spriteAnimActive != 0) {
@@ -684,7 +731,12 @@ static void menu_exit_cleanup(void)
 {
     FUN_004844b0();
     g_MainMenuState = 7;
-    set_fading(2, 0xC00);
+    if (zombie_mode_live_menu()) {
+        g_fading_state = -1;
+        g_main_state_flags &= ~MSF_FADE_ACTIVE;
+    } else {
+        set_fading(2, 0xC00);
+    }
     g_spriteAnimR = 0;
     g_spriteAnimG = 0;
     g_spriteAnimB = 0;
@@ -890,8 +942,9 @@ static void menu_draw_inventory(void)
     g_TextureDesc.height = 30;
     g_TextureDesc.clutY = 0x1e0;
     g_invDepthLayer = 10;
-    g_TextureDesc.texU = (g_playerEntity.id & 1) << 5;
-    g_TextureDesc.texV = (g_playerEntity.id & 2) << 4;
+    int portrait = zombie_mode_inventory_portrait();
+    g_TextureDesc.texU = (portrait & 1) << 5;
+    g_TextureDesc.texV = (portrait >> 1) << 5;
     bVar6 = 8;
     display_texture(&g_TextureDesc, 10, 9, 1);
 
@@ -1048,9 +1101,11 @@ static void display_item_qty(unsigned char itemId, unsigned char qty, int depth)
 
     // Normal numeric quantity display
     // (flag 0x7E grants infinite quantity for certain items like the rocket launcher)
-    if (!(hasInfPython != 0 && itemId == ITEM_COLT_PYTHON_MAG)
+    // Port-added mod: the mode's Ingram shows its rounds, not the infinity.
+    if (zombie_mode_ingram_finite(itemId) ||
+        (!(hasInfPython != 0 && itemId == ITEM_COLT_PYTHON_MAG)
         && ((hasInfRLauncher == 0 && itemId <= ITEM_NON_INFINITE_MAX) ||
-            (itemId != ITEM_ROCKET_LAUNCHER && itemId <= ITEM_NON_INFINITE_MAX)))
+            (itemId != ITEM_ROCKET_LAUNCHER && itemId <= ITEM_NON_INFINITE_MAX))))
     {
         // Clip quantity display for certain weapon types
         if (itemId != ITEM_FLAMETHROWER && itemId < ITEM_CLIP)
@@ -1219,6 +1274,16 @@ static void menu_update_selected_item(void)
     g_bItemMenuSelectedItemId = 0;
 }
 
+// The shotgun becomes a puzzle item at its empty mounting plate. Use the
+// same predicate for the command label and dispatch, so USE reaches the
+// host-confirmed return instead of taking the normal weapon EQUIP shortcut.
+static bool menu_item_equips_selected(void)
+{
+    bool weapon = (g_bItemMenuSelectedItemId < ITEM_CLIP) ||
+                  (ITEM_NON_INFINITE_MAX < g_bItemMenuSelectedItemId);
+    return weapon && !(g_bItemMenuSelectedItemId == ITEM_SHOTGUN && zm_shotgun_can_return_shotgun());
+}
+
 // (0x00401050) - Equip / unequip the item under the cursor
 static void menu_item_toggle_equip(void)
 {
@@ -1304,21 +1369,39 @@ static int menu_item_use_heal(unsigned char slot)
                     g_playerEntity.healthStatusFlags = g_playerEntity.healthStatusFlags & 0xdf;
                 }
             } else {
-                if (((bVar1 & 0xf0) != 0x20) || ((g_playerEntity.healthStatusFlags & 2) == 0)) {
+                // Infested: blue herbs (including blue mixtures) cure Yawn's
+                // serum-only poison as well as ordinary poison. Keep the
+                // original cure rules outside the mode.
+                unsigned char poisonMask = zombie_mode_armed() ? 0x22 : 0x02;
+                if (((bVar1 & 0xf0) != 0x20) || ((g_playerEntity.healthStatusFlags & poisonMask) == 0)) {
                     goto heal_done;
                 }
-                g_playerEntity.healthStatusFlags = g_playerEntity.healthStatusFlags & 0xfd;
+                if ((poisonMask & g_playerEntity.healthStatusFlags & 0x20) != 0)
+                    FUN_00473f10((int*)g_ScenarioFlags2, SCENARIO2_FLAG_YAWN_POISONED);
+                g_playerEntity.healthStatusFlags &= (unsigned char)~poisonMask;
             }
             DAT_00ae9f13 = DAT_00ae9f13 | 0x10;
             used = 1;
         }
     }
 heal_done:
+    // Port-added mod: Rebecca's spray heals the survivors around her too.
+    used = zombie_mode_heal_item_used(g_bItemMenuSelectedItemId, used);
     if (used != 0) {
         DAT_00ae9f2e = 2;
         DAT_00ae9f12 = 0xff;
     }
     return used;
+}
+
+// Port-added mod: the loaded count a reload adds to. The original keeps 7
+// bits of it (bit 7 of a gun's count is a flag), which cuts the
+// flamethrower's 240-unit tank - never reloaded in the USA game, as no fuel
+// lies anywhere, but the zombie mode's randomizer puts fuel out.
+static unsigned short menu_ammo_loaded(const unsigned char* slot)
+{
+    if (slot[0] == ITEM_FLAMETHROWER && zombie_mode_armed()) return slot[1];
+    return slot[1] & 0x7f;
 }
 
 // (0x00401bf0) - Combine effect 1: transfer ammo quantity (cursor slot wins)
@@ -1327,7 +1410,7 @@ static void menu_use_ammo_combine_a(unsigned char slotA, unsigned char slotB)
     unsigned char* pbVar4 = (unsigned char*)(ITEM_SLOTS + (unsigned int)slotA * 2);
     unsigned char* pbVar1 = pbVar4 + 1;
     unsigned char* pbOther = (unsigned char*)(ITEM_SLOTS + 1 + (unsigned int)slotB * 2);
-    unsigned short uVar6 = (unsigned short)*pbOther + (*pbVar1 & 0x7f);
+    unsigned short uVar6 = (unsigned short)*pbOther + menu_ammo_loaded(pbVar4);
     unsigned char bVar2 = g_ItemMaxQty[(unsigned int)*pbVar4 * 4];
     unsigned char bVar5 = (unsigned char)uVar6;
     if (bVar2 < uVar6) {
@@ -1345,7 +1428,7 @@ static void menu_use_ammo_combine_b(unsigned char slotA, unsigned char slotB)
     unsigned char* pbVar4 = (unsigned char*)(ITEM_SLOTS + (unsigned int)slotB * 2);
     unsigned char* pbVar1 = pbVar4 + 1;
     unsigned char* pbOther = (unsigned char*)(ITEM_SLOTS + 1 + (unsigned int)slotA * 2);
-    unsigned short uVar6 = (unsigned short)*pbOther + (*pbVar1 & 0x7f);
+    unsigned short uVar6 = (unsigned short)*pbOther + menu_ammo_loaded(pbVar4);
     unsigned char bVar2 = g_ItemMaxQty[(unsigned int)*pbVar4 * 4];
     unsigned char bVar5 = (unsigned char)uVar6;
     if (bVar2 < uVar6) {
@@ -1552,6 +1635,36 @@ static int menu_item_use_item(void)
         return 0;
     }
     bVar5 = 9;
+    if (zombie_mode_armed() && g_bItemMenuSelectedItemId == ITEM_PICK_AXE) {
+        if (zm_shotgun_use_pickaxe()) DAT_00ae9f13 |= 2;
+        else DAT_00ae9f22 = 1; // the puzzle supplies the specific refusal text
+        return 0;
+    }
+    // Port-added mod: the sheet music is played at the bar's piano by the
+    // survivors who can play, never by the original's Rebecca scenes.
+    if (zombie_mode_armed() && g_bItemMenuSelectedItemId == ITEM_MUSIC_NOTES) {
+        if (zm_piano_use()) DAT_00ae9f13 |= 2;
+        else DAT_00ae9f22 = 1; // the piano supplies the refusal text
+        return 0;
+    }
+    // Port-added mod: the battery powers the small elevator, at either of its
+    // doors (ZombieKeypad.cpp).
+    if (zombie_mode_armed() && g_bItemMenuSelectedItemId == ITEM_BATTERY) {
+        if (zm_access_use_battery()) DAT_00ae9f13 |= 2;
+        else DAT_00ae9f22 = 1; // the elevator supplies the refusal text
+        return 0;
+    }
+    if (zombie_mode_armed() && g_bItemMenuSelectedItemId == ITEM_BROKEN_SHOTGUN) {
+        if (zm_shotgun_use_broken()) DAT_00ae9f13 |= 2;
+        else { DAT_00ae9f22 = 1; set_message_display(0xFB, 0); }
+        return 0;
+    }
+    // At the mounting plate, USE can return a working shotgun when no broken
+    // replacement is available. Elsewhere it keeps the usual equip behavior.
+    if (zombie_mode_armed() && g_bItemMenuSelectedItemId == ITEM_SHOTGUN && zm_shotgun_use_shotgun()) {
+        DAT_00ae9f13 |= 2;
+        return 0;
+    }
     bVar6 = (DAT_00ae9f23 >> 1) - 4;
     bVar2 = g_ItemImageLookupTable[0x144];
     while (g_bItemMenuSelectedItemId < bVar2) {
@@ -1902,6 +2015,64 @@ void FUN_00454fd0(int itemId, int mode, short x, short y)
     } while (*pbVar4 != 7);
 }
 
+// Port-added (mods/ZombieDrops.cpp): the zombie mode's fourth command, DROP -
+// the item under the cursor leaves the inventory as the item box's deposit
+// takes it out (equip index cleared if it was this slot, slots compacted).
+static bool menu_item_drop(void)
+{
+    unsigned char slot = (DAT_00ae9f23 >> 1) - 4;
+    if (slot >= g_TotalHeldItems) return false;
+    unsigned char* item = ITEM_SLOTS + (unsigned int)slot * 2;
+    if (item[0] == 0 || !zombie_mode_drop_item(item[0], item[1])) return false;
+    if ((unsigned int)g_EquippedItemId - (unsigned int)slot == 1) {
+        g_EquippedItemId = 0;
+    }
+    item[0] = 0;
+    item[1] = 0;
+    rearrange_item_slots();
+    return true;
+}
+
+// Port-added: the command box's top. 0x39 in the original; with the DROP row
+// (zombie mode) the whole box sits one row (0x18) higher, so the fourth row
+// is not clipped against the equipped-weapon panel at y 0x92.
+static unsigned short menu_box_top(void)
+{
+    return zombie_mode_can_drop() ? (unsigned short)(0x39 - 0x18) : (unsigned short)0x39;
+}
+// The DROP row under COMBN, 3 pixels up from a fourth 0x18 step (its button's
+// transparent top rows overlap COMBN's bottom ones).
+#define MENU_DROP_ROW_Y (menu_box_top() + 3 * 0x18 - 3)
+// The DROP row under COMBN. status.tim has no DROP button, so it
+// is built from the CHECK button (texU 0x30, texV 0x30): its left and right
+// four columns, and column 11 - border and fill only - repeated across the
+// middle where the word was; the word itself in the game font on top.
+static void menu_draw_drop_row(void)
+{
+    const unsigned short y = MENU_DROP_ROW_Y;
+    g_TextureDesc.flags = 0x01000040;
+    g_TextureDesc.texturePage = 0x1c;
+    g_TextureDesc.clutX = 0;
+    g_TextureDesc.clutY = 0x1e4;
+    g_TextureDesc.texV = 0x30;
+    g_TextureDesc.height = 0x18;
+    g_TextureDesc.screenY = y;
+    g_TextureDesc.width = 4;
+    g_TextureDesc.texU = 0x30;
+    g_TextureDesc.screenX = 0x90;
+    display_texture(&g_TextureDesc, 0x23, 0, 1);
+    g_TextureDesc.texU = 0x30 + 44;
+    g_TextureDesc.screenX = 0x90 + 44;
+    display_texture(&g_TextureDesc, 0x23, 0, 1);
+    g_TextureDesc.width = 1;
+    g_TextureDesc.texU = 0x30 + 11;
+    for (int x = 4; x < 44; x++) {
+        g_TextureDesc.screenX = (unsigned short)(0x90 + x);
+        display_texture(&g_TextureDesc, 0x23, 0, 1);
+    }
+    zombie_mode_drop_label((short)(0x90 + 8 + g_ScreenOffsetX), (short)(y + 5 + g_ScreenOffsetY));
+}
+
 // (0x00420bb0) - Item action submenu: use/view/move options, animation and
 // item name box display
 static void menu_item_submenu(void)
@@ -1929,7 +2100,7 @@ static void menu_item_submenu(void)
             FUN_00454fd0(g_bItemMenuSelectedItemId, 0, item_name_left() - g_ScreenOffsetX, 0xba - g_ScreenOffsetY);
             if ((dpad_pressed_byte1() & 0x40) != 0) {
                 if (DAT_00ae9f24 == 0) {
-                    if ((g_bItemMenuSelectedItemId < ITEM_CLIP) || (ITEM_NON_INFINITE_MAX < g_bItemMenuSelectedItemId)) {
+                    if (menu_item_equips_selected()) {
                         menu_item_toggle_equip();
                         DAT_00ae9f21 = 3;
                         DAT_00ae9f27 = DAT_00ae9f27 & 0x7f;
@@ -1943,12 +2114,24 @@ static void menu_item_submenu(void)
                     DAT_00ae9f22 = 0;
                     DAT_00ae9f13 = DAT_00ae9f13 & 0xfb;
                     play_sfx(3, 6, 0);
+                } else if (DAT_00ae9f24 == 3) {
+                    // Port-added: DROP (zombie mode). Closes the box as an
+                    // equip does; refused, it stays open.
+                    if (menu_item_drop()) {
+                        DAT_00ae9f21 = 3;
+                        DAT_00ae9f27 = DAT_00ae9f27 & 0x7f;
+                        DAT_00ae9f24 = 0;
+                        play_sfx(3, 6, 0);
+                    } else {
+                        play_sfx(3, 5, 0);
+                    }
                 }
                 goto submenu_default;
             }
             if ((pad_held_byte1() & 0x50) != 0) {
                 if ((pad_held_byte1() & 0x10) == 0) {
-                    if (DAT_00ae9f24 < 2) {
+                    // Port-added: a fourth row, DROP, in the zombie mode.
+                    if (DAT_00ae9f24 < (zombie_mode_can_drop() ? 3 : 2)) {
                         DAT_00ae9f24 = DAT_00ae9f24 + 1;
                     }
                 } else if (DAT_00ae9f24 != 0) {
@@ -2007,12 +2190,13 @@ submenu_default:
         if (((DAT_00ae9f21 & 1) == 0) && (DAT_00ae9f28 == 0)) {
             g_TextureDesc.texV = 0x60;
             g_TextureDesc.height = 0x18;
-            g_TextureDesc.screenY = (unsigned short)DAT_00ae9f24 * 0x18 + 0x39;
+            g_TextureDesc.screenY = (DAT_00ae9f24 == 3) ? MENU_DROP_ROW_Y    // port-added: DROP
+                                                        : (unsigned short)DAT_00ae9f24 * 0x18 + menu_box_top();
             g_TextureDesc.width = 0x30;
             g_TextureDesc.texU = 0x30;
             display_texture(&g_TextureDesc, 0x23, 0, 1);
         }
-        g_TextureDesc.screenY = 0x39;
+        g_TextureDesc.screenY = menu_box_top();
         g_TextureDesc.texU = 0x30;
         g_TextureDesc.texV = 0;
         if (DAT_00ae9f1c == 0) {
@@ -2020,7 +2204,9 @@ submenu_default:
         }
         if ((DAT_00ae9f27 & 0x80) == 0) {
             g_TextureDesc.screenX = g_TextureDesc.screenX + (8 - (unsigned short)DAT_00ae9f27) * 6;
-            g_TextureDesc.screenY = (0x1b - (unsigned short)DAT_00ae9f27) * 3;
+            // (0x1b - n) * 3 opens from the box's middle down to its top at
+            // n = 8; port-added: moved with the box (menu_box_top).
+            g_TextureDesc.screenY = (0x1b - (unsigned short)DAT_00ae9f27) * 3 - (0x39 - menu_box_top());
             g_TextureDesc.texU = (0x10 - DAT_00ae9f27) * 6;
             g_TextureDesc.texV = g_TextureDesc.texV + (8 - DAT_00ae9f27) * 3;
         }
@@ -2046,6 +2232,11 @@ submenu_default:
             bVar5 = (unsigned char)uVar2 + 1;
             uVar2 = (unsigned short)bVar5;
         } while (bVar5 < 3);
+        // Port-added: the DROP row, once the box is fully open and still.
+        if (zombie_mode_can_drop() && (DAT_00ae9f27 & 0x80) != 0 && (DAT_00ae9f27 & 0x7f) == 8 &&
+            DAT_00ae9f28 == 0) {
+            menu_draw_drop_row();
+        }
     }
 }
 
@@ -2117,7 +2308,7 @@ static void menu_handle_input(void)
             }
         } else {
             if (g_bItemMenuSelectedItemId == 0) goto input_blink;
-            if ((g_bItemMenuSelectedItemId < ITEM_CLIP) || (ITEM_NON_INFINITE_MAX < g_bItemMenuSelectedItemId)) {
+            if (menu_item_equips_selected()) {
                 DAT_00ae9f1c = 1;
             } else {
                 DAT_00ae9f1c = 0;
@@ -5357,7 +5548,8 @@ static void itembox_draw_cursor(void)
 // y = ((slot&~1)<<4) + 0x50 (verified against the disassembly).
 static void itembox_draw_slot_icon(int imgType, int slot)
 {
-    LoadImage((int)g_TimImageBuffer__bitmap + imgType * 0x4b0, 0xc, slot + 0xf, 1,
+    const unsigned char* icon = zombie_mode_pickaxe_icon(imgType);
+    LoadImage(icon ? (int)icon : (int)g_TimImageBuffer__bitmap + imgType * 0x4b0, 0xc, slot + 0xf, 1,
               (short)((slot & 1) * 0x14), (short)(((slot & 0xfe) << 4) + 0x50),
               0x14, 0x1e, 1);
 }
@@ -5430,15 +5622,21 @@ static int menu_itembox_interaction(void)
                 play_sfx(3, 6, 0);
                 unsigned char slot = (DAT_00ae9f23 >> 1) - 4;
                 unsigned int playerIdx = (unsigned int)slot;
-                if ((unsigned int)g_EquippedItemId - playerIdx == 1) {
-                    g_EquippedItemId = 0;
-                }
                 unsigned int boxIdx = (unsigned int)DAT_00ae9f24;
                 unsigned char boxItem = g_itemboxSlots[boxIdx].Id;
                 unsigned char boxQty = g_itemboxSlots[boxIdx].qty;
+                if (!zombie_mode_box_claim(playerIdx, boxIdx, &boxItem, &boxQty)) {
+                    itembox_refresh_item();
+                    break;
+                }
+                if ((unsigned int)g_EquippedItemId - playerIdx == 1) {
+                    g_EquippedItemId = 0;
+                }
                 unsigned char* playerSlot = (unsigned char*)g_ItemSlotsPointer + playerIdx * 2;
-                g_itemboxSlots[boxIdx].Id = playerSlot[0];
-                g_itemboxSlots[boxIdx].qty = playerSlot[1];
+                if (!zombie_mode_box_shared()) {
+                    g_itemboxSlots[boxIdx].Id = playerSlot[0];
+                    g_itemboxSlots[boxIdx].qty = playerSlot[1];
+                }
                 playerSlot[0] = boxItem;
                 playerSlot[1] = boxQty;
                 if (g_TotalHeldItems <= slot) {
@@ -5451,11 +5649,19 @@ static int menu_itembox_interaction(void)
                     g_ItemSlotIndices[playerIdx] = freeIdx;
                     g_ItemSlotsBitmask |= 1u << (freeIdx & 0x1f);
                 }
+                unsigned char imageSlot = g_ItemSlotIndices[playerIdx];
+                // Finish inventory bookkeeping before image loading can yield
+                // and send another reconnect checkpoint.
+                bool sharedBox = zombie_mode_box_shared();
+                if (sharedBox) {
+                    rearrange_item_slots();
+                    zombie_mode_box_finished();
+                }
                 if ((boxItem != 0) && (boxItem < 0x6f)) {
                     LoadItemImage((int)g_ItemImageLookupTable[(unsigned int)boxItem * 4] - 1,
-                                  (int)g_ItemSlotIndices[playerIdx], (int)g_TimImageBuffer__bitmap);
+                                  (int)imageSlot, (int)g_TimImageBuffer__bitmap);
                 }
-                rearrange_item_slots();
+                if (!sharedBox) rearrange_item_slots();
                 itembox_refresh_item();
                 unsigned char newBoxItem = g_itemboxSlots[DAT_00ae9f24].Id;
                 if ((newBoxItem != 0) && (newBoxItem < 0x6f)) {
@@ -6406,6 +6612,11 @@ static void (*const g_viewerActions[4])(void) = {
 // Returns non-zero when the viewer finishes and the menu should continue.
 int FUN_0044e1b0(void)
 {
+    // Zombie-mode viewers - pickups and the inventory's CHECK alike - use
+    // four original animation steps per frame. Keep the timer in original
+    // units so the light and sprite fades follow (0x40 is a multiple of 4,
+    // so the spin still lands on the resting pose).
+    const int pickupAnimStep = zombie_mode_armed() ? 4 : 1;
     int iVar1;
     unsigned int uVar7;
     unsigned char bVar4;
@@ -6471,10 +6682,10 @@ int FUN_0044e1b0(void)
         // 0x40 frames x 0xc0 of yaw = 0x3000 = three full turns, and 0x40 x
         // 0x80 of roll = 0x2000 = two full turns, so both angles land back on
         // 0 and the model comes to rest in its identity pose.
-        DAT_00aea04c = DAT_00aea04c + 0x322;
-        DAT_00ae9f66 = DAT_00ae9f66 + 0xc0;
-        DAT_00ae9f68 = DAT_00ae9f68 + 0x80;
-        g_bItemViewerZoomTimer = g_bItemViewerZoomTimer - 1;
+        DAT_00aea04c = DAT_00aea04c + 0x322 * pickupAnimStep;
+        DAT_00ae9f66 = DAT_00ae9f66 + 0xc0 * pickupAnimStep;
+        DAT_00ae9f68 = DAT_00ae9f68 + 0x80 * pickupAnimStep;
+        g_bItemViewerZoomTimer = g_bItemViewerZoomTimer - pickupAnimStep;
         if (g_bItemViewerZoomTimer != 0) goto viewer_draw;
         switch (DAT_00ae9f10) {
         case 0:
@@ -6487,7 +6698,9 @@ int FUN_0044e1b0(void)
             if (g_TotalHeldItems < g_totalInventorySlots) {
                 uVar7 = 0xc0;
             } else {
-                if (((ITEM_EXPLOSIVE_ROUNDS < g_bItemMenuSelectedItemId) && (g_bItemMenuSelectedItemId < ITEM_EMPTY_BOTTLE)) || (g_bItemMenuSelectedItemId == ITEM_INK_RIBBONS)) {
+                // 0x0044e477: ids 0x0b-0x12 (every ammo, the clips too) and 0x2f.
+                bool fitsStack = false;
+                if (((ITEM_ROCKET_LAUNCHER < g_bItemMenuSelectedItemId) && (g_bItemMenuSelectedItemId < ITEM_EMPTY_BOTTLE)) || (g_bItemMenuSelectedItemId == ITEM_INK_RIBBONS)) {
                     // Same doubling the pickup itself will apply, so the
                     // "you got it" / "no room" choice matches what lands in the
                     // inventory (PS1 FUN_8002e1a4 repeats IncludeCurrentItem's
@@ -6495,6 +6708,11 @@ int FUN_0044e1b0(void)
                     unsigned char pickupQty = dc_item_pickup_quantity(
                         g_bItemMenuSelectedItemId,
                         *(unsigned char*)(*(int*)((int)g_pRoomActionEntry + 8) + 9));
+                    pickupQty = zombie_mode_pickup_quantity(g_bItemMenuSelectedItemId, pickupQty,
+                        *(const unsigned char* const*)((int)g_pRoomActionEntry + 8));
+                    // The pickup always gives 3 ink ribbons (room_event_item_pickup);
+                    // the original checks the record's count.
+                    if (g_bItemMenuSelectedItemId == ITEM_INK_RIBBONS && zombie_mode_armed()) pickupQty = 3;
                     bVar5 = 0;
                     bVar4 = g_totalInventorySlots;
                     do {
@@ -6503,6 +6721,7 @@ int FUN_0044e1b0(void)
                             ((unsigned short)((unsigned short)pbVar2[1] +
                              (unsigned short)pickupQty) < 251)) {
                             set_message_display(0xc0, 0);
+                            fitsStack = true;
                             break;
                         }
                         bVar4 = bVar4 - 1;
@@ -6510,6 +6729,10 @@ int FUN_0044e1b0(void)
                     } while (bVar4 != 0);
                 }
                 uVar7 = 0xc2;
+                // Port-added mod: the original shows 0xc0 for ammo that fits a
+                // stack and then overwrites it with 0xc2 here, so a full
+                // inventory never takes it. The zombie mode lets it stack.
+                if (fitsStack && zombie_mode_armed()) uVar7 = 0xc0;
             }
             break;
         case 4:
@@ -6568,13 +6791,13 @@ viewer_state3:
 
     case 5:
         // Exit animation (0x0044e397-0x0044e3ba): mirrors the intro
-        g_bItemViewerZoomTimer = g_bItemViewerZoomTimer - 1;
+        g_bItemViewerZoomTimer = g_bItemViewerZoomTimer - pickupAnimStep;
         if (g_bItemViewerZoomTimer == 0) {
             return 1;
         }
-        DAT_00aea04c = DAT_00aea04c - 0x322;
-        DAT_00ae9f66 = DAT_00ae9f66 - 0xc0;
-        DAT_00ae9f68 = DAT_00ae9f68 - 0x80;
+        DAT_00aea04c = DAT_00aea04c - 0x322 * pickupAnimStep;
+        DAT_00ae9f66 = DAT_00ae9f66 - 0xc0 * pickupAnimStep;
+        DAT_00ae9f68 = DAT_00ae9f68 - 0x80 * pickupAnimStep;
         g_spriteAnimB = g_bItemViewerZoomTimer >> 1;
         // 0x0044e3d0: exit colour fades out as (g_bItemViewerZoomTimer << 2) - 1
         viewer_setup_lights((g_bItemViewerZoomTimer << 2) - 1);

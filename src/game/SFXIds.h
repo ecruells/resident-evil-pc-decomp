@@ -6,6 +6,12 @@
 
 #define SFX_BANKS       1
 
+// Shared inventory/menu sounds in the character sound bank.
+#define SFX_UI_BANK     3
+#define SFX_UI_CURSOR   4
+#define SFX_UI_CANCEL   5
+#define SFX_UI_DECIDE   6
+
 // ============================================================================
 // Sound Bank IDs (passed to LoadSoundBank or used as bank display index)
 // ============================================================================

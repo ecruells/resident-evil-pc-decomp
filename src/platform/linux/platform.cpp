@@ -20,6 +20,11 @@
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <fcntl.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
+#include <sys/socket.h>
 
 #include <string>
 #include <unordered_map>
@@ -33,9 +38,12 @@
 static SDL_Scancode VkToScancode(int vk)
 {
     if (vk >= 'A' && vk <= 'Z')  return (SDL_Scancode)(SDL_SCANCODE_A + (vk - 'A'));
-    if (vk >= '0' && vk <= '9')  return (SDL_Scancode)(SDL_SCANCODE_1 + (vk - '0'));
+    // SDL orders the digit row 1..9, 0 (as the keys lie); '0' is the last.
+    if (vk == '0')               return SDL_SCANCODE_0;
+    if (vk >= '1' && vk <= '9')  return (SDL_Scancode)(SDL_SCANCODE_1 + (vk - '1'));
 
     switch (vk) {
+    case VK_TAB:      return SDL_SCANCODE_TAB;
     case VK_SHIFT:    return SDL_SCANCODE_LSHIFT;
     case VK_CONTROL:  return SDL_SCANCODE_LCTRL;
     case VK_RETURN:   return SDL_SCANCODE_RETURN;
@@ -244,6 +252,28 @@ void* plat_file_read_all(const char* path, size_t* outSize)
     return buffer;
 }
 
+BOOL plat_file_write_atomic(const char* path, const void* data, size_t size)
+{
+    char temporary[1024];
+    int n = snprintf(temporary, sizeof(temporary), "%s.tmp.XXXXXX", path);
+    if (n < 0 || n >= (int)sizeof(temporary)) return FALSE;
+    int fd = mkstemp(temporary);
+    if (fd < 0) return FALSE;
+    size_t written = 0;
+    bool ok = true;
+    while (written < size) {
+        ssize_t count = write(fd, (const char*)data + written, size - written);
+        if (count < 0 && errno == EINTR) continue;
+        if (count <= 0) { ok = false; break; }
+        written += (size_t)count;
+    }
+    if (ok && fsync(fd) != 0) ok = false;
+    if (close(fd) != 0) ok = false;
+    if (ok && rename(temporary, path) == 0) return TRUE;
+    unlink(temporary);
+    return FALSE;
+}
+
 size_t plat_readable_bytes(const void* p)
 {
     // Walk /proc/self/maps for the mapping that contains p and report how much
@@ -359,4 +389,81 @@ void plat_window_destroy(HWND window)
 void plat_cursor_show(BOOL show)
 {
     SDL_ShowCursor(show ? SDL_ENABLE : SDL_DISABLE);
+}
+
+// ---------------------------------------------------------------------------
+// Networking - one non-blocking UDP socket (BSD sockets)
+// ---------------------------------------------------------------------------
+
+static int s_netSocket = -1;
+
+BOOL plat_net_open(unsigned short port)
+{
+    plat_net_close();
+    int fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (fd < 0) return FALSE;
+    int yes = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &yes, sizeof(yes));
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    if (bind(fd, (struct sockaddr*)&addr, sizeof(addr)) != 0) {
+        close(fd);
+        return FALSE;
+    }
+    fcntl(fd, F_SETFL, fcntl(fd, F_GETFL, 0) | O_NONBLOCK);
+    s_netSocket = fd;
+    return TRUE;
+}
+
+void plat_net_close(void)
+{
+    if (s_netSocket >= 0) {
+        close(s_netSocket);
+        s_netSocket = -1;
+    }
+}
+
+BOOL plat_net_resolve(const char* host, unsigned short port, PlatNetAddr* out)
+{
+    struct addrinfo hints;
+    struct addrinfo* res = NULL;
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(host, NULL, &hints, &res) != 0 || res == NULL) return FALSE;
+    out->ip = ntohl(((struct sockaddr_in*)res->ai_addr)->sin_addr.s_addr);
+    out->port = port;
+    freeaddrinfo(res);
+    return TRUE;
+}
+
+BOOL plat_net_send(const PlatNetAddr* to, const void* data, int length)
+{
+    if (s_netSocket < 0) return FALSE;
+    struct sockaddr_in addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(to->ip);
+    addr.sin_port = htons(to->port);
+    return sendto(s_netSocket, data, (size_t)length, 0,
+                  (struct sockaddr*)&addr, sizeof(addr)) == length;
+}
+
+int plat_net_recv(void* buffer, int capacity, PlatNetAddr* from)
+{
+    if (s_netSocket < 0) return -1;
+    struct sockaddr_in addr;
+    socklen_t len = sizeof(addr);
+    ssize_t n = recvfrom(s_netSocket, buffer, (size_t)capacity, 0, (struct sockaddr*)&addr, &len);
+    if (n < 0) {
+        return (errno == EAGAIN || errno == EWOULDBLOCK) ? 0 : -1;
+    }
+    if (from != NULL) {
+        from->ip = ntohl(addr.sin_addr.s_addr);
+        from->port = ntohs(addr.sin_port);
+    }
+    return (int)n;
 }

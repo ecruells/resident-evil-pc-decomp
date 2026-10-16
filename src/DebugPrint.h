@@ -27,7 +27,16 @@ static inline FILE* dbg_log_file(void)
         logToFile = plat_env_get("RE1_DEBUGLOG", v, 4) ? 1 : 0;
     }
     if (!logToFile) return NULL;
-    static FILE* f = fopen("re1_debug.log", "a");
+    static FILE* f = NULL;
+    if (!f) {
+        char dir[1024] = {0};
+        char path[1100] = {0};
+        if (plat_exe_dir(dir, sizeof(dir))) {
+            snprintf(path, sizeof(path), "%s/re1_debug.log", dir);
+            f = fopen(path, "a");
+        }
+        if (!f) f = fopen("re1_debug.log", "a");
+    }
     return f;
 }
 
@@ -39,7 +48,6 @@ static inline void dbg_safe_str(const char* s)
 {
     if (plat_is_debugger_present()) {
         plat_debug_output(s);
-        return;
     }
     FILE* f = dbg_log_file();
     if (f && s && *s) {
@@ -59,7 +67,6 @@ static inline void dbg_printf(const char* fmt, ...)
 
     if (plat_is_debugger_present()) {
         plat_debug_output(buf);
-        return;
     }
 
     FILE* f = dbg_log_file();

@@ -4,10 +4,12 @@
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
+#include "mods/ZombieMode.h"
 #include "dc/ItemDescriptions.h"
 #include "dc/EntityModels.h"    // the arrange wardrobe's two outfit flags
 #include "../system/AssetPath.h"
 #include <cstdio>
+#include <cstring>
 
 // Forward declarations for helpers defined in other files
 extern void SetupCharacterData(void);
@@ -60,7 +62,13 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
 {
     short screenY;
 
-    if ((g_menu_choice_id & 0x80) != 0) {
+    // Port-added mod: in the zombie mode a message that does not stop the game
+    // gives way to a different one, and is not restarted by a walk-in zone
+    // the moment it ends (mods/ZombieMessages.cpp).
+    if (zombie_mode_message_repeat(msg_id, pause_game)) {
+        return 1;
+    }
+    if ((g_menu_choice_id & 0x80) != 0 && !zombie_mode_message_replace(msg_id)) {
         return 1;
     }
 
@@ -90,6 +98,20 @@ unsigned int set_message_display(unsigned short msg_id, unsigned short pause_gam
         } else {
             g_MessagePtr = global_messages[msg_id & 0x3F];
         }
+    }
+
+    // Port-added mod: the zombie mode's own text (mods/ZombieMessages.cpp).
+    if (const unsigned char* custom = zombie_mode_message_custom()) {
+        g_MessagePtr = (unsigned char*)custom;
+    }
+
+    // Port-added mod: the zombie mode keeps the room running under a message -
+    // nothing paused when it asks nothing, only the survivor's control when it
+    // asks Yes/No (mods/ZombieMessages.cpp).
+    unsigned short modPause = zombie_mode_message_pause(msg_id, pause_game, g_MessagePtr);
+    if (modPause != pause_game) {
+        g_PauseGameInMsgFlag = modPause;
+        g_message_flags = g_messageFlagsBackup & ~modPause;
     }
 
     g_MessageStateCounter = 0;
@@ -206,7 +228,8 @@ unsigned int set_item_description_message(unsigned short descIndex, unsigned sho
     g_MessageStateCounter = 0;
     g_MessageSpeedUpFlag = 0x80;
     g_lastScanCodeOrMsgID = (DWORD)descIndex;
-    g_MessagePtr = descriptions[descIndex];
+    unsigned char* modDescription = zombie_mode_pickaxe_description(descIndex);
+    g_MessagePtr = modDescription ? modDescription : descriptions[descIndex];
     g_MessageScreenY = 0xba - (short)g_ScreenOffsetY;
 
     return 0;
@@ -232,6 +255,10 @@ void display_game_loading_message(void)
         set_message_display(0x5c, 0);
         Task_exit();
     }
+    // Port-added mod: a human director plays at once, no narration.
+    if (zombie_mode_narration_skip()) Task_exit();
+    zombie_mode_narration_wait();    // port-added mod: the match's roster settles first
+    zombie_mode_narration_sound();   // port-added mod: the helicopter under the narration
     set_message_display(0x5b, 0);
     Task_exit();
 }
@@ -278,7 +305,12 @@ void room_action_table_reset(void) {
     do {
         *p = 0;
         p += 12;
-    } while (p < g_RoomActionTable + 288);
+    } while (p < g_RoomActionTable + ROOM_ACTION_ENTRIES_ORIGINAL * 12);
+    // Port-added: the widened entries (Globals.h) are cleared outright - none
+    // of the original's rooms reach them, and a stale zone pointer there would
+    // point into the previous room's data.
+    memset(g_RoomActionTable + ROOM_ACTION_ENTRIES_ORIGINAL * 12, 0,
+           (ROOM_ACTION_ENTRIES - ROOM_ACTION_ENTRIES_ORIGINAL) * 12);
     g_RoomActionTail = g_RoomActionTable;
 }
 
@@ -338,6 +370,9 @@ void room_set(void)
     g_AttractModeIdleTimer = 1;
 
     printf("room_set start\n");
+
+    // Port-added mod: last room's possessed zombie is gone with its room.
+    zombie_mode_room_reset();
 
     // Delete secondary texture sets 0x17-0x1d
     delete_texture_set_secondary(0x1d);
@@ -585,7 +620,13 @@ void room_set(void)
     printf("after of model\n");
 
     // 0x00477c0f: run_command_functions(g_RoomInitScd)
+    zombie_mode_room_prepare();
     run_command_functions((unsigned short*)g_RoomInitScd);
+
+    // Port-added mod: the possessed zombie joins the room's enemies here, after
+    // the script has placed its own and before the model loading loop below,
+    // which then loads its EMD like any scripted enemy's. No-op unless armed.
+    zombie_mode_room_spawn();
 
     // 0x00477c21: g_message_flags |= 0x80
     g_message_flags |= 0x80;
@@ -616,8 +657,23 @@ void room_set(void)
     pPrevEntity = NULL;
     if (g_enemy_count != 0) {
         do {
+            // Port-added mod (mods/ZombieMode.h): another survivor's stand-in
+            // wears that player's own model (or is dropped when the room has
+            // no texture banks or memory left for it).
+            int standIn = ((ENTITY->status_flags & 1) != 0) ? zombie_mode_standin_model(ENTITY) : -1;
+            if (standIn == -2) {
+                ENTITY->status_flags = 0;
+                g_enemy_count--;
+                ENTITY++;
+                continue;
+            }
             if ((ENTITY->status_flags & 1) != 0) {
-                if (g_LastEnemyModelId == ENTITY->id) {
+                if (standIn >= 0) {
+                    g_LastEnemyModelId = 0xff;      // never shared with another entity
+                    bool ext = zombie_mode_model_load_begin(ENTITY);
+                    LoadEntityEMD(ENTITY, (unsigned char)standIn);
+                    if (ext) zombie_mode_model_load_end();
+                } else if (g_LastEnemyModelId == ENTITY->id) {
                     // 0x00477bf7: Reuse previous enemy model data
                     ENTITY->animHeader = pPrevEntity->animHeader;
                     ENTITY->animBase = pPrevEntity->animBase;
@@ -625,7 +681,11 @@ void room_set(void)
                 } else {
                     // 0x00477bdc: Load new enemy model
                     g_LastEnemyModelId = ENTITY->id;
+                    // Port-added mod: the mod's own entities load their
+                    // textures on its own page counter (mods/ZombieMode.h).
+                    bool ext = zombie_mode_model_load_begin(ENTITY);
                     LoadEntityEMD(ENTITY, ENTITY->id + 4);
+                    if (ext) zombie_mode_model_load_end();
                 }
                 Entity_SetJoints(ENTITY, 0x7c);
                 InitAnimStructure((void*)ENTITY->modelLoadBuffer);
@@ -639,6 +699,9 @@ void room_set(void)
             ENTITY++;
         } while (i < (unsigned int)g_enemy_count);
     }
+
+    // Port-added mod: a borrowed character's weapon texture (mods/ZombieMode.h).
+    zombie_mode_room_models_loaded();
 
     // 0x00477c89: Setup texture bank data
     SetupTextureBankData((short)g_TextureCurrentPage);
@@ -715,7 +778,18 @@ void LoadRoomRdt(void)
     // 0x80043fb4, whose LoadRoomRdt calls it for exactly this). The identity
     // otherwise, so OG and the other two difficulties build the path they
     // always did.
-    const unsigned char fileStage = room_file_stage();
+    unsigned char fileStage = room_file_stage();
+    // The return mansion removes the crest interactions and draws all four
+    // crests permanently. Zombie mode needs the first visit's complete puzzle
+    // (models, messages and event scripts), while retaining its return-stage
+    // identity for doors, networking and the randomized pickups. The shotgun
+    // rooms likewise need the original mounting plate and ceiling/door models;
+    // the mod replaces their single-player rescue/fatal events.
+    if (zombie_mode_armed() && g_stageId == STAGE_MANSION_RETURN_1F &&
+        (g_roomId == ROOM_ROOFED_PASSAGE || g_roomId == ROOM_TRAP_ROOM ||
+         g_roomId == ROOM_LIVING_ROOM)) {
+        fileStage = STAGE_MANSION_1F;
+    }
 
     // The variant digit. The PC release ships a `...1` file for every room, so
     // this build could always append the character bit and find something; the

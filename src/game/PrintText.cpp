@@ -160,6 +160,11 @@ void PrintText8x8(short x, short y, unsigned char color, char shadow)
 // ============================================================================
 void PrintText8x14(short x, short y, unsigned char color, char flags)
 {
+    PrintText8x14Scaled(x, y, color, flags, 1.0f);
+}
+
+void PrintText8x14Scaled(short x, short y, unsigned char color, char flags, float textScale)
+{
     CMarniDirect3D* pD3D = (CMarniDirect3D*)g_pMarniDirect3D;
     if (pD3D == NULL) return;
 
@@ -202,10 +207,11 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
     unk_00be1180 = 0;
 
     for (int i = 0; PRINT_TEXT_BUFFER[i] != '\0'; i++) {
+        // Round from the origin so fractional advances do not accumulate error.
+        g_TextureDesc.screenX = x - g_ScreenOffsetX + (int)(i * glyphW * textScale + 0.5f);
         unsigned char ch = (unsigned char)PRINT_TEXT_BUFFER[i];
 
         if (ch == ' ') {
-            g_TextureDesc.screenX += glyphW;
             continue;
         }
 
@@ -228,9 +234,8 @@ void PrintText8x14(short x, short y, unsigned char color, char flags)
             finalBrightness = 0;
         }
 
-        AddTintSprite(&g_TextureDesc, finalBrightness);
+        AddTintSpriteScaled(&g_TextureDesc, finalBrightness, textScale);
 
-        g_TextureDesc.screenX += glyphW;
     }
 }
 

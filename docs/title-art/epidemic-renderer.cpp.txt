@@ -1,0 +1,100 @@
+// PvP EPIDEMIC wordmark: a dedicated procedural 4-bit TIM renderer.
+// The silhouette is hand-lettered; a seeded cellular field shades its tissue.
+// Generated once per title entry, then submitted as one sprite per frame.
+static void title_build_epidemic(void)
+{
+    // Individual brush paths, not a font grid. Coordinates describe just
+    // this image; each letter has its own lean, height and baseline.
+    struct Stroke { unsigned char letter; float x0, y0, x1, y1; };
+    static const Stroke strokes[] = {
+        {0,2,0,0,18},{0,2,0,15,1},{0,1,9,12,8},{0,0,18,14,17},
+        {1,2,19,2,0},{1,2,0,13,0},{1,13,0,15,4},{1,15,4,13,8},{1,13,8,2,8},
+        {2,2,1,13,0},{2,8,0,5,18},{2,0,18,11,19},
+        {3,1,18,3,0},{3,3,0,12,2},{3,12,2,17,7},{3,17,7,15,14},{3,15,14,9,18},{3,9,18,1,18},
+        {4,3,1,0,19},{4,3,1,15,0},{4,2,9,12,10},{4,0,19,15,17},
+        {5,0,18,2,0},{5,2,0,9,10},{5,9,10,16,1},{5,16,1,18,18},
+        {6,1,0,13,1},{6,8,1,5,18},{6,0,19,12,17},
+        {7,16,2,9,0},{7,9,0,2,4},{7,2,4,0,12},{7,0,12,5,18},{7,5,18,15,16}
+    };
+    const int width = 192, height = 32;
+    static unsigned char mask[width * height];
+    memset(mask, 0, sizeof(mask));
+    unsigned int rng = 0xE91DE11Cu;
+    auto random = [&rng]() { rng = rng * 1664525u + 1013904223u; return rng >> 16; };
+    auto dab = [&](float cx, float cy, float radius) {
+        for (int y = (int)(cy - radius - 1); y <= (int)(cy + radius + 1); ++y)
+            for (int x = (int)(cx - radius - 1); x <= (int)(cx + radius + 1); ++x) {
+                float dx = x - cx, dy = y - cy;
+                if (x > 0 && x < width - 1 && y > 0 && y < height - 1 &&
+                    dx * dx + dy * dy < radius * radius) mask[y * width + x] = 1;
+            }
+    };
+    static const float baseline[8] = {4,2,5,3,4,1,4,2};
+    static const float stretch[8] = {0.82f,0.91f,0.74f,0.86f,0.78f,0.96f,0.83f,0.88f};
+    for (const Stroke& stroke : strokes) {
+        int g = stroke.letter;
+        for (int t = 0; t <= 32; ++t) {
+            float u = t / 32.0f;
+            float y = stroke.y0 + (stroke.y1 - stroke.y0) * u;
+            float x = stroke.x0 + (stroke.x1 - stroke.x0) * u;
+            float wobble = ((int)(random() % 101) - 50) / 140.0f;
+            dab(8 + g * 22 + x + y * (g % 2 ? -0.10f : 0.13f),
+                baseline[g] + y * stretch[g] + wobble,
+                1.35f + (random() % 100) / 120.0f);
+        }
+    }
+    struct Cell { int x, y; };
+    Cell cells[160];
+    for (int i = 0; i < 160; ++i) {
+        cells[i].x = (i % 32) * 6 + random() % 5;
+        cells[i].y = (i / 32) * 7 + random() % 6;
+    }
+    alignas(4) unsigned char tim[64 + width * height / 2] = {};
+    unsigned int* header = (unsigned int*)tim;
+    header[0] = 0x10; header[1] = 8; header[2] = 44;
+    unsigned short* clut = (unsigned short*)(tim + 12);
+    clut[0] = 0; clut[1] = 0x1E0; clut[2] = 16; clut[3] = 1;
+    unsigned short* palette = (unsigned short*)(tim + 20);
+    for (int i = 1; i < 16; ++i) {
+        int r = 4 + i * 27 / 15;
+        int g = i > 12 ? (i - 12) : 0;
+        int b = i > 12 ? (i - 12) : 0;
+        palette[i] = (unsigned short)(r | g << 5 | b << 10);
+    }
+    *(unsigned int*)(tim + 52) = 12 + width * height / 2;
+    unsigned short* image = (unsigned short*)(tim + 56);
+    image[2] = width / 4; image[3] = height;
+    for (int y = 1; y < height - 1; ++y) for (int x = 1; x < width - 1; ++x) {
+        int shade = 0;
+        if (mask[y * width + x]) {
+            int first = 100000, second = 100000;
+            for (int i = 0; i < 160; ++i) {
+                int dx = x - cells[i].x, dy = y - cells[i].y;
+                int distance = dx * dx + dy * dy;
+                if (distance < first) { second = first; first = distance; }
+                else if (distance < second) second = distance;
+            }
+            // Dark nuclei, crimson membranes, wet scarlet interiors.
+            shade = first <= 1 ? 2 : second - first < 5 ? 5 : 9 + (x * 3 + y) % 4;
+            if (!mask[y * width + x - 1] && !mask[(y - 1) * width + x]) shade = 14;
+            if (!mask[y * width + x + 1] || !mask[(y + 1) * width + x]) shade = 4;
+        } else if (mask[y * width + x - 1] || mask[(y - 1) * width + x]) shade = 1;
+        tim[64 + y * (width / 2) + x / 2] |= (unsigned char)(shade << ((x & 1) * 4));
+    }
+    LoadTexturePage(tim, 11, 0, 15, 0, 0, 0, 0);
+}
+
+static void title_draw_epidemic(unsigned char brightness)
+{
+    TextureDesc word = {};
+    word.flags = brightness == 128 ? 0x10000000 : 0x40000000;
+    word.texturePage = 11;
+    word.clutY = 0x1E0;
+    // Centered screen coordinates: right of the original logo's center,
+    // below its lower edge, clear of PRESS START and the menu.
+    word.screenX = -40; word.screenY = 37;
+    word.width = 192; word.height = 32;
+    word.colorMulR = word.colorMulG = word.colorMulB = brightness;
+    display_texture(&word, 2, 15, 1);
+}
+

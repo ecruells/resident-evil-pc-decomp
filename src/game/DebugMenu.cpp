@@ -142,6 +142,16 @@ static const DebugStageRooms s_dbgStageRooms[DBG_STAGE_COUNT] = {
     { s_dbgRoomsMansion2F, 29 },    // stage 6 - mansion return 2F
 };
 
+// Port-added: a room's name for other UI (the zombie mod's survivor tracker),
+// or NULL for an id past the table.
+const char* DebugRoom_Name(unsigned char stage, unsigned char room)
+{
+    if (stage >= DBG_STAGE_COUNT || room >= s_dbgStageRooms[stage].count) {
+        return NULL;
+    }
+    return s_dbgStageRooms[stage].names[room];
+}
+
 // Highest stage the room-change menu will scroll to.
 static int DebugStageMax(void)
 {
@@ -502,9 +512,14 @@ static int DebugRoom_SpotBlocked(int px, int pz)
 {
     static const int r = 160;   // approx player body radius (Sca_info+10)
 
-    VECTOR origin;              // zero base: offset is the absolute point
+    // The query is (absolute position, SVECTOR offset), as the original's own
+    // callers pass it (CharacterNpc / EntityCommon: g_playerPosScratch +
+    // g_svecScratch). Passing a zero VECTOR position and the point as the
+    // offset made boundary_classify_flags read the point through an SVECTOR:
+    // its Z came out of the VECTOR's Y (0), so every probe tested z = 0.
     VECTOR point;
-    origin.x = 0; origin.y = 0; origin.z = 0; origin.pad = 0;
+    SVECTOR offset;
+    offset.x = 0; offset.y = 0; offset.z = 0; offset.pad = 0;
 
     static const int off[5][2] = { {0,0}, {r,0}, {-r,0}, {0,r}, {0,-r} };
     for (int i = 0; i < 5; i++) {
@@ -512,7 +527,7 @@ static int DebugRoom_SpotBlocked(int px, int pz)
         point.y = 0;
         point.z = pz + off[i][1];
         point.pad = 0;
-        if (room_collision_check_0047da50(&origin, &point) == 1) {
+        if (room_collision_check_0047da50(&point, (VECTOR*)&offset) == 1) {
             return 1;
         }
     }

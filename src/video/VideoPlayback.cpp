@@ -11,6 +11,7 @@
 #include "../platform/platform.h"
 #include "../system/AssetPath.h"
 #include "../marni/MarniSystem.h"
+#include "../game/mods/ZombieBumpers.h"
 #include <stdio.h>
 
 // ============================================================================
@@ -169,6 +170,10 @@ static BOOL  s_overlayCallbackRegistered = FALSE;
 
 static BOOL Ps1VideoOverlayCallback(DWORD32 frameTexture, int frameMs)
 {
+    // Port-added mod: the zombie mode's own movie (Wesker's ending) draws itself.
+    if (zombie_mode_fmv_frame((MarniHandle)frameTexture, frameMs)) {
+        return TRUE;
+    }
     // Whoever claims the frame draws the movie too, so the chain is ordered:
     // the credits overlay owns the whole picture when it is running.
     if (Ps1EndingCredits_RenderFrame((MarniHandle)frameTexture, frameMs)) {
@@ -305,8 +310,15 @@ void UpdateVideoPlayback(void)
     switch (g_FMVPlaybackState) {
     case 0: // Initialize
         {
-            ClearScreen();
-            ClearScreen();
+            // Port-added mod: a zombie-mode movie names its own file (not an
+            // FMV table entry) and starts from the white it faded the room to.
+            BOOL modMovie = zombie_mode_fmv_path(g_videoFilePath, sizeof(g_videoFilePath));
+            if (modMovie) {
+                zombie_mode_fmv_clear();
+            } else {
+                ClearScreen();
+                ClearScreen();
+            }
 
             // Present current frame before video overlay
             if (g_pMarniDirect3D != NULL) {
@@ -322,7 +334,7 @@ void UpdateVideoPlayback(void)
                 videoFile = GetFmvTable()[g_CurrentFMVID].filename;
             }
 
-            if (videoFile != NULL && CheckVideoFileExists(videoFile)) {
+            if (modMovie || (videoFile != NULL && CheckVideoFileExists(videoFile))) {
                 PauseGameSoundsAsync();
 
                 plat_video_set_window_mode(TRUE);
@@ -387,7 +399,7 @@ void UpdateVideoPlayback(void)
             WORD currentInput = (WORD)PlayerPad_Update();
 
             // Check for skip input (per-FMV skip mask from g_FMVTable[i].isSkippable)
-            WORD skipMask = GetFmvSkipMask(g_CurrentFMVID);
+            WORD skipMask = zombie_mode_fmv_playing() ? 0 : GetFmvSkipMask(g_CurrentFMVID);
             if (((skipMask & ~g_videoSkipInput & currentInput) != 0) && (g_videoSkipCounter == 0)) {
                 // Skip requested - stop playback
                 plat_video_stop();
@@ -432,7 +444,12 @@ void UpdateVideoPlayback(void)
             plat_video_close();
             Ps1EndingCredits_End();
             Ps1FmvSubtitles_End();
-            ResumeGameSoundsAsync();
+            // Port-added mod: after Wesker's ending the game stays silent.
+            if (zombie_mode_fmv_playing()) {
+                zombie_mode_fmv_silence();
+            } else {
+                ResumeGameSoundsAsync();
+            }
 
             g_FMVPlaybackState = 0;
             g_bMCINotifyEnabled = FALSE;

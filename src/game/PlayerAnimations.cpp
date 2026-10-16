@@ -5,6 +5,12 @@
 #include <cstdlib>
 #include "../DebugPrint.h"
 #include "entities/EntityCommon.h"
+#include "mods/ZombieMode.h"
+
+// Port-added (zombie mod): the original's `g_playerEntity.id & 1` - which
+// half of each per-character table (Chris / Jill) - by the body the player
+// wears, which in the mode need not be the scenario's character.
+static inline int player_body(void) { return zombie_mode_player_body(); }
 #include "dc/Items.h"             // lockpick/ammo item ids the DC moved
 
 // ============================================================================
@@ -127,7 +133,7 @@ void player_anim_multi_attack(void) {
             g_playerEntity.isBeingAttackedFlag = 0;
         }
     }
-    if ((int)(unsigned int)g_playerEntity.animation_frame_id <= (int)((unsigned int)(g_playerEntity.id & 1) * -4 + 10)) {
+    if ((int)(unsigned int)g_playerEntity.animation_frame_id <= (int)((unsigned int)player_body() * -4 + 10)) {
         EntityUpdateWeaponJoint(0);
         return;
     }
@@ -1188,6 +1194,7 @@ void JointSetColorTint(int modelObjPtr, unsigned int packedColor)
 // ============================================================================
 void JointApplyColorTint(JointStruct* joint, int param2, int param3, void* data)
 {
+    zombie_mode_on_joint_tint(joint, (unsigned int)param2);
     joint->flags |= 0x80;
     g_playerDisplacement = *(int*)(joint->anim_slot_ptr + 0x14) * 2;
     JointSetColorTint((int)joint->anim_object, (unsigned int)param2);
@@ -1328,6 +1335,15 @@ unsigned char Effect_CreateBillboard(
     unsigned char type, unsigned char depthGroup, short yaw,
     void* spriteInfo, void* pos, char lightFactor)
 {
+    // Port-added mod: a billboard from a fight in a shared room goes to the
+    // other copy too (blood, muzzle flashes, sparks).
+    // Children of a replayed projectile remain visual-only too. A NULL
+    // parent already means world coordinates, so an identity marker preserves
+    // their placement while retaining their replay ancestry.
+    if (spriteInfo == NULL) {
+        spriteInfo = zombie_mode_effect_replay_parent();
+    }
+
     if (g_freeEffectSlots == 0) return type;
 
     bool needAnimLookup = true;
@@ -1456,9 +1472,14 @@ unsigned char Effect_CreateBillboard(
         unsigned int* dst = (unsigned int*)&eff->animId;
         for (int i = 0; i < 6; i++) dst[i] = src[i];
 
+        // Use the padding byte as a local rendering tag. The spawn parameter
+        // also travels with network effect replay, so every copy gets green FX.
+        bool slamCloud = zombie_mode_armed() && type == 9 &&
+                         (unsigned char)lightFactor == EFFECT_ZM_SLAM_CLOUD;
+        eff->pad_42 = slamCloud ? EFFECT_ZM_SLAM_CLOUD : 0;
         // Set light factor if provided
         if (lightFactor != 0) {
-            eff->lightFactor = lightFactor;
+            eff->lightFactor = slamCloud ? 36 : lightFactor;
         }
 
         // Decrement frame count, apply yaw, mark active
@@ -1472,7 +1493,11 @@ unsigned char Effect_CreateBillboard(
         }
 
         // If no more frames remain, return this slot
-        if (frameCount == 0) return slotIdx;
+        zombie_mode_effect_created(slotIdx);
+        if (frameCount == 0) {
+            zombie_mode_on_effect(type, depthGroup, yaw, spriteInfo, pos, lightFactor, slotIdx);
+            return slotIdx;
+        }
     }
 
     return 0xFF;
@@ -1611,6 +1636,10 @@ void Add_speedXZ(int angleOffset)
 {
     // Set speed vector from entity's base speed value
     g_svecScratch.x = ENTITY->move_speed_current;
+    // Port-added mod: Enrico is 10% quicker (mods/ZombiePerks.cpp).
+    if (ENTITY == (Entity*)&g_playerEntity) {
+        g_svecScratch.x = (short)zombie_mode_player_move_speed(g_svecScratch.x);
+    }
     g_svecScratch.y = 0;
     g_svecScratch.z = 0;
 
@@ -2235,7 +2264,7 @@ static void player_state_03(void)
     case 0:
         g_playerEntity.action_state = 1;
         g_playerEntity.animation_frame_id = 0;
-        g_playerEntity.move_speed_current = s_deathFallTable[(g_playerEntity.id & 1) * 2];
+        g_playerEntity.move_speed_current = s_deathFallTable[player_body() * 2];
         g_playerEntity.unk_bf = 0;
         g_playerEntity.attackAnim = 4;
         Play3DSnd(3, 3, 0, (int)&g_playerEntity.scaMatrixData.localMatrix.t);  // death scream
@@ -2252,7 +2281,7 @@ static void player_state_03(void)
         {
             char cVar1 = Joint_move(0, g_playerEntity.animHeader, g_playerEntity.animBase, 0x400);
             g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + cVar1);
-            Add_speedXZ(s_deathFallTable[(g_playerEntity.id & 1) * 2 + 1]);
+            Add_speedXZ(s_deathFallTable[player_body() * 2 + 1]);
         }
         break;
     case 2:
@@ -2525,6 +2554,15 @@ int check_action_object(void)
     g_playerPosScratch.x = g_svecScratch.x + g_playerEntity.scaMatrixData.localMatrix.t[0];
     g_playerPosScratch.z = g_svecScratch.z + g_playerEntity.scaMatrixData.localMatrix.t[2];
 
+    if (zombie_mode_armed() && g_stageId == STAGE_MANSION_RETURN_2F && g_roomId == ROOM_LESSON_ROOM) {
+        const unsigned short* hole = *(const unsigned short* const*)(&g_RoomActionTable[2 * 12 + 8]);
+        dbg_printf("[yawn hole] Action at (%d,%d), probe (%d,%d), handler %d flags %02X, in zone %d\n",
+                   g_playerEntity.scaMatrixData.localMatrix.t[0], g_playerEntity.scaMatrixData.localMatrix.t[2],
+                   g_playerPosScratch.x, g_playerPosScratch.z,
+                   (int)g_RoomActionTable[24], (unsigned)g_RoomActionTable[25],
+                   hole != NULL ? is_point_in_action_zone(&g_playerPosScratch, (unsigned short*)hole) : 0);
+    }
+
     unsigned char* entry = g_RoomActionTable;
     if ((unsigned char*)g_RoomActionTable - 1 < (unsigned char*)g_RoomActionTail) {
         char index = 0;
@@ -2535,12 +2573,15 @@ int check_action_object(void)
                     if ((flags & 0x40) == 0) {
                         if (is_point_in_action_zone((VECTOR*)&g_playerPosScratch,
                                                     *(unsigned short**)(entry + 8)) != 0) {
+                            // Port-added mod: no second run of a scene still playing.
+                            if (zombie_mode_action_busy(entry)) return 0;
                             g_fwdPosActionId = (unsigned char)(index + 1);
                             return ((int(*)(unsigned char*))room_check_actions[*entry])(entry);
                         }
                     } else {
                         if (is_point_in_action_zone((VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t,
                                                     *(unsigned short**)(entry + 8)) != 0) {
+                            if (zombie_mode_action_busy(entry)) return 0;   // port-added mod
                             g_entPosActionId = (unsigned char)(index + 1);
                             return ((int(*)(unsigned char*))room_check_actions[*entry])(entry);
                         }
@@ -2650,7 +2691,7 @@ static void player_ctrl_behavior_walk(void)
     }
 
     short prevCounter = (short)g_playerEntity.attackDirection;
-    unsigned int t = (unsigned int)(g_playerEntity.id & 1) * 4;
+    unsigned int t = (unsigned int)player_body() * 4;
 
     g_playerEntity.move_speed_current = 0x5d;
     if ((unsigned char)(frame - kWalkSpeedTable[t]) < 7) {
@@ -3317,6 +3358,27 @@ static void player_behavior_00_idle(void)
 }
 
 // ============================================================================
+// Advance only the idle motion while a multiplayer inventory is open. The
+// normal player update also reads input, moves and starts interactions.
+void player_menu_idle(void)
+{
+    if (g_playerEntity.health < 0 || g_playerEntity.isBeingAttackedFlag != 0 ||
+        g_playerEntity.animationId != 1) return;
+    if (g_playerEntity.animFrameId != 0 || g_playerEntity.action_behavior != 0) {
+        g_playerEntity.animFrameId = 0;
+        g_playerEntity.action_behavior = 0;
+        g_playerEntity.action_state = 0;
+    }
+    Entity* saved = ENTITY;
+    WORD messages = g_message_flags;
+    ENTITY = (Entity*)&g_playerEntity;
+    // The inventory clears this permission; allow the idle's breathing loop.
+    g_message_flags |= 0x0100;
+    player_behavior_00_idle();
+    g_message_flags = messages;
+    ENTITY = saved;
+}
+
 // player_ctrl_frame0 (0x00495320) — animFrameId 0
 // Read input, then run the handler for the resulting action_behavior via the
 // full frame-2 dispatch table (player_ctrl_frame2, 0x00495330). This matters:
@@ -3920,7 +3982,7 @@ extern void entity_rotate_toward_target(VECTOR* pos, unsigned short angleStep);/
 static unsigned int weapon_special_frame_update(int step, int mode)
 {
     unsigned int uVar3 = (unsigned int)(step + 1) & 3;
-    int iVar1 = ((unsigned int)(g_playerEntity.id & 1) * 3 + (g_playerEntity.attackAnim - 1 & 3)) * 4;
+    int iVar1 = ((unsigned int)player_body() * 3 + (g_playerEntity.attackAnim - 1 & 3)) * 4;
     unsigned int frame = (unsigned int)g_playerEntity.animation_frame_id;
 
     if (frame < g_weaponSpecialFrameWindows[step + iVar1]
@@ -3958,7 +4020,7 @@ static void auto_aim_pitch_update(void)
     unsigned char bVar2 = g_playerEntity.flags & 0x1f;
     g_playerEntity.flags = (g_playerEntity.flags & 0x1f) | 0x40;
     if (g_playerEntity.equippedWeaponId != 10) {
-        int t = (g_playerEntity.id & 1) * 6;
+        int t = player_body() * 6;
         short low  = g_aimHeightTable[t + 0] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
         short high = g_aimHeightTable[t + 1] + (short)g_playerEntity.scaMatrixData.localMatrix.t[1];
         if (g_playerEntity.equippedWeaponId < 6 && g_playerEntity.equippedWeaponId != 3) {
@@ -3997,6 +4059,9 @@ unsigned char weapon_autoaim_check(void)
 
     if (itemId == ITEM_KNIFE) return 0; // knife has no ammo
     if (itemId == ITEM_FLAMETHROWER) return qty; // flamethrower can have 255 ammo
+    // Port-added mod: the mode's Ingram has its rounds (up to 150, all 8
+    // bits) and runs dry - no top-up below.
+    if (zombie_mode_ingram_finite(itemId)) return qty;
     if ((qty & 0x7f) != 0) return qty & 0x7f; // limit ammo to 127
 
     if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_INF_R_LAUNCHER) != 0 && itemId == 10) {
@@ -4022,6 +4087,21 @@ unsigned char weapon_autoaim_check(void)
 static char weapon_fire_check(void)
 {
     return (char)(get_item_slot(weapon_ammo_item_id(g_playerEntity.equippedWeaponId)) + 1);
+}
+
+// Port-added mod: can the survivor's reload button reload the equipped gun
+// now? Only the guns with a reload motion (b18 is gated on id < 6 - the
+// handgun, the shotgun and the Pythons), short of a full load, with their
+// ammo in the inventory. The DC's endless Python never needs one.
+static bool weapon_manual_reload_ready(void)
+{
+    unsigned char weaponId = g_playerEntity.equippedWeaponId;
+    if (g_EquippedItemId == 0 || weaponId < ITEM_BERETTA || weaponId >= 6) return false;
+    unsigned char* slot = (unsigned char*)g_ItemSlotsPointer + (g_EquippedItemId - 1) * 2;
+    if (dc_is_infinite_colt_python(slot[0])) return false;
+    unsigned char maxQty = g_ItemMaxQty[(unsigned int)weapon_ammo_item_id(weaponId) * 4];
+    if ((slot[1] & 0x7f) >= maxQty) return false;
+    return weapon_fire_check() != 0;
 }
 
 // ============================================================================
@@ -4125,8 +4205,11 @@ static unsigned int player_find_aim_target(void)
                 ent = g_EnemiesList;
             }
         }
+        // Port-added mod: a monster the zombie mode keeps hidden on this copy
+        // (the director's body while the director is elsewhere) is no target.
         if (ent->has_enter_switch_zone != 0 && -1 < ent->health
-            && (ent->behavior_flags & 0xc0) == 0 && ent->id < 0x13) {
+            && (ent->behavior_flags & 0xc0) == 0 && ent->id < 0x13
+            && !zombie_mode_hide_entity(ent)) {
             VECTOR delta;
             delta.x = ent->scaMatrixData.localMatrix.t[0]
                     - g_playerEntity.scaMatrixData.localMatrix.t[0];
@@ -4162,8 +4245,10 @@ static unsigned int player_reticle_enemy(void)
 
     while (count != 0) {
         if ((ent->status_flags & 1) != 0) {
+            // Port-added mod: hidden puppets are no target (as above).
             if (ent->has_enter_switch_zone != 0 && -1 < ent->health
-                && (ent->behavior_flags & 0xc0) == 0 && ent->id < 0x13) {
+                && (ent->behavior_flags & 0xc0) == 0 && ent->id < 0x13
+                && !zombie_mode_hide_entity(ent)) {
                 VECTOR delta;
                 delta.x = ent->scaMatrixData.localMatrix.t[0]
                         - g_playerEntity.scaMatrixData.localMatrix.t[0];
@@ -4336,11 +4421,11 @@ static void player_behavior_12_gun_aim(void)
             g_playerEntity.weaponAimState = 0;
         }
         if (g_playerEntity.weaponAimState == 3) {
-            g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+            g_animFrameIdSave = (unsigned int)player_body() * 0x20 + 0xf0;
             if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
-                g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+                g_animFrameIdSave = (player_body() + 6) * 0x20;
             }
-            if ((g_playerEntity.id & 1) == 0 && g_playerEntity.equippedWeaponId == 2) {
+            if (player_body() == 0 && g_playerEntity.equippedWeaponId == 2) {
                 g_animFrameIdSave += 0x20;
             }
             entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
@@ -4353,16 +4438,16 @@ static void player_behavior_12_gun_aim(void)
     g_playerEntity.action_state = (unsigned char)(g_playerEntity.action_state + ret);
 
     if ((g_PlayerDpadHeld & 2) != 0) {
-        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
+        g_playerEntity.directionAngle += (short)(player_body() * -0x10 + 0x48);
     }
     if ((g_PlayerDpadHeld & 8) != 0) {
-        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * 0x10 - 0x48);
+        g_playerEntity.directionAngle += (short)(player_body() * 0x10 - 0x48);
     }
     if (g_playerEntity.equippedWeaponId == 10) return;
 
     // Fire gate: Chris may quick-fire once the raise pose has passed frame 4
     // (weapons 2/4/5); everyone else after frame 9.
-    if ((((g_playerEntity.id & 1) == 0 && 4 < g_playerEntity.animation_frame_id)
+    if (((player_body() == 0 && 4 < g_playerEntity.animation_frame_id)
          && (g_playerEntity.equippedWeaponId == 2 || g_playerEntity.equippedWeaponId == 4
              || g_playerEntity.equippedWeaponId == 5))
         || 9 < g_playerEntity.animation_frame_id) {
@@ -4569,8 +4654,19 @@ static void player_behavior_13_gun_hold_input(void)
             }
         }
     }
+    // Port-added mod: in the zombie mode a survivor's cancel/run press (pad B /
+    // LT, keyboard V / Ctrl / Esc) reloads instead - the empty gun's reload
+    // motion, whose ammo step tops a part-loaded gun up (fire_consume_ammo_stack).
+    // Nothing to reload, the press does nothing: it never switches targets.
+    if ((g_PlayerPadHeld & 0x40) != 0 && zombie_mode_manual_reload()) {
+        if (weapon_manual_reload_ready()) {
+            g_playerEntity.action_behavior = 0x18;
+            g_playerEntity.action_state = 0;
+            return;
+        }
+    }
     // Raw pad bit 4 with a target lock starts the special lock-on fire.
-    if ((g_PlayerPadHeld & 0x40) != 0 && player_find_aim_target() != 0) {
+    else if ((g_PlayerPadHeld & 0x40) != 0 && player_find_aim_target() != 0) {
         g_playerEntity.action_behavior = 0x1a;           // 0x00459150 - not yet transcribed
         g_playerEntity.action_state = 0;
         return;
@@ -4578,7 +4674,7 @@ static void player_behavior_13_gun_hold_input(void)
 
     // Steering: the turn bits drop the raise blend back to state 2.
     if ((g_PlayerDpadHeld & 2) != 0) {
-        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
+        g_playerEntity.directionAngle += (short)(player_body() * -0x10 + 0x48);
         if (g_playerEntity.action_state < 2) {
             g_playerEntity.action_state = 2;
             g_playerEntity.unk_8c = 0;
@@ -4586,7 +4682,7 @@ static void player_behavior_13_gun_hold_input(void)
         return;
     }
     if ((g_PlayerDpadHeld & 8) != 0) {
-        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * 0x10 - 0x48);
+        g_playerEntity.directionAngle += (short)(player_body() * 0x10 - 0x48);
         if (g_playerEntity.action_state < 2) {
             g_playerEntity.action_state = 2;
             g_playerEntity.unk_8c = 0;
@@ -4691,10 +4787,10 @@ static void player_behavior_14_autoaim_fire(void)
     // ---- big muzzle flash
     if (g_weaponMuzzleFlash[weaponIdx].b0 == g_playerEntity.animation_frame_id) {
         g_playerPosScratch.x = g_weaponMuzzleFlash[weaponIdx].x;
-        int yOff = (1 - weaponIdx) * (g_playerEntity.id & 1) * 300;
+        int yOff = (1 - weaponIdx) * player_body() * 300;
         g_playerPosScratch.z = g_weaponMuzzleFlash[weaponIdx].z;
         if (weaponIdx == 8) {
-            yOff = (g_playerEntity.id & 1) * 500;
+            yOff = player_body() * 500;
         }
         g_playerPosScratch.y = yOff + g_weaponMuzzleFlash[weaponIdx].y;
 
@@ -4848,6 +4944,10 @@ static void player_behavior_14_autoaim_holdfire(void)
         // tables have 14 entries.
         int idx = (int)g_playerEntity.equippedWeaponId - 99;
         if (frame % g_weaponFireIntervals[0] == 0) {
+            // Port-added mod: a round a shot for the mode's Ingram (the
+            // original never counts the special weapons down).
+            unsigned char* slot = (unsigned char*)g_ItemSlotsPointer + (g_EquippedItemId - 1) * 2;
+            if (zombie_mode_ingram_finite(slot[0]) && slot[1] != 0) slot[1]--;
             auto_aim_pitch_update();
             g_playerPosScratch.x = g_weaponFireBillboard[idx].x;
             g_playerPosScratch.y = g_weaponFireBillboard[idx].y;
@@ -5182,7 +5282,7 @@ static void fire_consume_ammo_stack(void)
     unsigned char maxQty = g_ItemMaxQty[(unsigned int)weapon_ammo_item_id(weaponId) * 4];
     unsigned char bestSlot = 0;
     unsigned char bestQty = 0;
-    unsigned char slots = (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2);
+    unsigned char slots = (unsigned char)zombie_mode_inventory_slots((4 - ((g_playerEntity.id & 3) != 1)) * 2);
     for (unsigned char i = 0; i < slots; i++) {
         unsigned char id = ((unsigned char*)g_ItemSlotsPointer)[i * 2];
         unsigned char qty = ((unsigned char*)g_ItemSlotsPointer)[i * 2 + 1];
@@ -5190,6 +5290,28 @@ static void fire_consume_ammo_stack(void)
             bestSlot = i;
             bestQty = qty;
         }
+    }
+    // Port-added mod: the survivor's reload button reloads a part-loaded gun
+    // (weapon_manual_reload_ready); the rounds still in it are kept and only
+    // the shortfall comes off the stack. The original only gets here empty,
+    // where this is the same as below. Bit 7 (the volley gate) is dropped.
+    unsigned char* gunQty = (unsigned char*)g_ItemSlotsPointer + g_EquippedItemId * 2 - 1;
+    unsigned char loaded = zombie_mode_armed() ? (unsigned char)(*gunQty & 0x7f) : 0;
+    if (loaded != 0) {
+        unsigned char need = (unsigned char)(maxQty > loaded ? maxQty - loaded : 0);
+        if (bestQty == 0 || need == 0) {
+            *gunQty = loaded;
+            return;
+        }
+        if (need < bestQty) {
+            *gunQty = maxQty;
+            ((unsigned char*)g_ItemSlotsPointer)[bestSlot * 2 + 1] = bestQty - need;
+            return;
+        }
+        *gunQty = (unsigned char)(loaded + bestQty);
+        ((unsigned char*)g_ItemSlotsPointer)[bestSlot * 2] = 0;
+        rearrange_item_slots();
+        return;
     }
     if (maxQty < bestQty) {
         ((unsigned char*)g_ItemSlotsPointer)[g_EquippedItemId * 2 - 1] = maxQty;
@@ -5427,9 +5549,9 @@ state1_body:
                g_playerEntity.jointMoveData1, 0x200);
 
 turn_tail:
-    g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+    g_animFrameIdSave = (unsigned int)player_body() * 0x20 + 0xf0;
     if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
-        g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+        g_animFrameIdSave = (player_body() + 6) * 0x20;
     }
     entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
                                 (unsigned short)g_animFrameIdSave);
@@ -5465,9 +5587,9 @@ static void player_behavior_12_knife_aim(void)
             g_playerEntity.weaponAimState = 0;
         }
         if (g_playerEntity.weaponAimState == 3) {
-            g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+            g_animFrameIdSave = (unsigned int)player_body() * 0x20 + 0xf0;
             if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
-                g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+                g_animFrameIdSave = (player_body() + 6) * 0x20;
             }
             entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
                                         (unsigned short)g_animFrameIdSave);
@@ -5563,11 +5685,11 @@ static void player_behavior_13_knife_hold(void)
         return;
     }
     if ((g_PlayerDpadHeld & 2) != 0) {
-        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * -0x10 + 0x48);
+        g_playerEntity.directionAngle += (short)(player_body() * -0x10 + 0x48);
         return;
     }
     if ((g_PlayerDpadHeld & 8) != 0) {
-        g_playerEntity.directionAngle += (short)((g_playerEntity.id & 1) * 0x10 - 0x48);
+        g_playerEntity.directionAngle += (short)(player_body() * 0x10 - 0x48);
     }
 }
 
@@ -5631,7 +5753,7 @@ static void player_behavior_14_knife_swing(void)
     g_playerEntity.isBeingAttackedFlag = 0;
 
     // Fire window: table entry ((id&1)*3 + attackAnim)*2 - 12
-    int e = ((g_playerEntity.id & 1) * 3 + (int)g_playerEntity.attackAnim) * 2 - 12;
+    int e = (player_body() * 3 + (int)g_playerEntity.attackAnim) * 2 - 12;
     if ((unsigned char)(g_playerEntity.animation_frame_id - kFireWindow[e]) < kFireWindow[e + 1]
         && (g_playerEntity.weaponAimFlags & 2) == 0) {
         if (apply_weapon_damage(1) != 0
@@ -5734,9 +5856,9 @@ static void player_behavior_16_knife_turn(void)
     Joint_move(0, g_playerEntity.jointMoveData0, g_playerEntity.jointMoveData1, 0x100);
 
     // LAB_00459afa: steer toward the target until aligned
-    g_animFrameIdSave = (unsigned int)(g_playerEntity.id & 1) * 0x20 + 0xf0;
+    g_animFrameIdSave = (unsigned int)player_body() * 0x20 + 0xf0;
     if ((short)turn_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34), 0x200) == 0) {
-        g_animFrameIdSave = ((g_playerEntity.id & 1) + 6) * 0x20;
+        g_animFrameIdSave = (player_body() + 6) * 0x20;
     }
     entity_rotate_toward_target((VECTOR*)(g_playerEntity.unk_b8 + 0x34),
                                 (unsigned short)g_animFrameIdSave);
@@ -6709,6 +6831,11 @@ static void door_locked_message(unsigned int msgIndex)
 // sleep, then StMask - not a fade. This is why the in-game door cut is instant.
 static void door_begin_transition(unsigned char* record)
 {
+    // Port-added mod: the AI survivor walking out of the zombie's room leaves
+    // it rather than changing the room (mods/ZombieSurvivor.cpp).
+    if (zombie_mode_door_begin(record)) {
+        return;
+    }
     g_pendingDoorRecord = (int)record;          // the room the transition will load
     g_main_state_flags |= MSF_GAMEPLAY_ACTIVE;
     g_message_flags = 0;
@@ -6744,6 +6871,19 @@ int door_try_enter(unsigned char* entry)
     unsigned char* record = *(unsigned char**)(entry + 8);
     unsigned char  lock   = record[0xc];
 
+    // Port-added mod: a door the zombie mode's director has trapped shut
+    // (mods/ZombieTraps.cpp). The refusal handles its sound and message.
+    if (zombie_mode_door_trapped(record)) {
+        return 0;
+    }
+
+    // Port-added mod: the director's monster walks through any door, locked
+    // or not; the lock stays as it is for the survivors.
+    if (zombie_mode_door_ignores_lock(record)) {
+        door_begin_transition(record);
+        return 0;
+    }
+
     // 0x0041b41a: some doors are barred for one of the two characters.
     if ((lock & 0x40) != 0 && (g_playerEntity.id & 3) == 3) {
         set_message_display(0xd6, 0xff);
@@ -6752,17 +6892,26 @@ int door_try_enter(unsigned char* entry)
 
     // 0x0041b441: unlocked outright, or its lock flag is already raised.
     if ((lock & 0x80) == 0 || Flg_ck((int)g_LocksFlags, lock & 0x3f) != 0) {
+        // Port-added mod: a boss room's door, open - the survivors go in all
+        // together or not at all (mods/ZombieYawn.cpp).
+        if (zombie_mode_boss_door_gate(record)) return 0;
         door_begin_transition(record);
         return 0;
     }
 
     // Locked: work out whether the player can open it.
     unsigned int need = record[0x16];
+    // Port-added mod: the zombie mode's randomized key for this lock
+    // (mods/ZombieRandom.cpp).
+    need = zombie_mode_door_need((unsigned char)(record[0xc] & 0x3f), (unsigned char)need);
 
-    if (need == ITEM_SWORD_KEY && (g_playerEntity.id & 3) == 1) {
+    // Port-added mod: the zombie mod's Jill carries the lockpick in Chris's
+    // scenario (mods/ZombiePerks.cpp).
+    const bool modLockpick = need == ITEM_SWORD_KEY && zombie_mode_has_lockpick();
+    if (need == ITEM_SWORD_KEY && ((g_playerEntity.id & 3) == 1 || modLockpick)) {
         // 0x0041b474: Jill substitutes the lockpick for this key, but only once
         // she has it (g_ScenarioFlags bit SCENARIO_FLAG_HAS_LOCKPICK).
-        if (Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) == 0) {
+        if (!modLockpick && Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) == 0) {
             door_locked_message(0xd);
             return 0;
         }
@@ -6804,6 +6953,10 @@ int door_try_enter(unsigned char* entry)
     }
     play_sfx(2, sfxId, 0);
     Flg_on((int)g_LocksFlags, record[0xc] & 0x3f);
+    // Port-added mod: the key is used up now, not once the message closes -
+    // in the mode the survivor walks through the door the next frame, and a
+    // key with no lock left is discarded without asking (mods/ZombieMessages.cpp).
+    zombie_mode_key_turned();
     return 0;
 }
 
@@ -7039,6 +7192,8 @@ int open_itembox(unsigned char* entry)
 // ============================================================================
 int create_room_event(unsigned char* entry)
 {
+    // Port-added mod: play-as-zombie has no story, so no scene walked into.
+    if (zombie_mode_skip_room_event(entry)) return 0;
     ScdEventEntry_Create(*(unsigned char*)(entry + 2), *(unsigned char*)(entry + 4));
     return 0;
 }
@@ -7143,11 +7298,15 @@ int check_desk(unsigned char* entry)
         // (ITEMS_FLAGS = g_RoomActionTable+6).
         unsigned short itemFlagIdx = *(unsigned short*)((unsigned char*)g_RoomActionTable + 6 + (unsigned int)eventIdx * 0xc);
         if (Flg_ck((int)g_roomItemsFlags, itemFlagIdx) != 0) {
-            if ((g_playerEntity.id & 3) == 3) {
+            // Randomized progression can occupy a desk's reward slot. The
+            // infestation solver has no small-key dependency, so every
+            // survivor must be able to open it through the native pickup flow.
+            const bool freeDesk = zombie_mode_armed();
+            if (!freeDesk && (g_playerEntity.id & 3) == 3) {
                 set_message_display(0xd7, 0xff);
                 return 0;
             }
-            if (Flg_ck((int)g_LocksFlags, *(unsigned short*)(entry + 2)) == 0) {
+            if (!freeDesk && Flg_ck((int)g_LocksFlags, *(unsigned short*)(entry + 2)) == 0) {
                 if ((get_item_slot(ITEM_DESK_KEY) < 0) && (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_HAS_LOCKPICK) == 0)) {
                     set_message_display(0xd8, 0xff);
                     return 0;

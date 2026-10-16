@@ -47,6 +47,27 @@ Ps1EndingCredits=0
 ; Set to 1 to let the movies the original leaves unskippable (the endings, the
 ; staff rolls, DMF and DME) be skipped with the usual buttons like any other FMV.
 SkipUnskippableFmv=0
+; 1 = keep running (and playing sound) when the window loses focus. The
+; original pauses; the zombie mod's two-player link turns this on by itself.
+RunInBackground=0
+
+[Mods]
+; 1 = enables the infested game mode where you can play against others in a race
+; to escape the mansion
+PlayInfested=1
+; Default HOST - AI DIRECTOR difficulty: 1 easy, 2 normal, 3 hard,
+; 4 nightmare, 5 hell on earth. 0 uses normal as the lobby default.
+; Human director matches never run the AI.
+AiDirector=0
+
+[Net]
+; Two-player zombie mode (NEW GAME -> HOST / JOIN, with PlayInfested=1 on both
+; copies). The game rewrites these with the last address and port used.
+; Address = the host to join; Port = the UDP port the host listens on (allow it
+; through the host's firewall). To try both copies on one machine, start the
+; second with RE1_ALLOW_MULTI=1 in its environment and join 127.0.0.1.
+Address=127.0.0.1
+Port=27960
 
 [Debug]
 ; Master switch for the port-added debug features: F1 debug menu, F6

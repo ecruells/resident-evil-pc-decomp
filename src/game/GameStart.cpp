@@ -7,6 +7,8 @@
 #include "../marni/MarniSystem.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
+#include "mods/ZombieMode.h"
+#include "mods/ZombieReconnect.h"
 #include <cstdio>
 #include <cstring>
 #include "../system/AssetPath.h"
@@ -178,7 +180,7 @@ void CountHeldItems(void) // 0x00451600
     g_TotalHeldItems = 0;
     unsigned char itemSlot = *(unsigned char*)g_ItemSlotsPointer;
     while (itemSlot != 0 &&
-           g_TotalHeldItems < (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2)) {
+           g_TotalHeldItems < zombie_mode_inventory_slots((4 - ((g_playerEntity.id & 3) != 1)) * 2)) {
         g_TotalHeldItems = g_TotalHeldItems + 1;
         itemSlot = ((unsigned char*)g_ItemSlotsPointer)[(unsigned int)g_TotalHeldItems * 2];
     }
@@ -406,6 +408,10 @@ void InitializeGame(void)
 
     ResetGameStateBlock();
 
+    // Port-added mod: disarmed unless the new-game branch below re-arms it, so
+    // a continued game or an attract demo never spawns a possessed zombie.
+    zombie_mode_new_game(0);
+
     g_loadDataDestPointer = g_DataBuffer;
     g_SpecialRoomLightDelta = 0;
     g_fading_counter = 0;
@@ -441,6 +447,9 @@ void InitializeGame(void)
 
         if ((g_main_state_flags2 & MSF2_ATTRACT_DEMO) == 0) {
             InitPlayerData();
+            // Port-added mod: arm play-as-zombie for this session and mark the
+            // main-hall intro seen. Inert with [Mods] PlayInfested=0.
+            zombie_mode_new_game(1);
             /*
             * chris: 140hp
             * jill: 96hp
@@ -558,6 +567,10 @@ void InitializeGame(void)
         }
     }
 
+    // Port-added mod: a multiplayer survivor's toughness (mods/ZombiePerks.cpp).
+    zombie_mode_player_stats();
+    zm_reconnect_player_ready();
+
     // Placeholder only: SetupCharacterData (called below) replaces it with the
     // character's own record. Same value as the original's initial store.
     g_playerEntity.Sca_info = g_scaDataTable[0];
@@ -649,7 +662,8 @@ void game_start(void)
 // Loads a 20x30 16-bit item image from the buffer into a texture page slot.
 void LoadItemImage(int item_id, int image_index, int img_buffer) // 0x00443000
 {
-    LoadImage(item_id * 1200 + img_buffer, 0, image_index + 1, 1, 108, (short)image_index << 5, 20, 30, 2);
+    const unsigned char* icon = zombie_mode_pickaxe_icon(item_id);
+    LoadImage(icon ? (int)icon : item_id * 1200 + img_buffer, 0, image_index + 1, 1, 108, (short)image_index << 5, 20, 30, 2);
 }
 
 // (0x00481750) - Load attract mode (demo) player save data

@@ -13,6 +13,7 @@
 #include "SFXIds.h"
 #include "PrintText.h"
 #include "dc/Items.h"    // lockpick item id (is_lockpick_item)
+#include "mods/ZombieMode.h"
 #include <cstdio>
 #include <cstring>
 #include "../system/AssetPath.h"
@@ -635,6 +636,8 @@ void use_room_action_item(void)
             // Item depleted
             if (g_selectedItemId > ITEM_OIL && g_selectedItemId < ITEM_DESK_KEY) { // is door key
                 // Key item depleted — display drop message
+                // Port-added mod: discarded at once, no prompt (mods/ZombieMessages.cpp).
+                if (zombie_mode_key_used_up(slots, index)) return;
                 g_main_state_flags |= MSF_MENU_MODE_KEY_DEPLETED;
                 return;
             }
@@ -660,7 +663,7 @@ void rearrange_item_slots(void)
     unsigned char readIdx = 0;
     unsigned char writeIdx = 0;
     // Chris (0) has 6 slots, Jill (1) has 8 slots
-    int maxSlots = (4 - (((g_playerEntity.id & 3) != 1) ? 1 : 0)) * 2;
+    int maxSlots = zombie_mode_inventory_slots((4 - (((g_playerEntity.id & 3) != 1) ? 1 : 0)) * 2);
     int remaining = maxSlots;
 
     do {

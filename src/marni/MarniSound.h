@@ -39,7 +39,7 @@ public:
     void  SetVol(int bank, int vol);                            // 0x0041efa0
     void  SetPan(int bank, int pan);                            // 0x0041f080
     int   GetVol(int bank);                                     // 0x0041f160
-    int   CreateSound(const char* wavName);                     // 0x0041f1c0
+    int   CreateSound(const char* wavName, bool muffled = false); // 0x0041f1c0; optional mod filter
     void  ErrorRoutine(int code);                               // 0x0041f570
 };
 #pragma pack(pop)
@@ -50,7 +50,7 @@ static_assert(sizeof(DirectSound) == 0x32DDC, "DirectSound size must be 0x32DDC 
 extern DirectSound* g_pDirectSound;
 
 // Sound bank management wrappers (use g_pDirectSound internally)
-int  loadSndBankFromWav(const char* path);
+int  loadSndBankFromWav(const char* path, bool muffled = false);
 void destroySndBank(int bank);
 void setSndStop(int bank);
 void playSnd(int bank, int slot);

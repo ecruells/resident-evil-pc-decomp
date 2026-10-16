@@ -41,6 +41,7 @@
 // All original addresses from Ghidra.
 #include "EntityCommon.h"
 #include "../../Globals.h"
+#include "../mods/ZombieMode.h"
 #include <cstdlib>
 
 extern void ResetJointTransforms(void);                       // 0x0048bad0
@@ -1159,7 +1160,12 @@ unsigned char cerberus_bite_player(void)
     int  easy = Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH);
     short threshold = easy == 0 ? (short)0x0D : (short)0x11;
 
-    if (g_playerEntity.health < threshold
+    // The maul is a paired player/monster animation, with pointer and joint
+    // writes that PHURT cannot transfer to a remote victim. In multiplayer
+    // use the ordinary damaging bite, including the normal survivor death
+    // path, until that paired attack has a complete network handoff.
+    bool networkMatch = zombie_mode_network_match();
+    if (!networkMatch && g_playerEntity.health < threshold
         && (char)is_facing_toward_entity(&g_playerEntity) == 0) {
         g_playerEntity.flags |= 2;
         ENTITY->status_flags |= 2;

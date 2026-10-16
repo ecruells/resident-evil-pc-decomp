@@ -83,7 +83,7 @@ unsigned int FindMinClutDepth(AnimSlot* slot)
         if (iVar2 > 0) {
             do {
                 if ((*puVar5 & 0x4000000) != 0) {
-                    depth = (puVar5[2] >> 16) & 0x1f;
+                    depth = TexPageFromTsb(puVar5[2] >> 16);    // (puVar5[2] >> 16) & 0x1f, widened
                     if (depth < minDepth) {
                         minDepth = depth;
                     }
@@ -339,7 +339,7 @@ BYTE* CreateTmdObjectInternal(int depth, int tmdDataPtr, int animObjPtr)
     // yet - the original indexes the table with it unmasked (ASan caught a
     // read 4 bytes before g_tmdObjectSlotAnimPtrs), so range-check it.
     int slotIndex = *(int*)(animObjPtr + 8);
-    if (slotIndex >= 0 && slotIndex < 251 &&
+    if (slotIndex >= 0 && slotIndex < TMD_ENTITY_SLOT_COUNT + 1 &&
         g_objectDeletePtr && g_objectDeletePtr[slotIndex] == animObjPtr) {
         return (BYTE*)&g_tmdObjectBuffer[slotIndex * 0x1594];
     }
@@ -351,8 +351,8 @@ BYTE* CreateTmdObjectInternal(int depth, int tmdDataPtr, int animObjPtr)
         if (*slotPtr == animObjPtr) goto slotFound;
         slotPtr++;
         freeSlot++;
-    } while (freeSlot < 250);
-    if (g_objectDeleteFlag >= 250) {
+    } while (freeSlot < TMD_ENTITY_SLOT_COUNT);     // 250 in the original (Globals.h)
+    if (g_objectDeleteFlag >= TMD_ENTITY_SLOT_COUNT) {
         return NULL;
     }
     freeSlot = g_objectDeleteFlag;
@@ -567,7 +567,7 @@ void ComplexTmdObjectSetup(int* param_1)
     int objCount = tmdData[5];                                // [ESI+0x14] object count
 
     // Resolve texture bank
-    unsigned int bankID = (objTable[2] & 0x1F0000) >> 16;
+    unsigned int bankID = TexPageFromTsb(objTable[2] >> 16);   // (& 0x1F0000) >> 16, widened
     if (g_textureBankRedirect[bankID] != 0) {
         bankID = g_textureBankRedirect[bankID];
     }
@@ -837,13 +837,16 @@ unsigned int ProcessTmdTextures(char param1, unsigned int* param2, int param3, i
         unsigned int* puVar2 = (unsigned int*)cursor[4];
         for (int iVar4 = cursor[5]; iVar4 != 0; iVar4--) {
             if ((*puVar2 & 0x4000000) != 0) {
+                // The page is written through TexPageTsbBits: pages 32+ keep
+                // their high bits in TSB bits 9-11 (TexturePages.h). For pages
+                // 0-31 that is the original `param3 * 0x10000`.
                 if (param1 == 0) {
-                    puVar2[2] = puVar2[2] + param3 * 0x10000;
+                    puVar2[2] = puVar2[2] + TexPageTsbBits(param3) * 0x10000;
                 } else {
                     if (param1 == 1) {
                         puVar2[1] = puVar2[1] + param4 * 0x400000;
                     } else if (param1 == 2) {
-                        puVar2[2] = puVar2[2] + param3 * 0x10000;
+                        puVar2[2] = puVar2[2] + TexPageTsbBits(param3) * 0x10000;
                         puVar2[1] = puVar2[1] + param4 * 0x400000;
                     }
                 }
@@ -960,7 +963,9 @@ void TmdProcessingCallback(void)
     DWORD savedVar1 = *puVar1;
 
     *puVar7 = ((unsigned int)(g_TextureCurrentPage + 0x1E0) << 16) | (header.field_10 & 0xFFFF);
-    *puVar1 = ((unsigned int)(g_TextureBankID & 0x10) << 20) | ((unsigned int)(g_TextureBankID & 0xF) << 6);
+    // ((bank & 0x10) << 20) | ((bank & 0xF) << 6) in the original - the same
+    // origin for pages 0-31, carried on for the widened pages (TexturePages.h).
+    *puVar1 = TexPageVramOrigin(g_TextureBankID);
 
     VideoDriver_ClearState348(psvTex, g_pMarniDirect3D);
     ((PSXTexture*)psvTex)->Store((int*)tmdData, 1);

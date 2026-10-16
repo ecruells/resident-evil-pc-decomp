@@ -52,7 +52,6 @@ void OnKeyDown(HWND hwnd, WPARAM wparam)
 					g_displayExitGameScreen_flag = 1;
 				} else {
 					g_displayExitGameScreen_flag = 0;
-					CleanupVideoConfigAndSaveAllSettings();
 					DestroyWindow(g_hWnd);
 				}
 			} else if (g_displayReturnToTitleScreen_Flag == 0) {
@@ -105,10 +104,12 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
             g_bWindowFocused = FALSE;
             if (LOWORD(wParam) == WA_INACTIVE) {
                 // 0x004411f4: Window deactivated
-                if (!g_bIsSoftwareRendering && g_mciVideoDeviceID == 1) {
+                if (!g_bPlayAsZombie && !g_bIsSoftwareRendering && g_mciVideoDeviceID == 1) {
                     g_bMCIVideoEvent = TRUE;
                 }
-                PauseSounds();
+                if (!g_bRunInBackground && !g_bPlayAsZombie) { // keep the mod sounding in the background
+                    PauseSounds();
+                }
             } else {
                 // Window activated
                 g_bWindowFocused = TRUE;
@@ -128,7 +129,7 @@ LRESULT CALLBACK WindowProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
         // --- WM_DESTROY ---
         case WM_DESTROY:
             // 0x00441250: Cleanup and quit
-            CleanupVideoConfigAndSaveAllSettings();
+            // RunMessageLoop owns final cleanup after dispatch returns.
             g_hWnd = NULL;
             if (g_dwSelectedDisplayAdapterID == 0) {
                 RestoreWaveOutVolume();

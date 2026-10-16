@@ -10,7 +10,11 @@
 #define WIN32_LEAN_AND_MEAN
 #endif
 #include <windows.h>
+#include <winsock2.h>
+#include <ws2tcpip.h>
 #include <mmsystem.h>
+#pragma comment(lib, "Ws2_32.lib")
+#include <stdio.h>
 #include <stdlib.h>   // malloc/free for plat_file_read_all
 
 // Cached system wave-out volume, owned by Globals.cpp. Declared here rather
@@ -158,6 +162,39 @@ BOOL plat_file_write(const char* path, const void* data, size_t size)
     BOOL ok = WriteFile(hFile, data, (DWORD)size, &written, NULL);
     CloseHandle(hFile);
     return (ok && written == (DWORD)size) ? TRUE : FALSE;
+}
+
+BOOL plat_file_write_atomic(const char* path, const void* data, size_t size)
+{
+    static LONG sequence = 0;
+    char temporary[MAX_PATH + 64];
+    HANDLE file = INVALID_HANDLE_VALUE;
+    for (int attempt = 0; attempt < 32 && file == INVALID_HANDLE_VALUE; ++attempt) {
+        int n = snprintf(temporary, sizeof(temporary), "%s.%lu.%lu.tmp", path,
+            (unsigned long)GetCurrentProcessId(), (unsigned long)InterlockedIncrement(&sequence));
+        if (n < 0 || n >= (int)sizeof(temporary)) return FALSE;
+        file = CreateFileA(temporary, GENERIC_WRITE, 0, NULL, CREATE_NEW,
+                          FILE_ATTRIBUTE_NORMAL, NULL);
+        if (file == INVALID_HANDLE_VALUE && GetLastError() != ERROR_FILE_EXISTS) return FALSE;
+    }
+    if (file == INVALID_HANDLE_VALUE) return FALSE;
+    DWORD written = 0;
+    BOOL ok = WriteFile(file, data, (DWORD)size, &written, NULL) && written == size;
+    if (ok) ok = FlushFileBuffers(file);
+    if (!CloseHandle(file)) ok = FALSE;
+    if (ok) {
+        // A CRT reader can briefly deny deletion. Retry without ever unlinking
+        // the destination; if it stays busy, keep the old complete config.
+        for (int attempt = 0; attempt < 10; ++attempt) {
+            if (MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+                return TRUE;
+            DWORD error = GetLastError();
+            if (error != ERROR_SHARING_VIOLATION && error != ERROR_ACCESS_DENIED) break;
+            Sleep(10);
+        }
+    }
+    DeleteFileA(temporary);
+    return FALSE;
 }
 
 size_t plat_readable_bytes(const void* p)
@@ -321,4 +358,96 @@ void plat_window_destroy(HWND window)
 void plat_cursor_show(BOOL show)
 {
     ShowCursor(show);
+}
+
+// ---------------------------------------------------------------------------
+// Networking - one non-blocking UDP socket (Winsock 2)
+// ---------------------------------------------------------------------------
+
+static SOCKET s_netSocket = INVALID_SOCKET;
+static BOOL   s_wsaStarted = FALSE;
+
+BOOL plat_net_open(unsigned short port)
+{
+    plat_net_close();
+    if (!s_wsaStarted) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return FALSE;
+        s_wsaStarted = TRUE;
+    }
+    SOCKET s = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+    if (s == INVALID_SOCKET) return FALSE;
+    BOOL yes = TRUE;
+    setsockopt(s, SOL_SOCKET, SO_REUSEADDR, (const char*)&yes, sizeof(yes));
+    sockaddr_in addr;
+    ZeroMemory(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    addr.sin_port = htons(port);
+    if (bind(s, (sockaddr*)&addr, sizeof(addr)) != 0) {
+        closesocket(s);
+        return FALSE;
+    }
+    u_long nonBlocking = 1;
+    ioctlsocket(s, FIONBIO, &nonBlocking);
+    s_netSocket = s;
+    return TRUE;
+}
+
+void plat_net_close(void)
+{
+    if (s_netSocket != INVALID_SOCKET) {
+        closesocket(s_netSocket);
+        s_netSocket = INVALID_SOCKET;
+    }
+}
+
+BOOL plat_net_resolve(const char* host, unsigned short port, PlatNetAddr* out)
+{
+    if (!s_wsaStarted) {
+        WSADATA wsa;
+        if (WSAStartup(MAKEWORD(2, 2), &wsa) != 0) return FALSE;
+        s_wsaStarted = TRUE;
+    }
+    addrinfo hints;
+    addrinfo* res = NULL;
+    ZeroMemory(&hints, sizeof(hints));
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_DGRAM;
+    if (getaddrinfo(host, NULL, &hints, &res) != 0 || res == NULL) return FALSE;
+    out->ip = ntohl(((sockaddr_in*)res->ai_addr)->sin_addr.s_addr);
+    out->port = port;
+    freeaddrinfo(res);
+    return TRUE;
+}
+
+BOOL plat_net_send(const PlatNetAddr* to, const void* data, int length)
+{
+    if (s_netSocket == INVALID_SOCKET) return FALSE;
+    sockaddr_in addr;
+    ZeroMemory(&addr, sizeof(addr));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.s_addr = htonl(to->ip);
+    addr.sin_port = htons(to->port);
+    return sendto(s_netSocket, (const char*)data, length, 0,
+                  (sockaddr*)&addr, sizeof(addr)) == length;
+}
+
+int plat_net_recv(void* buffer, int capacity, PlatNetAddr* from)
+{
+    if (s_netSocket == INVALID_SOCKET) return -1;
+    sockaddr_in addr;
+    int len = sizeof(addr);
+    int n = recvfrom(s_netSocket, (char*)buffer, capacity, 0, (sockaddr*)&addr, &len);
+    if (n == SOCKET_ERROR) {
+        int err = WSAGetLastError();
+        // WSAECONNRESET: the peer's port was closed (ICMP unreachable) - not
+        // fatal for a connectionless socket, there is just nothing to read.
+        return (err == WSAEWOULDBLOCK || err == WSAECONNRESET) ? 0 : -1;
+    }
+    if (from != NULL) {
+        from->ip = ntohl(addr.sin_addr.s_addr);
+        from->port = ntohs(addr.sin_port);
+    }
+    return n;
 }

@@ -41,73 +41,79 @@ namespace {
 
 PlatVideoOverlayCallback s_overlayCallback = NULL;
 
-AVFormatContext* s_fmt     = NULL;
-AVCodecContext*  s_vctx    = NULL;
-AVCodecContext*  s_actx    = NULL;
-SwrContext*      s_swr     = NULL;
-int              s_vstream = -1;
-int              s_astream = -1;
-AVPacket*        s_pkt     = NULL;
-AVFrame*         s_frame   = NULL;
+struct VideoState {
+    AVFormatContext* s_fmt     = NULL;
+    AVCodecContext*  s_vctx    = NULL;
+    AVCodecContext*  s_actx    = NULL;
+    SwrContext*      s_swr     = NULL;
+    int              s_vstream = -1;
+    int              s_astream = -1;
+    AVPacket*        s_pkt     = NULL;
+    AVFrame*         s_frame   = NULL;
 
-double s_fps    = 10.0;
-int    s_width  = 0;
-int    s_height = 0;
+    double s_fps    = 10.0;
+    int    s_width  = 0;
+    int    s_height = 0;
 
-unsigned char* s_rgba      = NULL;   // last decoded frame, RGBA
-int            s_rgbaPitch = 0;
+    unsigned char* s_rgba      = NULL;   // last decoded frame, RGBA
+    int            s_rgbaPitch = 0;
 
-MarniHandle s_tex  = MARNI_NULL_HANDLE;
-int         s_texW = 0;
-int         s_texH = 0;
+    MarniHandle s_tex  = MARNI_NULL_HANDLE;
+    int         s_texW = 0;
+    int         s_texH = 0;
 
-int  s_frameIndex   = -1;     // index of the frame in s_rgba (absolute)
-int  s_baseFrame    = 0;      // frame the current segment started at
-int  s_playToFrame  = 0;      // 0 = play to the end
-BOOL s_active       = FALSE;
-BOOL s_endEvent     = FALSE;
-BOOL s_eof          = FALSE;
-BOOL s_flushed      = FALSE;   // the decoder's NULL-packet flush was sent
-DWORD s_startTicks  = 0;      // wall clock, used only when the movie has no audio
+    int  s_frameIndex   = -1;     // index of the frame in s_rgba (absolute)
+    int  s_baseFrame    = 0;      // frame the current segment started at
+    int  s_playToFrame  = 0;      // 0 = play to the end
+    BOOL s_active       = FALSE;
+    BOOL s_endEvent     = FALSE;
+    BOOL s_eof          = FALSE;
+    BOOL s_flushed      = FALSE;   // the decoder's NULL-packet flush was sent
+    DWORD s_startTicks  = 0;      // wall clock, used only when the movie has no audio
 
-short* s_audio        = NULL; // whole movie, S16 stereo at the device rate
-long   s_audioFrames  = 0;
-long   s_audioStartSample = 0;   // first sample of the current segment
-BOOL   s_useAudio     = FALSE;
+    short* s_audio        = NULL; // whole movie, S16 stereo at the device rate
+    long   s_audioFrames  = 0;
+    long   s_audioStartSample = 0;   // first sample of the current segment
+    BOOL   s_useAudio     = FALSE;
+};
+// Decoder helpers are synchronous. Silent clip calls select their own state
+// and restore the FMV state before returning; none yields to the task scheduler.
+VideoState s_mainVideo;
+VideoState* s_video = &s_mainVideo;
 
 // ---------------------------------------------------------------------------
 // Teardown
 // ---------------------------------------------------------------------------
 void FreeAll(void)
 {
-    plat_audio_stream_stop();
+    if (s_video == &s_mainVideo) plat_audio_stream_stop();
 
-    if (s_tex != MARNI_NULL_HANDLE) {
+    if (s_video->s_tex != MARNI_NULL_HANDLE) {
         MarniDX* dx = Marni_DX();
-        if (dx != NULL) dx->DestroyTexture(s_tex);
-        s_tex = MARNI_NULL_HANDLE;
+        if (dx != NULL) dx->DestroyTexture(s_video->s_tex);
+        s_video->s_tex = MARNI_NULL_HANDLE;
     }
-    s_texW = s_texH = 0;
+    s_video->s_texW = s_video->s_texH = 0;
 
-    free(s_rgba);      s_rgba = NULL;      s_rgbaPitch = 0;
-    free(s_audio);     s_audio = NULL;     s_audioFrames = 0;  s_useAudio = FALSE;
+    free(s_video->s_rgba);      s_video->s_rgba = NULL;      s_video->s_rgbaPitch = 0;
+    free(s_video->s_audio);     s_video->s_audio = NULL;     s_video->s_audioFrames = 0;  s_video->s_useAudio = FALSE;
 
-    if (s_swr)    { swr_free(&s_swr); }
-    if (s_frame)  { av_frame_free(&s_frame); }
-    if (s_pkt)    { av_packet_free(&s_pkt); }
-    if (s_vctx)   { avcodec_free_context(&s_vctx); }
-    if (s_actx)   { avcodec_free_context(&s_actx); }
-    if (s_fmt)    { avformat_close_input(&s_fmt); }
+    if (s_video->s_swr)    { swr_free(&s_video->s_swr); }
+    if (s_video->s_frame)  { av_frame_free(&s_video->s_frame); }
+    if (s_video->s_pkt)    { av_packet_free(&s_video->s_pkt); }
+    if (s_video->s_vctx)   { avcodec_free_context(&s_video->s_vctx); }
+    if (s_video->s_actx)   { avcodec_free_context(&s_video->s_actx); }
+    if (s_video->s_fmt)    { avformat_close_input(&s_video->s_fmt); }
 
-    s_vstream = -1;
-    s_astream = -1;
-    s_frameIndex = -1;
-    s_baseFrame = 0;
-    s_playToFrame = 0;
-    s_eof = FALSE;
-    s_flushed = FALSE;
-    s_active = FALSE;
-    s_endEvent = FALSE;
+    s_video->s_vstream = -1;
+    s_video->s_astream = -1;
+    s_video->s_frameIndex = -1;
+    s_video->s_baseFrame = 0;
+    s_video->s_playToFrame = 0;
+    s_video->s_eof = FALSE;
+    s_video->s_flushed = FALSE;
+    s_video->s_active = FALSE;
+    s_video->s_endEvent = FALSE;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,7 +125,7 @@ void FreeAll(void)
 // ---------------------------------------------------------------------------
 void DecodeAllAudio(void)
 {
-    if (s_actx == NULL || s_astream < 0) return;
+    if (s_video->s_actx == NULL || s_video->s_astream < 0) return;
 
     const int outRate = plat_audio_stream_rate();
     const int outChannels = 2;
@@ -127,11 +133,11 @@ void DecodeAllAudio(void)
     // Resample to the device's format/rate. Movies are 22050 Hz stereo here,
     // but this keeps the backend honest if a file is not.
     AVChannelLayout outLayout = AV_CHANNEL_LAYOUT_STEREO;
-    if (swr_alloc_set_opts2(&s_swr, &outLayout, AV_SAMPLE_FMT_S16, outRate,
-                            &s_actx->ch_layout, s_actx->sample_fmt,
-                            s_actx->sample_rate, 0, NULL) < 0 ||
-        swr_init(s_swr) < 0) {
-        swr_free(&s_swr);
+    if (swr_alloc_set_opts2(&s_video->s_swr, &outLayout, AV_SAMPLE_FMT_S16, outRate,
+                            &s_video->s_actx->ch_layout, s_video->s_actx->sample_fmt,
+                            s_video->s_actx->sample_rate, 0, NULL) < 0 ||
+        swr_init(s_video->s_swr) < 0) {
+        swr_free(&s_video->s_swr);
         return;
     }
 
@@ -168,26 +174,26 @@ void DecodeAllAudio(void)
             if (got > 0) *written += got;
             return TRUE;
         }
-    } sink = { &written, &capacity, &s_audio, outRate, outChannels, s_swr, s_actx };
+    } sink = { &written, &capacity, &s_video->s_audio, outRate, outChannels, s_video->s_swr, s_video->s_actx };
 
     BOOL ok = TRUE;
-    while (ok && av_read_frame(s_fmt, pkt) >= 0) {
-        if (pkt->stream_index != s_astream) { av_packet_unref(pkt); continue; }
+    while (ok && av_read_frame(s_video->s_fmt, pkt) >= 0) {
+        if (pkt->stream_index != s_video->s_astream) { av_packet_unref(pkt); continue; }
 
-        int ret = avcodec_send_packet(s_actx, pkt);
+        int ret = avcodec_send_packet(s_video->s_actx, pkt);
         if (ret == AVERROR(EAGAIN)) {
             // Input queue full: drain it, then retry the same packet.
-            while (avcodec_receive_frame(s_actx, frm) == 0) {
+            while (avcodec_receive_frame(s_video->s_actx, frm) == 0) {
                 if (!sink.Store(frm)) { ok = FALSE; break; }
                 av_frame_unref(frm);
             }
-            ret = avcodec_send_packet(s_actx, pkt);
+            ret = avcodec_send_packet(s_video->s_actx, pkt);
         }
         av_packet_unref(pkt);
         if (!ok) break;
         if (ret < 0) continue;
 
-        while (avcodec_receive_frame(s_actx, frm) == 0) {
+        while (avcodec_receive_frame(s_video->s_actx, frm) == 0) {
             if (!sink.Store(frm)) { ok = FALSE; break; }
             av_frame_unref(frm);
         }
@@ -195,20 +201,20 @@ void DecodeAllAudio(void)
 
     // Flush the resampler's tail.
     if (ok && written + 4096 <= capacity) {
-        uint8_t* out[1] = { (uint8_t*)(s_audio + (size_t)written * outChannels) };
-        int got = swr_convert(s_swr, out, 4096, NULL, 0);
+        uint8_t* out[1] = { (uint8_t*)(s_video->s_audio + (size_t)written * outChannels) };
+        int got = swr_convert(s_video->s_swr, out, 4096, NULL, 0);
         if (got > 0) written += got;
     }
 
     av_packet_free(&pkt);
     av_frame_free(&frm);
 
-    s_audioFrames = written;
-    s_useAudio = (written > 0) ? TRUE : FALSE;
+    s_video->s_audioFrames = written;
+    s_video->s_useAudio = (written > 0) ? TRUE : FALSE;
 
     // Rewind the demuxer to the start for the video pass.
-    av_seek_frame(s_fmt, s_vstream, 0, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(s_vctx);
+    av_seek_frame(s_video->s_fmt, s_video->s_vstream, 0, AVSEEK_FLAG_BACKWARD);
+    avcodec_flush_buffers(s_video->s_vctx);
 }
 
 // ---------------------------------------------------------------------------
@@ -220,50 +226,50 @@ void DecodeAllAudio(void)
 // ---------------------------------------------------------------------------
 BOOL ConvertAndStore(void)
 {
-    if (s_width <= 0 || s_height <= 0) return FALSE;
+    if (s_video->s_width <= 0 || s_video->s_height <= 0) return FALSE;
 
-    if (s_rgba == NULL) {
-        s_rgbaPitch = s_width * 4;
-        s_rgba = (unsigned char*)malloc((size_t)s_rgbaPitch * s_height);
-        if (s_rgba == NULL) return FALSE;
+    if (s_video->s_rgba == NULL) {
+        s_video->s_rgbaPitch = s_video->s_width * 4;
+        s_video->s_rgba = (unsigned char*)malloc((size_t)s_video->s_rgbaPitch * s_video->s_height);
+        if (s_video->s_rgba == NULL) return FALSE;
     }
 
-    const int srcStride = s_frame->linesize[0];
-    const unsigned char* src = s_frame->data[0];
-    unsigned char* dst = s_rgba;
+    const int srcStride = s_video->s_frame->linesize[0];
+    const unsigned char* src = s_video->s_frame->data[0];
+    unsigned char* dst = s_video->s_rgba;
 
-    switch (s_frame->format) {
+    switch (s_video->s_frame->format) {
     case AV_PIX_FMT_RGB24:
-        for (int y = 0; y < s_height; ++y) {
+        for (int y = 0; y < s_video->s_height; ++y) {
             const unsigned char* s = src + (size_t)y * srcStride;
-            unsigned char* d = dst + (size_t)y * s_rgbaPitch;
-            for (int x = 0; x < s_width; ++x) {
+            unsigned char* d = dst + (size_t)y * s_video->s_rgbaPitch;
+            for (int x = 0; x < s_video->s_width; ++x) {
                 d[0] = s[0]; d[1] = s[1]; d[2] = s[2]; d[3] = 255;
                 s += 3; d += 4;
             }
         }
         return TRUE;
     case AV_PIX_FMT_BGR24:
-        for (int y = 0; y < s_height; ++y) {
+        for (int y = 0; y < s_video->s_height; ++y) {
             const unsigned char* s = src + (size_t)y * srcStride;
-            unsigned char* d = dst + (size_t)y * s_rgbaPitch;
-            for (int x = 0; x < s_width; ++x) {
+            unsigned char* d = dst + (size_t)y * s_video->s_rgbaPitch;
+            for (int x = 0; x < s_video->s_width; ++x) {
                 d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = 255;
                 s += 3; d += 4;
             }
         }
         return TRUE;
     case AV_PIX_FMT_RGBA:
-        for (int y = 0; y < s_height; ++y) {
-            memcpy(dst + (size_t)y * s_rgbaPitch, src + (size_t)y * srcStride,
-                   (size_t)s_width * 4);
+        for (int y = 0; y < s_video->s_height; ++y) {
+            memcpy(dst + (size_t)y * s_video->s_rgbaPitch, src + (size_t)y * srcStride,
+                   (size_t)s_video->s_width * 4);
         }
         return TRUE;
     case AV_PIX_FMT_BGRA:
-        for (int y = 0; y < s_height; ++y) {
+        for (int y = 0; y < s_video->s_height; ++y) {
             const unsigned char* s = src + (size_t)y * srcStride;
-            unsigned char* d = dst + (size_t)y * s_rgbaPitch;
-            for (int x = 0; x < s_width; ++x) {
+            unsigned char* d = dst + (size_t)y * s_video->s_rgbaPitch;
+            for (int x = 0; x < s_video->s_width; ++x) {
                 d[0] = s[2]; d[1] = s[1]; d[2] = s[0]; d[3] = s[3];
                 s += 4; d += 4;
             }
@@ -271,18 +277,18 @@ BOOL ConvertAndStore(void)
         return TRUE;
     case AV_PIX_FMT_YUV420P:
         {
-            const unsigned char* yp = s_frame->data[0];
-            const unsigned char* up = s_frame->data[1];
-            const unsigned char* vp = s_frame->data[2];
-            const int yStride = s_frame->linesize[0];
-            const int uStride = s_frame->linesize[1];
-            const int vStride = s_frame->linesize[2];
-            for (int y = 0; y < s_height; ++y) {
+            const unsigned char* yp = s_video->s_frame->data[0];
+            const unsigned char* up = s_video->s_frame->data[1];
+            const unsigned char* vp = s_video->s_frame->data[2];
+            const int yStride = s_video->s_frame->linesize[0];
+            const int uStride = s_video->s_frame->linesize[1];
+            const int vStride = s_video->s_frame->linesize[2];
+            for (int y = 0; y < s_video->s_height; ++y) {
                 const unsigned char* yRow = yp + (size_t)y * yStride;
                 const unsigned char* uRow = up + (size_t)(y / 2) * uStride;
                 const unsigned char* vRow = vp + (size_t)(y / 2) * vStride;
-                unsigned char* d = dst + (size_t)y * s_rgbaPitch;
-                for (int x = 0; x < s_width; ++x) {
+                unsigned char* d = dst + (size_t)y * s_video->s_rgbaPitch;
+                for (int x = 0; x < s_video->s_width; ++x) {
                     const int yy = yRow[x] - 16;
                     const int uu = uRow[x / 2] - 128;
                     const int vv = vRow[x / 2] - 128;
@@ -299,7 +305,7 @@ BOOL ConvertAndStore(void)
         }
         return TRUE;
     default:
-        fprintf(stderr, "[VIDEO] unsupported pixel format %d\n", s_frame->format);
+        fprintf(stderr, "[VIDEO] unsupported pixel format %d\n", s_video->s_frame->format);
         return FALSE;
     }
 }
@@ -315,10 +321,10 @@ BOOL ConvertAndStore(void)
 // ---------------------------------------------------------------------------
 BOOL DecodeNextVideoFrame(void)
 {
-    if (s_eof) return FALSE;
+    if (s_video->s_eof) return FALSE;
 
     for (;;) {
-        int ret = avcodec_receive_frame(s_vctx, s_frame);
+        int ret = avcodec_receive_frame(s_video->s_vctx, s_video->s_frame);
         if (ret == 0) {
             // Track the frame number from the timestamp. Counting decodes
             // instead only works from the start of the file: after a seek the
@@ -326,36 +332,36 @@ BOOL DecodeNextVideoFrame(void)
             // `frame` pictures past the target - which is what made the
             // prologue cut run off the end of the movie and go black while the
             // audio, seeked by sample count, carried on correctly.
-            AVStream* st = s_fmt->streams[s_vstream];
-            if (s_frame->pts != AV_NOPTS_VALUE && st->time_base.den > 0) {
-                const double sec = (double)s_frame->pts * av_q2d(st->time_base);
-                s_frameIndex = (int)(sec * s_fps + 0.5);
+            AVStream* st = s_video->s_fmt->streams[s_video->s_vstream];
+            if (s_video->s_frame->pts != AV_NOPTS_VALUE && st->time_base.den > 0) {
+                const double sec = (double)s_video->s_frame->pts * av_q2d(st->time_base);
+                s_video->s_frameIndex = (int)(sec * s_video->s_fps + 0.5);
             } else {
-                s_frameIndex++;
+                s_video->s_frameIndex++;
             }
             return ConvertAndStore();
         }
-        if (ret == AVERROR_EOF) { s_eof = TRUE; return FALSE; }
-        if (ret != AVERROR(EAGAIN)) { s_eof = TRUE; return FALSE; }
+        if (ret == AVERROR_EOF) { s_video->s_eof = TRUE; return FALSE; }
+        if (ret != AVERROR(EAGAIN)) { s_video->s_eof = TRUE; return FALSE; }
 
         // The decoder wants more input. If the file is exhausted and the flush
         // packet has already gone in, there is nothing left to produce.
-        if (s_flushed) { s_eof = TRUE; return FALSE; }
+        if (s_video->s_flushed) { s_video->s_eof = TRUE; return FALSE; }
 
-        int readRet = av_read_frame(s_fmt, s_pkt);
-        while (readRet >= 0 && s_pkt->stream_index != s_vstream) {
-            av_packet_unref(s_pkt);
-            readRet = av_read_frame(s_fmt, s_pkt);
+        int readRet = av_read_frame(s_video->s_fmt, s_video->s_pkt);
+        while (readRet >= 0 && s_video->s_pkt->stream_index != s_video->s_vstream) {
+            av_packet_unref(s_video->s_pkt);
+            readRet = av_read_frame(s_video->s_fmt, s_video->s_pkt);
         }
         if (readRet < 0) {
-            s_flushed = TRUE;
-            avcodec_send_packet(s_vctx, NULL);
+            s_video->s_flushed = TRUE;
+            avcodec_send_packet(s_video->s_vctx, NULL);
             continue;
         }
 
-        ret = avcodec_send_packet(s_vctx, s_pkt);
-        av_packet_unref(s_pkt);
-        if (ret < 0 && ret != AVERROR(EAGAIN)) { s_eof = TRUE; return FALSE; }
+        ret = avcodec_send_packet(s_video->s_vctx, s_video->s_pkt);
+        av_packet_unref(s_video->s_pkt);
+        if (ret < 0 && ret != AVERROR(EAGAIN)) { s_video->s_eof = TRUE; return FALSE; }
         // EAGAIN means "receive first" - loop back and do exactly that.
     }
 }
@@ -367,33 +373,33 @@ BOOL SeekTo(int frame)
 {
     if (frame < 0) frame = 0;
 
-    const int64_t ts = (int64_t)((double)frame / s_fps * (double)AV_TIME_BASE);
-    av_seek_frame(s_fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
-    avcodec_flush_buffers(s_vctx);
-    s_eof = FALSE;
-    s_flushed = FALSE;
-    s_frameIndex = -1;
+    const int64_t ts = (int64_t)((double)frame / s_video->s_fps * (double)AV_TIME_BASE);
+    av_seek_frame(s_video->s_fmt, -1, ts, AVSEEK_FLAG_BACKWARD);
+    avcodec_flush_buffers(s_video->s_vctx);
+    s_video->s_eof = FALSE;
+    s_video->s_flushed = FALSE;
+    s_video->s_frameIndex = -1;
 
-    // Decode forward to the requested frame so s_rgba holds it. The decoder
+    // Decode forward to the requested frame so s_video->s_rgba holds it. The decoder
     // restarts at the keyframe before the target, so this walks until the
     // timestamp-derived index reaches it (frame 0 needs one decode).
-    while (s_frameIndex < frame && !s_eof) {
+    while (s_video->s_frameIndex < frame && !s_video->s_eof) {
         if (!DecodeNextVideoFrame()) break;
     }
 
-    if (s_useAudio) {
-        const long startSample = (long)((double)frame / s_fps * plat_audio_stream_rate());
-        const long endSample = (s_playToFrame > 0)
-            ? (long)((double)s_playToFrame / s_fps * plat_audio_stream_rate())
-            : s_audioFrames;
-        s_audioStartSample = startSample;
-        plat_audio_stream_play(s_audio, s_audioFrames, startSample, endSample);
+    if (s_video->s_useAudio) {
+        const long startSample = (long)((double)frame / s_video->s_fps * plat_audio_stream_rate());
+        const long endSample = (s_video->s_playToFrame > 0)
+            ? (long)((double)s_video->s_playToFrame / s_video->s_fps * plat_audio_stream_rate())
+            : s_video->s_audioFrames;
+        s_video->s_audioStartSample = startSample;
+        plat_audio_stream_play(s_video->s_audio, s_video->s_audioFrames, startSample, endSample);
     }
 
     // The clock restarts with the segment, but frame numbers stay absolute:
     // a resumed segment begins at `frame`, not at 0.
-    s_baseFrame = frame;
-    s_startTicks = plat_time_ms();
+    s_video->s_baseFrame = frame;
+    s_video->s_startTicks = plat_time_ms();
     return TRUE;
 }
 
@@ -402,20 +408,20 @@ BOOL SeekTo(int frame)
 // ---------------------------------------------------------------------------
 void Present(void)
 {
-    if (s_rgba == NULL || s_width <= 0 || s_height <= 0) return;
+    if (s_video->s_rgba == NULL || s_video->s_width <= 0 || s_video->s_height <= 0) return;
 
     MarniDX* dx = Marni_DX();
     if (dx == NULL) return;
 
-    if (s_tex == MARNI_NULL_HANDLE || s_texW != s_width || s_texH != s_height) {
-        if (s_tex != MARNI_NULL_HANDLE) dx->DestroyTexture(s_tex);
+    if (s_video->s_tex == MARNI_NULL_HANDLE || s_video->s_texW != s_video->s_width || s_video->s_texH != s_video->s_height) {
+        if (s_video->s_tex != MARNI_NULL_HANDLE) dx->DestroyTexture(s_video->s_tex);
         int ow = 0, oh = 0;
-        s_tex = dx->CreateTexture(s_width, s_height, 32, s_rgba, &ow, &oh);
-        s_texW = s_width;
-        s_texH = s_height;
-        if (s_tex == MARNI_NULL_HANDLE) return;
+        s_video->s_tex = dx->CreateTexture(s_video->s_width, s_video->s_height, 32, s_video->s_rgba, &ow, &oh);
+        s_video->s_texW = s_video->s_width;
+        s_video->s_texH = s_video->s_height;
+        if (s_video->s_tex == MARNI_NULL_HANDLE) return;
     } else {
-        dx->UpdateTexturePixels(s_tex, s_rgba, s_width, s_height, 32);
+        dx->UpdateTexturePixels(s_video->s_tex, s_video->s_rgba, s_video->s_width, s_video->s_height, 32);
     }
 
     DWORD bw = 0, bh = 0;
@@ -423,12 +429,12 @@ void Present(void)
     if (bw == 0 || bh == 0) return;
 
     dx->Clear(0.0f, 0.0f, 0.0f, 1.0f);
-    const int frameMs = s_frameIndex > 0
-        ? (int)((double)s_frameIndex * 1000.0 / s_fps + 0.5) : 0;
-    if (s_overlayCallback == NULL || !s_overlayCallback(s_tex, frameMs)) {
+    const int frameMs = s_video->s_frameIndex > 0
+        ? (int)((double)s_video->s_frameIndex * 1000.0 / s_video->s_fps + 0.5) : 0;
+    if (s_overlayCallback == NULL || !s_overlayCallback(s_video->s_tex, frameMs)) {
         dx->DrawSprite(0.0f, 0.0f, (float)bw, (float)bh,
                        0.0f, 0.0f, 1.0f, 1.0f,
-                       0xFFFFFFFFu, s_tex, MARNI_SAMPLER_POINT, MARNI_BLEND_DISABLE);
+                       0xFFFFFFFFu, s_video->s_tex, MARNI_SAMPLER_POINT, MARNI_BLEND_DISABLE);
     }
     dx->Present();
 }
@@ -449,24 +455,25 @@ BOOL plat_video_init(void)
     return TRUE;   // ffmpeg is linked in; nothing to probe
 }
 
-BOOL plat_video_open_and_play(const char* path, int playToMs)
+// Shared video-only setup for playback and silent portrait extraction.
+static BOOL OpenPicture(const char* path)
 {
     FreeAll();
 
-    if (avformat_open_input(&s_fmt, path, NULL, NULL) < 0) {
+    if (avformat_open_input(&s_video->s_fmt, path, NULL, NULL) < 0) {
         fprintf(stderr, "[VIDEO] ffmpeg could not open %s\n", path);
         FreeAll();
         return FALSE;
     }
-    if (avformat_find_stream_info(s_fmt, NULL) < 0) {
+    if (avformat_find_stream_info(s_video->s_fmt, NULL) < 0) {
         fprintf(stderr, "[VIDEO] no stream info in %s\n", path);
         FreeAll();
         return FALSE;
     }
 
-    s_vstream = av_find_best_stream(s_fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
-    s_astream = av_find_best_stream(s_fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
-    if (s_vstream < 0) {
+    s_video->s_vstream = av_find_best_stream(s_video->s_fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0);
+    s_video->s_astream = av_find_best_stream(s_video->s_fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0);
+    if (s_video->s_vstream < 0) {
         fprintf(stderr, "[VIDEO] no video stream in %s\n", path);
         FreeAll();
         return FALSE;
@@ -474,82 +481,112 @@ BOOL plat_video_open_and_play(const char* path, int playToMs)
 
     // Video decoder
     {
-        AVStream* st = s_fmt->streams[s_vstream];
+        AVStream* st = s_video->s_fmt->streams[s_video->s_vstream];
         const AVCodec* codec = avcodec_find_decoder(st->codecpar->codec_id);
         if (codec == NULL) { FreeAll(); return FALSE; }
-        s_vctx = avcodec_alloc_context3(codec);
-        if (s_vctx == NULL) { FreeAll(); return FALSE; }
-        if (avcodec_parameters_to_context(s_vctx, st->codecpar) < 0 ||
-            avcodec_open2(s_vctx, codec, NULL) < 0) {
+        s_video->s_vctx = avcodec_alloc_context3(codec);
+        if (s_video->s_vctx == NULL) { FreeAll(); return FALSE; }
+        if (avcodec_parameters_to_context(s_video->s_vctx, st->codecpar) < 0 ||
+            avcodec_open2(s_video->s_vctx, codec, NULL) < 0) {
             FreeAll();
             return FALSE;
         }
-        s_width  = s_vctx->width;
-        s_height = s_vctx->height;
+        s_video->s_width  = s_video->s_vctx->width;
+        s_video->s_height = s_video->s_vctx->height;
         if (st->avg_frame_rate.num > 0 && st->avg_frame_rate.den > 0) {
-            s_fps = av_q2d(st->avg_frame_rate);
+            s_video->s_fps = av_q2d(st->avg_frame_rate);
         } else if (st->r_frame_rate.num > 0 && st->r_frame_rate.den > 0) {
-            s_fps = av_q2d(st->r_frame_rate);
+            s_video->s_fps = av_q2d(st->r_frame_rate);
         }
-        if (s_fps <= 0.0) s_fps = 10.0;
+        if (s_video->s_fps <= 0.0) s_video->s_fps = 10.0;
     }
+
+    s_video->s_pkt = av_packet_alloc();
+    s_video->s_frame = av_frame_alloc();
+    if (s_video->s_pkt == NULL || s_video->s_frame == NULL) { FreeAll(); return FALSE; }
+    return TRUE;
+}
+
+BOOL plat_video_read_frame(const char* path, int timeMs, unsigned char** rgba,
+                          int* width, int* height)
+{
+    if (!rgba || !width || !height) return FALSE;
+    *rgba = NULL; *width = *height = 0;
+    if (!path || timeMs < 0 || s_video->s_fmt != NULL || s_video->s_active || s_video->s_endEvent) return FALSE;
+    if (!OpenPicture(path)) return FALSE;
+    int target = (int)((double)timeMs * s_video->s_fps / 1000.0 + .5);
+    SeekTo(target); // no audio decoder was opened
+    BOOL ok = FALSE;
+    if (s_video->s_frameIndex >= target && s_video->s_rgba && s_video->s_width > 0 && s_video->s_height > 0 &&
+        s_video->s_width <= 4096 && s_video->s_height <= 4096) {
+        size_t bytes = (size_t)s_video->s_width * s_video->s_height * 4;
+        *rgba = (unsigned char*)malloc(bytes);
+        if (*rgba) {
+            memcpy(*rgba, s_video->s_rgba, bytes);
+            *width = s_video->s_width; *height = s_video->s_height;
+            ok = TRUE;
+        }
+    }
+    FreeAll();
+    return ok;
+}
+
+BOOL plat_video_open_and_play(const char* path, int playToMs)
+{
+    if (!OpenPicture(path)) return FALSE;
 
     // Audio decoder (optional)
-    if (s_astream >= 0) {
-        AVStream* st = s_fmt->streams[s_astream];
+    if (s_video->s_astream >= 0) {
+        AVStream* st = s_video->s_fmt->streams[s_video->s_astream];
         const AVCodec* codec = avcodec_find_decoder(st->codecpar->codec_id);
         if (codec != NULL) {
-            s_actx = avcodec_alloc_context3(codec);
-            if (s_actx == NULL ||
-                avcodec_parameters_to_context(s_actx, st->codecpar) < 0 ||
-                avcodec_open2(s_actx, codec, NULL) < 0) {
-                avcodec_free_context(&s_actx);
-                s_astream = -1;
+            s_video->s_actx = avcodec_alloc_context3(codec);
+            if (s_video->s_actx == NULL ||
+                avcodec_parameters_to_context(s_video->s_actx, st->codecpar) < 0 ||
+                avcodec_open2(s_video->s_actx, codec, NULL) < 0) {
+                avcodec_free_context(&s_video->s_actx);
+                s_video->s_astream = -1;
             }
         } else {
-            s_astream = -1;
+            s_video->s_astream = -1;
         }
     }
 
-    s_pkt   = av_packet_alloc();
-    s_frame = av_frame_alloc();
-    if (s_pkt == NULL || s_frame == NULL) { FreeAll(); return FALSE; }
-
-    if (s_astream >= 0) {
+    if (s_video->s_astream >= 0) {
         DecodeAllAudio();
     }
 
     // The cut point arrives as a time; turn it into this movie's frames (the
     // stream rate is known now, and a converted movie's rate need not be the
     // originals' 10 fps).
-    s_playToFrame = (playToMs > 0)
-        ? (int)((double)playToMs / 1000.0 * s_fps + 0.5) : 0;
-    s_active = TRUE;
-    s_endEvent = FALSE;
+    s_video->s_playToFrame = (playToMs > 0)
+        ? (int)((double)playToMs / 1000.0 * s_video->s_fps + 0.5) : 0;
+    s_video->s_active = TRUE;
+    s_video->s_endEvent = FALSE;
     SeekTo(0);
     Present();
 
     fprintf(stderr, "[VIDEO] playing %s (%dx%d, %.2f fps, audio %s)\n",
-            path, s_width, s_height, s_fps, s_useAudio ? "on" : "off");
+            path, s_video->s_width, s_video->s_height, s_video->s_fps, s_video->s_useAudio ? "on" : "off");
     return TRUE;
 }
 
 void plat_video_play_from(int fromMs)
 {
-    if (s_fmt == NULL) return;
-    const int fromFrame = (int)((double)fromMs / 1000.0 * s_fps + 0.5);
-    s_playToFrame = 0;
-    s_endEvent = FALSE;
-    s_active = TRUE;
+    if (s_video->s_fmt == NULL) return;
+    const int fromFrame = (int)((double)fromMs / 1000.0 * s_video->s_fps + 0.5);
+    s_video->s_playToFrame = 0;
+    s_video->s_endEvent = FALSE;
+    s_video->s_active = TRUE;
     SeekTo(fromFrame);
     fprintf(stderr, "[VIDEO] play_from(%dms -> frame %d) index %d eof=%d\n",
-            fromMs, fromFrame, s_frameIndex, (int)s_eof);
+            fromMs, fromFrame, s_video->s_frameIndex, (int)s_video->s_eof);
     Present();
 }
 
 void plat_video_stop(void)
 {
-    s_active = FALSE;
+    s_video->s_active = FALSE;
 }
 
 void plat_video_close(void)
@@ -559,19 +596,19 @@ void plat_video_close(void)
 
 BOOL plat_video_is_active(void)
 {
-    return s_active;
+    return s_video->s_active;
 }
 
 BOOL plat_video_take_end_event(void)
 {
-    if (!s_endEvent) return FALSE;
-    s_endEvent = FALSE;
+    if (!s_video->s_endEvent) return FALSE;
+    s_video->s_endEvent = FALSE;
     return TRUE;
 }
 
 void plat_video_tick(void)
 {
-    if (!s_active || s_fmt == NULL) return;
+    if (!s_video->s_active || s_video->s_fmt == NULL) return;
 
     // Target frame: the sound card's cursor when it is trustworthy, the wall
     // clock otherwise. The audio is the better clock (it cannot drift from the
@@ -579,42 +616,82 @@ void plat_video_tick(void)
     // fallback - consumes the whole movie in milliseconds, and following that
     // would fast-forward the picture. Accept the audio clock only while it is
     // in step with real time.
-    const double wallSeconds = (double)(plat_time_ms() - s_startTicks) / 1000.0;
+    const double wallSeconds = (double)(plat_time_ms() - s_video->s_startTicks) / 1000.0;
     double seconds = wallSeconds;
-    if (s_useAudio) {
+    if (s_video->s_useAudio) {
         const long pos = plat_audio_stream_pos();
         if (pos >= 0) {
             const double audioSeconds =
-                (double)(pos - s_audioStartSample) / (double)plat_audio_stream_rate();
+                (double)(pos - s_video->s_audioStartSample) / (double)plat_audio_stream_rate();
             if (audioSeconds >= wallSeconds - 0.5 && audioSeconds <= wallSeconds + 0.25) {
                 seconds = audioSeconds;
             }
         }
     }
 
-    const int target = s_baseFrame + (int)(seconds * s_fps);
+    const int target = s_video->s_baseFrame + (int)(seconds * s_video->s_fps);
 
     // Decode forward to the frame due now (the decode itself advances the
     // index from the frame's timestamp).
-    while (s_frameIndex < target && !s_eof) {
+    while (s_video->s_frameIndex < target && !s_video->s_eof) {
         if (!DecodeNextVideoFrame()) break;
     }
     Present();
 
     // End of the segment: the requested cut point, or the last frame once the
     // clock has moved past it.
-    if (s_playToFrame > 0 && s_frameIndex >= s_playToFrame) {
-        s_active = FALSE;
-        s_endEvent = TRUE;
+    if (s_video->s_playToFrame > 0 && s_video->s_frameIndex >= s_video->s_playToFrame) {
+        s_video->s_active = FALSE;
+        s_video->s_endEvent = TRUE;
         return;
     }
-    if (s_eof && target > s_frameIndex) {
-        s_active = FALSE;
-        s_endEvent = TRUE;
+    if (s_video->s_eof && target > s_video->s_frameIndex) {
+        s_video->s_active = FALSE;
+        s_video->s_endEvent = TRUE;
     }
 }
 
 void plat_video_set_window_mode(BOOL forVideo)
 {
     (void)forVideo;   // SDL has no MCI overlay to accommodate
+}
+
+// Each silent clip owns its decoder; existing FMV state is left untouched.
+struct PlatVideoClip { VideoState video; };
+PlatVideoClip* plat_video_clip_open(const char* path)
+{
+    PlatVideoClip* clip = new PlatVideoClip;
+    VideoState* saved = s_video;
+    s_video = &clip->video;
+    BOOL ok = OpenPicture(path);
+    if (ok && (s_video->s_width <= 0 || s_video->s_height <= 0 ||
+               s_video->s_width > 4096 || s_video->s_height > 4096)) ok = FALSE;
+    if (ok) ok = DecodeNextVideoFrame();
+    if (!ok) FreeAll();
+    s_video = saved;
+    if (!ok) { delete clip; return NULL; }
+    return clip;
+}
+BOOL plat_video_clip_frame(PlatVideoClip* clip, int timeMs,
+                          const unsigned char** rgba, int* width, int* height)
+{
+    if (!clip || !rgba || !width || !height) return FALSE;
+    VideoState* saved = s_video;
+    s_video = &clip->video;
+    int target = (int)((double)timeMs * s_video->s_fps / 1000.0);
+    while (s_video->s_frameIndex < target && !s_video->s_eof)
+        if (!DecodeNextVideoFrame()) break;
+    *rgba = s_video->s_rgba; *width = s_video->s_width; *height = s_video->s_height;
+    BOOL active = s_video->s_rgba && !(s_video->s_eof && target > s_video->s_frameIndex);
+    s_video = saved;
+    return active;
+}
+void plat_video_clip_close(PlatVideoClip* clip)
+{
+    if (!clip) return;
+    VideoState* saved = s_video;
+    s_video = &clip->video;
+    FreeAll();
+    s_video = saved;
+    delete clip;
 }

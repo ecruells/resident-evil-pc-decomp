@@ -15,6 +15,7 @@
 // ============================================================================
 #include "EntityCommon.h"
 #include "../../Globals.h"
+#include "../mods/ZombieMode.h"
 #include <cstring>
 
 // Plant 42 boss update (0x00464d10).
@@ -615,6 +616,9 @@ void SetEntityScaHitData(Entity* ent)
 // ============================================================================
 unsigned int ResolveEntityScaCollision(Entity* entA, Entity* entB)
 {
+    // Network puppets awaiting a snapshot are hidden, and cannot obstruct
+    // either a survivor or the director before their first puppet update.
+    if (zombie_mode_hide_entity(entA) || zombie_mode_hide_entity(entB)) return 0;
     if (entB->state == 4) return 0;       // eating/headless state - skip collision
     if ((entA->status_flags | entB->status_flags) & 2) return 0;  // one is deactivated
 
@@ -1481,6 +1485,11 @@ void FUN_0040a380(VECTOR* v0, VECTOR* v1)
 char reduce_attack_time_by_btn_press(void)
 {
     char reduce = 0;
+    // Port-added mod: the pad belongs to the zombie; the grabbed survivor's
+    // struggle is the AI's (mods/ZombieSurvivor.cpp).
+    if (zombie_mode_grab_mash(&reduce)) {
+        return reduce;
+    }
     if (((g_PlayerPadHeld >> 8) & 0xF0) != 0) reduce = 3;
     if ((g_PlayerPadHeld & 0xF0) != 0) reduce += 2;
     return reduce;
@@ -1777,9 +1786,24 @@ void update_entities(void)
         if ((ENTITY->status_flags & 0x01) != 0) {
             // 0x0048f12b: Call per-type update function from dispatch table
             void* updateFunc = enemies_update_functions_tbl[ENTITY->id];
+            // Port-added mod: the possessed zombie is driven by the pad.
+            if (ENTITY == g_zombieModeEntity) {
+                updateFunc = (void*)zombie_mode_update;
+            } else if (zombie_mode_is_remote_grabbed(ENTITY)) {
+                updateFunc = (void*)zombie_mode_remote_grabbed_update;
+            } else if (zombie_mode_is_puppet(ENTITY)) {
+                updateFunc = (void*)zombie_mode_puppet_update;
+            }
+            if (!zombie_mode_before_entity_update(ENTITY)) {  // port-added mod
+                updateFunc = NULL;
+            }
+            // Crushing has no monster death sound/animation: the slab hides
+            // these corpses and the director uses the explicit handoff.
+            if (zombie_mode_shotgun_corpse(ENTITY)) updateFunc = NULL;
             if (updateFunc != NULL) {
                 ((void(*)())updateFunc)();
             }
+            zombie_mode_after_entity_update(ENTITY);   // port-added mod
 
             // 0x0048f131-0x0048f197: the mirror pass. Bit 0 of g_main_state_flags
             // is set only by SCD opcode 0x0F, i.e. only by a room with a mirror

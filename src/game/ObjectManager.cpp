@@ -156,7 +156,7 @@ void ObjectCleanupCallback(void)
     // First pass: iterate g_objectCountArray and clear the texture pages of
     // each bank. The original walks 0x00a75168 (g_psxTextureArray), NOT the
     // TMD object buffer — using g_tmdObjectBuffer here corrupted TMD slots.
-    for (int i = 0; i < 32; i++) {
+    for (int i = 0; i < TEX_BANK_COUNT; i++) {     // 32 in the original (TexturePages.h)
         if (i == 22) {
             g_objectCountArray[22] = 1;
         } else {

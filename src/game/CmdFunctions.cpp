@@ -2,6 +2,7 @@
 // All functions in this file are entries in the script_command_funcs_table[81].
 // Each function takes no parameters and returns int (0 = stop, 1 = continue).
 #include "../Globals.h"
+#include "mods/ZombieMode.h"
 #include <cstdio>
 #include <cstring>
 #include "../DebugPrint.h"
@@ -204,6 +205,19 @@ int cmd_bit_op(void)
     unsigned int* target = (unsigned int*)((char*)flagBank + bitOffset);
     unsigned int mask = 0x80000000U >> bitIndex;
 
+    // Port-added mod: an SCD event in the zombie mode takes the control but
+    // does not stop the player, the monsters or the effects
+    // (mods/ZombieMessages.cpp).
+    if (operation == 1 && op1 >> 8 == 6 && bitOffset == 0) {
+        mask = zombie_mode_event_flag_clear(mask);
+    }
+    // Port-added mod: no letterbox for the scenes the mode plays as a
+    // close-up (an examine or a reveal), which can end without taking it away.
+    if (operation != 1 && op1 >> 8 == 5 && bitOffset == 0 && mask == MSF_INTENSITY_RAMP &&
+        !zombie_mode_event_letterbox()) {
+        return 1;
+    }
+
     if (operation == 0) {
         *target |= mask;
     } else if (operation == 1) {
@@ -301,6 +315,12 @@ int cmd_state_byte_set(void)
 // ============================================================================
 int cmd_cut_lock_set(void)
 {
+    // Port-added mod: an examine event whose close-up the survivor walked out
+    // of keeps its hands off the camera (mods/ZombieMessages.cpp).
+    if (zombie_mode_cut_skip()) {
+        g_ScdOpcodes += 2;
+        return 1;
+    }
     g_ScdOpcodes++;
     g_cutId = g_roomCameraId;
     g_roomCameraId = *g_ScdOpcodes;
@@ -317,6 +337,7 @@ int cmd_cut_lock_set(void)
     cut_set();
     g_ScdOpcodes++;
     g_main_state_flags |= MSF_CAMERA_LOCK;
+    zombie_mode_cut_closeup(g_cutId);   // port-added mod
     return 1;
 }
 
@@ -326,6 +347,12 @@ int cmd_cut_lock_set(void)
 // ============================================================================
 int cmd_current_cut_set(void)
 {
+    // Port-added mod: see cmd_cut_lock_set.
+    if (zombie_mode_cut_skip()) {
+        g_ScdOpcodes += 2;
+        return 1;
+    }
+    zombie_mode_cut_restored();
     g_roomCameraId = g_cutId;
     unsigned short camId = *(unsigned short*)((char*)g_RdtPointer->cam_switch_zones + 2);
     unsigned int zonePtr = (unsigned int)g_RdtPointer->cam_switch_zones;
@@ -374,6 +401,8 @@ int cmd_door_set(void)
     entry[1] = g_ScdOpcodes[0x19];
     *(unsigned short*)(entry + 2) = (unsigned short)doorNumber;
     *(unsigned int*)(entry + 8) = (unsigned int)(g_ScdOpcodes + 2);
+    // Port-added mod: the zombie mode's own key locks (mods/ZombieRandom.cpp).
+    zombie_mode_door_record(doorNumber & 0x7f, g_ScdOpcodes + 2);
     g_ScdOpcodes += 0x1a;
     dbg_printf("DOOR_AT_SET END %s\n", "door_at_set");
     return 1;
@@ -402,6 +431,7 @@ int cmd_room_action_set(void)
     *(unsigned short*)(entry + 4) = *(unsigned short*)(g_ScdOpcodes + 14);
     *(unsigned short*)(entry + 6) = *(unsigned short*)(g_ScdOpcodes + 16);
     *(unsigned int*)(entry + 8) = (unsigned int)(g_ScdOpcodes + 2);
+    zombie_mode_item_action(itemSlot);
     g_ScdOpcodes += 18;
     return 1;
 }
@@ -460,7 +490,8 @@ int cmd_picked_item_test(void)
 {
     unsigned char testVal = g_ScdOpcodes[1];
     g_ScdOpcodes += 2;
-    return testVal == g_pickedItemId;
+    // Port-added mod: a randomized spot's script tests for its original item.
+    return testVal == g_pickedItemId || zombie_mode_picked_original(testVal);
 }
 
 // ============================================================================
@@ -477,6 +508,7 @@ int cmd_room_action_reset(void)
     *(unsigned short*)(&g_RoomActionTable[base + 2]) = *(unsigned short*)(g_ScdOpcodes - 6);
     *(unsigned short*)(&g_RoomActionTable[base + 4]) = *(unsigned short*)(g_ScdOpcodes - 4);
     *(unsigned short*)(&g_RoomActionTable[base + 6]) = *(unsigned short*)(g_ScdOpcodes - 2);
+    zombie_mode_item_action((unsigned char)(base / 0xc));
     return 1;
 }
 
@@ -495,6 +527,7 @@ int cmd_room_action_arm(void)
     g_ScdOpcodes += 4;
     g_RoomActionTable[base]     = g_ScdOpcodes[-2];
     g_RoomActionTable[base + 1] = g_ScdOpcodes[-1];
+    zombie_mode_item_action((unsigned char)(base / 0xc));
     return 1;
 }
 
@@ -509,7 +542,10 @@ int cmd_scd_event_create(void)
     // it a byte at a time made scriptIndex constant 0.
     g_ScdOpcodes += 2;
     unsigned short param = scd_read_u16(0);
-    ScdEventEntry_Create(param & 0xFF, param >> 8);
+    // Port-added mod: play-as-zombie has no story, so no story scenes.
+    if (!zombie_mode_skip_scd_event(param >> 8)) {
+        ScdEventEntry_Create(param & 0xFF, param >> 8);
+    }
     g_ScdOpcodes += 2;
     return 1;
 }
@@ -610,6 +646,8 @@ int cmd_sfx_3d_play(void)
 int cmd_item_model_set(void)
 {
     dbg_printf("ITEM MODEL START %s\n", "imodel_set");
+    // Port-added mod: this game's item at the spot (mods/ZombieRandom.cpp).
+    zombie_mode_item_spot(g_ScdOpcodes);
 
     // skip ink ribbon model set if jill's first playthrough
     if ((char)g_ScdOpcodes[10] == ITEM_INK_RIBBONS && (g_playerEntity.id & 3) == 1) {
@@ -645,6 +683,13 @@ int cmd_item_model_set(void)
         visFlag &= 0xd;
     }
     entry[0] = visFlag;
+    // Port-added mod: the special weapons never lie in a room in the
+    // original, and their high ids pick the document handler (0xD); the
+    // mode's Ingram (the candle room's prize, a survivor's drop) is picked up
+    // like any item.
+    if (zombie_mode_armed() && visFlag != 0 && (itemType == ITEM_INGRAM || itemType == ITEM_MINIMI)) {
+        entry[0] = 4;
+    }
 
     // The original READS the word at +0x18, then WRITES BACK `word & 1` into the
     // opcode stream, and stores that masked value in entry+2. Everything after
@@ -663,15 +708,29 @@ int cmd_item_model_set(void)
 
     char* modelPtr = (char*)g_item_model_table[g_ScdOpcodes[0xc]];
     int* itemModelData = (int*)((char*)g_RdtPointer->item_models + (unsigned int)g_ScdOpcodes[0xc] * 8);
+    // Port-added mod: a randomized spot shows its new item - that item's view
+    // model, rescaled and already on its own texture pages (mods/ZombieRandom.cpp).
+    const int* modLook = zombie_mode_item_look(g_ScdOpcodes);
+    // "The room's first item model" was g_ItemModelCount == 0; with a mod look
+    // bound first that count is no longer 0 when the room's own first model
+    // comes, so it is tracked on its own. Identical without the mod.
+    static bool s_roomItemBound = false;
+    if ((char)g_ItemModelCount == 0) s_roomItemBound = false;
 
     // spriteInfo is chosen per branch below (it is NOT always modelPtr+0x20).
     MATRIX* spriteInfo = (MATRIX*)(modelPtr + 0x20);
 
-    if (*itemModelData == 0) {
+    if (modLook == NULL && *itemModelData == 0) {
         modelPtr[0x14] = 0; modelPtr[0x15] = 0;
         modelPtr[0x16] = 0; modelPtr[0x17] = 0;
     } else {
-        if (((char)g_ItemModelCount == 0 || DAT_00bca0d0[1] != itemModelData[1]) && itemModelData[1] != 0) {
+        if (modLook != NULL) {
+            // The room's item texture state (DAT_008e1c78/70, DAT_00bca0d0)
+            // is left as it was, so the room's own items after this one bind
+            // as they would have.
+            FUN_00473ea0(modLook[0], modelPtr + 0xc, (ScaMatrixData*)(modelPtr + 0x1c));
+        } else {
+        if ((!s_roomItemBound || DAT_00bca0d0[1] != itemModelData[1]) && itemModelData[1] != 0) {
             DAT_008e1c78 = g_TextureBankID;
             DAT_008e1c70 = g_TextureCurrentPage;
             ClearTmdProcessingFlag();
@@ -695,12 +754,13 @@ int cmd_item_model_set(void)
             }
             ProcessTmdAsync((unsigned int)itemModelData[1]);
         }
-        if ((char)g_ItemModelCount == 0 || *itemModelData != *DAT_00bca0d0) {
+        if (!s_roomItemBound || *itemModelData != *DAT_00bca0d0) {
             ProcessTmdTextures(2, (unsigned int*)(unsigned int)*itemModelData, DAT_008e1c78, DAT_008e1c70);
         }
         FUN_00473ea0(*itemModelData, modelPtr + 0xc, (ScaMatrixData*)(modelPtr + 0x1c));
         if ((char)g_ScdOpcodes[10] == ITEM_CRANK_HEX) {
             FUN_004870d0(*(int*)(modelPtr + 0x18));
+        }
         }
 
         // SCA parent: what the pos operands below are RELATIVE TO. They land in
@@ -804,7 +864,10 @@ int cmd_item_model_set(void)
 
     *(char*)&g_ItemModelCount = (char)g_ItemModelCount + 1;
     g_ScdOpcodes += 0x1a;
-    DAT_00bca0d0 = itemModelData;
+    if (modLook == NULL) {                                   // port-added mod: see above
+        DAT_00bca0d0 = itemModelData;
+        s_roomItemBound = true;
+    }
     dbg_printf("ITEM MODEL END %s\n", "imodel_set");
     return 1;
 }
@@ -885,6 +948,17 @@ int cmd_enemy_set(void)
         ENTITY->animationId = g_ScdOpcodes[0x13];
         ENTITY->animation_frame_id = g_ScdOpcodes[0x14];
         ENTITY->timing_control = 1;
+    }
+
+    // Port-added mod (mods/ZombieWorld.cpp): the persistent monster roster
+    // can put this monster where it was last left, or keep a dead one away -
+    // the unconditional records (+0x04) included, which the original spawns
+    // fresh on every visit.
+    if (!zombie_mode_enemy_spawn(ENTITY, enemySlot, g_ScdOpcodes[1])) {
+        ENTITY->status_flags = 0;
+        g_ScdOpcodes += 0x16;
+        dbg_printf("ENEMY SET END %s\n", "enemy_set");
+        return 1;
     }
 
     if (ENTITY->status_flags & 1) {
@@ -1222,6 +1296,12 @@ setupObject:
 // ============================================================================
 int cmd_player_pos_set(void)
 {
+    // Port-added mod: a reveal in the zombie mode leaves the survivor where
+    // it stands (mods/ZombieMessages.cpp).
+    if (zombie_mode_player_pos_skip()) {
+        g_ScdOpcodes += 0xe;
+        return 1;
+    }
     // Original: AND word ptr [player+0xE0],0xfff3 - clears bits 2 AND 3.
     g_playerEntity.unk_e0 &= 0xFFF3;
     g_playerEntity.position.pad = scd_read_s16(2);
@@ -1346,7 +1426,10 @@ int cmd_item_count_test(void)
 int cmd_cut_lock_write(void)
 {
     if ((char)g_ScdOpcodes[1] == 0) {
+        zombie_mode_cut_restored();   // port-added mod
         g_main_state_flags &= ~MSF_CAMERA_LOCK;
+    } else if (zombie_mode_cut_skip()) {
+        // Port-added mod: see cmd_cut_lock_set.
     } else {
         g_main_state_flags |= MSF_CAMERA_LOCK;
     }
@@ -1372,6 +1455,12 @@ int cmd_room_action(void)
     if (actionIdx >= ROOM_CHECK_ACTION_COUNT || room_check_actions[actionIdx] == nullptr) {
         return 1;
     }
+    // Port-added mod: a pickup scene cut short by a hit does not open its take
+    // screen afterwards (mods/ZombieMessages.cpp).
+    if (zombie_mode_event_room_action_skip(actionIdx)) return 1;
+    // Port-added mod: the attic's key or crest stays put while Yawn is there
+    // (mods/ZombieYawn.cpp).
+    if (zombie_mode_yawn_guards(&g_RoomActionTable[(unsigned int)slotIdx * 0xc], actionIdx)) return 1;
     ((RoomActionFunc)room_check_actions[actionIdx])(
         &g_RoomActionTable[(unsigned int)slotIdx * 0xc]);
     return 1;
@@ -1505,6 +1594,11 @@ int cmd_enemy_prop_set(void)
 // ============================================================================
 int cmd_fmv_set(void)
 {
+    // Port-added mod: play-as-zombie has no story, so no cutscene movies.
+    if (zombie_mode_armed()) {
+        g_ScdOpcodes += 2;
+        return 1;
+    }
     g_main_state_flags |= MSF_FMV_REQUEST;
     *(unsigned char*)&g_selectedFmvId = (unsigned char)(scd_read_u16(0) >> 8);
     g_fmvDataPointer = g_loadDataDestPointer;
@@ -1640,6 +1734,11 @@ int cmd_item_remove(void)
 // ============================================================================
 int cmd_got_item(void)
 {
+    // Port-added mod: a pickup scene cut short by a hit opens no menu.
+    if (zombie_mode_event_room_action_skip(4)) {
+        g_ScdOpcodes += 4;
+        return 0;
+    }
     cmd_room_action();
     g_main_state_flags |= MSF_MENU_MODE_GOT_ITEM;
     g_main_state_flags ^= MSF_MENU_MODE_ITEM_VIEW;

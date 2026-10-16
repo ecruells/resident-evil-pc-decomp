@@ -7,6 +7,7 @@
 #include "../system/AssetPath.h"
 #include "../DebugPrint.h"
 #include "dc/ArrangeStages.h"   // room_file_stage()
+#include "mods/ZombieMode.h"
 
 extern void SetSpriteBufferFlag(void);
 
@@ -169,6 +170,8 @@ void display_room_camera_bg(void) // 0x00462d50
 // ============================================================================
 void check_camera_switch(int param_1) // 0x00462cc0
 {
+    if (zombie_mode_spectator_camera()) return;
+
     // 0x00462cc1-0x00462cc7: first candidate zone is the one AFTER the group
     // header that g_CurrentRdtDataTypePtr points at
     CAM_SWITCH_ZONE* zone = (CAM_SWITCH_ZONE*)g_CurrentRdtDataTypePtr + 1;
@@ -179,9 +182,14 @@ void check_camera_switch(int param_1) // 0x00462cc0
     }
 
     // 0x00462cdb-0x00462d02: walk this camera's zones
+    // Port-added mod: the camera follows the possessed zombie, not the player.
+    VECTOR* camTarget = zombie_mode_camera_target();
+    if (camTarget == NULL) {
+        camTarget = (VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t;
+    }
+
     while ((unsigned short)zone->camFrom == (unsigned short)g_roomCameraId) {
-        if (is_entity_in_switch_zone(
-                (VECTOR*)g_playerEntity.scaMatrixData.localMatrix.t, zone) != 0)
+        if (is_entity_in_switch_zone(camTarget, zone) != 0)
         {
             // 0x00462d1b: enter the new camera
             g_roomCameraId = (unsigned char)zone->camTo;

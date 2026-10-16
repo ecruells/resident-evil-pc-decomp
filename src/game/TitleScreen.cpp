@@ -5,13 +5,549 @@
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
 #include "SpriteRenderer.h"
+#include "InfestedTitleImage.h"
+#include "GuideTitleImage.h"
 #include "SFXIds.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>          // memcpy, for the DC title sheet assembly
 #include "../system/AssetPath.h"
+#include "../system/AudioFile.h"
+#include "../platform/platform.h"
+#include "../marni/MarniSound.h"
+#include "mods/ZombieMode.h"
+#include "mods/ZombieModeInternal.h"
+#include "mods/ZombieNet.h"
 
 extern void logos_state(void);
+extern void zombie_lobby_state(void);   // mods/ZombieLobby.cpp (port-added)
+
+// Preload the suffix so NEW GAME never waits for file I/O or audio completion
+// before starting the original flash/fade sequence.
+static int s_infestedBank = 0;
+static int s_infestedVoicePhase = 0;
+static unsigned int s_infestedStartMs = 0;
+static unsigned int s_infestedDelayMs = 0;
+
+static void title_load_infested(void)
+{
+    if (s_infestedBank) destroySndBank(s_infestedBank);
+    s_infestedBank = 0;
+    s_infestedVoicePhase = 0;
+    s_infestedDelayMs = 0;
+    char titlePath[1200], rooted[1200];
+    const char* name = g_SoundBanksTable[GetAssetVersion() != 0 ? BANK_BIO : BANK_TITLE][0];
+    snprintf(titlePath, sizeof(titlePath), GAME_DATA_ROOT "sound/%s.wav", name);
+    AudioFileData titleAudio = {};
+    if (AudioFile_Load(ResolveAssetRoot(titlePath, rooted, sizeof(rooted)), &titleAudio)) {
+        unsigned int frameBytes = titleAudio.channels * (titleAudio.bitsPerSample / 8);
+        if (frameBytes && titleAudio.sampleRate > 0) {
+            unsigned int frames = titleAudio.pcmSize / frameBytes;
+            // Split the calculation to keep it within 32-bit arithmetic.
+            unsigned int durationMs = (frames / titleAudio.sampleRate) * 1000u +
+                (frames % titleAudio.sampleRate) * 1000u / titleAudio.sampleRate;
+            s_infestedDelayMs = durationMs > 1000u ? durationMs - 1000u : 0;
+        }
+        free(titleAudio.buffer);
+    }
+    char exeDir[1024], path[1200];
+    if (!plat_exe_dir(exeDir, sizeof(exeDir))) return;
+    snprintf(path, sizeof(path), "%s/infested/infested.wav", exeDir);
+    s_infestedBank = loadSndBankFromWav(path);
+    if (!s_infestedBank) return;
+    set_volume(s_infestedBank, g_SfxVolume);
+    pan_set(s_infestedBank, 0);
+}
+
+static void title_infested_voice_frame(void)
+{
+    if (s_infestedVoicePhase == 1 &&
+        (plat_time_ms() - s_infestedStartMs >= s_infestedDelayMs ||
+         !getSndStat(g_SfxBanks[SFX_TITLE_EVIL01 * 2]))) {
+        playSnd(s_infestedBank, 0);
+        s_infestedVoicePhase = 2;
+    } else if (s_infestedVoicePhase == 2 && !getSndStat(s_infestedBank)) {
+        s_infestedVoicePhase = 0;
+    }
+}
+
+
+// Port-added PvP guide. Kept with the title so both platform builds share it.
+extern void zm_text_encode(char* s);
+static bool s_guideOpen = false;
+static int s_guideSection = 0;
+static int s_guidePage = -1;
+// Eight spacious rows: blank rows separate short, single-topic paragraphs.
+struct GuidePage { const char* heading; const char* lines[8]; };
+static const GuidePage kGeneral[] = {
+    { "WELCOME TO THE MANSION", {
+        "BRING A FRIEND, OR A WHOLE TEAM. ONE DIRECTOR",
+        "FACES 1-3 SURVIVORS IN THE RETURN MANSION.",
+        "",
+        "SURVIVORS EXPLORE TOGETHER. THE DIRECTOR FILLS",
+        "THEIR PATH WITH MONSTERS." } },
+    { "A FAMILIAR PLACE, A NEW ROUTE", {
+        "KEYS, CRESTS AND SUPPLIES MOVE AROUND EACH MATCH.",
+        "KNOWING THE MANSION HELPS, BUT THERE IS ALWAYS",
+        "MORE TO DISCOVER.",
+        "",
+        "STORY SCENES ARE SKIPPED. EVERY MONSTER YOU MEET",
+        "WAS BOUGHT BY THE DIRECTOR." } },
+    { "WHAT YOU ARE WORKING TOWARD", {
+        "SURVIVORS: GATHER THE FOUR CRESTS AND OPEN THE",
+        "STOREROOM EXIT TO THE COURTYARD. ONE ESCAPE WINS",
+        "FOR YOUR WHOLE TEAM.",
+        "",
+        "DIRECTOR: STOP THEM UNTIL THE 20 MINUTE CLOCK",
+        "RUNS OUT, OR KILL EVERY SURVIVOR." } },
+    { "GETTING EVERYONE TOGETHER", {
+        "THE DIRECTOR CHOOSES NEW GAME, THEN HOST.",
+        "SURVIVORS CHOOSE JOIN AND ENTER THE HOST ADDRESS.",
+        "",
+        "ONCE EVERYONE IS CONNECTED, THE HOST PRESSES",
+        "ENTER TO REVIEW THE MAP." } },
+    { "RETURNING AFTER CONNECTION LOSS", {
+        "A LOST CONNECTION PAUSES THE MATCH FOR UP TO",
+        "30 SECONDS. KEEP THE GAME OPEN TO RECONNECT.",
+        "",
+        "AFTER A CRASH, CHOOSE NEW GAME AND REJOIN YOUR",
+        "SURVIVOR NUMBER ON THE SAME COMPUTER. RETURN",
+        "BEFORE THE COUNTDOWN ENDS. IF THE HOST CLOSES",
+        "ITS GAME, THE MATCH CANNOT BE RECOVERED." } },
+    { "TAKE A LOOK AT THE MAP", {
+        "TAKE A MOMENT TO PLAN YOUR ROUTE. ACTION ACCEPTS",
+        "THE MAP. AIM VOTES TO VETO IT AND DRAW A NEW ONE.",
+        "",
+        "EACH TEAM GETS ONE VETO. SURVIVORS MUST ALL",
+        "AGREE. THE HOST PRESSES ENTER TO START AFTER",
+        "ALL ACCEPT, OR CAN PROCEED AFTER 90 SECONDS." } },
+    { "BEFORE THE CLOCK STARTS", {
+        "THE DIRECTOR GETS TWO MINUTES TO PREPARE.",
+        "SURVIVORS CHOOSE DIFFERENT CHARACTERS AND CAN",
+        "CHANGE THEIR PICKS UNTIL THEY SPAWN.",
+        "",
+        "EVERYONE ARRIVES IN THE MAIN HALL. THE CLOCK",
+        "STARTS ONCE ALL ARE IN; THE HALL STAYS PROTECTED",
+        "FOR 60 SECONDS." } },
+};
+static const GuidePage kDirector[] = {
+    { "YOUR PART IN THE MATCH", {
+        "YOU SET THE PACE OF THE DANGER. SPEND POINTS ON",
+        "MONSTERS, THEN TAKE CONTROL OF ONE TO HUNT THE",
+        "SURVIVORS YOURSELF.",
+        "",
+        "YOU CAN WIN BY WEARING DOWN THE TEAM OR KEEPING",
+        "THE EXIT OUT OF REACH UNTIL TIME RUNS OUT." } },
+    { "TAKING CONTROL", {
+        "ARROWS MOVE AND TURN YOUR MONSTER. RUN MOVES",
+        "FASTER. ACTION ATTACKS; AIM + ACTION USES A",
+        "SECOND ATTACK.",
+        "",
+        "START SWITCHES BODIES. THE MONSTER PROFILES THAT",
+        "FOLLOW EXPLAIN EACH SET OF ATTACKS." } },
+    { "MOVING AROUND THE MANSION", {
+        "OPTIONS OPENS OR CLOSES YOUR MAP. TO TRAVEL ON",
+        "FOOT, PRESS ACTION AT A DOOR. SURVIVOR KEY LOCKS",
+        "DO NOT STOP YOU.",
+        "",
+        "ON THE MAP, SELECT A ROOM AND PRESS ACTION TO",
+        "JUMP TO A CONTROLLABLE MONSTER THERE." } },
+    { "BUYING YOUR FIRST MONSTERS", {
+        "ON THE MAP, ARROWS SELECT A ROOM. RUN OPENS THE",
+        "MONSTER AND TRAP LIST; UP AND DOWN CHOOSE A TYPE.",
+        "",
+        "ACTION OR RUN RETURNS TO THE MAP. AIM BUYS AND",
+        "PLACES YOUR SELECTION. CHECK ITS PRICE AND THE",
+        "ROOM LIMIT FIRST." } },
+    { "ROOM LIMITS", {
+        "HUNTERS AND CHIMERAS USE TWO ROOM SLOTS.",
+        "TYRANTS USE THREE. OTHER MONSTERS USE ONE.",
+        "",
+        "A TYRANT CAN FIT AN EMPTY ROOM EVEN WHEN ITS",
+        "LIMIT IS BELOW THREE. LATER PURCHASES MUST FIT",
+        "THE ROOM LIMIT." } },
+    { "GIVING SURVIVORS SOME SPACE", {
+        "OCCUPIED ROOMS ALLOW ONE DOOR REINFORCEMENT PER",
+        "MINUTE: A ZOMBIE OR UNLOCKED HUNTER, NORMAL COST.",
+        "",
+        "SAFE ROOMS ARE ALWAYS OFF LIMITS: NO ENTRY, MAP",
+        "JUMPS, MONSTERS OR TRAPS. THE HALL IS CLOSED",
+        "DURING ITS PROTECTION TIMER." } },
+    { "INTERCEPTING A SURVIVOR", {
+        "BUY A ZOMBIE OR HUNTER IN AN OCCUPIED ROOM.",
+        "IT USES THE CLOSEST SAFE DOOR OTHER THAN A",
+        "SURVIVOR'S ENTRANCE. ROOM LIMITS STILL APPLY.",
+        "",
+        "SURVIVORS HEAR A ONE SECOND WARNING. IF NO DOOR",
+        "IS SAFE, YOU SPEND NO POINTS OR COOLDOWN.",
+        "YOU CAN STILL JUMP TO MONSTERS OR USE TRAPS." } },
+    { "BUILDING YOUR BUDGET", {
+        "YOU START WITH 500, 800 OR 1000 POINTS FOR 1, 2",
+        "OR 3 SURVIVORS.",
+        "",
+        "WITH 1, 2 OR 3 SURVIVORS ALIVE, YOU EARN 1, 2 OR",
+        "4 POINTS EACH SECOND. YOU DO NOT NEED TO RUSH",
+        "EVERY PURCHASE." } },
+    { "MAKING YOUR MONSTERS COUNT", {
+        "A HIT FROM YOUR CONTROLLED MONSTER EARNS 50",
+        "POINTS. ANOTHER MONSTER EARNS 25 FOR A HIT. BOTH",
+        "BONUSES HAVE SHORT COOLDOWNS.",
+        "",
+        "WHEN A MONSTER DIES, YOU GET 25 PERCENT OF ITS",
+        "PRICE BACK. ROOM LIMITS GROW AT 6 AND 10 MINUTES." } },
+    { "MORE TOOLS AS TIME PASSES", {
+        "STRONGER MONSTERS UNLOCK AS THE MATCH GOES ON.",
+        "THEIR PROFILES LIST THE TIMES, COUNTED FROM WHEN",
+        "ALL SURVIVORS ARRIVE.",
+        "",
+        "LOCK DOORS COSTS 100 POINTS. IT BLOCKS SURVIVOR",
+        "ENTRANCES TO ONE ROOM FOR 10 SECONDS, WITH A",
+        "ONE MINUTE COOLDOWN." } },
+};
+static const GuidePage kSurvivors[] = {
+    { "YOU ARE IN THIS TOGETHER", {
+        "EXPLORE, SHARE WHAT YOU FIND AND HELP EACH OTHER",
+        "REACH THE COURTYARD. JUST ONE SURVIVOR NEEDS TO",
+        "OPEN THE EXIT FOR THE TEAM TO WIN.",
+        "",
+        "YOU HAVE 20 MINUTES. COLLECT THE FOUR CRESTS AND",
+        "KEEP AN EYE ON THE CLOCK AS YOU PLAN YOUR ROUTE." } },
+    { "FINDING YOUR FEET", {
+        "USE YOUR CONFIGURED GAME CONTROLS. ARROWS MOVE",
+        "AND TURN; RUN RUNS. AIM + ACTION USES YOUR",
+        "EQUIPPED WEAPON.",
+        "",
+        "ACTION OPENS DOORS, TAKES ITEMS AND WORKS",
+        "PUZZLES. YOUR INVENTORY LETS YOU EQUIP, USE AND",
+        "DROP ITEMS." } },
+    { "PLANNING YOUR NEXT MOVE", {
+        "OPTIONS OPENS YOUR ROUTE MAP. IT SHOWS KEY DOORS,",
+        "KEYS, CRESTS AND THE ROOMS YOUR TEAMMATES ARE IN.",
+        "",
+        "WAIT FIVE SECONDS BEFORE RETURNING TO THE ROOM",
+        "YOU JUST LEFT. OTHER EXITS REMAIN AVAILABLE.",
+        "NEARBY MONSTERS ARE STUNNED WHEN YOU ARRIVE.",
+        "STUN LASTS FIVE SECONDS. THEN THEY ARE IMMUNE",
+        "TO ENTRY STUNS FOR TEN SECONDS." } },
+    { "A PLACE TO CATCH YOUR BREATH", {
+        "SAFE ROOMS KEEP THE DIRECTOR OUT. USE THE BREAK",
+        "TO SORT YOUR SUPPLIES AND THINK ABOUT WHERE TO GO",
+        "NEXT.",
+        "",
+        "EVERY ITEM BOX SHARES THE SAME TEAM STORAGE. IT",
+        "STARTS EMPTY; LEAVE SOMETHING THERE FOR A",
+        "TEAMMATE WHO NEEDS IT." } },
+    { "SHARING WHAT YOU CARRY", {
+        "IN THE INVENTORY COMMAND MENU, CHOOSE DROP TO",
+        "LEAVE AN ITEM AT YOUR FEET FOR SOMEONE ELSE TO",
+        "TAKE.",
+        "",
+        "DROPPED ITEMS STAY FOR THE MATCH. IF YOU DIE,",
+        "YOUR INVENTORY FALLS AROUND YOUR BODY SO THE TEAM",
+        "CAN RECOVER IT." } },
+    { "BRINGING A TEAMMATE BACK", {
+        "CARRY A FIRST AID SPRAY, STAND CLOSE TO THEIR",
+        "BODY AND HOLD ACTION FOR FIVE SECONDS TO REVIVE",
+        "THEM.",
+        "",
+        "KEEP CLOSE AND COVER EACH OTHER. RELEASING",
+        "ACTION, GETTING HURT OR BEING GRABBED CANCELS",
+        "YOUR ATTEMPT." } },
+    { "THE CHANCE TO RETURN", {
+        "THERE IS NO DEADLINE TO REVIVE A TEAMMATE.",
+        "EACH SURVIVOR CAN COME BACK ONCE PER",
+        "MATCH, AT 25 PERCENT HEALTH.",
+        "",
+        "REBECCA REVIVES FASTER, CAN USE A GREEN HERB AND",
+        "BRINGS TEAMMATES BACK WITH MORE HEALTH. SEE HER",
+        "PROFILE FOR DETAILS." } },
+    { "STAYING WITH YOUR TEAM", {
+        "AFTER DEATH, YOU STAY IN THE MATCH. AFTER FOUR",
+        "SECONDS YOU WATCH A LIVING TEAMMATE; LEFT AND",
+        "RIGHT CHANGE WHO YOU FOLLOW.",
+        "",
+        "A REVIVE BRINGS YOU BACK TO YOUR BODY. IF",
+        "EVERYONE DIES, THE DIRECTOR WINS, SO HELP EACH",
+        "OTHER WHILE YOU STILL CAN." } },
+};
+static void guide_text(int x, int y, unsigned char color, const char* text)
+{
+    zm_setup_text(x, y, color, text);
+}
+static int guide_general_count(void)
+{
+    return s_guideSection == 0 ? (int)(sizeof(kGeneral) / sizeof(kGeneral[0])) :
+           s_guideSection == 1 ? (int)(sizeof(kDirector) / sizeof(kDirector[0])) :
+                                (int)(sizeof(kSurvivors) / sizeof(kSurvivors[0]));
+}
+static int guide_page_count(void)
+{
+    return guide_general_count() + (s_guideSection == 1 ? 7 : s_guideSection == 2 ? ZM_CHAR_COUNT : 0);
+}
+static void title_guide_update(void)
+{
+    unsigned int pad = g_PlayerPadPressed;
+    int oldSection = s_guideSection, oldPage = s_guidePage;
+    if (pad & 0x40) {
+        play_sfx(SFX_UI_BANK, SFX_UI_CANCEL);
+        zm_guide_profile(-1, -1);
+        if (s_guidePage >= 0) s_guidePage = -1;
+        else { s_guideOpen = false; zm_guide_background(false); }
+        g_titleDemoTime = 0x708;
+        return;
+    }
+    const GuidePage* pages = s_guideSection == 0 ? kGeneral :
+                             s_guideSection == 1 ? kDirector : kSurvivors;
+    int count = guide_page_count();
+    if (s_guidePage < 0) {
+        if (pad & 0x1000) s_guideSection = (s_guideSection + 3) % 4;
+        if (pad & 0x4000) s_guideSection = (s_guideSection + 1) % 4;
+        if (pad & 0x80) {
+            play_sfx(SFX_UI_BANK, SFX_UI_DECIDE);
+            if (s_guideSection == 3) { zm_guide_profile(-1, -1); zm_guide_background(false); s_guideOpen = false; return; }
+            s_guidePage = 0;
+        }
+    } else {
+        if (pad & 0x8000) s_guidePage = (s_guidePage + count - 1) % count;
+        if (pad & (0x2000 | 0x80)) s_guidePage = (s_guidePage + 1) % count;
+    }
+    if (oldSection != s_guideSection || oldPage != s_guidePage) {
+        if (pad & 0x80) {
+            if (oldPage >= 0) play_sfx(SFX_UI_BANK, SFX_UI_DECIDE);
+        } else play_sfx(SFX_UI_BANK, SFX_UI_CURSOR);
+    }
+    zm_guide_background(true);
+    bool profile = s_guidePage >= guide_general_count();
+    if (!profile) zm_guide_profile(-1, -1);
+    if (s_guidePage < 0) {
+        static const char* labels[] = { "GENERAL / STARTING A MATCH", "THE DIRECTOR", "THE SURVIVORS", "BACK TO MAIN MENU" };
+        guide_text(24, 20, 0x8F, ZM_MODE_TITLE " GUIDE");
+        for (int i = 0; i < 4; ++i) {
+            guide_text(24, 65 + i * 21, i == s_guideSection ? 0x8F : 0x7F, labels[i]);
+            if (i == s_guideSection) guide_text(8, 65 + i * 21, 0x8F, ">");
+        }
+    } else {
+        // Re-evaluate after entering a section in this frame.
+        pages = s_guideSection == 0 ? kGeneral : s_guideSection == 1 ? kDirector : kSurvivors;
+        count = guide_page_count();
+        if (profile) {
+            int index = s_guidePage - guide_general_count();
+            zm_guide_profile(s_guideSection == 2 ? index : -1,
+                             s_guideSection == 1 ? index : -1);
+        } else {
+            guide_text(8, 16, 0x8F, pages[s_guidePage].heading);
+            for (int i = 0; i < 8; ++i)
+                if (pages[s_guidePage].lines[i]) guide_text(8, 44 + i * 18, 0x7F, pages[s_guidePage].lines[i]);
+        }
+        char footer[64];
+        snprintf(footer, sizeof(footer), "PAGE %d/%d  LEFT/RIGHT: PAGE", s_guidePage + 1, count);
+        guide_text(8, 202, 0x7F, footer);
+    }
+    guide_text(8, 232 - 14, 0x7F, s_guidePage < 0 ? "UP/DOWN: SELECT ACTION: OPEN RUN: BACK" : "ACTION: NEXT  RUN / ESC: BACK");
+}
+
+// Generated artwork matches the original menu sheet's bold capitals.
+// Embedded TIM keeps both platform builds independent of loose image files.
+static void title_build_guide_label(void)
+{
+    LoadTexturePage(kGuideTitleTim, 10, 0, 14, 0, 0, 0, 0);
+}
+
+// Archived INFESTATION alternative (the previous renderer and placement).
+// To restore it: uncomment this block and change the title initialization/draw
+// calls below to title_build_infestation / title_draw_infestation.
+/*
+// PvP INFESTATION wordmark: a dedicated procedural 4-bit TIM renderer.
+// The silhouette is hand-lettered; a seeded cellular field shades its tissue.
+// Generated once per title entry, then submitted as one sprite per frame.
+static void title_build_infestation(void)
+{
+    // Individual brush paths, not a font grid. Coordinates describe just
+    // this image; each letter has its own lean, height and baseline.
+    struct Stroke { unsigned char letter; float x0, y0, x1, y1; };
+    static const Stroke strokes[] = {
+        {0,2,1,13,0},{0,8,0,5,18},{0,0,18,11,19}, // I
+        {1,0,19,2,0},{1,2,0,15,18},{1,15,18,16,0}, // N
+        {2,2,19,3,0},{2,3,0,16,1},{2,2,9,13,8}, // F
+        {3,3,1,0,19},{3,3,1,15,0},{3,2,9,12,10},{3,0,19,15,17}, // E
+        {4,16,1,6,0},{4,6,0,1,5},{4,1,5,5,9},{4,5,9,13,10},
+        {4,13,10,16,14},{4,16,14,12,18},{4,12,18,1,17}, // S
+        {5,0,1,17,0},{5,9,0,6,19}, // T
+        {6,0,19,8,0},{6,8,0,17,18},{6,4,11,13,10}, // A
+        {7,0,0,17,2},{7,9,1,7,19}, // T
+        {8,2,1,13,0},{8,8,0,5,18},{8,0,18,11,19}, // I
+        {9,8,0,2,3},{9,2,3,0,13},{9,0,13,5,18},
+        {9,5,18,13,17},{9,13,17,17,10},{9,17,10,15,3},{9,15,3,8,0}, // O
+        {10,0,18,2,0},{10,2,0,15,19},{10,15,19,17,1} // N
+    };
+    const int width = 224, height = 32;
+    static unsigned char mask[width * height];
+    memset(mask, 0, sizeof(mask));
+    unsigned int rng = 0xE91DE11Cu;
+    auto random = [&rng]() { rng = rng * 1664525u + 1013904223u; return rng >> 16; };
+    auto dab = [&](float cx, float cy, float radius) {
+        for (int y = (int)(cy - radius - 1); y <= (int)(cy + radius + 1); ++y)
+            for (int x = (int)(cx - radius - 1); x <= (int)(cx + radius + 1); ++x) {
+                float dx = x - cx, dy = y - cy;
+                if (x > 0 && x < width - 1 && y > 0 && y < height - 1 &&
+                    dx * dx + dy * dy < radius * radius) mask[y * width + x] = 1;
+            }
+    };
+    static const float baseline[11] = {4,2,5,3,4,1,4,2,5,2,3};
+    static const float stretch[11] = {0.82f,0.91f,0.74f,0.86f,0.78f,0.96f,0.83f,0.88f,0.74f,0.91f,0.84f};
+    for (const Stroke& stroke : strokes) {
+        int g = stroke.letter;
+        for (int t = 0; t <= 32; ++t) {
+            float u = t / 32.0f;
+            float y = stroke.y0 + (stroke.y1 - stroke.y0) * u;
+            float x = stroke.x0 + (stroke.x1 - stroke.x0) * u;
+            float wobble = ((int)(random() % 101) - 50) / 140.0f;
+            dab(7 + g * 19 + x * 0.87f + y * (g % 2 ? -0.10f : 0.13f),
+                baseline[g] + y * stretch[g] + wobble,
+                1.35f + (random() % 100) / 120.0f);
+        }
+    }
+    // A few short, attached beads rather than a fringe under every letter.
+    // Keep the trails inside the existing image, above the menu text.
+    static const int dripX[] = {47, 86, 127, 183};
+    for (int i = 0; i < 4; ++i) {
+        int x = dripX[i];
+        for (int y = 23; y >= 12; --y) if (mask[y * width + x]) {
+            int length = 3 + i % 3;
+            for (int d = 1; d <= length; ++d)
+                dab((float)x, (float)(y + d), d == 1 ? 1.1f : 0.75f);
+            dab((float)x, (float)(y + length), 1.2f);
+            break;
+        }
+    }
+    struct Cell { int x, y; };
+    Cell cells[160];
+    for (int i = 0; i < 160; ++i) {
+        cells[i].x = (i % 32) * 7 + random() % 6;
+        cells[i].y = (i / 32) * 7 + random() % 6;
+    }
+    alignas(4) unsigned char tim[64 + width * height / 2] = {};
+    unsigned int* header = (unsigned int*)tim;
+    header[0] = 0x10; header[1] = 8; header[2] = 44;
+    unsigned short* clut = (unsigned short*)(tim + 12);
+    clut[0] = 0; clut[1] = 0x1E0; clut[2] = 16; clut[3] = 1;
+    unsigned short* palette = (unsigned short*)(tim + 20);
+    for (int i = 1; i < 16; ++i) {
+        int r = 4 + i * 27 / 15;
+        int g = i > 12 ? (i - 12) : 0;
+        int b = i > 12 ? (i - 12) : 0;
+        palette[i] = (unsigned short)(r | g << 5 | b << 10);
+    }
+    *(unsigned int*)(tim + 52) = 12 + width * height / 2;
+    unsigned short* image = (unsigned short*)(tim + 56);
+    image[2] = width / 4; image[3] = height;
+    for (int y = 1; y < height - 1; ++y) for (int x = 1; x < width - 1; ++x) {
+        int shade = 0;
+        if (mask[y * width + x]) {
+            int first = 100000, second = 100000;
+            for (int i = 0; i < 160; ++i) {
+                int dx = x - cells[i].x, dy = y - cells[i].y;
+                int distance = dx * dx + dy * dy;
+                if (distance < first) { second = first; first = distance; }
+                else if (distance < second) second = distance;
+            }
+            // Shade the continuous brush volume rather than dithering each
+            // pixel. Cellular boundaries remain subtle beneath the wet face.
+            int edgeDistance = 16;
+            for (int dy = -3; dy <= 3; ++dy) for (int dx = -3; dx <= 3; ++dx) {
+                int nx = x + dx, ny = y + dy;
+                int distance = dx * dx + dy * dy;
+                if (nx < 0 || nx >= width || ny < 0 || ny >= height ||
+                    !mask[ny * width + nx])
+                    if (distance < edgeDistance) edgeDistance = distance;
+            }
+            shade = edgeDistance <= 1 ? 6 : edgeDistance <= 4 ? 10 : 12;
+            if (second - first < 4 && shade > 7) shade -= 2;
+            if (first <= 1 && shade > 8) shade -= 2;
+            // Sparse highlights on the upper-left rim, a dark lower rim.
+            if (!mask[(y - 1) * width + x] && mask[y * width + x + 1]) shade = 13;
+            if (!mask[(y + 1) * width + x]) shade = 4;
+        } else if (mask[y * width + x - 1] && mask[(y - 1) * width + x]) shade = 1;
+        tim[64 + y * (width / 2) + x / 2] |= (unsigned char)(shade << ((x & 1) * 4));
+    }
+    LoadTexturePage(tim, 11, 0, 15, 0, 0, 0, 0);
+}
+
+static void title_draw_infestation(unsigned char brightness)
+{
+    TextureDesc word = {};
+    word.flags = brightness == 128 ? 0x10000000 : 0x40000000;
+    word.texturePage = 11;
+    word.clutY = 0x1E0;
+    // Centered screen coordinates: right of the original logo's center,
+    // below its lower edge, clear of PRESS START and the menu.
+    word.screenX = -72; word.screenY = 37;
+    word.width = 224; word.height = 32;
+    word.colorMulR = word.colorMulG = word.colorMulB = brightness;
+    // Two translucent black silhouettes feather the edge without a panel.
+    for (int layer = 0; layer < 2; ++layer) {
+        TextureDesc shadow = word;
+        shadow.texturePage = 12 + layer;
+        int first = g_SpriteQueueCount;
+        display_texture(&shadow, 2, 16 + layer, 1);
+        for (int i = first; i < g_SpriteQueueCount; ++i)
+            g_SpriteCommandBuffer[i].alpha = (layer == 0 ? 0.12f : 0.22f) * brightness / 128.0f;
+    }
+    display_texture(&word, 2, 15, 1);
+}
+*/
+
+// PvP wordmark: infested/images/infested.png converted to a 4-bit TIM by
+// tools/gen_infested_title.py and baked into InfestedTitleImage.h.
+static void title_build_infested(void)
+{
+    LoadTexturePage(kInfestedTitleTim, 11, 0, 15, 0, 0, 0, 0);
+    LoadTexturePage(kInfestedShadowTim0, 12, 0, 16, 0, 0, 0, 0);
+    LoadTexturePage(kInfestedShadowTim1, 13, 0, 17, 0, 0, 0, 0);
+}
+
+static void title_draw_infested(unsigned char brightness)
+{
+    TextureDesc word = {};
+    word.flags = brightness == 128 ? 0x10000000 : 0x40000000;
+    word.texturePage = 11;
+    word.clutY = 0x1E0;
+    // Centered screen coordinates: centred across the screen, raised a
+    // quarter of its height above y 49, where the code-drawn wordmark sat.
+    word.width = kInfestedTitleWidth; word.height = kInfestedTitleHeight;
+    word.screenX = -kInfestedTitleWidth / 2;
+    word.screenY = 49 - kInfestedTitleHeight / 2 - kInfestedTitleHeight / 4;
+    word.colorMulR = word.colorMulG = word.colorMulB = brightness;
+    // The 320x240 screen is scaled to the window per axis, so a wide window
+    // stretches sprites sideways. Narrow the quad (the UVs still cover the
+    // whole texture) so the artwork keeps its own aspect on any window.
+    float scaleX = 1.0f, scaleY = 1.0f;
+    MarniGetRenderScale(&scaleX, &scaleY);
+    int drawnWidth = kInfestedTitleWidth;
+    if (scaleX > 0.0f && scaleY > 0.0f)
+        drawnWidth = (int)(kInfestedTitleWidth * scaleY / scaleX + 0.5f);
+    auto fit = [drawnWidth](int first) {
+        for (int i = first; i < g_SpriteQueueCount; ++i) {
+            TextureDraw& cmd = g_SpriteCommandBuffer[i];
+            int center = cmd.x0 + kInfestedTitleWidth / 2;
+            cmd.x0 = (short)(center - drawnWidth / 2);
+            cmd.x1 = (short)(cmd.x0 + drawnWidth - 1);
+        }
+    };
+    // Two translucent black silhouettes feather the edge without a panel.
+    for (int layer = 0; layer < 2; ++layer) {
+        TextureDesc shadow = word;
+        shadow.texturePage = 12 + layer;
+        int first = g_SpriteQueueCount;
+        display_texture(&shadow, 2, 16 + layer, 1);
+        fit(first);
+        for (int i = first; i < g_SpriteQueueCount; ++i)
+            g_SpriteCommandBuffer[i].alpha = (layer == 0 ? 0.12f : 0.22f) * brightness / 128.0f;
+    }
+    int first = g_SpriteQueueCount;
+    display_texture(&word, 2, 15, 1);
+    fit(first);
+}
 
 // ============================================================================
 // set_display_resolution (0x00401000)
@@ -184,6 +720,12 @@ static unsigned int dc_title_build_page(const unsigned char* file,
 // ============================================================================
 void init_title_screen(void)
 {
+    s_guideOpen = false;
+    s_guidePage = -1;
+    if (g_bPlayAsZombie && !g_bDcMode) {
+        title_build_guide_label();
+        title_build_infested();
+    }
     g_bGameActive = 0;
     set_display_resolution(320, 240, 0);
 
@@ -245,7 +787,7 @@ void init_title_screen(void)
     }
 
 
-    if (check_save_files_exist()) {
+    if (!(g_bPlayAsZombie && !g_bDcMode) && check_save_files_exist()) {
         g_titleSelectionId = 2;
         g_main_state_flags &= ~MSF_SCREEN_MODE_MASK;
         return;
@@ -335,6 +877,9 @@ static const TitleTextPosData g_titleTextPosTableDc[7] = {
 // ============================================================================
 void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
 {
+    if (g_bPlayAsZombie && !g_bDcMode) title_draw_infested(brightness);
+    const bool guideSelected = selectionId == 2;
+    if (g_bPlayAsZombie && !g_bDcMode && selectionId != 0) selectionId = 1;
     TextureDesc* td = &g_TextureDesc;
 
     td->flags = 0x10000000;
@@ -369,6 +914,32 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
 
     td->clutY = 0x1E0;
 
+    // Port-added mod: draw NEW GAME and our generated GUIDE label, but
+    // the sheet's NEW GAME cell (rows 83-152 of t_press.tim / t_start.tim)
+    // carries the whole menu: NEW GAME lit (rows 84-94), LOAD GAME dimmed
+    // (102-112), the copyright (131-151). Drawn in two pieces, it leaves the
+    // LOAD GAME line out.
+    if (g_bPlayAsZombie && !g_bDcMode && selectionId == 1) {
+        const int cellTop = entry->vramY;
+        // Keep the PvP menu below INFESTED; copyright stays in place.
+        const int menuOffsetY = 12;
+        td->screenY += menuOffsetY;
+        td->texV = (unsigned char)cellTop;
+        td->height = 98 - cellTop;                      // NEW GAME
+        td->colorMulR = td->colorMulG = td->colorMulB = guideSelected ? brightness / 2 : brightness;
+        display_texture(td, 2, entry->slot, 1);
+        td->colorMulR = td->colorMulG = td->colorMulB = brightness;
+        td->texV = 120;
+        td->height = cellTop + entry->sprHeight - 120;  // the copyright
+        td->screenY = entry->screenY + 38 + (120 - cellTop);
+        display_texture(td, 2, entry->slot, 1);
+        td->texV = 0; td->height = 16; td->screenY = 65 + menuOffsetY;
+        td->texturePage = 10;
+        td->colorMulR = td->colorMulG = td->colorMulB = guideSelected ? brightness : brightness / 2;
+        display_texture(td, 2, 14, 1);
+        return;
+    }
+
     display_texture(td, 2, entry->slot, 1);
 }
 
@@ -377,6 +948,7 @@ void UpdateTitleTextSprite(unsigned char brightness, unsigned char selectionId)
 // ============================================================================
 void update_title_options(void)
 {
+    title_infested_voice_frame();
 	DWORD sidewinderPress = 0;
 	DWORD sidewinderState = 0;
 	if (g_bPadConnected) {
@@ -384,6 +956,8 @@ void update_title_options(void)
 		sidewinderPress = sidewinderState & 0x10000 & ~g_PlayerPadHeldPrev;
 	}
 	g_PlayerPadHeldPrev = sidewinderState;
+
+    if (s_guideOpen) { title_guide_update(); return; }
 
     if (g_titleMode != 0) {
         if (g_titleMode != 1) return;
@@ -464,10 +1038,19 @@ void update_title_options(void)
                 g_titleOptionsFading = 2;
                 g_titleDemoTime = 0x708;
             }
+            // PvP has no saves; start on NEW GAME, with GUIDE below it.
+            if (g_bPlayAsZombie && !g_bDcMode) g_titleSelectionId = 1;
             UpdateTitleTextSprite(128, g_titleSelectionId);
             return;
 
 	case 2:
+        if (g_bPlayAsZombie && !g_bDcMode) {
+            if (g_PlayerPadPressed & 0x5000) g_titleSelectionId = g_titleSelectionId == 1 ? 2 : 1;
+            if (g_titleSelectionId == 2 && ((g_PlayerPadPressed & 0x80) || sidewinderPress)) {
+                s_guideOpen = true; s_guideSection = 0; s_guidePage = -1;
+                return;
+            }
+        }
 		UpdateTitleTextSprite(128, g_titleSelectionId);
 
 		// DC: confirming NEW GAME opens the STANDARD/TRAINING/ADVANCED submenu
@@ -483,9 +1066,13 @@ void update_title_options(void)
 			return;
 		}
 
-		if ((g_PlayerPadPressed & 0xeff) || sidewinderPress) {
+		if ((g_PlayerPadPressed & ((g_bPlayAsZombie && !g_bDcMode) ? 0x80 : 0xeff)) || sidewinderPress) {
 			play_sfx(SFX_BANKS, SFX_TITLE_EVIL01);
 			play_sfx(SFX_BANKS, 1); // null sfx
+			if (g_bPlayAsZombie && !g_bDcMode && g_titleSelectionId == 1) {
+				s_infestedStartMs = plat_time_ms();
+				s_infestedVoicePhase = s_infestedBank ? 1 : 0;
+			}
 			g_titleOptionsFading = 6;
 			g_fade_type_id = 1;
 			g_fading_counter = 0x7F00;
@@ -494,7 +1081,7 @@ void update_title_options(void)
 			return;
 		}
 
-		if (g_PlayerPadPressed & 0x5100) {
+		if ((g_PlayerPadPressed & 0x5100) && !(g_bPlayAsZombie && !g_bDcMode)) {
 			if (!(g_PlayerPadPressed & 0x1100)) {
 				if (g_titleSelectionId == 2) g_titleSelectionId = 0;
 				g_titleSelectionId++;
@@ -510,6 +1097,8 @@ void update_title_options(void)
 		}
 
 	demo_reset:
+            // Infestation stays on the menu indefinitely instead of entering attract mode.
+            if (g_bPlayAsZombie && !g_bDcMode) break;
             g_titleDemoTime--;
             if (g_titleDemoTime != 0) break;
 
@@ -574,6 +1163,13 @@ void update_title_options(void)
 
         case 9:
             if (g_fading_state < 0) {
+                // Hold the title after its flashes until both lines finish.
+                // Waiting after the final fade lets the standalone renderer
+                // draw the eye again while the suffix is still playing.
+                if (s_infestedVoicePhase != 0) {
+                    UpdateTitleTextSprite(0x80, g_titleSelectionId);
+                    return;
+                }
                 g_titleOptionsFading = 4;
                 g_fade_type_id = 2;
                 g_fading_counter = 0x270;
@@ -610,7 +1206,8 @@ void update_title_options(void)
             break;
 
         case 2:
-            g_titleDemoTime--;
+            // Keep PRESS START responsive, but do not time out into a demo.
+            if (!(g_bPlayAsZombie && !g_bDcMode)) g_titleDemoTime--;
             UpdateTitleTextSprite(0x80, 0);
             if (g_titleDemoTime == 0) {
                 g_titleOptionsFading = 3;
@@ -683,6 +1280,8 @@ void title_state(void)
     // have slot 0 as the logo voice and 13/14/15 as Cancel/Type01/Type02, so the
     // play_sfx ids in update_title_options are unchanged; only the bank differs.
     LoadSoundBank(GetAssetVersion() != 0 ? BANK_BIO : BANK_TITLE, g_DataBuffer);
+    if (g_bPlayAsZombie && !g_bDcMode) title_load_infested();
+    if (g_bPlayAsZombie && !g_bDcMode) load_character_sfx(0);
 
     g_fading_state = -1;
     g_titleLoopFlag = 0;
@@ -703,11 +1302,14 @@ void title_state(void)
     Task_sleep(1);
 
     if (g_fmvPlayCount < 1) {
-        g_selectedFmvId = 0;
-        g_fmvDataPointer = g_loadDataDestPointer;
         g_fmvPlayCount = 0x10;
-        g_main_state_flags = g_main_state_flags | MSF_FMV_REQUEST;
-        Task_sleep(1);
+        // Port-added mod: no opening movie (OU.avi) in play-as-zombie.
+        if (!zombie_mode_skip_intro()) {
+            g_selectedFmvId = 0;
+            g_fmvDataPointer = g_loadDataDestPointer;
+            g_main_state_flags = g_main_state_flags | MSF_FMV_REQUEST;
+            Task_sleep(1);
+        }
     }
 
     g_main_state_flags = (g_main_state_flags & ~MSF_SCREEN_MODE_MASK) | MSF_SCREEN_REBUILD;
@@ -726,6 +1328,15 @@ void title_state(void)
     }
 
     cleanup_texture_slot(12);
+    if (s_infestedBank) destroySndBank(s_infestedBank);
+    s_infestedBank = 0;
+    s_infestedVoicePhase = 0;
+    if (g_bPlayAsZombie && !g_bDcMode) {
+        cleanup_texture_slot(14);
+        cleanup_texture_slot(15);
+        cleanup_texture_slot(16);
+        cleanup_texture_slot(17);
+    }
 
     // DC: the difficulty submenu leaves the choice at 3..5 (and 6 for ADVANCED*
     // while the green cell is drawn). The PS1's title_state groups 1 and 3..6
@@ -748,6 +1359,12 @@ void title_state(void)
 
     case 1:
         nullsub_0047eb80();
+        // Port-added mod: NEW GAME goes through the zombie mod's lobby
+        // (single player / host / join) first; it chains the character select.
+        if (g_bPlayAsZombie && !g_bDcMode) {
+            Task_chain((void*)zombie_lobby_state);
+            return;
+        }
         Task_chain((void*)characterSelectionScreen);
 
         // The character select starts the game itself (CharacterSelectionScreen

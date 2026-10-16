@@ -205,7 +205,7 @@ void FUN_004850d0(void)
     // redirect table. The page lives inside g_psxTextureArray (0x1b60 per bank).
     int texPage = 0;
     if (prims != NULL) {
-        texPage = (*(int*)((char*)prims + 8) & 0x1f0000) >> 0x10;
+        texPage = (int)TexPageFromTsb((unsigned int)*(int*)((char*)prims + 8) >> 0x10);   // & 0x1f0000, widened
     }
     if (texPage >= 0 && texPage < 23 && g_textureBankRedirect[texPage] != 0) {
         texPage = g_textureBankRedirect[texPage];

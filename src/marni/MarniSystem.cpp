@@ -221,7 +221,7 @@ static int VTable_Clear(void* self)
 {
     CMarniDirect3D* pD3D = (CMarniDirect3D*)self;
     if (!pD3D || !pD3D->m_isInitialized) return 0;
-    if (!pD3D->m_isActive) return 0;
+    if (!pD3D->m_isActive && !g_bPlayAsZombie) return 0;
 
     float r, g, b;
     if (g_debugClearR != 0.0f || g_debugClearG != 0.0f || g_debugClearB != 0.0f) {

@@ -5,7 +5,8 @@
 #include "../Globals.h"
 #include "../DebugPrint.h"
 #include "../platform/platform.h"
-#include "AssetPath.h"   // SetAssetBase / SetSaveRoot / SetAssetVersion
+#include "AssetPath.h"
+#include "../game/mods/ZombieNet.h"   // [Net] keys   // SetAssetBase / SetSaveRoot / SetAssetVersion
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -43,6 +44,8 @@ const OwnedKey kOwnedKeys[] = {
     { "Player",  "ClearCount" },
     { "Input",   "KeyDef" },
     { "Input",   "SideDef" },
+    { "Net",     "Address" },     // port-added: the zombie mod's last host
+    { "Net",     "Port" },
 };
 const int kOwnedKeyCount = (int)(sizeof(kOwnedKeys) / sizeof(kOwnedKeys[0]));
 
@@ -162,7 +165,8 @@ const char* ResolveConfiguredPath(const char* exeDir, const char* value,
 }
 
 // Static line pool for keys that have to be inserted rather than replaced.
-char s_newLine[16][700];
+const int kNewLineCount = kOwnedKeyCount * 3;
+char s_newLine[kNewLineCount][700];
 int  s_newLineUsed = 0;
 
 void SetValue(const char* section, const char* key, const char* value,
@@ -203,14 +207,14 @@ void SetValue(const char* section, const char* key, const char* value,
         if ((size_t)(keyEnd - p) != keyLen || strncmp(p, key, keyLen) != 0) continue;
 
         // Replace in place.
-        if (s_newLineUsed < 16) {
+        if (s_newLineUsed < kNewLineCount) {
             snprintf(s_newLine[s_newLineUsed], sizeof(s_newLine[0]), "%s=%s", key, value);
             lines[i] = s_newLine[s_newLineUsed++];
         }
         return;
     }
 
-    if (*count + 3 >= MAX_LINES || s_newLineUsed + 3 > 16) return;
+    if (*count + 3 >= MAX_LINES || s_newLineUsed + 3 > kNewLineCount) return;
 
     if (sectionHeader < 0) {
         // Unknown section: append it whole.
@@ -394,6 +398,17 @@ void ConfigFile_EnsureExists(void)
         "; cutscenes unskippable; set this to 1 to make those skippable too.\n"
         "SkipUnskippableFmv=%d\n"
         "\n"
+        "[Mods]\n"
+        "; 1 = a new game puts you in the main hall as a zombie, hunting the\n"
+        "; character you picked, who explores the mansion on its own and shoots\n"
+        "; back (intro skipped). Forward/back walk,\n"
+        "; left/right turn, run speeds the walk up, action attacks or opens a\n"
+        "; door, aim lies down / gets up (forward crawls while down).\n"
+        "PlayInfested=%d\n"
+        "; Default AI DIRECTOR difficulty: 1-5 = easy, normal, hard, nightmare, hell on earth.\n"
+        "; 0 uses normal. Human director matches never run the AI.\n"
+        "AiDirector=0\n"
+        "\n"
         "[Debug]\n"
         "; Master switch for the port-added debug features: F1 debug menu, F6\n"
         "; texture viewer, F8 collision overlay. 0 = off, 1 = on.\n"
@@ -415,6 +430,7 @@ void ConfigFile_EnsureExists(void)
         g_bPs1EndingCredits ? 1 : 0,
         g_bPs1FmvSubtitles ? 1 : 0,
         g_bSkipUnskippableFmv ? 1 : 0,
+        g_bPlayAsZombie ? 1 : 0,
 #ifdef _DEBUG
         1,
 #else
@@ -514,6 +530,20 @@ BOOL ConfigFile_Load(void)
     // Port-added: overrides the per-FMV skip mask so the movies the original
     // marks unskippable can be skipped too. Off unless the key is set.
     g_bSkipUnskippableFmv = ReadInt(path, "Game", "SkipUnskippableFmv", 0) != 0;
+    // Port-added mod (src/game/mods/ZombieMode.cpp). Off unless the key is set.
+    g_bPlayAsZombie = ReadInt(path, "Mods", "PlayInfested", 0) != 0;
+    g_zmAiDirector = ReadInt(path, "Mods", "AiDirector", 0);
+    if (g_zmAiDirector < 0 || g_zmAiDirector > 5) g_zmAiDirector = 0;
+    g_bRunInBackgroundConfig = ReadInt(path, "Game", "RunInBackground", 0) != 0;
+    g_bRunInBackground = g_bRunInBackgroundConfig;
+    {
+        char addr[64];
+        if (ReadValue(path, "Net", "Address", addr, sizeof(addr)) && addr[0] != '\0') {
+            snprintf(g_zmNetAddress, sizeof(g_zmNetAddress), "%s", addr);
+        }
+        int port = ReadInt(path, "Net", "Port", (int)g_zmNetPort);
+        if (port > 0 && port <= 65535) g_zmNetPort = (unsigned short)port;
+    }
     dbg_printf("[CONFIG] mode=%s overlay=%s ps1_credits=%d\n", GameModeName(g_GameMode),
                GetAssetModeName()[0] ? GetAssetModeName() : "(none)",
                g_bPs1EndingCredits ? 1 : 0);
@@ -543,18 +573,32 @@ void ConfigFile_Save(void)
     s_newLineUsed = 0;
 
     FILE* f = fopen(path, "r");
-    if (f != NULL) {
+    if (f == NULL) {
+        dbg_printf("[CONFIG] save skipped: could not read %s\n", path);
+        return;
+    }
+    bool complete = true;
+    {
         char buf[MAX_LINE];
         while (count < MAX_LINES && fgets(buf, sizeof(buf), f) != NULL) {
             size_t n = strlen(buf);
+            if (n == sizeof(buf) - 1 && buf[n - 1] != '\n') { complete = false; break; }
             while (n > 0 && (buf[n - 1] == '\n' || buf[n - 1] == '\r')) buf[--n] = '\0';
             lines[count] = (char*)malloc(n + 1);
-            if (lines[count] == NULL) break;
+            if (lines[count] == NULL) { complete = false; break; }
             memcpy(lines[count], buf, n + 1);
             malloced[mallocedCount++] = lines[count];
             count++;
         }
-        fclose(f);
+        if (ferror(f) || (count == MAX_LINES && fgetc(f) != EOF)) complete = false;
+        if (fclose(f) != 0) complete = false;
+    }
+    // Never turn a missing/unreadable/truncated input into an owned-keys-only
+    // config. Even an empty file is evidence to preserve, not a settings base.
+    if (!complete || count == 0) {
+        dbg_printf("[CONFIG] save skipped: incomplete or empty input %s\n", path);
+        for (int i = 0; i < mallocedCount; ++i) free(malloced[i]);
+        return;
     }
 
     char values[kOwnedKeyCount][600];
@@ -572,19 +616,29 @@ void ConfigFile_Save(void)
     snprintf(values[6], sizeof(values[6]), "%u", (unsigned)g_dwClearCount);
     snprintf(values[7], sizeof(values[7]), "%s", keyHex);
     snprintf(values[8], sizeof(values[8]), "%s", sideHex);
+    snprintf(values[9], sizeof(values[9]), "%s", g_zmNetAddress);
+    snprintf(values[10], sizeof(values[10]), "%u", (unsigned)g_zmNetPort);
 
     for (int i = 0; i < kOwnedKeyCount; ++i) {
         SetValue(kOwnedKeys[i].section, kOwnedKeys[i].key, values[i], lines, &count);
     }
 
-    f = fopen(path, "w");
-    if (f == NULL) {
-        dbg_printf("[CONFIG] could not write %s\n", path);
+    size_t size = 0;
+    for (int i = 0; i < count; ++i) size += strlen(lines[i]) + 1;
+    char* output = (char*)malloc(size);
+    if (output == NULL) {
+        dbg_printf("[CONFIG] save skipped: out of memory\n");
     } else {
+        size_t offset = 0;
         for (int i = 0; i < count; ++i) {
-            fprintf(f, "%s\n", lines[i]);
+            size_t n = strlen(lines[i]);
+            memcpy(output + offset, lines[i], n);
+            offset += n;
+            output[offset++] = '\n';
         }
-        fclose(f);
+        if (!plat_file_write_atomic(path, output, size))
+            dbg_printf("[CONFIG] could not replace %s; existing file preserved\n", path);
+        free(output);
     }
 
     for (int i = 0; i < mallocedCount; ++i) {

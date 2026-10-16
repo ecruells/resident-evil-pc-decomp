@@ -1,0 +1,23 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Build Game (Release Win32)",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["build", "${workspaceFolder}/Build.proj", "-c", "Release", "-p:Platform=Win32"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": { "kind": "build", "isDefault": true },
+            "problemMatcher": "$msCompile"
+        },
+        {
+            "label": "Build Game (Debug Win32)",
+            "type": "process",
+            "command": "dotnet",
+            "args": ["build", "${workspaceFolder}/Build.proj", "-c", "Debug", "-p:Platform=Win32"],
+            "options": { "cwd": "${workspaceFolder}" },
+            "group": "build",
+            "problemMatcher": "$msCompile"
+        }
+    ]
+}

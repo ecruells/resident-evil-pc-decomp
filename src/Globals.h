@@ -61,6 +61,12 @@ extern BOOL          g_bHasFinalizedSettings;          // 0x004bcb78
 // Window/message-pump state flags
 extern BOOL          g_isPaused;                       // 0x004d46ac - SideWinder pause-button event (read+cleared by main_loop, injects START+bit8)
 extern BOOL          g_bWindowFocused;                 // 0x004bcb2c - window focused (WM_ACTIVATE), read by message pump
+// Port-added: keep running (and sounding) when the window loses focus, as two
+// copies side by side need. [Game] RunInBackground, and forced on while the
+// zombie mod's multiplayer link is up. The enabled zombie mod also bypasses
+// focus pausing without a link. Unfocused, the copy then reads no input.
+extern bool          g_bRunInBackground;
+extern bool          g_bRunInBackgroundConfig;
 extern BOOL          g_bWindowActive;                  // 0x004bcb30
 extern BOOL          g_bQuitFlag;                      // 0x004bcb40
 extern BOOL          g_bAccessibilityAnimations;
@@ -471,6 +477,12 @@ extern bool          g_bPs1FmvSubtitles;      // [Game] Ps1FmvSubtitles
 // per-FMV mask table (0x004c39dc) marks 0x0000 - the endings, the staff rolls
 // and DMF/DME. Off by default, so the original's masks are what ship.
 extern bool          g_bSkipUnskippableFmv;    // [Game] SkipUnskippableFmv
+// Port-added mod: start in the main hall controlling a zombie. Defined in
+// src/game/mods/ZombieMode.cpp, which documents it.
+extern bool          g_bPlayAsZombie;          // [Mods] PlayAsZombie
+// The director's autopilot (src/game/mods/ZombieDirectorAI.cpp): 0 off,
+// 1 easy, 2 normal, 3 hard, 4 nightmare, 5 hell on earth.
+extern int           g_zmAiDirector;           // [Mods] AiDirector
 
 // Every "are we in Director's Cut mode" test in the port. Deliberately a macro
 // over g_GameMode rather than a second global: there is one stored value, so
@@ -675,6 +687,7 @@ int texture_viewer_overlay(void);                 // DebugScreens.cpp - per-fram
 extern int           g_debugMenuOpen;            // 1 while the F1 debug menu overlay is open
 int debug_menu_overlay(void);                     // DebugMenu.cpp - F1 overlay; 1 while open
 void DebugRoomChange_ApplyPendingPlacement(void); // DebugMenu.cpp - post room_transition_load placement
+const char* DebugRoom_Name(unsigned char stage, unsigned char room); // DebugMenu.cpp - room name, NULL if unknown
 extern int           g_debugLoadSlot;             // quick access load: selected slot index (0-7)
 void DebugQuick_SaveSlot(int slot);               // DebugSaveLoad.cpp - write a full save to savedat<slot+1>.dat
 int  DebugQuick_LoadSlot(int slot);               // DebugSaveLoad.cpp - restore savedat<slot+1>.dat and arm the continue path; 0 = refused
@@ -864,7 +877,13 @@ extern DWORD         g_SysFlags[2];                    // 0x00be41c8 - SCD flag 
 // effect zones and cutscene triggers all live here. Entry byte 0 is the
 // room_check_actions handler index, byte 1 the probe flags, +8 the pointer to
 // the originating SCD record (the zone geometry).
-extern unsigned char g_RoomActionTable[288];        // 0x00d91aa0
+// Port-widened (the zombie mode's dropped items): the original's 24 entries,
+// then more up to the 128 a 7-bit SCD slot can name. Item model records:
+// 8 in the original, 64 here.
+#define ROOM_ACTION_ENTRIES_ORIGINAL 24
+#define ROOM_ACTION_ENTRIES          128
+#define ROOM_ITEM_MODELS             64
+extern unsigned char g_RoomActionTable[ROOM_ACTION_ENTRIES * 12];   // 0x00d91aa0 (288 bytes in the original)
 extern void*         g_RoomActionTail;              // 0x00d91bc0
 
 // Pointer to the room action entry the last fired handler latched (a
@@ -876,7 +895,7 @@ extern void*         g_pRoomActionEntry;               // 0x00d226a4
 
 // Room model record tables (populated by room_set from the RDT VB region)
 extern void*         g_omodel_table[8];      // 0x00d226b0 - room-object (omodel) records
-extern void*         g_item_model_table[8]; // 0x00d21360 - item model records (room pick-up 3D models)
+extern void*         g_item_model_table[ROOM_ITEM_MODELS]; // 0x00d21360 (8 in the original) - item model records (room pick-up 3D models)
 
 // Enemy model loading state (used by room_set and cmd_omodel_set)
 extern int           g_omodelCount;                    // 0x00ae9ef4 - object model count (cmd_omodel_set)
@@ -1437,8 +1456,11 @@ extern unsigned short g_SavedTextureBankID;            // 0x00bebcc6 - saved roo
 // Texture/bank arrays
 extern BYTE          g_textureQueueData[40];           // 0x00d22740
 
-extern BYTE          g_psxTextureArray[32 * 0x1b60];   // 0x00a75168 - 32 banks (verified against Ghidra: spans exactly to 0x00aabd68)
-extern DWORD         g_textureBankRedirect[32];        // 0x00aae2b0
+#include "marni/TexturePages.h"
+// Both were 32 banks in the original (verified against Ghidra: the array spans
+// exactly 0x00a75168..0x00aabd68); widened to TEX_BANK_COUNT (TexturePages.h).
+extern BYTE          g_psxTextureArray[TEX_BANK_COUNT * 0x1b60];   // 0x00a75168
+extern DWORD         g_textureBankRedirect[TEX_BANK_COUNT];        // 0x00aae2b0
 
 // Sprite/clear color
 extern float         g_color_r;                        // 0x004c336c
@@ -1490,7 +1512,7 @@ extern BYTE          g_faceNormalBuffer[250 * 8];      // 0x008fb8b0
 
 // Object cleanup globals
 extern int           g_objectDeleteFlag;               // 0x004d2bfc
-extern int           g_objectCountArray[32];           // 0x008ffc40
+extern int           g_objectCountArray[TEX_BANK_COUNT];   // 0x008ffc40 (32 in the original)
 extern int           g_objectDeleteCounter;            // 0x00aabd68
 extern BYTE          g_complexTmdObjectData[0x10800];  // 0x008ffcc0 - complex TMD object data area (see Globals.cpp)
 
@@ -1504,7 +1526,7 @@ extern DWORD         g_objectListPtrArray[0xE00];      // 0x008fc430 - 256 CMarn
 
 extern int          ARRAY_00922260[2016];           // 0x00922260
 
-extern DWORD        g_tmdTextureAllocated[48];     // 0x00922a40
+extern DWORD        g_tmdTextureAllocated[TEX_BANK_COUNT + 16];   // 0x00922a40 (48 in the original)
 
 extern int          g_complexTmdObjectArray[256];     // 0x00922b00
 extern int          INT_ARRAY_00922f00[530];          // 0x00922f00
@@ -1512,9 +1534,12 @@ extern int          g_complexTmdObjectIds[256];       // 0x00923748
 
 extern int          INT_ARRAY_00923b48[2];       // 0x00923b48
 
-extern BYTE         g_tmdObjectBuffer[1606172];  // 0x00923b50 area
+// Entity TMD object slots (0x1594 bytes each): the original's 250, widened by
+// the port (TMD_ENTITY_SLOT_COUNT, TmdRenderer.h) with 40 slots of slack.
+#define TMD_ENTITY_SLOT_COUNT   1000
+extern BYTE         g_tmdObjectBuffer[(TMD_ENTITY_SLOT_COUNT + 40) * 0x1594];  // 0x00923b50 area
 
-extern int          g_tmdObjectSlotAnimPtrs[251];     // 0x00aabd6c - TMD slot → animObjPtr table
+extern int          g_tmdObjectSlotAnimPtrs[TMD_ENTITY_SLOT_COUNT + 1];   // 0x00aabd6c - TMD slot -> animObjPtr table
 
 extern int          DAT_00aad6ec; // 0x00aad6ec 
 extern int          DAT_00aae740; // 0x00aae740 
@@ -1688,7 +1713,7 @@ extern DWORD        g_animObjectBuffer[0x680];       // 0x00c133c0 - weapon anim
 extern BYTE          g_shootDirEspBuffer[73728];
 
 // 0x00c26dc0 - General purpose data buffer (832728 bytes)
-extern BYTE          g_DataBuffer[832728];
+extern BYTE          g_DataBuffer[832728 + 0x400000];  // + port headroom (Globals.cpp)
 
 // 0x00cf2298 - TIM Image buffer, first 20 bytes are the header
 // Buffer Size: 187180 bytes (187160 headless)
@@ -1743,6 +1768,7 @@ void characterSelectionScreen(void);
 // --- Print text / primitives ---
 void PrintText8x8(short x, short y, unsigned char color, char shadow);
 void PrintText8x14(short x, short y, unsigned char color, char flags);
+void PrintText8x14Scaled(short x, short y, unsigned char color, char flags, float textScale);
 void PrintTextFormatted(short x, short y, unsigned char color, const unsigned char* data);
 void PrintFormattedText(short x, short y, unsigned char color, const unsigned char* data);
 void draw_rect(RectDrawDesc* rect, int blend, int flags);
@@ -1869,6 +1895,7 @@ void lab_slides_start(void);                           // 0x00463320 - shared in
 void lab_slides_update(void);                          // 0x004633c0 - shared update block
 void lab_slides_finish(void);                          // 0x004636b0 - shared finish block
 int  AddTintSprite(TextureDesc* texture, unsigned short brightness);
+int  AddTintSpriteScaled(TextureDesc* texture, unsigned short brightness, float textScale);
 int  AddTintSprite_Ex(TextureDesc* texture, unsigned short brightness);   // 0x0046f8a0
 // slide.tim CLUT-variant SRVs built by TexturePage_LoadImage (SpriteRenderer.cpp)
 MarniHandle Slides_GetVariantSRV(int variant);
@@ -1899,6 +1926,7 @@ void check_event_item_usage(void);                    // 0x0041c490
 void check_and_display_interactive_screen(void);      // 0x0042a030
 void TexturePage_ClearAll(void);                      // 0x0046c360
 void SetupJointStructures(void* buf);                 // 0x0048b9e0
+void* PlayerJointAnimationBuffer(void);               // player model's safe animation-object storage
 // 0x00462620 - implemented in EntityModelLoader.cpp. The parameter types must
 // match that definition exactly: an extra (int,int,void*,void*) declaration used
 // to exist here, which silently overloaded the real function and routed the menu
@@ -1920,6 +1948,7 @@ void setBackColor(unsigned short r, unsigned short g, unsigned short b); // 0x00
 void empty_40ae40(int param);                         // 0x0040ae40
 void update_entities(void);                           // 0x0048f0f0
 void update_player_anim(void);                        // 0x00494d90
+void player_menu_idle(void);                          // multiplayer inventory idle
 void update_player_position(PlayerEntity* ent, int a);// 0x0041c060
 int  check_door(unsigned char* entry);              // 0x0041b6d0 room_check_actions[5]
 int  no_room_action(unsigned char* entry);          // 0x0041c050 room_check_actions[0]

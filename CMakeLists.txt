@@ -101,6 +101,39 @@ set(RE1_SOURCES
     src/game/dc/EntityModels.cpp
     src/game/dc/ArrangeStages.cpp
     src/game/dc/ArrangeSoundRows.cpp
+    src/game/mods/ZombieMode.cpp
+    src/game/mods/ZombieSurvivor.cpp
+    src/game/mods/ZombieNav.cpp
+    src/game/mods/ZombieNet.cpp
+    src/game/mods/ZombieLobby.cpp
+    src/game/mods/ZombieWorld.cpp
+    src/game/mods/ZombieMap.cpp
+    src/game/mods/ZombiePerks.cpp
+    src/game/mods/ZombiePortraits.cpp
+    src/game/mods/ZombiePortraitImage.cpp
+    src/game/mods/ZombieRandom.cpp
+    src/game/mods/ZombieEconomy.cpp
+    src/game/mods/ZombieSpawnSpots.cpp
+    src/game/mods/ZombieTraps.cpp
+    src/game/mods/ZombieDirectorAI.cpp
+    src/game/mods/ZombieReinforcements.cpp
+    src/game/mods/ZombiePickups.cpp
+    src/game/mods/ZombieBox.cpp
+    src/game/mods/ZombieReconnect.cpp
+    src/game/mods/ZombieSpectate.cpp
+    src/game/mods/ZombieShotgun.cpp
+    src/game/mods/ZombiePiano.cpp
+    src/game/mods/ZombieBumpers.cpp
+    src/game/mods/ZombieVoice.cpp
+    src/game/mods/ZombieTimeout.cpp
+    src/game/mods/ZombieKeypad.cpp
+    src/game/mods/ZombieGreenhouse.cpp
+    src/game/mods/ZombieRoomSync.cpp
+    src/game/mods/ZombieStatue.cpp
+    src/game/mods/ZombieYawn.cpp
+    src/game/mods/ZombieStats.cpp
+    src/game/mods/ZombieDrops.cpp
+    src/game/mods/ZombieMessages.cpp
 
     src/game/entities/Adder.cpp
     src/game/entities/BlackTiger.cpp
@@ -140,6 +173,37 @@ list(APPEND RE1_SOURCES
 )
 
 add_executable(residentevil ${RE1_SOURCES})
+
+# Keep mod audio beside the executable, independently of the game asset root.
+# Run on incremental builds too, so adding recordings needs no C++ rebuild.
+# Generate the destination separately: using TARGET_FILE_DIR in the custom
+# target's command creates a circular dependency on CMake 3.16-3.18.
+# Test source existence at build time, so new recordings work without a
+# reconfigure even if the optional voices folder was initially absent.
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/copy_voice_lines_$<CONFIG>.cmake"
+    CONTENT "if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/infested/voices\")\n  execute_process(COMMAND \"${CMAKE_COMMAND}\" -E copy_directory \"${CMAKE_CURRENT_SOURCE_DIR}/infested/voices\" \"$<TARGET_FILE_DIR:residentevil>/infested/voices\" RESULT_VARIABLE copy_result)\n  if(NOT copy_result EQUAL 0)\n    message(FATAL_ERROR \"Failed to copy survivor voice recordings\")\n  endif()\nendif()\n")
+add_custom_target(copy_voice_lines
+    COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/copy_voice_lines_$<CONFIG>.cmake"
+    COMMENT "Copying survivor voice recordings"
+    VERBATIM)
+add_dependencies(residentevil copy_voice_lines)
+
+# The match bumpers (docs/INFESTED_BUMPERS.md): infested/video and the intro's
+# sound, copied the same way so new clips need no reconfigure either.
+file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/copy_bumpers_$<CONFIG>.cmake"
+    CONTENT "if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/infested/video\")\n  execute_process(COMMAND \"${CMAKE_COMMAND}\" -E copy_directory \"${CMAKE_CURRENT_SOURCE_DIR}/infested/video\" \"$<TARGET_FILE_DIR:residentevil>/infested/video\" RESULT_VARIABLE copy_result)\n  if(NOT copy_result EQUAL 0)\n    message(FATAL_ERROR \"Failed to copy match bumper videos\")\n  endif()\nendif()\nforeach(sound helicopter survive)\n  if(EXISTS \"${CMAKE_CURRENT_SOURCE_DIR}/infested/audio/\${sound}.wav\")\n    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E make_directory \"$<TARGET_FILE_DIR:residentevil>/infested/audio\")\n    execute_process(COMMAND \"${CMAKE_COMMAND}\" -E copy_if_different \"${CMAKE_CURRENT_SOURCE_DIR}/infested/audio/\${sound}.wav\" \"$<TARGET_FILE_DIR:residentevil>/infested/audio/\${sound}.wav\" RESULT_VARIABLE copy_result)\n    if(NOT copy_result EQUAL 0)\n      message(FATAL_ERROR \"Failed to copy the match bumper sound \${sound}.wav\")\n    endif()\n  endif()\nendforeach()\n")
+add_custom_target(copy_bumpers
+    COMMAND ${CMAKE_COMMAND} -P "${CMAKE_CURRENT_BINARY_DIR}/copy_bumpers_$<CONFIG>.cmake"
+    COMMENT "Copying match bumper videos"
+    VERBATIM)
+add_dependencies(residentevil copy_bumpers)
+
+add_custom_command(TARGET residentevil POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E make_directory "$<TARGET_FILE_DIR:residentevil>/infested"
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${CMAKE_CURRENT_SOURCE_DIR}/infested/audio/infested.wav"
+        "$<TARGET_FILE_DIR:residentevil>/infested/infested.wav"
+    VERBATIM)
 
 target_include_directories(residentevil PRIVATE src)
 

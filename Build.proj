@@ -1,0 +1,16 @@
+<Project DefaultTargets="Build">
+  <!-- The .NET SDK can orchestrate this build, but native C++ tasks must run
+       in Visual Studio's full-framework MSBuild via the existing scripts. -->
+  <PropertyGroup>
+    <Configuration Condition="'$(Configuration)' == ''">Debug</Configuration>
+    <Platform Condition="'$(Platform)' == ''">Win32</Platform>
+  </PropertyGroup>
+  <Target Name="Restore" />
+  <Target Name="Build">
+    <Error Condition="'$(OS)' != 'Windows_NT'" Text="This entry point requires Windows and Visual Studio C++ build tools. For Linux, use CMake (docs/LINUX_PORT.md)." />
+    <Error Condition="'$(Platform)' != 'Win32'" Text="The game requires Platform=Win32." />
+    <Error Condition="'$(Configuration)' != 'Debug' and '$(Configuration)' != 'Release'" Text="Configuration must be Debug or Release." />
+    <Exec Condition="'$(Configuration)' == 'Debug'" WorkingDirectory="$(MSBuildThisFileDirectory)" Command="&quot;$(MSBuildThisFileDirectory)build_debug.bat&quot;" />
+    <Exec Condition="'$(Configuration)' == 'Release'" WorkingDirectory="$(MSBuildThisFileDirectory)" Command="&quot;$(MSBuildThisFileDirectory)build.bat&quot;" />
+  </Target>
+</Project>

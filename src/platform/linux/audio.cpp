@@ -308,7 +308,7 @@ int DirectSound::GetVol(int bank)
     return vol;
 }
 
-int DirectSound::CreateSound(const char* wavName)
+int DirectSound::CreateSound(const char* wavName, bool muffled)
 {
     if (wavName == NULL) return 0;
 
@@ -336,6 +336,7 @@ int DirectSound::CreateSound(const char* wavName)
         }
         return 0;
     }
+    if (muffled) AudioFile_Muffle(&af);
     BYTE* wavData = af.buffer;
 
     if (s_dev != 0) SDL_LockAudioDevice(s_dev);

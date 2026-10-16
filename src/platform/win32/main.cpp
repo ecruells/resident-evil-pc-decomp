@@ -5,6 +5,7 @@
 #include "Globals.h"
 #include "system/AssetPath.h"
 #include "system/ConfigFile.h"
+#include "DebugPrint.h"
 
 // Forward declarations for local helpers
 static int  CheckSystemRequirements(void);
@@ -43,6 +44,7 @@ int PASCAL WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     // Dev tooling: capture fail-fast precursors to crash.log (see CrashLog.cpp)
     extern void crashlog_install(void);
     crashlog_install();
+    dbg_printf("[startup] Windows build: corpse appearance snapshots, network version 39\n");
 
     // 0x00441350: __chkstk() - stack probe for large stack frame
 
@@ -95,6 +97,10 @@ int PASCAL WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance, LPSTR lpCmdLine
     BOOL hasCDROM = EnumerateDriveTypes();
     
     // --- 0x004414a2: Single instance checks via mutex ---
+    // --multi (port-added): allow a second copy, as RE1_ALLOW_MULTI=1 does.
+    if (lpCmdLine != NULL && strstr(lpCmdLine, "--multi") != NULL) {
+        SetEnvironmentVariableA("RE1_ALLOW_MULTI", "1");
+    }
     if (!CheckSingleInstance()) {
         return 3; // already running
     }
@@ -275,6 +281,13 @@ int CheckSystemRequirements(void)
 // ============================================================================
 BOOL CheckSingleInstance(void)
 {
+    // Port-added: RE1_ALLOW_MULTI=1 lets a second copy run beside the first -
+    // the zombie mod's two-player link, tested on one machine.
+    char allow[8];
+    if (GetEnvironmentVariableA("RE1_ALLOW_MULTI", allow, sizeof(allow)) > 0 && allow[0] == '1') {
+        return TRUE;
+    }
+
     g_hMutex = OpenMutexA(MUTEX_ALL_ACCESS, FALSE, "RESIDENT EVIL PC DoubleStart Check");
     if (g_hMutex != NULL) {
         CloseHandle(g_hMutex);
@@ -556,51 +569,27 @@ int RunMessageLoop(void)
         if (PeekMessageA(&msg, NULL, 0, 0, peekFlags)) {
             // 0x00441d87: Get the message
             BOOL gotMsg = GetMessageA(&msg, NULL, 0, 0);
-                if (!gotMsg) {
-                // 0x00441da0: WM_QUIT received - cleanup and exit
-                DestroyAllSoundBanks();
-                CleanupAsyncTasks();
-
-                if (g_bHasFinalizedSettings) {
-                    if (!g_isGameCursorHiddenFlag) {
-                    ShowCursor(TRUE);
-                }
-                    // Show error message if applicable
-                    ShowMessageBox(NULL, "", "RESIDENT EVIL", MB_OK);
-                }
-                
-                if (g_bAccessibilityAnimations) {
-                    SystemParametersInfoA(SPI_SETANIMATION, 0, (PVOID)TRUE, SPIF_SENDCHANGE);
-                }
-                
-                CleanupVideoConfigAndSaveAllSettings();
-                CloseHandle(g_hMutex);
-                CleanupSharedMemory();
-                timeEndPeriod(1);
-                return (int)msg.wParam;
+            if (gotMsg <= 0) {
+                // Finalized settings means cleanup ran, not an error. The old
+                // branch displayed an empty message box on an ordinary quit.
+                exitCode = gotMsg == 0 ? (int)msg.wParam : 1;
+                break;
             }
-            
+
             // 0x00441dc2: Translate and dispatch
             TranslateMessage(&msg);
-            
-            // 0x00441dca: Handle WM_CLOSE (SC_CLOSE)
-            if (msg.message == WM_SYSCOMMAND && msg.wParam == SC_CLOSE) {
-                CleanupVideoConfigAndSaveAllSettings();
-            }
             
             DispatchMessageA(&msg);
         }
         
         // 0x00441dd6: Check if window was destroyed (DAT_004d4604)
         if (g_hWnd == NULL) {
-            CleanupVideoConfigAndSaveAllSettings();
             break;
         }
         
         // 0x00441de0: Check software rendering shared memory signals
         if (g_bIsSoftwareRendering && g_pSharedMemory != NULL) {
             if (g_pSharedMemory[3] == 0x01 && g_pSharedMemory[1] == 0x00) {
-                CleanupVideoConfigAndSaveAllSettings();
                 DestroyWindow(g_hWnd);
                 g_hWnd = NULL;
                 break;
@@ -623,7 +612,6 @@ int RunMessageLoop(void)
         if (!IsGraphicsSystemReadyForOperation()) {
             OutputDebugStringA("[MAIN LOOP] IsGraphicsSystemReadyForOperation returned FALSE\n");
             if (!g_displayReturnToTitleScreen_Flag) {
-                CleanupVideoConfigAndSaveAllSettings();
                 DestroyWindow(g_hWnd);
                 g_hWnd = NULL;
             }
@@ -645,7 +633,9 @@ int RunMessageLoop(void)
         // Losing focus therefore stops main_loop() being called at all - that is
         // the pause. The port previously ORed the two flags together with an
         // always-TRUE g_bWindowActive, so it never paused.
-        if (!g_bQuitFlag && g_bWindowFocused) {
+        // Background mode and the zombie mod keep an unfocused copy running,
+        // including the lobby before a multiplayer link is established.
+        if (!g_bQuitFlag && (g_bWindowFocused || g_bRunInBackground || g_bPlayAsZombie)) {
             if (g_hWnd != NULL || g_bWindowActive) {
                 DWORD currentTime = timeGetTime();
                 
@@ -712,11 +702,8 @@ int RunMessageLoop(void)
                 
                 if (loopResult == 0) {
                     // Game loop requested exit
-                    if (g_bAccessibilityAnimations) {
-                        SystemParametersInfoA(SPI_SETANIMATION, 0, (PVOID)TRUE, SPIF_SENDCHANGE);
-                    }
-                    CloseHandle(g_hMutex);
-                    return (int)msg.wParam;
+                    exitCode = (int)msg.wParam;
+                    break;
                 }
             }
             else {
@@ -727,5 +714,17 @@ int RunMessageLoop(void)
         }
     }
     
+    // All quit routes (including an unfocused taskbar-preview close) share
+    // this tail. Window callbacks no longer destroy the renderer mid-dispatch.
+    g_bQuitFlag = TRUE;
+    DestroyAllSoundBanks();
+    CleanupAsyncTasks();
+    CleanupVideoConfigAndSaveAllSettings();
+    if (!g_isGameCursorHiddenFlag) ShowCursor(TRUE);
+    if (g_bAccessibilityAnimations)
+        SystemParametersInfoA(SPI_SETANIMATION, 0, (PVOID)TRUE, SPIF_SENDCHANGE);
+    CloseHandle(g_hMutex);
+    CleanupSharedMemory();
+    timeEndPeriod(1);
     return exitCode;
 }

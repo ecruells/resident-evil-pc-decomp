@@ -8,6 +8,7 @@
 #include "../system/AssetPath.h"
 #include "dc/EntityModels.h"
 #include "dc/Items.h"        // DC_ITEM_BERETTA_CUSTOM
+#include "mods/ZombieMode.h"
 
 // ============================================================================
 // Extern data declarations (not yet extracted to Globals.h)
@@ -24,7 +25,7 @@ extern DWORD DAT_004c1a2c;                     // 0x004c1a2c
 extern DWORD DAT_00ae9f04;                     // 0x00ae9f04
 extern BYTE  g_textureQueueData[40];           // 0x00d22740
 extern DWORD g_animSlotIndex;                  // 0x008f8c78
-extern DWORD g_textureBankRedirect[32];        // 0x00aae2b0
+extern DWORD g_textureBankRedirect[TEX_BANK_COUNT];   // 0x00aae2b0
 extern DWORD g_bCostumeVariant;                     // 0x004d6444
 
 // Player/weapon angle globals
@@ -250,6 +251,33 @@ static const char g_weaponPathTable[][0xe][16] = {
         "players/w08.emw",
     }
 };
+
+// Port-added: Barry's own in-hand weapon files. The original's block 2 (above)
+// points Barry at Chris's set - Barry is never playable in the PC release - but
+// the disc carries his: Players/W21-W25 differ from W01-W05 (W20 is W00), and
+// they are cut for his model's texture layout. Used for the play-as-zombie
+// mod's Barry (zombie_mode_player_skin == 2); NULL = Chris's file stands.
+// Not the knife: W21's mesh is W01's byte for byte, but its animation table is
+// not a knife set (12 clips where the knife code expects W01's 15, laid out
+// differently from clip 5 on), so Barry stood waving it and struck with the
+// wrong clip. He takes Chris's W01 whole.
+static const char* const g_barryWeaponPaths[0xe] = {
+    "players/w20.emw", NULL, "players/w22.emw", "players/w23.emw",
+    "players/w24.emw", "players/w24.emw", "players/w25.emw",
+    NULL, NULL, NULL, NULL, NULL, NULL, NULL,
+};
+
+// The in-hand weapon file for character block `block` (0 Chris, 1 Jill,
+// 2 Barry, 3 Rebecca) and item id `weaponId`, with LoadEquippedWeaponAnimation's
+// remap of the special weapons (> 0x6e). Port-added (the mod's stand-ins).
+const char* WeaponModelPath(int block, unsigned char weaponId)
+{
+    if (weaponId > 0x6e) weaponId = (unsigned char)(0xd - (weaponId == 0x6f));
+    if (weaponId >= 0xe) weaponId = 0;
+    block &= 3;
+    if (block == 2 && g_barryWeaponPaths[weaponId] != NULL) return g_barryWeaponPaths[weaponId];
+    return g_weaponPathTable[block][weaponId];
+}
 
 // TMD texture header struct — defined in TmdAnimation.cpp, declared here for extern visibility
 #pragma pack(push, 1)
@@ -491,9 +519,12 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
 
     // The port's table is the OG's; in DC mode a handful of indices name a
     // different file (dc/EntityModels.cpp). NULL = the table entry stands.
-    const char* emdPath = g_emdPathTable[(g_playerEntity.id & 1) * 53 + entity_id];
+    // Enemy EMDs also supply the player's damage animations. Match those
+    // to the survivor's body, while retaining Chris's scenario scripts.
+    int playerBody = zombie_mode_player_body();
+    const char* emdPath = g_emdPathTable[playerBody * 53 + entity_id];
     if (g_bDcMode) {
-        const char* dcPath = dc_emd_path(entity_id, (unsigned char)(g_playerEntity.id & 1));
+        const char* dcPath = dc_emd_path(entity_id, (unsigned char)playerBody);
         if (dcPath != NULL) {
             emdPath = dcPath;
         }
@@ -553,9 +584,28 @@ void LoadEntityEMD(Entity* em, unsigned char entity_id)
     em->animHeader = (puVar2[1] & 0xFFFFFFFC) + data_pointer;
 
     if (*puVar2 != 0) {
-        g_playerEntity.emdScratchPtr1 = data_pointer;
-        g_playerEntity.emdScratchPtr2 = (*puVar2 & 0xFFFFFFFC) + data_pointer;
+        unsigned int damageBase = (*puVar2 & 0xFFFFFFFC) + data_pointer;
+        if (zombie_mode_armed()) {
+            zombie_mode_damage_model_loaded(em, data_pointer, damageBase);
+        } else {
+            g_playerEntity.emdScratchPtr1 = data_pointer;
+            g_playerEntity.emdScratchPtr2 = damageBase;
+        }
     }
+}
+
+// The player model's animation objects must follow all its joint structs,
+// including the spare magazine joint. Enrico's larger NPC mesh places those
+// structs across the original buffer boundary. Use the same allocation on
+// room load and on menu close so rebuilding cannot overwrite the joints.
+void* PlayerJointAnimationBuffer(void)
+{
+    unsigned int animObjects = (unsigned int)&g_entityModelBuffer2;
+    unsigned int jointsEnd = (unsigned int)(g_playerEntity.jointsStructs + g_playerEntity.jointCount + 1);
+    if (jointsEnd > animObjects) {
+        animObjects = (jointsEnd + 0xF) & ~0xFu;
+    }
+    return (void*)animObjects;
 }
 
 // ============================================================================
@@ -570,7 +620,10 @@ void LoadEntityModel(void)
     g_playerEntity.modelLoadBuffer = (DWORD)&g_entityModelBuffer;
     g_loadDataDestPointer = &g_entityModelBuffer;
 
-    LoadEntityEMD(ENTITY, g_playerEntity.id & 3);
+    // Port-added mod: a multiplayer survivor wears the character it picked
+    // (the scenario stays the one g_playerEntity.id names).
+    LoadEntityEMD(ENTITY, (unsigned char)zombie_mode_player_model_index(g_playerEntity.id & 3));
+    zombie_mode_player_model_loaded();
 
     Entity_SetJoints(ENTITY, sizeof(JointStruct));
 
@@ -578,11 +631,61 @@ void LoadEntityModel(void)
 
     InitAnimStructure((void*)g_playerEntity.modelLoadBuffer);
 
-    g_playerEntity.jointCount++;
+    // The player model carries one mesh object more than its skeleton has
+    // joints (16 for 15), set up as an extra joint here. Port-added guard:
+    // Barry's char12.emd - never a player model in the original - has only
+    // the 15, so the extra joint would read the slot table past its end
+    // (SetupJointStructures -> CreateAnimObject crashed on it). Such a model
+    // gets its 15 joints, and the extra one shares its last mesh. modelLoadBuffer
+    // is the slot array here (InitAnimStructure left it at header + 0xc).
+    const AnimDataHeader* modelHeader = (const AnimDataHeader*)(g_playerEntity.modelLoadBuffer - 0xc);
 
-    SetupJointStructures((unsigned int)&g_entityModelBuffer2);
+    // The joint structs sit right after the model's TMD (where LoadEntityEMD
+    // left g_loadDataDestPointer: the TIM, already uploaded), and the joints'
+    // animation objects start at g_entityModelBuffer2. Every player model's
+    // TMD ends early enough for the 16 joint structs to fit in between.
+    // Port-added guard: the mod's Enrico (em1028.emd, an NPC model) has a TMD
+    // ending at 0xCA4C, so its joint structs ran 0x590 bytes into
+    // g_entityModelBuffer2 and the animation objects overwrote them - a crash
+    // on load. Such a model's objects start after its joint structs instead
+    // (the spill guard behind the pair has the room); the original's
+    // models keep the original address.
+    unsigned int animObjects = (unsigned int)PlayerJointAnimationBuffer();
 
-    g_playerEntity.jointCount--;
+    unsigned int objectsEnd;
+    if (modelHeader->slotCount > (int)g_playerEntity.jointCount) {
+        g_playerEntity.jointCount++;
+
+        objectsEnd = SetupJointStructures(animObjects);
+
+        g_playerEntity.jointCount--;
+    } else {
+        unsigned int next = SetupJointStructures(animObjects);
+        objectsEnd = next;
+        unsigned char extra = g_playerEntity.jointCount;
+        JointStruct* joint = &g_playerEntity.jointsStructs[extra];
+        SetAnimSlot((AnimSlot*)g_playerEntity.modelLoadBuffer, (int)&joint->anim_field,
+                    modelHeader->slotCount - 1);
+        joint->index = extra;
+        joint->flags = 3;
+        joint->data_ptr = &joint->scale_flag;
+        joint->field_1c = 0;
+        joint->scale_flag = 1;
+        joint->anim_object = 0;
+        joint->field_02 = 0;
+        joint->anim_field = 0;
+        objectsEnd = (unsigned int)CreateAnimObject((int)&joint->anim_field, (unsigned int*)next);
+    }
+    if (animObjects != (unsigned int)&g_entityModelBuffer2) {
+        // The storage behind the pair (Globals.h) is its spill guard.
+        unsigned int storageEnd = (unsigned int)&g_entityModelBuffer2 + sizeof(g_entityModelBuffer2) +
+                                  sizeof(((EntityModelStorage*)0)->spillGuard);
+        dbg_printf("[model] player joints end past g_entityModelBuffer2: animation objects at +%X, "
+                   "ending %d bytes %s the storage's end\n",
+                   animObjects - (unsigned int)&g_entityModelBuffer2,
+                   (int)(objectsEnd > storageEnd ? objectsEnd - storageEnd : storageEnd - objectsEnd),
+                   objectsEnd > storageEnd ? "PAST" : "before");
+    }
 
     ResetJointTransforms();
 }
@@ -638,7 +741,10 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
     sprintf(FILE_PATH, "%s%s",
             GAME_DATA_ROOT,
             weaponModel != 0 ? weaponModel
-                             : g_weaponPathTable[g_playerEntity.id & 3][weapon_id]);
+                             : (zombie_mode_player_skin(g_playerEntity.id & 3) == 2 && weapon_id < 0xe &&
+                                g_barryWeaponPaths[weapon_id] != NULL)
+                                   ? g_barryWeaponPaths[weapon_id]
+                                   : g_weaponPathTable[zombie_mode_player_weapon_block(g_playerEntity.id & 3)][weapon_id]);
     SetSpriteBufferFlag();
 
     unsigned int fileSize = LoadFile(FILE_PATH, (void*)anim_buffer, 32);
@@ -660,7 +766,11 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
         unsigned char prevBank = g_TextureBankID;
         g_TextureCurrentPage = 7;
         g_TextureBankID = 0x16;
-        ProcessTmdTextures(2, (unsigned int*)joint->anim_slot_ptr, 0x16, 7);
+        // Port-added mod: a borrowed character's (Chris's) weapon reads
+        // Chris's texture sheet, loaded into the room's banks.
+        int weaponBank = 0x16, weaponPage = 7;
+        zombie_mode_weapon_texture(&weaponBank, &weaponPage);
+        ProcessTmdTextures(2, (unsigned int*)joint->anim_slot_ptr, weaponBank, weaponPage);
         g_TextureBankID = prevBank;
         g_TextureCurrentPage = prevPage;
         joint->anim_slot_ptr += 0xc;

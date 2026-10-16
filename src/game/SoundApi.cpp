@@ -12,6 +12,7 @@
 #include "../system/AssetPath.h"
 #include "../system/AudioFile.h"
 #include "marni/MarniSound.h"
+#include "mods/ZombieBumpers.h"
 
 // ---------------------------------------------------------------------
 // SFX filename sub-tables (game data, shared by both backends).
@@ -113,7 +114,7 @@ const char** g_SoundBanksTable[SFX_SUBTABLE_SIZE] = {
 // ============================================================================
 // Wrappers using g_pDirectSound
 // ============================================================================
-int loadSndBankFromWav(const char* path)
+int loadSndBankFromWav(const char* path, bool muffled)
 {
     // Callers build the path with GAME_DATA_ROOT, so it is already correct for the
     // build configuration - nothing to rewrite here.
@@ -122,7 +123,7 @@ int loadSndBankFromWav(const char* path)
         // stub (FUN_00420290). The async wrapper would overwrite the single
         // callback slot on each call, so batch loading via LoadSoundBank
         // would lose all but the last callback.
-        g_sndload_bank_index = g_pDirectSound->CreateSound(path);
+        g_sndload_bank_index = g_pDirectSound->CreateSound(path, muffled);
     } else {
         OutputDebugStringA("[DEBUG] loadSndBankFromWav: g_pDirectSound NOT READY\n");
         g_sndload_bank_index = 0;
@@ -132,6 +133,7 @@ int loadSndBankFromWav(const char* path)
 
 void destroySndBank(int bank)
 {
+    zombie_mode_bgm_stopped(bank);   // port-added mod: a held music channel goes with it
     if (g_pDirectSound != NULL && bank != 0) {
         g_pDirectSound->DestroySound(bank);
     }
@@ -139,6 +141,7 @@ void destroySndBank(int bank)
 
 void setSndStop(int bank)
 {
+    zombie_mode_bgm_stopped(bank);
     if (g_pDirectSound != NULL && bank != 0) {
         g_pDirectSound->StopSound(bank);
     }
@@ -148,6 +151,8 @@ void playSnd(int bank, int slot)
 {
     g_CurSlot = (short)slot;
     g_CurBank = bank;
+    // Port-added mod: the room's music waits for the match intro (ZombieBumpers.cpp).
+    if (zombie_mode_bgm_hold(bank)) return;
     if (g_pDirectSound != NULL && bank != 0) {
         g_pDirectSound->PlaySound(bank, (unsigned int)slot);
     }
@@ -157,6 +162,7 @@ void SetSndSlot(int bank, int slot)
 {
     g_CurSlot = (short)slot;
     g_CurBank = bank;
+    if (zombie_mode_bgm_hold(bank)) return;
     if (g_pDirectSound != NULL && bank != 0) {
         g_pDirectSound->PlaySound(bank, (unsigned int)slot);
     }

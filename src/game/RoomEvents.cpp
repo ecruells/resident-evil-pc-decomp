@@ -3,6 +3,7 @@
 #include "../Globals.h"
 #include "../DebugPrint.h"
 #include "dc/Items.h"    // lockpick item id the DC moved to 0x0D
+#include "mods/ZombieMode.h"   // port-added mod hooks
 #include <cstring>
 
 // Forward declaration
@@ -20,6 +21,8 @@ static void ScdEventEntry_Init(ScdEventEntry* entry, int scriptIndex)
     entry->scriptPtr = ((unsigned char**)g_RoomEventScripts)[scriptIndex];
     entry->stackDepth = 0xFF;
     entry->entity = ENTITY;
+    // Port-added mod: is it an examine event (mods/ZombieMessages.cpp)?
+    zombie_mode_event_init((int)(entry - g_ScdEventTable), scriptIndex);
 }
 
 // ============================================================================
@@ -341,6 +344,14 @@ static int scd_event_state1_anim(void)
 {
     unsigned short* opcodes = (unsigned short*)g_pScdEventCurrent->scriptPtr;
     Entity* ent = g_pScdEventCurrent->entity;
+
+    // Port-added mod: a reveal in the zombie mode does not pose the player
+    // (mods/ZombieMessages.cpp).
+    if (int skip = zombie_mode_event_pose_skip((int)(g_pScdEventCurrent - g_ScdEventTable), ent,
+                                               g_pScdEventCurrent->scriptPtr)) {
+        g_pScdEventCurrent->scriptPtr += skip;
+        return 1;
+    }
 
     switch ((unsigned char)*opcodes) {
     case 0x00: // Advance script pointer
@@ -750,16 +761,26 @@ event_dispatch:
                         scd_event_cmd_set_entity();
                         break;
                     case 0x05: // Create event
+                        // Port-added mod: which event starts it (mods/ZombieMessages.cpp).
+                        zombie_mode_event_cmd((int)(g_pScdEventCurrent - g_ScdEventTable));
                         scd_event_cmd_create();
+                        zombie_mode_event_cmd(-1);
                         break;
                     case 0x06: // Run SCD inline
+                        // Port-added mod: which event runs the commands.
+                        zombie_mode_event_cmd((int)(g_pScdEventCurrent - g_ScdEventTable));
                         scd_event_cmd_run_scd();
+                        zombie_mode_event_cmd(-1);
                         break;
                     case 0x07: // Execute SCD command
+                        zombie_mode_event_cmd((int)(g_pScdEventCurrent - g_ScdEventTable));
                         scd_event_cmd_exec();
+                        zombie_mode_event_cmd(-1);
                         break;
                     case 0x08: // Reinitialize event
+                        zombie_mode_event_cmd((int)(g_pScdEventCurrent - g_ScdEventTable));   // port-added mod
                         scd_event_cmd_init();
+                        zombie_mode_event_cmd(-1);
                         goto event_next_entry;
                     case 0x09: // Deactivate another event
                         g_ScdEventTable[scriptByte[1]].active = 0;
@@ -881,7 +902,7 @@ void* room_check_actions[ROOM_CHECK_ACTION_COUNT] = {
 // deactivated (first byte 0) and the model's opened flag cleared.
 //
 // Stackable items (ids 0x0b-0x12 and 0x2f) merge into an existing slot first:
-// up to the character's slot count ((4 - (id&3)!=1) * 2 - Chris 8, Jill 6),
+// up to the character's slot count (Chris 6, Jill 8),
 // capping a slot at 0xfa and spilling the overflow into a new slot. A fresh
 // slot records the first free index in g_ItemSlotIndices and raises its bit in
 // g_ItemSlotsBitmask, then the menu images are rebuilt.
@@ -891,6 +912,7 @@ void room_event_item_pickup(void)
     unsigned char* evt = (unsigned char*)g_pRoomActionEntry;
     unsigned char* record = *(unsigned char**)(evt + 8);
 
+    if (!zombie_mode_pickup_claim(evt, record)) return;
     *evt = 0;                                     // deactivate the event entry
     ((unsigned char*)g_item_model_table[record[10]])[0] = 0;
     unsigned short fxSlot =
@@ -904,6 +926,7 @@ void room_event_item_pickup(void)
         // pool bytes and the item's sparkle billboard kept rendering until the room
         // reload wiped the pool (e.g. ROOM1000's sword key, slot 63).
         memset_((unsigned int*)&g_effectPool[fxSlot], 0x21);
+        *(unsigned short*)((char*)g_item_model_table[record[10]] + 0x86) = 0;
     }
     FUN_00473f10((int*)&g_roomItemsFlags, record[0x14]);
 
@@ -918,12 +941,14 @@ void room_event_item_pickup(void)
     // (SLUS_005.51 0x8002ce28) shifts the record quantity left once for ammo and
     // ink ribbons when the mode bits are set. The USA build has no such branch.
     quantity = dc_item_pickup_quantity(g_selectedItemId, quantity);
+    // Port-added mod: Chris's world-ammo bonus excludes player drops.
+    quantity = zombie_mode_pickup_quantity(g_selectedItemId, quantity, record);
 
     // if ammo or ink ribbon
     if (((ITEM_ROCKET_LAUNCHER < g_selectedItemId) && (g_selectedItemId < ITEM_EMPTY_BOTTLE)) ||
         (g_selectedItemId == ITEM_INK_RIBBONS)) {
         // Stackable: merge into an existing slot of the same item id.
-        unsigned char slotCount = (unsigned char)((4 - ((g_playerEntity.id & 3) != 1)) * 2);
+        unsigned char slotCount = (unsigned char)zombie_mode_inventory_slots((4 - ((g_playerEntity.id & 3) != 1)) * 2);
         unsigned char idx = 0;
         while (slotCount != 0) {
             unsigned char* slot = (unsigned char*)g_ItemSlotsPointer + (unsigned int)idx * 2;
@@ -931,6 +956,7 @@ void room_event_item_pickup(void)
                 unsigned short merged = (unsigned short)(slot[1] + (unsigned short)quantity);
                 if (merged < 0xfb) {
                     slot[1] = (unsigned char)merged;
+                    zombie_mode_pickup_finished();
                     return;
                 }
                 if (g_TotalHeldItems < slotCount) {
@@ -960,6 +986,7 @@ void room_event_item_pickup(void)
     g_ItemSlotsBitmask |= 1u << (freeIdx & 0x1f);
     LoadHeldItemsImages();
     StMask(0, 1);
+    zombie_mode_pickup_finished();
 }
 
 // ============================================================================

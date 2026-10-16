@@ -65,7 +65,8 @@
 // longer a number anything else has to dodge. (g_tmdObjectBuffer is sized for
 // 290 slots; the extra 40 are slack, not a reservation.)
 #define TMD_SLOT_STRIDE         0x1594
-#define TMD_CLEANUP_SLOT_COUNT  250     // main-buffer slots ObjectCleanupCallback destroys
+#define TMD_CLEANUP_SLOT_COUNT  TMD_ENTITY_SLOT_COUNT   // main-buffer slots ObjectCleanupCallback destroys
+                                                        // (250 in the original; widened, Globals.h)
 #define TMD_DOOR_SLOT_COUNT     12      // one per door order entry
 #define TMD_ITEM_SLOT_COUNT     3       // one per item-viewer model object
 

@@ -9,6 +9,7 @@
 #include "dc/Items.h"    // lockpick item id (is_lockpick_item)
 #include "SpriteRenderer.h"
 #include "TmdRenderer.h"
+#include "mods/ZombieMode.h"
 #include <cstdlib>
 #include <cstdio>
 #include <time.h>
@@ -27,7 +28,8 @@ extern void rearrange_item_slots(void);
 // per-glyph text sprites (~390 sprites with hints) - at the original 300 the queue
 // overflowed, silently dropping the bottom rows AND the background quad that
 // OT_InsertPrimitive adds at present time, which blacked the whole screen.
-#define MAX_PENDING_SPRITES 512
+// Diagonal PvP map fills use clipped scanline runs, in addition to UI sprites.
+#define MAX_PENDING_SPRITES 32768
 
 // Pending sprites at or above this depth are scene elements drawn BEFORE the
 // 3D TMD pass (room backgrounds, window fills); below it they are overlays that
@@ -56,6 +58,12 @@ MarniHandle g_displayImageSRV = MARNI_NULL_HANDLE;
 // FrameRateGovernor before FlushSpriteCommands.
 // ============================================================================
 int AddTintSprite(TextureDesc* texture, unsigned short brightness)
+{
+    return AddTintSpriteScaled(texture, brightness, 1.0f);
+}
+
+// Scale the destination quad only; keep the complete bitmap glyph UVs.
+int AddTintSpriteScaled(TextureDesc* texture, unsigned short brightness, float textScale)
 {
     if (g_pendingSpriteCount >= MAX_PENDING_SPRITES) return 0;
 
@@ -93,8 +101,8 @@ int AddTintSprite(TextureDesc* texture, unsigned short brightness)
 
     float screenX = gameX * scaleX;
     float screenY = gameY * scaleY;
-    float charW = (float)texture->width * scaleX;
-    float charH = (float)texture->height * scaleY;
+    float charW = (float)texture->width * scaleX * textScale;
+    float charH = (float)texture->height * scaleY * textScale;
 
     // Font page select. The original's AddTintSprite looks `texturePage` up in
     // the texture-page table (JPN 0x00441120 / USA 0x0046e0a0 search slots
@@ -450,6 +458,9 @@ void FrameRateGovernor(void)
             // Render queued 3D TMD objects (entities, options-menu character)
             FlushTmdObjects();
 
+            // Port-added mod: Wesker's frozen ending frame under the results screen.
+            zombie_mode_bumper_draw_backdrop();
+
             // Render command buffer sprites (game objects, title text, etc.).
             // The >= 0x10000 half already drew before the TMD pass.
             //
@@ -512,6 +523,7 @@ void FrameRateGovernor(void)
                 }
             }
 
+            zombie_mode_bumper_draw();
             if (!g_DisablePad) {
                 MarniPresent();
             }
@@ -1184,6 +1196,8 @@ static const unsigned char** dc_usa_item_names(void)
 
 unsigned char* message_item_name_lookup(unsigned char itemId)
 {
+    unsigned char* modName = zombie_mode_pickaxe_name(itemId);
+    if (modName) return modName;
     // The Japanese release has its own pair of tables (0x004cd388/0x004cd548,
     // read by its message_item_name_lookup at 0x00491440) holding the names in
     // FONT.TIM's encoding. The USA strings would still draw - the two fonts
@@ -1406,6 +1420,8 @@ static void handle_message_post_action(void)
                     slots[(unsigned int)bVar4 * 2 + 1] = bVar1 - 1;
                     if (slots[(unsigned int)bVar4 * 2 + 1] == 0) {
                         if ((ITEM_OIL < g_selectedItemId) && (g_selectedItemId < ITEM_DESK_KEY)) { // is door key
+                            // Port-added mod: discarded at once, no prompt (mods/ZombieMessages.cpp).
+                            if (zombie_mode_key_used_up(slots, bVar4)) return;
                             g_main_state_flags = g_main_state_flags | MSF_MENU_MODE_KEY_DEPLETED;
                             return;
                         }
@@ -1461,6 +1477,7 @@ void UpdateMessageDisplay(void)
     unsigned char* pbVar3;
     short screenX;
     unsigned short fade;
+    int charsLeft = 1;      // port-added: characters still to type this frame
 
     g_TextureDesc.colorMulR = 0x80;
     g_TextureDesc.colorMulG = 0x80;
@@ -1503,6 +1520,7 @@ void UpdateMessageDisplay(void)
         }
 
         // Timer expired: process next character
+        charsLeft = zombie_mode_message_chars_per_frame();
         bVar1 = *g_MessageCurrentPtr;
         lineCount = g_MessageLineCounter;
         pbVar3 = g_MessageCurrentPtr;
@@ -1526,8 +1544,10 @@ void UpdateMessageDisplay(void)
                 return;
             }
             // Auto-advance after delay
+            // Port-added mod: the opening narration's pages are shorter in the
+            // zombie mode (mods/ZombieMessages.cpp).
             g_MessageStateCounter = 6;
-            g_MessageCharTimer = *g_MessageCurrentPtr << (g_bGameActive == 0);
+            g_MessageCharTimer = zombie_mode_message_page_delay(*g_MessageCurrentPtr) << (g_bGameActive == 0);
             message_render_chars();
             return;
 
@@ -1552,7 +1572,7 @@ void UpdateMessageDisplay(void)
                 return;
             }
             g_MessageStateCounter = 3;
-            g_MessageCharTimer = *g_MessageCurrentPtr << (g_bGameActive == 0);
+            g_MessageCharTimer = zombie_mode_message_page_delay(*g_MessageCurrentPtr) << (g_bGameActive == 0);
             g_MessageCurrentPtr = pbVar3 + 2;
             message_render_chars();
             return;
@@ -1613,6 +1633,13 @@ state1_case2:
 msg_skip_char:
             g_MessageCurrentPtr++;
             g_MessageCharTimer = g_MessageCharDelay;
+            // Port-added mod: more than one character a frame (mods/ZombieMessages.cpp).
+            if (--charsLeft > 0) {
+                bVar1 = *g_MessageCurrentPtr;
+                lineCount = g_MessageLineCounter;
+                pbVar3 = g_MessageCurrentPtr;
+                goto state1_process_char;
+            }
             goto state1_default;
         }
 
@@ -1624,7 +1651,9 @@ msg_skip_char:
 
     // === State 2: Waiting with blinking cursor ===
     case 2:
-        if ((g_PlayerDpadPressed & 0xC000) != 0) {
+        // Port-added mod: a zombie-mode message that does not stop the game
+        // turns its page after a reading time, not on a press.
+        if (zombie_mode_message_page_done((g_PlayerDpadPressed & 0xC000) != 0)) {
             // Button pressed: restart text reveal
             g_MessageStateCounter = 1;
             g_MessagePtr = g_MessageCurrentPtr;
@@ -1681,7 +1710,9 @@ msg_skip_char:
         const short ynCursorX = (GetAssetVersion() != 0) ? 0xa0 : 208;
         const short ynTextX = ynCursorX + ynGlyphW;
 
-        if ((g_PlayerDpadPressed & 0x4000) == 0) {
+        // Port-added mod: in the zombie mode the room runs under the prompt, so
+        // a grab or death answers No (mods/ZombieMessages.cpp).
+        if ((g_PlayerDpadPressed & 0x4000) == 0 && !zombie_mode_message_prompt_cancel()) {
             if ((g_PlayerPadHeld & (0x2000 | 0x8000)) != 0) {
                 g_menu_choice_id = g_menu_choice_id ^ 1;
                 g_MessageCharTimer = 0;
@@ -1725,15 +1756,25 @@ msg_skip_char:
 
         // Confirm pressed: dismiss message
         g_menu_choice_id = g_menu_choice_id & 0x7f;
-        g_message_flags = g_messageFlagsBackup;
-        handle_message_post_action();
+        // Port-added mod: raise back only what the mode's prompt cleared.
+        if (!zombie_mode_message_prompt_end()) {
+            g_message_flags = g_messageFlagsBackup;
+        }
+        if (!zombie_mode_boss_prompt_answer((g_menu_choice_id & 1) == 0)) {
+            handle_message_post_action();
+        }
         return;
     }
 
     // === State 5: Waiting for player input to dismiss ===
     case 5:
-        if ((g_PlayerDpadPressed & 0xC000) != 0) {
+        // Port-added mod: likewise it closes after a reading time, and leaves
+        // g_message_flags alone - it never paused them.
+        if (zombie_mode_message_page_done((g_PlayerDpadPressed & 0xC000) != 0)) {
             g_menu_choice_id = g_menu_choice_id & 0x7f;
+            if (zombie_mode_message_end()) {
+                return;
+            }
             if ((g_message_flags & 1) == 0) {
                 g_PlayerDpadHeld = g_PlayerDpadHeld & 0xf000;
                 g_PlayerDpadHeldPrev = g_PlayerDpadHeldPrev & 0xf000;
@@ -1745,6 +1786,16 @@ msg_skip_char:
 
     // === State 6: Auto-dismiss after timeout ===
     case 6:
+        // Port-added mod: a passive message stays for its reading time rather
+        // than the script's delay, which was timed for a paused game.
+        if (zombie_mode_message_is_passive()) {
+            if (zombie_mode_message_page_done(false)) {
+                g_menu_choice_id = g_menu_choice_id & 0x7f;
+                zombie_mode_message_end();
+                return;
+            }
+            break;
+        }
         g_MessageCharTimer = g_MessageCharTimer - 1;
         if (g_MessageCharTimer == 0) {
             g_menu_choice_id = g_menu_choice_id & 0x7f;

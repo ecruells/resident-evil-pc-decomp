@@ -3,6 +3,7 @@
 // Adapted from Ghidra decompilation
 #include "Globals.h"
 #include "../system/AssetPath.h"
+#include "mods/ZombieMode.h"
 
 // 0x00470750 - declared in SpriteRenderer.h; the signature must match that
 // definition exactly (see the stub-overload note on display_room_camera_bg).
@@ -47,7 +48,10 @@ int main_loop(void)
 
     // 0x00428eff: Check for special key combination (F9/F10/F11 scan codes)
     // Only fires when no message is currently displayed (bit 0x80 of g_menu_choice_id = message active)
-    if ((g_padEdgeDetectedWord != 0) && (((g_lastScanCodeOrMsgID == 0x5b || (g_lastScanCodeOrMsgID == 0x5c)) || (g_lastScanCodeOrMsgID == 0x5d)))) {
+    // Port-added mod: the zombie mode's opening narration cannot be skipped,
+    // so it lasts as long on every copy (mods/ZombieMessages.cpp).
+    if ((g_padEdgeDetectedWord != 0) && (((g_lastScanCodeOrMsgID == 0x5b || (g_lastScanCodeOrMsgID == 0x5c)) || (g_lastScanCodeOrMsgID == 0x5d))) &&
+        !zombie_mode_intro_unskippable()) {
         DAT_00d91bc8 = 1;
         g_menu_choice_id = 0;
     }

@@ -39,6 +39,8 @@ int AudioFile_Find(const char* path, char* out, size_t outSize);
 // Load `path` (as AudioFile_Find resolves it) to PCM. 0 on failure; `out` is
 // zeroed then.
 int AudioFile_Load(const char* path, AudioFileData* out);
+// Optional through-door effect; filters owned PCM in place, preserving format.
+void AudioFile_Muffle(AudioFileData* audio);
 
 // 1 when the active tree's Sound folder carries the migrator's PS1 audio
 // marker (sound\ps1audio.txt). The backends then mix at 44.1 kHz: the PS1

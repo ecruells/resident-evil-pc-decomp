@@ -539,6 +539,8 @@ BOOL g_bWindowActive = FALSE;
 // Starts FALSE like the original's .bss; ShowWindow() sends WM_ACTIVATE
 // synchronously before the pump starts, so it is already TRUE by then.
 BOOL g_bWindowFocused = FALSE;
+bool g_bRunInBackground = false;        // port-added, see Globals.h
+bool g_bRunInBackgroundConfig = false;
 BOOL g_bQuitFlag = FALSE;       // DAT_004bcb40
 BOOL g_bUseFrameSkip = TRUE;  // DAT_004bcb48 - 1 in the image (SetFrameRateMode
                               // rewrites it from g_bGameActive every frame anyway)
@@ -791,7 +793,7 @@ BOOL g_bFullScreenFlag_68 = FALSE;  // used for cursor hiding logic
 
 // Object cleanup globals (Object_DeleteAll / ObjectCleanupCallback / ObjectList_Cleanup)
 int    g_objectDeleteFlag = 0;                // 0x004d2bfc
-int    g_objectCountArray[32] = {};           // 0x008ffc40
+int    g_objectCountArray[TEX_BANK_COUNT] = {};   // 0x008ffc40 (32 originally)
 int    g_objectDeleteCounter = 0;             // 0x00aabd68
 
 // 0x008ffcc0 - Complex TMD object data area (DAT_008ffcc0).
@@ -830,8 +832,8 @@ DWORD  g_objectListPtrArray[0xE00] = {};      // 0x008fc430 - 256 x 0x38 entries
 // access to banks 23-31 write/read past the end of this array, corrupting
 // whatever the linker placed next (observed: g_objectCountArray itself ended
 // up holding garbage counts, crashing ObjectCleanupCallback).
-BYTE   g_psxTextureArray[32 * 0x1b60] = {};   // 0x00a75168 - PSXTexture array
-DWORD  g_textureBankRedirect[32] = {};        // 0x00aae2b0
+BYTE   g_psxTextureArray[TEX_BANK_COUNT * 0x1b60] = {};   // 0x00a75168 - PSXTexture array (32 banks originally)
+DWORD  g_textureBankRedirect[TEX_BANK_COUNT] = {};        // 0x00aae2b0
 
 // Async TMD object creation globals (FUN_00483cc0)
 DWORD  g_asyncTmdDepth = 0;                   // 0x008fc42c
@@ -846,7 +848,7 @@ BYTE         g_faceNormalBuffer[250 * 8] = {};      // 0x008fb8b0
 
 int          ARRAY_00922260[2016] = {};           // 0x00922260
 
-DWORD        g_tmdTextureAllocated[48] = {};     // 0x00922a40
+DWORD        g_tmdTextureAllocated[TEX_BANK_COUNT + 16] = {};   // 0x00922a40 (48 originally)
 
 int          g_complexTmdObjectArray[256] = {};     // 0x00922b00
 int          INT_ARRAY_00922f00[530] = {};          // 0x00922f00
@@ -854,9 +856,9 @@ int          g_complexTmdObjectIds[256] = {};       // 0x00923748
 
 int          INT_ARRAY_00923b48[2] = {};       // 0x00923b48
 
-BYTE         g_tmdObjectBuffer[1606172] = {};  // 0x00923b50 area
+BYTE         g_tmdObjectBuffer[(TMD_ENTITY_SLOT_COUNT + 40) * 0x1594] = {};  // 0x00923b50 area (290 slots in the port before the widening)
 
-int          g_tmdObjectSlotAnimPtrs[251] = {};     // 0x00aabd6c - TMD slot → animObjPtr table
+int          g_tmdObjectSlotAnimPtrs[TMD_ENTITY_SLOT_COUNT + 1] = {};   // 0x00aabd6c - TMD slot -> animObjPtr table
 
 int          DAT_00aad6ec = 0; // 0x00aad6ec - 
 int          DAT_00aae740 = 0; // 0x00aae740 - 
@@ -1226,7 +1228,9 @@ DWORD         g_SysFlags[2] = {};
 // 0x00d91aa0 - Room action table (AOT list), 24 entries x 12 bytes = 288 bytes.
 // Built by door_set/room_action_set/item_model_set and probed every frame by the
 // player position update; entry byte 0 selects a room_check_actions handler.
-unsigned char g_RoomActionTable[288] = {};
+// Port-widened to ROOM_ACTION_ENTRIES (Globals.h); its own definition, so no
+// neighbour depends on the old size.
+unsigned char g_RoomActionTable[ROOM_ACTION_ENTRIES * 12] = {};
 // 0x00d91bc0 - Highest table entry any command has touched this room, INCLUSIVE:
 // the setup commands only ever raise it and the probe loops run while
 // entry <= it. Reset to the table base on room load.
@@ -1760,8 +1764,12 @@ DWORD  g_animObjectBuffer[0x680] = {};
 // 0x00c14dc0 - ESP effect data
 BYTE   g_shootDirEspBuffer[73728] = {};
 
-// 0x00c26dc0 - General purpose data buffer (832728 bytes)
-BYTE    g_DataBuffer[832728];
+// 0x00c26dc0 - General purpose data buffer (832728 bytes in the original).
+// Port-added headroom: the zombie mod loads up to three survivor models into
+// every room on top of the room's own data, and the director can place any
+// number of monster types (each a 100-220 KB EMD); the biggest RDTs already
+// fill most of the original size.
+BYTE    g_DataBuffer[832728 + 0x400000];
 
 // Display image buffer for TIM slide loading (at 0x00cf22ac in original)
 BYTE    g_TimImageBuffer[187160+20] = {};
@@ -1871,7 +1879,8 @@ void*          g_omodel_table[8] = {};
 // the one lying on the floor, or the one a desk close-up reveals. Byte 0 bit 0 is
 // "currently drawn" (renderer pass 1); pickup clears it and frees the sparkle
 // billboard at +0x86. Also an entity target for event scripts.
-void*          g_item_model_table[8] = {};
+// Port-widened to ROOM_ITEM_MODELS (Globals.h).
+void*          g_item_model_table[ROOM_ITEM_MODELS] = {};
 
 // 0x00ae9ef4 - Count of object models loaded by cmd_omodel_set in current room
 int            g_omodelCount = 0;

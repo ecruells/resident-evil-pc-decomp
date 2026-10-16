@@ -45,6 +45,7 @@
 #include "../marni/PSXTexture.h"
 #include "TmdRenderer.h"
 #include "FileLoader.h"
+#include "mods/ZombieMode.h"
 
 // --- forward declarations of port-side helpers ---------------------------------
 extern int  PSXObject_Store(CMarniDirect3DTMD* self, int* tmdHdr, int objIndex,
@@ -207,6 +208,7 @@ static_assert(sizeof(DoorOrderEntry) == 0x80, "DoorOrderEntry size mismatch");
 static DoorOrderEntry   g_doorOrders[12];       // 0x00be05c0
 static short            g_doorPhase;            // 0x00be0bc4 - phase counter, +1 per loop pass
 static int              g_doorFrameCount;       // 0x007e0df8 - frame counter
+static bool             g_doorApproachSkipped;  // port-added: debug trace only
 static MATRIX           g_doorCameraMatrix;     // 0x00be0bd0 - camera from/to positions
 static short            g_doorMatrixDelta[6];   // 0x00be0bf0 - camera delta buffer
 static DoorCommandEntry g_doorCommands[8];      // 0x00be0c10
@@ -630,11 +632,44 @@ static int door_op_jmp_short(void)
     return 1;
 }
 
+// Port-added mod: all shipped DOOR*.DOR single/double-door scripts use this
+// 80-tick camera approach before activating the handle/opening scripts. Apply
+// its final camera position and deltas in one step, without showing the dolly.
+// Match the whole block so later camera movement and stairs/ladders stay intact.
+static bool DoorSkipApproach(unsigned char* p)
+{
+    static const unsigned char approach[] = {
+        0x06, 0x00, 0x50, 0x00,       // LOOP_PUSH 80
+        0x14, 0x00, 0x00, 0x01,       // DELTA_ADD 0, +1
+        0x14, 0x00, 0x03, 0x01,       // DELTA_ADD 3, +1
+        0x13, 0x00,                   // MAT_ADD_DELTA
+        0x07, 0x00                    // LOOP
+    };
+    if (zombie_mode_door_frames() < 0 ||
+        memcmp(p, approach, sizeof(approach)) != 0) return false;
+
+    int* camera = (int*)&g_doorCameraMatrix;
+    for (int tick = 0; tick < 80; tick++) {
+        g_doorMatrixDelta[0]++;
+        g_doorMatrixDelta[3]++;
+        for (int i = 0; i < 6; i++) {
+            camera[i] += (int)g_doorMatrixDelta[i];
+        }
+    }
+    g_doorApproachSkipped = true;
+    dbg_printf("[door] approach skipped at frame %d phase %d", g_doorFrameCount, g_doorPhase);
+    return true;
+}
+
 // 0x06: loop push - store return address and loop count into the workspace
 static int door_op_loop_push(void)
 {
     DoorCommandEntry* e = g_doorCmdCur;
     unsigned char* p = DATA;
+    if (DoorSkipApproach(p)) {
+        DATA = p + 16;
+        return 1;
+    }
     int n = e->counter;
     *(int*)((unsigned char*)e + 8 + n * 4) = (int)(p + 4);
     *(unsigned short*)((unsigned char*)e + 0x28 + n * 2) = *(unsigned short*)(p + 2);
@@ -1089,11 +1124,26 @@ static void DoorComposeChain(ScaMatrixData* node, MATRIX* out)
 // ============================================================================
 // DoorAnimLoop (0x00444540) - the animation main loop
 // ============================================================================
+// Port-added mod: script ticks per displayed frame once loading is done.
+// Doors play at 5x; stairs and ladders (kai01..kai04 / lad00..lad01,
+// table 0x16..0x1B) have no
+// approach to skip and look rushed at that speed, so they play at 2x. The
+// stair cut is stretched by the same ratio, so the same part of the climb
+// is shown.
+#define DOOR_MOD_TICKS          5
+#define DOOR_MOD_STAIR_TICKS    2
+static bool DoorIsClimb(void)
+{
+    return DOOR_BYTEVAR2 >= 0x16 && DOOR_BYTEVAR2 <= 0x1B;
+}
+
 static void DoorAnimLoop(void)
 {
     g_doorPhase = 0;
     g_doorFrameCount = 0;
+    g_doorApproachSkipped = false;
     int holdCounter = 0;
+    int gateFrame = -1;
 
     while ((g_doorState & 1) != 0) {
 
@@ -1111,27 +1161,40 @@ static void DoorAnimLoop(void)
             draw_rect(&g_rect, 0, 0);
         }
 
-        DoorPhaseCheck();
+        // Keep the loading phases at normal speed so asynchronous texture/model
+        // creation can finish. The mod skips the approach in DoorSkipApproach
+        // and plays the remaining handle/opening scripts at 5x speed (stairs
+        // and ladders 2x, DoorIsClimb).
+        // The cutoff still counts displayed frames.
+        int modTicks = DoorIsClimb() ? DOOR_MOD_STAIR_TICKS : DOOR_MOD_TICKS;
+        int scriptTicks = zombie_mode_door_frames() >= 0 && g_doorPhase > 2 ? modTicks : 1;
+        for (int tick = 0; tick < scriptTicks && (g_doorState & 1) != 0; tick++) {
+            DoorPhaseCheck();
 
-        // Dispatch the command-entry scripts. The gate (state bit 1) is
-        // re-opened once g_main_state_flags2 bit 0x800000 clears (BGM ready).
-        if ((g_doorState & 2) != 0) {
-            g_doorCmdCur = &g_doorCommands[0];
-            while (g_doorCmdCur < &g_doorCommands[8]) {
-                if (g_doorCmdCur->status != 0 && g_doorCmdCur->data != NULL) {
-                    unsigned char op;
-                    do {
-                        op = *(unsigned char*)g_doorCmdCur->data;
-                        if (op >= 38) {         // safety: never in shipped data
-                            g_doorCmdCur->status = 0;
-                            break;
-                        }
-                    } while (g_doorOps[op]() != 0);
+            // Dispatch the command-entry scripts. The gate (state bit 1) is
+            // re-opened once g_main_state_flags2 bit 0x800000 clears (BGM ready).
+            if ((g_doorState & 2) != 0) {
+                g_doorCmdCur = &g_doorCommands[0];
+                while (g_doorCmdCur < &g_doorCommands[8]) {
+                    if (g_doorCmdCur->status != 0 && g_doorCmdCur->data != NULL) {
+                        unsigned char op;
+                        do {
+                            op = *(unsigned char*)g_doorCmdCur->data;
+                            if (op >= 38) {         // safety: never in shipped data
+                                g_doorCmdCur->status = 0;
+                                break;
+                            }
+                        } while (g_doorOps[op]() != 0);
+                    }
+                    g_doorCmdCur++;
                 }
-                g_doorCmdCur++;
+            } else if ((g_main_state_flags2 & MSF2_SND_BUSY) == 0) {
+                g_doorState |= 2;
+                gateFrame = g_doorFrameCount;
             }
-        } else if ((g_main_state_flags2 & MSF2_SND_BUSY) == 0) {
-            g_doorState |= 2;
+            if (tick + 1 < scriptTicks && (g_doorState & 1) != 0) {
+                g_doorPhase++;
+            }
         }
 
         // Render the order entries.
@@ -1174,7 +1237,20 @@ static void DoorAnimLoop(void)
         }
 
         // Holding any d-pad/circle button skips the animation (after frame 10).
-        if (((g_PlayerPadHeld & 0xC0) != 0) && (g_doorFrameCount > 10)) {
+        // Port-added mod: the mode ends every door at the same short length
+        // instead, and the buttons do nothing (zombie_mode_door_frames).
+        // The cut counts from the script gate opening, not from the start: the
+        // gate waits on the sound load, which takes longer on some machines and
+        // would otherwise eat into the opening that is shown. The second limit
+        // keeps a gate that never opens from holding the door.
+        int doorCut = zombie_mode_door_frames();
+        if (doorCut >= 0 && DoorIsClimb()) {
+            doorCut = doorCut * DOOR_MOD_TICKS / DOOR_MOD_STAIR_TICKS;
+        }
+        bool doorCutDone = gateFrame >= 0 ? g_doorFrameCount - gateFrame >= doorCut
+                                          : g_doorFrameCount >= doorCut * 3;
+        if (doorCut >= 0 ? doorCutDone
+                         : ((g_PlayerPadHeld & 0xC0) != 0) && (g_doorFrameCount > 10)) {
             g_SpriteAsyncFlag = 1;
             g_doorState = 0;
         }
@@ -1190,6 +1266,9 @@ static void DoorAnimLoop(void)
         g_doorPhase++;
         g_doorFrameCount++;
     }
+    dbg_printf("[door] end: frames %d cut %d gate frame %d approach %s",
+               g_doorFrameCount, zombie_mode_door_frames(), gateFrame,
+               g_doorApproachSkipped ? "skipped" : "PLAYED");
 }
 
 // ============================================================================
@@ -1447,8 +1526,11 @@ void room_transition_load(void)
         g_SndPanVol[i].pan    = 0x5f;
     }
 
-    load_room_sfx(g_nextRoomSfxId);
-    door_system_load_data();            // FUN_00412300 - load the .dor + start the texture page
+    const bool skipDoor = zombie_mode_skip_door_animation(record);
+    if (!skipDoor) {
+        load_room_sfx(g_nextRoomSfxId);
+        door_system_load_data();        // FUN_00412300 - load the .dor + start the texture page
+    }
 
     // The original does:
     //     Task_execute(1, FUN_00444770);   // spawns the door-animation task
@@ -1459,8 +1541,10 @@ void room_transition_load(void)
     // bit 0x4000000 on init, animates the door (black rect, camera dolly, door
     // panels through the TMD queue) while this task loads the destination room,
     // and clears the bit on teardown. The wait loop below polls that bit.
-    door_system_start_animation();
-    Task_sleep(1);
+    if (!skipDoor) {
+        door_system_start_animation();
+        Task_sleep(1);
+    }
 
     // 0x0048148c: place the player at the destination's entry point.
     //
@@ -1507,6 +1591,8 @@ void room_transition_load(void)
     // stage change needs the heavier init_room, which re-points the stage data
     // and BGM tables first.
     if ((flags & 0x80) == 0) {
+        // Port-added mod: the possessed zombie is not one of the room's enemies.
+        zombie_mode_room_exit();
         BuildEnemySnap();
         g_AttractMode_RoomCameraId = g_roomId;
         g_scaPoolPtr = g_scaPoolBase;
@@ -1528,10 +1614,17 @@ void room_transition_load(void)
     }
 
     g_AttractModeIdleTimer = 1;
-    // Waits for the door-animation task to clear bit 0x4000000. That task is not
-    // spawned yet, so nothing sets the bit and this falls straight through.
+    // Wait for an ordinary door animation; synthetic mod jumps spawn none.
     while ((g_main_state_flags & MSF_ROOM_TRANSITION) != 0) {
         Task_sleep(1);
+    }
+
+    if (skipDoor) {
+        // Restore the rendering state normally restored by DoorAnimTeardown.
+        g_fading_state = (short)-1;
+        g_bGameActive = 2;
+        g_imageBufferPtr = g_imageBufferDataA;
+        g_imageBufferPtr2 = g_imageBufferDataB;
     }
 
     // 0x0048156c: put the newly loaded room on screen. The camera-only branch has no
@@ -1541,6 +1634,8 @@ void room_transition_load(void)
         load_room_bg_image();
         Room_ApplySpriteFlags();
     } else {
+        // Port-added mod: same room, so the possessed zombie is still here.
+        zombie_mode_after_transition();
         check_camera_switch(1);
     }
 

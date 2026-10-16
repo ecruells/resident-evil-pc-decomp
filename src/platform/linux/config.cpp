@@ -43,6 +43,13 @@ void CleanupVideoConfigAndSaveAllSettings(void)
 // ---------------------------------------------------------------------------
 BOOL plat_single_instance_check(void)
 {
+    // Port-added: RE1_ALLOW_MULTI=1 lets a second copy run beside the first -
+    // the zombie mod's two-player link, tested on one machine.
+    const char* allow = getenv("RE1_ALLOW_MULTI");
+    if (allow != NULL && allow[0] == '1') {
+        return TRUE;
+    }
+
     s_lockFd = open("re1.lock", O_RDWR | O_CREAT, 0666);
     if (s_lockFd < 0) {
         return TRUE;   // cannot create the lock: do not block the game

@@ -1,6 +1,7 @@
 // Marni3DObject.cpp - 3D object / execute buffer / polyhedra / TMD implementations
 // All functions decompiled from Ghidra with original addresses
 #include "Marni3DObject.h"
+#include "TexturePages.h"
 #include "DebugPrint.h"
 // Safe ODS wrapper (raw OutputDebugStringA fail-fasts on switched task stacks)
 #ifndef OutputDebugStringA
@@ -1660,7 +1661,7 @@ static unsigned int* PSXObject_FindPacket(unsigned int* pkt, int* kind)
     while ((((*pkt ^ (unsigned int)kind[2]) & 0x3DFFFFFF) != 0) ||
            (((unsigned int)kind[2] & 0x4000000) != 0 &&
             (((short)(pkt[1] >> 0x10) != *(short*)(kind + 1)) ||
-             (((unsigned short)(pkt[2] >> 0x10) & 0x1F) != *(unsigned short*)(kind + 4))))) {
+             ((unsigned short)TexPageFromTsb(pkt[2] >> 0x10) != *(unsigned short*)(kind + 4))))) {
         pkt = (unsigned int*)((int)pkt + ((*pkt & 0xFF00) >> 6) + 4);
     }
     return pkt;
@@ -1689,7 +1690,7 @@ static int PSXObject_EnumKind(int maxKinds, int* table, unsigned int* pkt, int n
                                 return 0;
                             }
                             if (((short)(pkt[1] >> 0x10) != (short)kp[-1]) ||
-                                (((unsigned short)(pkt[2] >> 0x10) & 0x1F) != (unsigned short)kp[2])) {
+                                ((unsigned short)TexPageFromTsb(pkt[2] >> 0x10) != (unsigned short)kp[2])) {
                                 goto noMatch;
                             }
                         }
@@ -1705,7 +1706,7 @@ static int PSXObject_EnumKind(int maxKinds, int* table, unsigned int* pkt, int n
                 kindCount = kindCount + 1;
                 PSXObject_KindDataSet(newEntry, *pkt,
                                       (short)(pkt[1] >> 0x10),
-                                      (short)((pkt[2] >> 0x10) & 0x1F));
+                                      (short)TexPageFromTsb(pkt[2] >> 0x10));
                 newEntry = newEntry + 5;
             }
             if (maxKinds < kindCount) {

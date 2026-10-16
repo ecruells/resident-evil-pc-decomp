@@ -187,6 +187,39 @@
     <ClCompile Include="src\game\dc\EntityModels.cpp" />
     <ClCompile Include="src\game\dc\ArrangeStages.cpp" />
     <ClCompile Include="src\game\dc\ArrangeSoundRows.cpp" />
+    <ClCompile Include="src\game\mods\ZombieMode.cpp" />
+    <ClCompile Include="src\game\mods\ZombieSurvivor.cpp" />
+    <ClCompile Include="src\game\mods\ZombieNav.cpp" />
+    <ClCompile Include="src\game\mods\ZombieNet.cpp" />
+    <ClCompile Include="src\game\mods\ZombieLobby.cpp" />
+    <ClCompile Include="src\game\mods\ZombieWorld.cpp" />
+    <ClCompile Include="src\game\mods\ZombieMap.cpp" />
+    <ClCompile Include="src\game\mods\ZombiePerks.cpp" />
+    <ClCompile Include="src\game\mods\ZombiePortraits.cpp" />
+    <ClCompile Include="src\game\mods\ZombiePortraitImage.cpp" />
+    <ClCompile Include="src\game\mods\ZombieRandom.cpp" />
+    <ClCompile Include="src\game\mods\ZombieEconomy.cpp" />
+    <ClCompile Include="src\game\mods\ZombieSpawnSpots.cpp" />
+    <ClCompile Include="src\game\mods\ZombieTraps.cpp" />
+    <ClCompile Include="src\game\mods\ZombieDirectorAI.cpp" />
+    <ClCompile Include="src\game\mods\ZombieReinforcements.cpp" />
+    <ClCompile Include="src\game\mods\ZombiePickups.cpp" />
+    <ClCompile Include="src\game\mods\ZombieBox.cpp" />
+    <ClCompile Include="src\game\mods\ZombieReconnect.cpp" />
+    <ClCompile Include="src\game\mods\ZombieSpectate.cpp" />
+    <ClCompile Include="src\game\mods\ZombieShotgun.cpp" />
+    <ClCompile Include="src\game\mods\ZombiePiano.cpp" />
+    <ClCompile Include="src\game\mods\ZombieBumpers.cpp" />
+    <ClCompile Include="src\game\mods\ZombieVoice.cpp" />
+    <ClCompile Include="src\game\mods\ZombieTimeout.cpp" />
+    <ClCompile Include="src\game\mods\ZombieKeypad.cpp" />
+    <ClCompile Include="src\game\mods\ZombieGreenhouse.cpp" />
+    <ClCompile Include="src\game\mods\ZombieRoomSync.cpp" />
+    <ClCompile Include="src\game\mods\ZombieStatue.cpp" />
+    <ClCompile Include="src\game\mods\ZombieYawn.cpp" />
+    <ClCompile Include="src\game\mods\ZombieStats.cpp" />
+    <ClCompile Include="src\game\mods\ZombieDrops.cpp" />
+    <ClCompile Include="src\game\mods\ZombieMessages.cpp" />
     <ClCompile Include="src\game\Rendering.cpp" />
     <ClCompile Include="src\game\JpnTextTables.cpp" />
     <ClCompile Include="src\game\PrintText.cpp" />
@@ -211,6 +244,7 @@
     <ClInclude Include="src\marni\MarniDX.h" />
     <ClInclude Include="src\marni\MarniBits.h" />
     <ClInclude Include="src\marni\Marni3DObject.h" />
+    <ClInclude Include="src\marni\TexturePages.h" />
     <ClInclude Include="src\marni\MarniInput.h" />
     <ClInclude Include="src\marni\MarniXInput.h" />
     <ClInclude Include="src\marni\MarniSound.h" />
@@ -221,9 +255,30 @@
     <ClInclude Include="src\game\TmdRenderer.h" />
     <ClInclude Include="src\game\entities\EntityCommon.h" />
     <ClInclude Include="src\game\entities\Zombie.h" />
+    <ClInclude Include="src\game\mods\ZombieBumpers.h" />
+    <ClInclude Include="src\game\mods\ZombieBumperBarrier.h" />
+    <ClInclude Include="src\game\mods\ZombieMode.h" />
+    <ClInclude Include="src\game\mods\ZombieModeInternal.h" />
+    <ClInclude Include="src\game\mods\ZombieNet.h" />
     <ClInclude Include="src\system\PngImage.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
+  <Target Name="CopyInfestedAudio" AfterTargets="Build">
+    <ItemGroup>
+      <InfestedBumperVideos Include="$(ProjectDir)infested\video\**\*.mp4" />
+      <InfestedBumperAudio Include="$(ProjectDir)infested\audio\helicopter.wav" Condition="Exists('$(ProjectDir)infested\audio\helicopter.wav')" />
+      <InfestedBumperAudio Include="$(ProjectDir)infested\audio\survive.wav" Condition="Exists('$(ProjectDir)infested\audio\survive.wav')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(InfestedBumperVideos)"
+          DestinationFiles="@(InfestedBumperVideos->'$(TargetDir)infested\video\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true" Condition="'@(InfestedBumperVideos)' != ''" />
+    <Copy SourceFiles="@(InfestedBumperAudio)" DestinationFolder="$(TargetDir)infested\audio"
+          SkipUnchangedFiles="true" Condition="'@(InfestedBumperAudio)' != ''" />
+    <MakeDir Directories="$(TargetDir)infested" />
+    <Copy SourceFiles="$(ProjectDir)infested\audio\infested.wav"
+          DestinationFiles="$(TargetDir)infested\infested.wav"
+          SkipUnchangedFiles="true" />
+  </Target>
   <ImportGroup Label="ExtensionTargets">
   </ImportGroup>
 </Project>

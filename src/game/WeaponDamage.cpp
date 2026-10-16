@@ -9,6 +9,7 @@
 #include <cstdlib>                   // rand() - MSVC got this via <windows.h>
 #include "entities/EntityCommon.h"   // ENEMY_* / NPC_* type ids
 #include "dc/WeaponDamageTables.h"    // DC per-mode damage columns (generated)
+#include "mods/ZombieMode.h"
 
 // ---- Global scratch variable (set by apply_weapon_damage before hit detection) ----
 extern int g_scaled_down_dist;  // holds weapon_id - 1 during hit detection
@@ -153,7 +154,8 @@ static unsigned char weapon_hit_detect_knife(short range, Entity* enemy)
 
     g_matrixScratch = g_identityMatrixData;
 
-    unsigned int pid = (unsigned int)(g_playerEntityPointer.id & 1);
+    // Port-added mod: the knife joint's offset for the body worn (ZombieMode.h).
+    unsigned int pid = (unsigned int)zombie_mode_player_body();
     g_matrixScratch.t[0] = (int)offsets[pid * 3];
     g_matrixScratch.t[1] = (int)offsets[pid * 3 + 1];
     g_matrixScratch.t[2] = (int)offsets[pid * 3 + 2];
@@ -222,7 +224,7 @@ static unsigned char weapon_hit_detect_gun(short range, Entity* enemy)
     // Zombies — skip if aiming down and NOT shotgun (weapon index 2)
     if ((enemyId == ENEMY_ZOMBIE || enemyId == ENEMY_ZOMBIE_NAKED || enemyId == ENEMY_ZOMBIE_VARIANT)
         && (g_playerEntityPointer.flags & 0x80) != 0
-        && g_scaled_down_dist != 2)
+        && g_scaled_down_dist != 2 && !zombie_mode_feeding_target(enemy))
         return 0;
 
     // Per-enemy range adjustments
@@ -303,6 +305,89 @@ static unsigned char weapon_hit_detect_projectile(short range, Entity* enemy)
 }
 
 // ============================================================================
+// The damage half of apply_weapon_damage (0x0043c020), from the hit record
+// lookup on - split out (port-added) so the zombie mod's penetrating shots can
+// run it for every enemy a shot reaches. Unchanged for the one hit the
+// original makes.
+// ============================================================================
+static unsigned char weapon_apply_hit(Entity* enemy, unsigned char weaponAdj, unsigned char hitStateBase)
+{
+    bool feeding = zombie_mode_feeding_target(enemy);
+    unsigned char enemyType = enemy->id;
+    if (enemyType >= NPC_ENTITIES_IDS) return enemy->id;   // 0x14+ NPC ids: no damage (matches the original, returns the enemy id)
+
+    unsigned int tableIdx = (unsigned int)weaponAdj + (unsigned int)enemyType * 10;
+
+    // 12-byte hit record lookup. The knockback vector (kx/ky/kz) and the
+    // post-hit inputs (type/data) come from the first-run records for BOTH
+    // playthroughs - only damage and hit-state differ (verified against the
+    // original disassembly of 0x0043c020).
+    WeaponHitRecordFirstRun* rec = &g_weaponHitRecordsFirstRun[tableIdx];
+    g_playerPosScratch.x = (int)rec->kx;                    // 0x00be11b0
+    g_playerPosScratch.y = (int)rec->ky;
+    g_playerPosScratch.z = (int)rec->kz;
+    g_weaponHitEnemyType = enemyType;                       // 0x00be0de4
+    g_collPushDepthZHi   = rec->type;                       // 0x00be0dec (shared scratch)
+    g_collPushDepthZLo   = rec->data;                       // 0x00be0df0 (shared scratch)
+    g_entity_bkp         = (unsigned int)(int)enemy->health;// 0x00be0df4 (shared scratch)
+
+    unsigned char hitState;
+    short damage;
+    if (g_bDcMode) {
+        // The DC reads the damage from one of three mode columns and has no
+        // second-playthrough damage table; the knockback/type/data/hit fields
+        // still come from the STANDARD records (SLUS_005.51 0x800120e8: the
+        // 0x40000 bit -> 0x8008B59A, (bits & 0x30000) == 0x20000 ->
+        // 0x8008BEFA, else the base column - so ADVANCED* reads the base
+        // column, exactly as the difficulty byte does here).
+        if (g_DcDifficulty == DC_DIFFICULTY_TRAINING) {
+            damage = g_dcWeaponDamageTraining[tableIdx];
+        } else if (g_DcDifficulty == DC_DIFFICULTY_ADVANCED) {
+            damage = g_dcWeaponDamageAdvanced[tableIdx];
+        } else {
+            damage = rec->dmg;              // STANDARD and ADVANCED* share this column
+        }
+        hitState = rec->hit;
+    } else if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
+        hitState = rec->hit;                                // first-playthrough hit-state @ +10
+        damage = rec->dmg;                                  // first-playthrough damage @ +6
+    } else {
+        hitState = g_weaponHitRecordsSecondRun[tableIdx].hit;  // second-playthrough hit-state @ +4
+        damage = g_weaponHitRecordsSecondRun[tableIdx].dmg;    // second-playthrough damage @ +0
+    }
+
+    damage = (short)zombie_mode_player_weapon_damage((unsigned char)(weaponAdj + 1), damage);
+    enemy->health -= damage;
+
+    if ((g_playerEntityPointer.flags & 0xE0) != 0x20) {
+        hitState += (g_playerEntityPointer.flags >> 5);
+    }
+    hitState |= (unsigned char)(hitStateBase << 3);
+    enemy->hit_state = hitState;
+
+    typedef void (*postHitFn)(Entity* ent);
+    postHitFn postHit = (postHitFn)PTR_post_hit_callbacks[weaponAdj];
+    bool captureImpact = zombie_mode_weapon_fx_begin();
+    postHit(enemy);
+    if (captureImpact) zombie_mode_fx_capture(false);
+
+    enemy->state = 3;
+    enemy->ignore_player_flag = 0;
+    enemy->action_behavior = 0;
+    enemy->action_state = 0;
+
+    if (enemy->health >= 0) {
+        enemy->state = 2;
+        enemy->ignore_player_flag = 0;
+        enemy->action_behavior = 0;
+        enemy->action_state = 0;
+    }
+
+    if (feeding && enemy->health >= 0) zombie_mode_stand_feeding(enemy);
+    return 1;
+}
+
+// ============================================================================
 // apply_weapon_damage @ 0x0043c020
 // Real-time weapon hit detection and damage application. Iterates all
 // active enemies, calls per-weapon hit detection to find the closest
@@ -360,8 +445,10 @@ unsigned char apply_weapon_damage(unsigned int weapon_id)
         idx--;
         Entity* candidate = &g_EnemiesList[activeIdx[0]];
 
+        // Port-added mod: a monster the zombie mode keeps hidden on this copy
+        // (the director's body while the director is elsewhere) cannot be hit.
         if ((candidate->status_flags & g_playerEntityPointer.flags & 0xE0) != 0
-            && candidate->hit_state == 0)
+            && candidate->hit_state == 0 && !zombie_mode_hide_entity(candidate))
         {
             typedef unsigned char (*hitDetectFn)(short range, Entity* ent);
             hitDetectFn detector = (hitDetectFn)PTR_weapons_hit_detection_functions[weaponAdj];
@@ -376,74 +463,37 @@ unsigned char apply_weapon_damage(unsigned int weapon_id)
         return 0;
     }
 
-    unsigned char enemyType = enemy->id;
-    if (enemyType >= NPC_ENTITIES_IDS) return enemy->id;   // 0x14+ NPC ids: no damage (matches the original, returns the enemy id)
+    // Port-added mod: another copy's grenade / rocket, replayed here, hits
+    // (so it explodes where the real one did) but the shooter's copy deals
+    // the damage (mods/ZombieMode.h).
+    if (zombie_mode_effect_damage_blocked()) {
+        return 1;
+    }
 
-    unsigned int tableIdx = (unsigned int)weaponAdj + (unsigned int)enemyType * 10;
+    short healthBefore = enemy->health;
+    unsigned char result = weapon_apply_hit(enemy, weaponAdj, hitStateBase);
+    zombie_mode_on_weapon_hit(enemy, healthBefore);     // port-added mod: the match's stats
 
-    // 12-byte hit record lookup. The knockback vector (kx/ky/kz) and the
-    // post-hit inputs (type/data) come from the first-run records for BOTH
-    // playthroughs - only damage and hit-state differ (verified against the
-    // original disassembly of 0x0043c020).
-    WeaponHitRecordFirstRun* rec = &g_weaponHitRecordsFirstRun[tableIdx];
-    g_playerPosScratch.x = (int)rec->kx;                    // 0x00be11b0
-    g_playerPosScratch.y = (int)rec->ky;
-    g_playerPosScratch.z = (int)rec->kz;
-    g_weaponHitEnemyType = enemyType;                       // 0x00be0de4
-    g_collPushDepthZHi   = rec->type;                       // 0x00be0dec (shared scratch)
-    g_collPushDepthZLo   = rec->data;                       // 0x00be0df0 (shared scratch)
-    g_entity_bkp         = (unsigned int)(int)enemy->health;// 0x00be0df4 (shared scratch)
-
-    unsigned char hitState;
-    short damage;
-    if (g_bDcMode) {
-        // The DC reads the damage from one of three mode columns and has no
-        // second-playthrough damage table; the knockback/type/data/hit fields
-        // still come from the STANDARD records (SLUS_005.51 0x800120e8: the
-        // 0x40000 bit -> 0x8008B59A, (bits & 0x30000) == 0x20000 ->
-        // 0x8008BEFA, else the base column - so ADVANCED* reads the base
-        // column, exactly as the difficulty byte does here).
-        if (g_DcDifficulty == DC_DIFFICULTY_TRAINING) {
-            damage = g_dcWeaponDamageTraining[tableIdx];
-        } else if (g_DcDifficulty == DC_DIFFICULTY_ADVANCED) {
-            damage = g_dcWeaponDamageAdvanced[tableIdx];
-        } else {
-            damage = rec->dmg;              // STANDARD and ADVANCED* share this column
+    // Port-added mod: Barry's gun shots go through (mods/ZombiePerks.cpp) -
+    // every other enemy the same shot's cone and line of sight reach takes the
+    // hit too. The detector keeps the nearest by g_playerDisplacement, so it
+    // is reset for each one.
+    if (weaponAdj >= 1 && weaponAdj <= 4 && zombie_mode_shots_penetrate()) {
+        typedef unsigned char (*hitDetectFn)(short range, Entity* ent);
+        hitDetectFn detector = (hitDetectFn)PTR_weapons_hit_detection_functions[weaponAdj];
+        for (int i = 0; i < 30; i++) {
+            Entity* other = &g_EnemiesList[i];
+            if (other == enemy || (other->status_flags & ENTITY_STATUS_ACTIVE) == 0) continue;
+            if ((other->status_flags & g_playerEntityPointer.flags & 0xE0) == 0 || other->hit_state != 0) continue;
+            if (other->id >= NPC_ENTITIES_IDS || zombie_mode_hide_entity(other)) continue;
+            g_playerDisplacement = 0x7FFFFFFF;
+            g_scaled_down_dist = weaponAdj;
+            if (detector((short)wpnRange, other) == 0) continue;
+            if (check_weapon_line_of_sight((VECTOR*)other->scaMatrixData.localMatrix.t)) continue;
+            weapon_apply_hit(other, weaponAdj, hitStateBase);
         }
-        hitState = rec->hit;
-    } else if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0) {
-        hitState = rec->hit;                                // first-playthrough hit-state @ +10
-        damage = rec->dmg;                                  // first-playthrough damage @ +6
-    } else {
-        hitState = g_weaponHitRecordsSecondRun[tableIdx].hit;  // second-playthrough hit-state @ +4
-        damage = g_weaponHitRecordsSecondRun[tableIdx].dmg;    // second-playthrough damage @ +0
     }
-
-    enemy->health -= damage;
-
-    if ((g_playerEntityPointer.flags & 0xE0) != 0x20) {
-        hitState += (g_playerEntityPointer.flags >> 5);
-    }
-    hitState |= (unsigned char)(hitStateBase << 3);
-    enemy->hit_state = hitState;
-
-    typedef void (*postHitFn)(Entity* ent);
-    postHitFn postHit = (postHitFn)PTR_post_hit_callbacks[weaponAdj];
-    postHit(enemy);
-
-    enemy->state = 3;
-    enemy->ignore_player_flag = 0;
-    enemy->action_behavior = 0;
-    enemy->action_state = 0;
-
-    if (enemy->health >= 0) {
-        enemy->state = 2;
-        enemy->ignore_player_flag = 0;
-        enemy->action_behavior = 0;
-        enemy->action_state = 0;
-    }
-
-    return 1;
+    return result;
 }
 
 // ============================================================================
@@ -1256,7 +1306,7 @@ static void weapon_post_hit_knife(Entity* enemy)
     enemy_hit_reaction_dispatch(enemy);
 
     if (g_collPushDepthZHi != 1) {
-        unsigned int pid = (unsigned int)(g_playerEntityPointer.id & 1);
+        unsigned int pid = (unsigned int)zombie_mode_player_body();   // port-added mod: the body worn
         g_playerPosScratch.x = (int)offset[pid * 3];
         g_playerPosScratch.y = (int)offset[pid * 3 + 1];
         g_playerPosScratch.z = (int)offset[pid * 3 + 2];

@@ -2,6 +2,7 @@
 // Decompiled from Ghidra with original addresses
 #include "../Globals.h"
 #include "../marni/MarniSystem.h"
+#include "mods/ZombieMode.h"
 
 // Forward declarations for helpers defined in other files
 extern void Object_DeleteAll(int a);            // ObjectManager.cpp
@@ -44,10 +45,13 @@ void logos_state(void)
     Task_sleep(3);
 
     // if (g_bIsSoftwareRendering == FALSE) {
+    // Port-added mod: play-as-zombie goes straight to the menus.
+    if (!zombie_mode_skip_intro()) {
         g_selectedFmvId = 23;
         // g_CurrentFMVID = 23;
         g_FmvCharacterId = 0;
         g_main_state_flags |= MSF_FMV_REQUEST;
+    }
     // } else {
     //     QueueVideoPlayback(29, 0);
     // }

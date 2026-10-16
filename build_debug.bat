@@ -26,4 +26,12 @@ set "RE1_EXTRA="
 if defined RE1_TOOLSET set "RE1_EXTRA=%RE1_EXTRA% /p:PlatformToolset=%RE1_TOOLSET%"
 if defined RE1_SDK set "RE1_EXTRA=%RE1_EXTRA% /p:WindowsTargetPlatformVersion=%RE1_SDK%"
 
-"%MSBUILD%" "Game.sln" /p:Configuration=Debug /p:Platform=Win32 %RE1_EXTRA% /t:Build /v:minimal
+"%MSBUILD%" "%~dp0Game.sln" /p:Configuration=Debug /p:Platform=Win32 %RE1_EXTRA% /t:Build /v:minimal
+if errorlevel 1 exit /b %errorlevel%
+
+rem Voice paths are relative to the executable, independent of the asset root.
+if exist "%~dp0infested\voices\" (
+    robocopy "%~dp0infested\voices" "%~dp0bin\Debug\infested\voices" *.wav *.ogg /S /R:1 /W:1 /NFL /NDL /NJH /NJS
+    if errorlevel 8 exit /b 1
+)
+exit /b 0

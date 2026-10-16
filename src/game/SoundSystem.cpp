@@ -1,6 +1,7 @@
 // SoundSystem.cpp - Sound system implementation
 // All functions decompiled from Ghidra with original addresses
 #include "../Globals.h"
+#include "mods/ZombieMode.h"
 #include "../platform/platform.h"
 #include "../marni/MarniSound.h"
 #include "Entities.h"
@@ -17,8 +18,12 @@
 // sounds_reset (0x0047eb70)
 // Destroys all sound banks and resets all sound state.
 // ============================================================================
+static int s_zombieEntrySound = 0;
+
 void sounds_reset(void)
 {
+    if (s_zombieEntrySound != 0) destroySndBank(s_zombieEntrySound);
+    s_zombieEntrySound = 0;
     if (g_BgmSoundBank != 0) {
         destroySndBank(g_BgmSoundBank);
     }
@@ -139,6 +144,21 @@ void LoadSoundBank(int sound_bank_id, void* buffer)
 // Plays a sound effect from the specified bank type.
 // bank: 0=room, 1=sfx, 2=enemy, 3=character, 4=special
 // ============================================================================
+void zombie_mode_room_entry_sound(void)
+{
+    if (s_zombieEntrySound == 0) {
+        char path[260];
+        sprintf(path, GAME_DATA_ROOT "sound\\Dr_wd02.wav");
+        findAndOpenFile(path);
+        s_zombieEntrySound = loadSndBankFromWav(path);
+    }
+    if (s_zombieEntrySound != 0) {
+        pan_set(s_zombieEntrySound, 0);
+        set_volume(s_zombieEntrySound, g_roomSfxVolume);
+        SetSndSlot(s_zombieEntrySound, 0);
+    }
+}
+
 void play_sfx(int bank, int soundId)
 {
     int handle = 0;
@@ -535,6 +555,7 @@ static const char** g_charactersSfxTable[] = {
 
 void load_character_sfx(unsigned char charId)
 {
+    charId = (unsigned char)zombie_mode_player_voice(charId);
     int iVar6 = 0;
     int* piVar7 = g_CharacterSfxBanks;
 
@@ -1037,6 +1058,7 @@ int CalcPanVolume(int panL, int panR) // 0x00480610
 // ============================================================================
 void Play3DSnd(int bank, int soundId, int vol, int pos) // 0x0047f9c0
 {
+    zombie_mode_on_player_sound(bank, soundId, vol, pos);   // port-added mod (mods/ZombieMode.h)
     VECTOR* soundPos = (VECTOR*)pos;
     int handle = 0;
 
@@ -1354,6 +1376,17 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
     }
 }
 
+// Port-added: the play-as-zombie mod's extra enemy sound groups. A room has
+// the original's four (records 0-39 of g_emSndBanks; 40-47 are footsteps),
+// and the mod's monsters - the director's placements, a possessed monster
+// that walked in - often need rows the room does not load. Snd_em's group
+// field is three bits wide, so groups 4-7 go here: ten records each, the same
+// (handle, slot) layout, emptied with every room load.
+#define EMSND_ROOM_GROUPS 4
+#define EMSND_MOD_GROUPS  4
+static int         s_modEmSndBanks[EMSND_MOD_GROUPS * 10 * 2];
+static const char* const* s_modEmSndRow[EMSND_MOD_GROUPS];   // each group's row, NULL = empty
+
 // ============================================================================
 // Snd_em (0x0047fca0)
 // Plays a 3D positioned enemy sound effect using the current entity's
@@ -1363,6 +1396,7 @@ void PlayEntitySnd(unsigned char soundType) // 0x0047fbf0
 void Snd_em(unsigned char em_snd_id) // 0x0047fca0
 {
     if (em_snd_id >= 10) return;
+    zombie_mode_on_snd_em(em_snd_id);   // port-added mod (mods/ZombieMode.h)
 
     // `MOV AL, byte ptr [EAX + 0x161]` at 0x0047fcb2 - the sound-bank GROUP is
     // in the high nibble of entity+0x161, which cmd_enemy_set fills from the SCD
@@ -1370,7 +1404,21 @@ void Snd_em(unsigned char em_snd_id) // 0x0047fca0
     // The old code read entity+0x10, part of the model/SCA header: whatever bits
     // happened to sit in 0x70 there scaled the id by 10 and pushed it past the
     // 47-record table, so Snd_em bailed out and no enemy ever made a sound.
-    em_snd_id = em_snd_id + ((ENTITY->pad_160[1] & 0x70) >> 4) * 10;
+    // Port-added mod: groups 4-7 are the play-as-zombie mod's own (see
+    // Room_SetupZombieSoundGroup), only ever set on its monsters. The
+    // original's sum below would read them out of the footstep records.
+    const int group = (ENTITY->pad_160[1] & 0x70) >> 4;
+    if (group >= EMSND_ROOM_GROUPS && zombie_mode_armed()) {
+        int handle = s_modEmSndBanks[((group - EMSND_ROOM_GROUPS) * 10 + em_snd_id) * 2];
+        if (handle != 0) {
+            Calc3DSndPan((VECTOR*)ENTITY->scaMatrixData.localMatrix.t);
+            pan_set(handle, (g_snd_pan_right - g_snd_pan_left) * 0x4E);
+            SetSndSlot(handle, 0);
+        }
+        return;
+    }
+
+    em_snd_id = em_snd_id + group * 10;
     if (em_snd_id >= 48) return;
 
     Calc3DSndPan((VECTOR*)ENTITY->scaMatrixData.localMatrix.t);
@@ -1391,9 +1439,8 @@ void Snd_em(unsigned char em_snd_id) // 0x0047fca0
 // into g_emSndBanks (two ints per record). The body of Room_LoadEnemySoundBanks'
 // loop, shared with the arrange-room override pass at the end of it. A NULL
 // filename leaves the slot empty, which is how a slot gets cleared.
-static void emsnd_load_slot(int slot, const char* filename)
+static void emsnd_load_record(int* piVar7, const char* filename)
 {
-    int* piVar7 = &g_emSndBanks[slot * 2];
 
     if (*piVar7 != 0) {
         destroySndBank(*piVar7);
@@ -1417,6 +1464,78 @@ static void emsnd_load_slot(int slot, const char* filename)
     }
 }
 
+static void emsnd_load_slot(int slot, const char* filename)
+{
+    emsnd_load_record(&g_emSndBanks[slot * 2], filename);
+}
+
+// Port-added: give the play-as-zombie mod (mods/ZombieMode.cpp) a sound group
+// holding a monster type's ten cues, and return it (0-7, the value Snd_em reads
+// from bits 4-6 of entity+0x161), or -1 if there is no room for one.
+// A room group of the same kind - its first four names (fall, steps, bite)
+// as the row's - is used as is, so a coated zombie keeps the room's own voice;
+// then one of the mod's own groups (4-7) already holding the exact row or
+// still empty; last, a group of the room's four whose ten slots this room
+// leaves empty, filled from `row`.
+// Every zombie row starts with "z_taore", the naked zombie's too (its steps
+// and bite are ze_/zep_), so matching on the first name alone gave every
+// zombie type in a room whichever zombie row loaded first.
+static int emsnd_names_match(const char* const* a, const char* const* b, int count)
+{
+    for (int i = 0; i < count; i++) {
+        if (a[i] == NULL || b[i] == NULL) {
+            if (a[i] != b[i]) return 0;
+        } else if (strcmp(a[i], b[i]) != 0) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+int Room_SetupZombieSoundGroup(const char* const* row)
+{
+    const unsigned int roomIdx = get_stage_id() * 29 + (unsigned int)g_roomId;
+    const char** names =
+        roomIdx < sizeof(g_RoomSoundNameTable) / sizeof(g_RoomSoundNameTable[0])
+            ? g_RoomSoundNameTable[roomIdx] : NULL;
+
+    for (int group = 0; group < 4 && names != NULL; group++) {
+        if (names[group * 10] != NULL && emsnd_names_match(&names[group * 10], row, 4)) {
+            return group;
+        }
+    }
+    for (int g = 0; g < EMSND_MOD_GROUPS; g++) {
+        if (s_modEmSndRow[g] != NULL && emsnd_names_match(s_modEmSndRow[g], row, 10)) {
+            return EMSND_ROOM_GROUPS + g;
+        }
+    }
+    for (int g = 0; g < EMSND_MOD_GROUPS; g++) {
+        if (s_modEmSndRow[g] == NULL) {
+            for (int i = 0; i < 10; i++) {
+                emsnd_load_record(&s_modEmSndBanks[(g * 10 + i) * 2], row[i]);
+            }
+            s_modEmSndRow[g] = row;
+            return EMSND_ROOM_GROUPS + g;
+        }
+    }
+    for (int group = 0; group < 4; group++) {
+        int empty = 1;
+        for (int i = 0; i < 10; i++) {
+            if (g_emSndBanks[(group * 10 + i) * 2] != 0) {
+                empty = 0;
+                break;
+            }
+        }
+        if (empty) {
+            for (int i = 0; i < 10; i++) {
+                emsnd_load_slot(group * 10 + i, row[i]);
+            }
+            return group;
+        }
+    }
+    return -1;
+}
+
 // ============================================================================
 // Room_LoadEnemySoundBanks (0x0047eed0)
 // Loads per-room enemy sound banks. Iterates through g_emSndBanks, destroys
@@ -1437,6 +1556,16 @@ static void emsnd_load_slot(int slot, const char* filename)
 void Room_LoadEnemySoundBanks(void) {
     int iVar6 = 0;
     int* piVar7 = g_emSndBanks;
+
+    // Port-added: the mod's extra groups belong to the room being left.
+    for (int i = 0; i < EMSND_MOD_GROUPS * 10; i++) {
+        if (s_modEmSndBanks[i * 2] != 0) {
+            emsnd_load_record(&s_modEmSndBanks[i * 2], NULL);
+        }
+    }
+    for (int g = 0; g < EMSND_MOD_GROUPS; g++) {
+        s_modEmSndRow[g] = NULL;
+    }
 
     // Base row: an arrange room is the same physical room as its base stage's,
     // so it takes that room's enemy bank list. That is right for the footsteps,

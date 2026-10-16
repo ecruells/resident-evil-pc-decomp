@@ -35,6 +35,10 @@ int main(int argc, char** argv)
     // Crash diagnostics and the single-instance guard, in the game root like
     // their Windows counterparts (WinMain does the same, in this order).
     crashlog_install();
+    // --multi (port-added): allow a second copy, as RE1_ALLOW_MULTI=1 does.
+    for (int i = 1; i < argc; ++i) {
+        if (strcmp(argv[i], "--multi") == 0) setenv("RE1_ALLOW_MULTI", "1", 1);
+    }
     if (!plat_single_instance_check()) {
         fprintf(stderr, "[RE1] RESIDENT EVIL is already running.\n");
         return 3;
@@ -204,7 +208,9 @@ int main(int argc, char** argv)
         }
 
         if (!running || g_bQuitFlag) break;
-        if (!g_bWindowFocused) { SDL_Delay(1); continue; }
+        // The original pauses on focus loss; g_bRunInBackground (port-added)
+        // keeps it going for two copies side by side.
+        if (!g_bWindowFocused && !g_bRunInBackground && !g_bPlayAsZombie) { SDL_Delay(1); continue; }
 
         DWORD now = plat_time_ms();
 

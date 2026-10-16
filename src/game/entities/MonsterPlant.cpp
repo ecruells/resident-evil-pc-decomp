@@ -77,6 +77,7 @@
 #include "EntityCommon.h"
 #include "../../Globals.h"
 #include "../BioCard.h"
+#include "../mods/ZombieMode.h"
 #include <cstdlib>
 
 extern void ResetJointTransforms(void);                                   // 0x0048bad0
@@ -546,7 +547,7 @@ void mp_variant_2(void)
     ENTITY->status_flags = (unsigned char)(ENTITY->status_flags | 8);
     ENTITY->ignore_player_flag = 1;
     // 0x10 - ((id & 1) == 0)  ->  0x10 when odd, 0x0F when even.
-    ENTITY->animationId        = (unsigned char)(0x10 - (((g_playerEntity.id & 1) == 0) ? 1 : 0));
+    ENTITY->animationId        = (unsigned char)(0x10 - ((zombie_mode_player_body() == 0) ? 1 : 0));
     ENTITY->animation_frame_id = 0;
     ENTITY->timing_control     = 0;
     ENTITY->blend_counter      = 0;
@@ -594,7 +595,7 @@ void mp_variant_4(void)
 void mp_variant_5(void)
 {
     ENTITY->ignore_player_flag = 4;
-    ENTITY->animationId        = (unsigned char)(0x10 - (((g_playerEntity.id & 1) == 0) ? 1 : 0));
+    ENTITY->animationId        = (unsigned char)(0x10 - ((zombie_mode_player_body() == 0) ? 1 : 0));
     ENTITY->animation_frame_id = 0;
     ENTITY->timing_control     = 0;
     ENTITY->blend_counter      = 0;
@@ -886,7 +887,7 @@ void mp_grab_sound(void)
 {
     Snd_em(3);
     if ((g_playerEntity.id & 3) != 3) {
-        Play3DSnd(2, (int)(g_playerEntity.id & 1) + 0x17, 0,
+        Play3DSnd(2, zombie_mode_player_body() + 0x17, 0,
                   (int)(void*)g_playerEntity.scaMatrixData.localMatrix.t);
     } else {
         Play3DSnd(3, 0, 0, (int)(void*)g_playerEntity.scaMatrixData.localMatrix.t);
@@ -924,7 +925,7 @@ void mp_step_00(void)
         MP_STEP = (unsigned char)(MP_STEP + 1);
         // (-((id & 1) == 0) & 0xFA) + 10  ->  10 when odd, 4 when even
         // (0xFA + 10 = 0x104, truncated to a byte).
-        ENTITY->animationId        = mp_pick((unsigned int)g_playerEntity.id & 1, 0xFA, 10);
+        ENTITY->animationId        = mp_pick((unsigned int)zombie_mode_player_body(), 0xFA, 10);
         ENTITY->animation_frame_id = 0;
         ENTITY->timing_control     = 0;
         ENTITY->blend_counter      = 0;
@@ -1130,7 +1131,7 @@ void mp_step_08(void)
     if (MP_ANIM_END != 0) {
         MP_STEP = (unsigned char)(MP_STEP + 1);
         // (-((id & 1) == 0) & 0xFA) + 0x0B  ->  0x0B when odd, 0x05 when even.
-        ENTITY->animationId        = mp_pick((unsigned int)g_playerEntity.id & 1, 0xFA, 0x0B);
+        ENTITY->animationId        = mp_pick((unsigned int)zombie_mode_player_body(), 0xFA, 0x0B);
         ENTITY->animation_frame_id = 0;
         ENTITY->timing_control     = 0;
         ENTITY->blend_counter      = 0;

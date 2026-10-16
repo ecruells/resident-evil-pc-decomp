@@ -465,7 +465,7 @@ int DirectSound::GetVol(int bank)
 // ============================================================================
 // DirectSound::CreateSound (0x0041f1c0)
 // ============================================================================
-int DirectSound::CreateSound(const char* wavName)
+int DirectSound::CreateSound(const char* wavName, bool muffled)
 {
     if (wavName == NULL || *(int*)((BYTE*)this + 0x10) == 0) {
         OutputDebugStringA("[DEBUG] CreateSound: not initialized or null name\n");
@@ -500,6 +500,7 @@ int DirectSound::CreateSound(const char* wavName)
         OutputDebugStringA(dbg);
         return 0;
     }
+    if (muffled) AudioFile_Muffle(&af);
     const WORD channels = (WORD)af.channels;
     const DWORD sampleRate = (DWORD)af.sampleRate;
     const WORD bitsPerSample = (WORD)af.bitsPerSample;

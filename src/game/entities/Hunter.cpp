@@ -74,6 +74,7 @@
 #include "EntityCommon.h"
 #include "../../Globals.h"
 #include "../BioCard.h"
+#include "../mods/ZombieMode.h"
 #include <cstdlib>
 #include <cstring>
 
@@ -766,7 +767,7 @@ static void hunter_variant_2_ai(void) // 0x00416ca0
     H_POUNCE_LATCH = 0;
 
     if ((unsigned short)playerHealth <
-        (unsigned short)hunter_player_health_gate[g_playerEntity.id & 1] &&
+        (unsigned short)hunter_player_health_gate[zombie_mode_player_body()] &&
         0 < playerHealth) {
         H_POISE = 0;
         if (H_HEALTH < 0x28) {
@@ -1281,6 +1282,7 @@ static void hunter_pounce_start(void) // 0x00417800
 static void hunter_pounce_bite(void) // 0x00417870
 {
     if ((ENTITY->behavior_flags & 0x40) == 0 &&
+        (!zombie_mode_network_match() || g_playerEntity.isBeingAttackedFlag == 0) &&
         g_playerEntity.health > 0 &&
         (unsigned char)(ENTITY->animation_frame_id - 7) < 8 &&
         (g_playerEntity.jointsStructs[1].flags & 0x40) == 0) {
@@ -1289,6 +1291,17 @@ static void hunter_pounce_bite(void) // 0x00417870
         unsigned char hit = FUN_0048ae00(mouth, &g_playerPosScratch, 700, PLAYER_T_INT);
         player_distance_z = hit;
         if (hit != 0) {
+            // Pounce contact still hurts in PvP, but the drag's pointer/joint
+            // coupling has no victim-side handoff. Land after a normal hit.
+            if (zombie_mode_network_match()) {
+                unsigned char facing = (unsigned char)is_facing_toward_entity(&g_playerEntity);
+                g_playerEntity.health = (short)(g_playerEntity.health - 15);
+                g_playerEntity.isBeingAttackedFlag = (unsigned char)(facing + 2);
+                g_playerEntity.action_behavior = (unsigned char)(facing + 0x66);
+                ENTITY->action_state = 2;
+                Snd_em(5);
+                return;
+            }
             g_playerEntity.isBeingAttackedFlag = 1;
             g_playerEntity.animationId = 7;
             g_playerEntity.animFrameId = 6;

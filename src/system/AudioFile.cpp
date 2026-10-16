@@ -1,5 +1,23 @@
 // AudioFile.cpp - see AudioFile.h. Port-added; no original counterpart.
 #include "AudioFile.h"
+
+void AudioFile_Muffle(AudioFileData* audio)
+{
+    if (!audio || !audio->pcm || audio->channels < 1 || audio->channels > 2 ||
+        audio->sampleRate < 1 || (audio->bitsPerSample != 8 && audio->bitsPerSample != 16)) return;
+    // First-order low-pass near 1 kHz. Integer arithmetic stays strictly 32 bit.
+    int alpha = (6000 * 256) / (audio->sampleRate + 6000), history[2] = {};
+    if (alpha < 1) alpha = 1;
+    int bytes = audio->bitsPerSample / 8;
+    unsigned int frames = audio->pcmSize / (audio->channels * bytes);
+    for (unsigned int i = 0; i < frames; i++) for (int c = 0; c < audio->channels; c++) {
+        unsigned char* p = audio->pcm + (i * audio->channels + c) * bytes;
+        int sample = bytes == 1 ? ((int)*p - 128) * 256 : (int)(short)(p[0] | (p[1] << 8));
+        history[c] += (sample - history[c]) * alpha / 256;
+        if (bytes == 1) *p = (unsigned char)(history[c] / 256 + 128);
+        else { p[0] = (unsigned char)history[c]; p[1] = (unsigned char)((unsigned short)history[c] >> 8); }
+    }
+}
 #include "AssetPath.h"
 #include "../platform/platform.h"
 

@@ -25,6 +25,7 @@
 #include "BioCard.h"
 #include "dc/ArrangeStages.h"   // room_effect_page_entry()
 #include "../DebugPrint.h"
+#include "mods/ZombieMode.h"
 #include <cstring>
 #include <cstdlib>
 
@@ -1263,6 +1264,7 @@ static void effect_behavior_clone(void)
         dst->spawnPosY = eff->spawnPosY;
         dst->spawnPosZ = eff->spawnPosZ;
         dst->spawnPosW = eff->spawnPosW;
+        zombie_mode_effect_created((unsigned char)slot);
         dst->clutInfo = eff->clutInfo;
         dst->vramInfo = eff->vramInfo;
         dst->vramInfoBackup = eff->vramInfo;
@@ -1917,7 +1919,11 @@ static void effect_behavior_bullet(void)
     unsigned char hit = apply_weapon_damage((unsigned int)eff->animHeader[1]);
     if (hit != 0) {
         g_playerEntity.flags = savedFlags;
-        effect_shot_impact(0);
+        // Retail leaves monster-hit visuals to the weapon's post-hit
+        // callback. A replayed projectile skips that damage callback, so
+        // show its own round-specific impact as on a ground landing.
+        // 7/8/9 select explosive, acid and flame rounds respectively.
+        effect_shot_impact(zombie_mode_armed() ? 1 : 0);
         return;
     }
 
@@ -2005,6 +2011,13 @@ static void effect_behavior_rocket(void)
     unsigned char hit = apply_weapon_damage(10);
     g_playerEntity.flags = savedFlags;
     if (hit != 0) {
+        if (zombie_mode_armed()) {
+            // Retail relies on the weapon-hit callback for target visuals;
+            // remote visual-only projectiles deliberately skip that callback.
+            // Use the explicit blast for both impact paths in the mod.
+            effect_rocket_explode();
+            return;
+        }
         g_playerPosScratch.x = (int)eff->posX;
         g_playerPosScratch.y = (int)eff->posY;
         g_playerPosScratch.z = (int)eff->posZ;
@@ -2724,6 +2737,11 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
         }
     }
 
+    // Infested slam: tint the shared smoke art green on every network copy.
+    static const unsigned char kSlamGreen[3] = { 35, 220, 65 };
+    if (zombie_mode_armed() && eff->pad_42 == EFFECT_ZM_SLAM_CLOUD)
+        color = kSlamGreen;
+
     int submitted = SubmitEffectSprite(&g_TextureDesc, (int)depthArg, texSlot,
                                        color[0], color[1], color[2],
                                        scaleXadd, scaleYadd, (int)blendMode, (short)brightness);
@@ -2780,6 +2798,7 @@ void EffectActor_UpdateAndRender(void)
     local_10.z = (int)eff->posZ;
     local_10.pad = 0;
 
+    bool replayContext = zombie_mode_effect_context_begin();
     if ((g_message_flags & 8) != 0) {
         g_effectBehaviorTable[eff->animId]();
     }
@@ -2839,6 +2858,7 @@ void EffectActor_UpdateAndRender(void)
         Effect_AnimateSprite();
     }
 
+    if (replayContext) zombie_mode_effect_context_end();
     if ((eff->animHeader[11] & 0x80) != 0) return;
 
     if (is_entity_in_switch_zone(&local_10, g_CurrentRdtDataTypePtr) == 0) return;
@@ -2918,6 +2938,8 @@ void update_2d_effects(void)
     MATRIX tempMatrix;
     static const int g_EffectPoolFlag = 1;   // 0x004c59bc
 
+    // Port-added mod: replayed projectiles deal no damage (mods/ZombieMode.h).
+    zombie_mode_effects_running(true);
     if (g_EffectPoolFlag != 0) {
         g_activeEffectIndex = 64;
         do {
@@ -2945,6 +2967,7 @@ void update_2d_effects(void)
                 }
             }
         } while (g_activeEffectIndex != 0);
+        zombie_mode_effects_running(false);
         return;
     }
 
@@ -2976,6 +2999,7 @@ void update_2d_effects(void)
         }
         g_activeEffectIndex++;
     } while (g_activeEffectIndex < 0x40);
+    zombie_mode_effects_running(false);
 }
 
 // ============================================================================

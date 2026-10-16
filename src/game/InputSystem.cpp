@@ -5,6 +5,7 @@
 #include "../platform/platform.h"
 #include "../marni/MarniInput.h"
 #include "../marni/MarniXInput.h"
+#include "mods/ZombieMode.h"
 #include <cstring>
 
 // ============================================================================
@@ -140,12 +141,39 @@ DWORD ReadPadBoth(void)
 {
 	DWORD tmp;
 
+	// Port-added: running in the background, an unfocused copy takes no
+	// input - on Windows the keyboard is read globally, so otherwise both
+	// copies side by side would act on every key.
+	if ((g_bRunInBackground || g_bPlayAsZombie) && !g_bWindowFocused) {
+		return 0;
+	}
+
 	if (g_pMasterInputState.frameFlag != 0) {
 		g_PadBtnWord = JoyToPSX(g_pMasterInputState.keyboardPrev, 0);
 	}
+	g_PadBtnWord &= ~(DWORD)PAD_MODS;   // re-read below; never carried over
 	if ((1 < g_NumControllers) && (g_pMasterInputState.joysticks[0].enabled != 0)) {
-		tmp = JoyToPSX(g_pMasterInputState.joysticks[0].currPress, 1);
+		DWORD padMask = g_pMasterInputState.joysticks[0].currPress;
+		// Port addition: in the zombie mod LB / RB are the modifier buttons
+		// (PAD_MOD1 / PAD_MOD2), not aim. Pad buttons 5 / 6 are the shoulders
+		// in both the XInput and the WinMM/HID ordering. Read off the hardware
+		// mask, past the remap table, so neither the saved bindings nor
+		// config.ini need migrating.
+		if (g_bPlayAsZombie) {
+			padMask &= ~(MARNI_XI_BTN_LB | MARNI_XI_BTN_RB);
+		}
+		tmp = JoyToPSX(padMask, 1);
 		g_PadBtnWord |= tmp;
+		if (g_bPlayAsZombie) {
+			if (g_pMasterInputState.joysticks[0].currPress & MARNI_XI_BTN_LB) g_PadBtnWord |= PAD_MOD1;
+			if (g_pMasterInputState.joysticks[0].currPress & MARNI_XI_BTN_RB) g_PadBtnWord |= PAD_MOD2;
+		}
+	}
+	// Port addition: the keyboard's modifiers, Shift and Tab, read directly
+	// for the same reason.
+	if (g_bPlayAsZombie) {
+		if (plat_key_state(VK_SHIFT) & 0x8000) g_PadBtnWord |= PAD_MOD1;
+		if (plat_key_state(VK_TAB) & 0x8000)   g_PadBtnWord |= PAD_MOD2;
 	}
 	if (g_DisablePad != 0) {
 		return 0;
@@ -291,6 +319,20 @@ DWORD PlayerPad_Update(void)
 	g_padEdgeDetectedWord = (WORD)(~g_PlayerPadHeldPrev & (WORD)newHeldRaw);
 	g_button_pressed_id = g_RawPadHeld;
 	g_PlayerPadPressed = ~g_PlayerPadPressed & g_RawPadHeld;
+
+	// Port addition (zombie mod): a held modifier takes the buttons of its
+	// combos (the survivors' voice lines: MOD1 + a direction) out of this
+	// frame's words before the remap below, so they never reach gameplay.
+	// g_RawPadHeld is left whole: next frame's edges stay the real ones.
+	{
+		DWORD drop = zombie_mode_pad_filter(g_button_pressed_id, g_PlayerPadPressed);
+		if (drop != 0) {
+			g_button_pressed_id &= ~drop;
+			g_PlayerPadPressed &= ~drop;
+			g_RawPadState &= (WORD)~drop;
+			g_padEdgeDetectedWord &= (WORD)~drop;
+		}
+	}
 
 	// Part 5: Remap current g_button_pressed_id to compute g_PlayerDpadHeld
 	g_PlayerDpadHeld = 0;

@@ -8,6 +8,8 @@
 #include "SFXIds.h"
 #include <cstdio>
 #include "../system/AssetPath.h"
+#include "mods/ZombieMode.h"
+#include "mods/ZombieModeInternal.h"
 
 // ============================================================================
 // Forward declarations for external functions
@@ -24,6 +26,14 @@ extern void texture_viewer_state(void);
 static void DisplayIntroAndStartGame(void)
 {
     sounds_reset();
+    // Port-added mod: play-as-zombie has no story, so no prologue movie.
+    if (zombie_mode_skip_intro()) {
+        zm_guide_background(false);
+        nullsub_0047eb80();
+        Task_sleep(1);
+        Task_chain((void*)game_start);
+        return;
+    }
     g_selectedFmvId = 1;
     g_main_state_flags |= (MSF_FMV_REQUEST | MSF_PANNING_RESET);
     nullsub_0047eb80();
@@ -148,6 +158,13 @@ static void CharSelectDrawShadowRect(short posX, short posY, short scaleFix12)
     cmd->x1 = (short)(sx + shadowW - 1);
     cmd->y1 = (short)(sy + shadowH - 1);
 
+    if (g_bPlayAsZombie && !g_bDcMode) {
+        cmd->x0 = (short)(zm_setup_x(cmd->x0 - g_ScreenOffsetX) + g_ScreenOffsetX);
+        cmd->x1 = (short)(zm_setup_x(cmd->x1 - g_ScreenOffsetX) + g_ScreenOffsetX);
+        cmd->y0 = (short)(zm_setup_y(cmd->y0 - g_ScreenOffsetY) + g_ScreenOffsetY);
+        cmd->y1 = (short)(zm_setup_y(cmd->y1 - g_ScreenOffsetY) + g_ScreenOffsetY);
+    }
+
     cmd->depthSort = 42 * 16 + 500;
 
     // Use an opaque pixel from the portrait texture page (slot 0x0C)
@@ -203,6 +220,13 @@ static void CharSelectRenderSprite(unsigned char texU, unsigned char texV,
     cmd->x1 = sx + scaledW - scaledPX - 1;
     cmd->y1 = sy + scaledH - scaledPY - 1;
 
+    if (g_bPlayAsZombie && !g_bDcMode) {
+        cmd->x0 = (short)(zm_setup_x(cmd->x0 - g_ScreenOffsetX) + g_ScreenOffsetX);
+        cmd->x1 = (short)(zm_setup_x(cmd->x1 - g_ScreenOffsetX) + g_ScreenOffsetX);
+        cmd->y0 = (short)(zm_setup_y(cmd->y0 - g_ScreenOffsetY) + g_ScreenOffsetY);
+        cmd->y1 = (short)(zm_setup_y(cmd->y1 - g_ScreenOffsetY) + g_ScreenOffsetY);
+    }
+
     cmd->depthSort = (unsigned int)depth * 16 + 500;
 
     cmd->u0 = (unsigned short)texU;
@@ -233,9 +257,18 @@ static void CharSelectDrawCursor(void)
         g_TextureDesc.texV = 0x50;
     }
 
+    if (g_bPlayAsZombie && !g_bDcMode) {
+        g_TextureDesc.screenX = (short)(zm_setup_x(g_TextureDesc.screenX + 160) - 160);
+        g_TextureDesc.screenY = (short)(zm_setup_y(g_TextureDesc.screenY + 120) - 120);
+    }
     display_texture(&g_TextureDesc, 1, 0x0C, 1);
     g_TextureDesc.texV += 0x10;
     g_TextureDesc.screenX = 0x4C;
+    g_TextureDesc.screenY = -0x16;
+    if (g_bPlayAsZombie && !g_bDcMode) {
+        g_TextureDesc.screenX = (short)(zm_setup_x(g_TextureDesc.screenX + 160) - 160);
+        g_TextureDesc.screenY = (short)(zm_setup_y(g_TextureDesc.screenY + 120) - 120);
+    }
     display_texture(&g_TextureDesc, 1, 0x0C, 1);
 }
 
@@ -316,6 +349,7 @@ void characterSelectionScreen(void)
     g_roomId = 0x1B;   // 0x0049239? - placeholder room id for the selection screen, not a real location
 
     LoadSoundBank(BANK_SELECT, g_DataBuffer);
+    if (g_bPlayAsZombie && !g_bDcMode) load_character_sfx(0);
 
     // Load characters police cards and selection arrow texture
     LoadFile(GAME_DATA_ROOT "data\\select_b.tim", g_TimImageBuffer__bitmap, 0x20);
@@ -327,11 +361,14 @@ void characterSelectionScreen(void)
     LoadFile(GAME_DATA_ROOT "data\\select_k.tim", g_TimImageBuffer__bitmap, 0x20);
     LoadTexturePage(g_TimImageBuffer__bitmap, 5, 10, 0x0D, 7, 0, 0, 0);
 
-    // Load background image
-    LoadFile(GAME_DATA_ROOT "data\\sel_back.pix", g_TimImageBuffer__bitmap, 0x20);
-    display_image(0, g_TimImageBuffer__bitmap, 320, 240);
-
-    title_setup_texture_pages(0, 1);
+    // Infestation's solo setup uses the same monitor as multiplayer setup.
+    if (g_bPlayAsZombie && !g_bDcMode) {
+        zm_guide_background(true);
+    } else {
+        LoadFile(GAME_DATA_ROOT "data\\sel_back.pix", g_TimImageBuffer__bitmap, 0x20);
+        display_image(0, g_TimImageBuffer__bitmap, 320, 240);
+        title_setup_texture_pages(0, 1);
+    }
     // empty_00470960(0): empty in the original - call dropped
 
     // Initialize rotation matrix
@@ -515,7 +552,8 @@ void characterSelectionScreen(void)
                         g_selState = 2;
                         g_selSwapDir = (g_RawPadHeld & 0x8000) ? 1 : 0;
         
-                        play_sfx(1, 0);
+                        play_sfx(g_bPlayAsZombie && !g_bDcMode ? SFX_UI_BANK : 1,
+                                 g_bPlayAsZombie && !g_bDcMode ? SFX_UI_CURSOR : 0);
         
                         if (g_selSwapDir == g_selSelected) {
                             g_char0AccX = 2;
@@ -539,7 +577,8 @@ void characterSelectionScreen(void)
                     CharSelectDrawCursor();
 
                 } else {
-                    play_sfx(1, 1);
+                    play_sfx(g_bPlayAsZombie && !g_bDcMode ? SFX_UI_BANK : 1,
+                             g_bPlayAsZombie && !g_bDcMode ? SFX_UI_DECIDE : 1);
                     g_selSubState = 0;
                     g_selState = 3;
                     g_fade_type_id = 1;
@@ -716,6 +755,7 @@ case_6:
                 cleanup_texture_slot(0x0C);
                 cleanup_texture_slot(0x0D);
                 cleanup_texture_slot(0x0E);
+                if (g_bPlayAsZombie && !g_bDcMode) zm_guide_background(false);
                 Task_chain((void*)title_state);
                 return;
             }

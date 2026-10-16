@@ -156,6 +156,7 @@ typedef struct joyinfoex_tag {
 
 // Virtual-key codes used by the game (key bindings, debug screens, the F-key
 // menu combos). Values match Win32 so the binding tables stay meaningful.
+#define VK_TAB       0x09
 #define VK_SHIFT     0x10
 #define VK_CONTROL   0x11
 #define VK_RETURN    0x0D

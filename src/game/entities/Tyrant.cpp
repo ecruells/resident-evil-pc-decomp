@@ -96,6 +96,7 @@
 #include "EntityCommon.h"
 #include "../../Globals.h"
 #include "../BioCard.h"
+#include "../mods/ZombieMode.h"
 #include "../../DebugPrint.h"
 #include "../SpriteRenderer.h"           // TextureDraw queue + SPRITE_CLASS_*
 #include "../../marni/MarniSystem.h"     // MarniCreateTexture
@@ -209,6 +210,54 @@ static SVECTOR      g_tyTrailNear      = { 0, (short)-300, 0, 0 };  // 0x004ba27
 // the arm sweep in tyrant_update pushes _DAT_004ba27a (= this vector's y) by
 // +-100 / -800 / +-1000, which only makes sense against a 1500 base.
 static SVECTOR      g_tyTrailFar       = { 0, 1500, 0, 0 };         // 0x004ba278
+
+// The original has one boss. The mod can place several; each needs its own
+// ribbon history, ghost copies and countdown even when it is a net puppet.
+struct TyrantModVisual {
+    void* ghosts = nullptr;
+    void* trail = nullptr;
+    short scaleA = 3000, scaleB = 300;
+    signed char step = -56;
+    unsigned short timer = 0;
+    int segments = 8;
+    SVECTOR farPoint = { 0, 1500, 0, 0 };
+};
+static TyrantModVisual s_modVisual[30];
+
+static int tyrant_mod_visual_slot(void)
+{
+    if (!zombie_mode_armed()) return -1;
+    int slot = (int)(ENTITY - g_EnemiesList);
+    return slot >= 0 && slot < 30 ? slot : -1;
+}
+
+static void tyrant_mod_visual_load(int slot)
+{
+    if (slot < 0) return;
+    const TyrantModVisual& v = s_modVisual[slot];
+    g_tyClawGhostBlock = v.ghosts;
+    g_tyTrailBlock = v.trail;
+    g_tyClawScaleA = v.scaleA;
+    g_tyClawScaleB = v.scaleB;
+    g_tyClawScaleStep = v.step;
+    g_tyTrailTimer = v.timer;
+    g_tyTrailSegments = v.segments;
+    g_tyTrailFar = v.farPoint;
+}
+
+static void tyrant_mod_visual_save(int slot)
+{
+    if (slot < 0) return;
+    TyrantModVisual& v = s_modVisual[slot];
+    v.ghosts = g_tyClawGhostBlock;
+    v.trail = g_tyTrailBlock;
+    v.scaleA = g_tyClawScaleA;
+    v.scaleB = g_tyClawScaleB;
+    v.step = g_tyClawScaleStep;
+    v.timer = g_tyTrailTimer;
+    v.segments = g_tyTrailSegments;
+    v.farPoint = g_tyTrailFar;
+}
 
 namespace {
 
@@ -688,8 +737,13 @@ void tyrant_latch_player_attacker(short yawBias)
 // Damage with the second-playthrough variant (g_ScenarioFlags bit SCENARIO_FLAG_SECOND_PLAYTHROUGH, set
 // by EndingScreen after clearing the game - the "hard mode" behaviour switch
 // every enemy AI reads, NOT a defense-item check).
-void tyrant_damage_player(int base, int withFlag)
+void tyrant_damage_player(int base, int withFlag, int modDamage = 50)
 {
+    // Zombie mode: standing attacks 50, aimed slash 40, running attacks 60.
+    if (zombie_mode_armed()) {
+        g_playerEntity.health = (short)(g_playerEntity.health - modDamage);
+        return;
+    }
     if (Flg_ck((int)g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0)
         g_playerEntity.health = (short)(g_playerEntity.health - base);
     else
@@ -966,11 +1020,11 @@ void tyrant_behavior_restrained(void)
         eub(ENTITY, 0x8c) = 0x0f;
         ty_anim() = 8;
         euw(ENTITY, 0x88) = 0xffff;          // health = -1: unkillable while bound
-        Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
+        if (!zombie_mode_armed()) Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
     } else if (sub != 1) {
         if (sub == 2) {
             ENTITY->status_flags |= 10;
-            Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
+            if (!zombie_mode_armed()) Flg_on((int)g_EnemiesFlags, ENTITY->death_event_id);
         }
         tyrant_root_motion(0, 0);
         Add_speedXZ(0);
@@ -1195,7 +1249,7 @@ void tyrant_behavior_claw_slash(void)
     }
 
     if ((unsigned short)(frame - 7) == 5 && (ty_hitMask() & 2) != 0) {
-        tyrant_damage_player(0x0c, 0x12);
+        tyrant_damage_player(0x0c, 0x12, 40);
         unsigned char snd;
         if (((unsigned short)g_playerEntity.health & 0x8000) == 0) {
             snd = 3;
@@ -1296,7 +1350,8 @@ void tyrant_behavior_backhand(void)
         ty_speed() = 0x12c;
         entity_rotate_toward_target((VECTOR*)ty_playerT(), 0x30);
         g_tyTrailSegments = 8;
-        g_tyTrailTimer = 0x0f;
+        // The mod's puppets need a fresh cue/history for this swing too.
+        g_tyTrailTimer = zombie_mode_armed() ? 0x800f : 0x0f;
     } else if (sub != 1) {
         if (sub == 2) {
             set_state_word(0x00010001);
@@ -1476,7 +1531,7 @@ void tyrant_behavior_charge(void)
             }
         }
         if (phase == 4 && (ty_hitMask() & 8) != 0) {
-            tyrant_damage_player(0x14, 0x1e);
+            tyrant_damage_player(0x14, 0x1e, 60);
             Snd_em(2);
         }
 
@@ -1721,7 +1776,7 @@ void tyrant_behavior_rush(void)
             g_tyClawScaleB = (short)(g_tyClawScaleB - 800);
 
         if (phase == 8 && (ty_hitMask() & 2) != 0) {
-            tyrant_damage_player(0x14, 0x1e);
+            tyrant_damage_player(0x14, 0x1e, 60);
             unsigned char snd;
             if (((unsigned short)g_playerEntity.health & 0x8000) == 0) {
                 snd = 3;
@@ -1868,7 +1923,7 @@ void tyrant_think_roof(void)
         }
     }
 
-    if (Flg_ck((int)g_SysFlags, 0x1e) != 0 && g_playerDisplacement < 0xa8c &&
+    if (!zombie_mode_armed() && Flg_ck((int)g_SysFlags, 0x1e) != 0 && g_playerDisplacement < 0xa8c &&
         (short)turn_toward_target((VECTOR*)ty_playerT(), 0x200) == 0) {
         set_state_word(0x00070101);          // behaviour 7 -> impale
     }
@@ -1963,6 +2018,17 @@ static void tyrant_init(void)
     eub(ENTITY, 0xbd) = 6;
     if (ENTITY->id == 0x10) set_state_word(0x00090101);   // behaviour 9 -> eruption
 
+    if (ENTITY->id == 0x10 && zombie_mode_armed()) {
+        // Choose the standing pose BEFORE the first Joint_move. Animation 6
+        // starts below the floor; changing only the combat state afterward
+        // leaves that root pose blending upward on room arrival.
+        set_state_word(0x00010001);
+        ty_anim() = 0;
+        ty_frame() = 0;
+        eub(ENTITY, 0xbf) = 0;
+        eub(ENTITY, 0x8c) = 0;
+    }
+
     Joint_move(0, ENTITY->animHeader, ENTITY->animBase, 0x40);
 
     ENTITY->lookAtJointIdx  = 2;
@@ -2000,6 +2066,11 @@ static void tyrant_init(void)
     g_tyTrailBlock = g_loadDataDestPointer;
     tyrant_trail_alloc(9, g_loadDataDestPointer, 0x70);
     eub(ENTITY, 0x17f) = 0x5a;
+    if (zombie_mode_armed()) {
+        eub(ENTITY, 0x17f) = 0;
+        dbg_printf("[tyrant] room init standing anim %u root y %d\n",
+            (unsigned)ty_anim(), ENTITY->jointsStructs[0].transform.t[1]);
+    }
 }
 
 // ===========================================================================
@@ -2087,7 +2158,9 @@ static void tyrant_state_forced(void)
 {
     if (ENTITY->ignore_player_flag == 0) {
         set_state_word(0x00000103);          // state 3, ignore 1, behaviour 0
-        if (ENTITY->id == 0x10) ENTITY->action_behavior = 1;
+        // The mod has no rooftop script to finish its death. Collapse instead
+        // of yielding to the final-battle SCD.
+        if (ENTITY->id == 0x10 && !zombie_mode_armed()) ENTITY->action_behavior = 1;
     }
     tyrant_run_behavior((int)ENTITY->action_behavior);
 }
@@ -2918,7 +2991,33 @@ const TyrantState s_tyrantStates[10] = {
 // ===========================================================================
 // 0x00421990 - per-frame entry, both ids.
 // ===========================================================================
-void tyrant_update(void)
+static void tyrant_render_claw(void)
+{
+    if (ENTITY->id != 0x10 || (ty_flags() & 8) != 0) return;
+    tyrant_draw_claw_ghosts();
+    if ((g_tyTrailTimer & 0x8000) != 0 && ENTITY->jointsStructs != nullptr) {
+        zombie_mode_tyrant_trail_started(ENTITY, (unsigned short)(g_tyTrailTimer & 0x7FFF));
+        MATRIX* claw = ty_clawWorld();
+        g_tyTrailSegments = 8;
+        g_entity_bkp = 7;
+        if (g_tyClawScaleB > 8000) g_tyTrailFar.y = (short)(g_tyTrailFar.y + 1000);
+        g_tyTrailFar.y = (short)(g_tyTrailFar.y - 800);
+        do {
+            g_tyTrailFar.y = (short)(g_tyTrailFar.y + 100);
+            tyrant_trail_push(g_tyTrailBlock, claw, claw, &g_tyTrailNear, &g_tyTrailFar,
+                (unsigned char)g_entity_bkp, 0);
+            unsigned int n = g_entity_bkp;
+            g_entity_bkp = n - 1;
+            if (n == 0) break;
+        } while (true);
+        tyrant_trail_push(g_tyTrailBlock, claw, claw, &g_tyTrailNear, &g_tyTrailNear, 8, 0);
+        g_tyTrailTimer &= 0x7FFF;
+        if (g_tyClawScaleB > 8000) g_tyTrailFar.y = (short)(g_tyTrailFar.y - 1000);
+    }
+    if (g_tyTrailTimer != 0) tyrant_trail_update();
+}
+
+static void tyrant_update_impl(void)
 {
     // Any live Tyrant whose behavior_flags carry 0x40 is handed to the SCD.
     if (ENTITY->state != 0 && (ENTITY->behavior_flags & 0x40) != 0)
@@ -2932,9 +3031,10 @@ void tyrant_update(void)
         if (ENTITY->state < 10 && s_tyrantStates[ENTITY->state] != nullptr)
             s_tyrantStates[ENTITY->state]();
 
-        // action_behavior 9 is the impale: the grabbed player must not be
+        // State 1's +2 table bias makes action_behavior 7 the impale.
+        // The grabbed player must not be
         // pushed out of the animation by the collision solver.
-        if (ENTITY->action_behavior != 9) {
+        if (!(ENTITY->state == 1 && ENTITY->action_behavior == 7)) {
             ResolveEntityScaCollision(reinterpret_cast<Entity*>(&g_playerEntity), ENTITY);
             HandleEnemyPlayerCollisions();
             eub(ENTITY, 0x16c) |= check_room_collision(
@@ -2979,40 +3079,7 @@ void tyrant_update(void)
     ENTITY->has_enter_switch_zone = (unsigned char)is_entity_in_switch_zone(
         reinterpret_cast<VECTOR*>(&ei(ENTITY, 0x34)), g_CurrentRdtDataTypePtr);
 
-    if (ENTITY->id != 12 && (ty_flags() & 8) == 0) {
-        tyrant_draw_claw_ghosts();
-
-        // The 0x8000 bit arms the ribbon: seed the whole history from the
-        // current claw pose, sweeping the far point through 0x004ba27a.
-        //
-        // The original reads ENTITY+0x98 unchecked.  Port-side the null test
-        // leaves the arm bit SET rather than seeding the pool from a null claw:
-        // tyrant_trail_update() also returns early on null joints, so nothing
-        // draws an unseeded ribbon and the sweep retries on the first frame the
-        // joints exist.
-        if ((g_tyTrailTimer & 0x8000) != 0 && ENTITY->jointsStructs != nullptr) {
-            MATRIX* claw = ty_clawWorld();
-            g_tyTrailSegments = 8;
-            g_entity_bkp = 7;
-            if (g_tyClawScaleB > 8000) g_tyTrailFar.y = (short)(g_tyTrailFar.y + 1000);
-            g_tyTrailFar.y = (short)(g_tyTrailFar.y - 800);
-            do {
-                g_tyTrailFar.y = (short)(g_tyTrailFar.y + 100);
-                tyrant_trail_push(g_tyTrailBlock, claw, claw,
-                                  &g_tyTrailNear, &g_tyTrailFar,
-                                  (unsigned char)g_entity_bkp, 0);
-                unsigned int n = g_entity_bkp;
-                g_entity_bkp = n - 1;
-                if (n == 0) break;
-            } while (true);
-            tyrant_trail_push(g_tyTrailBlock, claw, claw,
-                              &g_tyTrailNear, &g_tyTrailNear, 8, 0);
-            g_tyTrailTimer &= 0x7fff;
-            if (g_tyClawScaleB > 8000) g_tyTrailFar.y = (short)(g_tyTrailFar.y - 1000);
-        }
-
-        if (g_tyTrailTimer != 0) tyrant_trail_update();
-    }
+    tyrant_render_claw();
 
     if ((ty_flags() & 1) != 0 && ENTITY->has_enter_switch_zone != 0) {
         entity_add_fade_sprite(reinterpret_cast<VECTOR*>(&ei(ENTITY, 0x34)),
@@ -3022,12 +3089,49 @@ void tyrant_update(void)
     // The rocket launcher kill: once the rooftop Tyrant drops below 201 HP the
     // room's "boss dead" flag goes up and the health is pinned so the death
     // behaviour runs exactly once.
-    if ((ty_flags() & 8) == 0 && ENTITY->id == 0x10 && ENTITY->health < 0xc9) {
+    if (!zombie_mode_armed() && (ty_flags() & 8) == 0 && ENTITY->id == 0x10 && ENTITY->health < 0xc9) {
         Flg_on((int)g_SysFlags, 0x1f);
         ENTITY->health = 200;
     }
 
     update_player_position(reinterpret_cast<PlayerEntity*>(ENTITY), 2);
+}
+
+void tyrant_update(void)
+{
+    int slot = tyrant_mod_visual_slot();
+    if (slot >= 0 && ENTITY->state == 0) s_modVisual[slot] = TyrantModVisual();
+    tyrant_mod_visual_load(slot);
+    tyrant_update_impl();
+    tyrant_mod_visual_save(slot);
+}
+
+// No AI, movement or damage: the room owner already sent this joint pose.
+void tyrant_puppet_visuals(unsigned short trailFrames)
+{
+    int slot = tyrant_mod_visual_slot();
+    tyrant_mod_visual_load(slot);
+    if (trailFrames != 0) g_tyTrailTimer = (unsigned short)(0x8000 | trailFrames);
+    if (ENTITY->health >= 0) {
+        tyrant_draw_heart();
+        tyrant_render_claw();
+    } else {
+        g_tyTrailTimer = 0;
+    }
+    tyrant_mod_visual_save(slot);
+}
+
+// The pad bypasses the combat AI while walking, but the heart and the state
+// word restored by a shot still need the Tyrant's normal frame bookkeeping.
+void tyrant_director_walk_finish(void)
+{
+    int slot = tyrant_mod_visual_slot();
+    tyrant_mod_visual_load(slot);
+    eu(ENTITY, 0x174) = eu(ENTITY, 0x84);
+    if ((ty_flags() & 8) == 0) tyrant_draw_heart();
+    tyrant_render_claw();
+    update_player_position(reinterpret_cast<PlayerEntity*>(ENTITY), 2);
+    tyrant_mod_visual_save(slot);
 }
 
 // ===========================================================================

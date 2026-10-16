@@ -68,6 +68,11 @@ BOOL plat_mkdir(const char* path);
 // Replaces the CreateFileA/WriteFile pair in MarniBits::SaveBitmapToFile.
 BOOL plat_file_write(const char* path, const void* data, size_t size);
 
+// Write a private temporary file beside path, flush it, then atomically replace
+// path. Failure leaves the existing destination intact; concurrent readers see
+// one complete version. Temporary names are exclusive across game processes.
+BOOL plat_file_write_atomic(const char* path, const void* data, size_t size);
+
 // How many bytes are readable from `p` up to the end of the committed,
 // accessible memory region containing it. Returns 0 when the address is not
 // readable. Replaces the VirtualQuery calls that clamp a truncated TIM page.
@@ -119,6 +124,28 @@ void* plat_alloc_guarded_stacks(int count, size_t stackSize, size_t guardSize);
 void plat_fatal(const char* message);
 
 // ---------------------------------------------------------------------------
+// Networking (port-added, for the zombie mod's two-player link)
+//
+// One non-blocking UDP socket per process - all the mod needs. Addresses are
+// plain data (IPv4, host byte order), so no OS type leaks into game code.
+// ---------------------------------------------------------------------------
+struct PlatNetAddr {
+    unsigned int   ip;     // host byte order, 192.168.1.10 = 0xC0A8010A
+    unsigned short port;
+};
+
+// Open the socket bound to `port` on every interface (0 = any free port),
+// closing a previous one. FALSE on failure.
+BOOL plat_net_open(unsigned short port);
+void plat_net_close(void);
+// Resolve a dotted address or host name. FALSE if it does not resolve.
+BOOL plat_net_resolve(const char* host, unsigned short port, PlatNetAddr* out);
+// Send one datagram. FALSE on failure.
+BOOL plat_net_send(const PlatNetAddr* to, const void* data, int length);
+// Receive one datagram if one is waiting: its length, 0 when none, -1 on error.
+int  plat_net_recv(void* buffer, int capacity, PlatNetAddr* from);
+
+// ---------------------------------------------------------------------------
 // Window / cursor lifecycle
 //
 // Used by the Marni init failure path. The platform window layer owns the real
@@ -148,8 +175,23 @@ void plat_cursor_show(BOOL show);
 typedef BOOL (*PlatVideoOverlayCallback)(DWORD32 frameTexture, int frameMs);
 void plat_video_set_overlay_callback(PlatVideoOverlayCallback callback);
 
+// Independent silent, forward-only decoder for simultaneous mod bumpers.
+// Returned pixels belong to the decoder until its next frame/close call.
+// FALSE at EOF/error; the last pixels remain available until close.
+struct PlatVideoClip;
+PlatVideoClip* plat_video_clip_open(const char* path);
+BOOL plat_video_clip_frame(PlatVideoClip* clip, int timeMs,
+                          const unsigned char** rgba, int* width, int* height);
+void plat_video_clip_close(PlatVideoClip* clip);
+
 // Probe the decoder backend. FALSE means "no FMV available, skip the movie".
 BOOL plat_video_init(void);
+
+// Decode one picture silently, without presenting or starting audio. Fails if
+// playback owns the decoder. On success returns malloc-owned top-down RGBA8;
+// caller frees *rgba. Does not change the playback/overlay state.
+BOOL plat_video_read_frame(const char* path, int timeMs, unsigned char** rgba,
+                          int* width, int* height);
 
 // Open `path` and start playing. playToMs > 0 stops at that time (the
 // prologue's Chris-only beat); 0 plays through to the end.

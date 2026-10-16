@@ -7,7 +7,7 @@
 //
 //   - ConfigFile_Load()      reads [Display]/[Player]/[Input] (plus the
 //                            [Assets] and [Debug] dev knobs) into the globals.
-//   - ConfigFile_Save()      rewrites ONLY the keys the game owns, in place:
+//   - ConfigFile_Save()      rewrites ONLY the keys the game owns, atomically:
 //                            comments, unknown keys and section order survive.
 //   - ConfigFile_EnsureExists() writes the documented default file when it is
 //                            missing, so a fresh install has something to edit.

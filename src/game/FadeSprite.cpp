@@ -21,6 +21,7 @@
 // ============================================================================
 #include "../Globals.h"
 #include "SpriteRenderer.h"
+#include "mods/ZombieMode.h"
 #include <cstring>
 
 extern void SetRotAndTransMatrix(MATRIX* m);
@@ -303,6 +304,21 @@ static unsigned int fade_spr_param_index(void)
 // ============================================================================
 void entity_add_fade_sprite(VECTOR* pos, short* quad, short yOffset, short angle)
 {
+    // Original enemies submit at y=0 because they stay on their spawn floor.
+    // The mod places and moves monsters on different levels of the same room.
+    // Match only body shadows: joint shadows must not project onto the
+    // height of an animated joint. Keep explicit nonzero offsets unchanged.
+    if (zombie_mode_armed() && yOffset == 0) {
+        for (int i = 0; i < 30; ++i) {
+            Entity* e = &g_EnemiesList[i];
+            if (pos == (VECTOR*)e->scaMatrixData.localMatrix.t &&
+                quad == (short*)&e->pushVelocity) {
+                yOffset = (short)e->scaMatrixData.localMatrix.t[1];
+                break;
+            }
+        }
+    }
+
     MATRIX local, composed;
     int discard0 = 0, discard1 = 0;
 

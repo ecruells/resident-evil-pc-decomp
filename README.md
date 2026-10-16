@@ -1,3 +1,47 @@
+
+# Resident Evil Infested
+
+**Infested** is an asymmetric multiplayer mode built on the pc decomp: one
+**director** against up to three **survivors** in a randomized mansion
+scenario. The director spends points to place, possess and command the
+mansion's monsters and set traps. The survivors each pick a character with
+their own perks, scavenge randomized keys, weapons and ammo, and try to escape
+through the storeroom before the 20-minute clock runs out. Single player pits
+the director against an AI survivor and is mostly meant for familiarizitng yourself with the controls. 
+It is switched on with `[Mods] PlayInfested=1` in `config.ini` (the default in `config.ini.template`); with it
+off, the game plays exactly as the original. 
+
+**HOST - AI DIRECTOR** (NEW GAME's lobby, left/right picks easy, normal, hard,
+nightmare or hell on earth) hosts a game the AI director plays, and the host plays a survivor
+alongside up to three others - or alone. Everyone picks a character in the
+lobby (the host with ENTER, then AIM to start), there is no map review or setup,
+and the AI runs on the host's copy. It only buys monsters, traps and doorway
+reinforcements - it never possesses one. Higher levels earn more points, unlock
+the big monsters sooner and press harder. `[Mods] AiDirector=1-5` sets
+the default AI DIRECTOR difficulty; human director matches never run the AI.
+Nightmare earns and starts with 2.2x Normal points; Hell on Earth uses the same
+aggression as Nightmare with 3x Normal income and starting points.
+
+**Survivors** may find some key differences from the old mansion
+- Most weapons are locked behind the progression puzzles, the piano, gallery, armor room, plant room, etc.
+- Keys are randomly spread out across the mansion and their locations are indicated in the special Infested map
+viewable with the options button.
+- The set of locked doors is mostly the same, but which key unlocks them is randomized.
+- The shotgun is in its original place but requires either a pickaxe to break down the door 
+as the trap event is happening or the broken shotgun must be used to swap out for the shotgun, 
+both the Pickaxe and Broken shotgun are random drops.
+- To reach the back part of the mansion either a key code for the keypad door or a 
+battery for the elevator, both are random drops, one crest will always spawn in that area of the mansion.
+
+If you want to really mess around you can rebuild this project with the QUICK_DEBUG define line uncommented
+and the game will start with most of the relevant items in the main hall or near their respective puzzles.
+
+### Thank you
+
+This project is a fork of Eduardo Cruells'
+[**Resident Evil 1 for PC Decompilation**](https://github.com/ecruells/resident-evil-pc-decomp).
+and would not exist without it. Please go star it and support it.
+
 # Resident Evil 1 for PC Decompilation
 
 ## Introduction
@@ -52,6 +96,18 @@ This invokes MSBuild on `Game.sln` (Release / Win32) and produces
 build_debug.bat
 ```
 This produces `bin\Debug\residentevil.exe`.
+
+In VS Code, press **Ctrl+Shift+B** for Release / Win32, or choose
+**Tasks: Run Build Task** for Debug / Win32. The tasks use the .NET CLI:
+```
+dotnet build Build.proj -c Release
+dotnet build Build.proj -c Debug
+```
+`Build.proj` delegates to the same build scripts and builds `Game.sln` with
+Visual Studio's MSBuild. Install the .NET SDK in addition to the C++ build
+tools for this entry point. Direct `dotnet build Game.sln` does not work:
+the SDK's MSBuild cannot run this project's native Visual C++ build tasks.
+The `RE1_TOOLSET` and `RE1_SDK` overrides below also apply to these commands.
 
 Both scripts find MSBuild with `vswhere.exe`, so any Visual Studio edition and
 version (2017 or newer) works without editing a path. The solution itself pins

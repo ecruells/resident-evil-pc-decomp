@@ -66,6 +66,7 @@
 // ============================================================================
 #include "EntityCommon.h"
 #include "../../Globals.h"
+#include "../mods/ZombieMode.h"
 #include <cstdlib>
 
 extern void ResetJointTransforms(void);                            // 0x0048bad0
@@ -1005,6 +1006,26 @@ static void chimera_behavior_swipe(void) // 0x00439ad0
 // ============================================================================
 static void chimera_behavior_grabhold(void) // 0x00439df0
 {
+    // The original grab writes the victim's pose and reads its mash input on
+    // the monster's copy. PvP has no complete handoff for that sequence yet.
+    if (zombie_mode_network_match()) {
+        unsigned char facing = (unsigned char)is_facing_toward_entity(&g_playerEntityPointer);
+        int damage = Flg_ck((int)&g_ScenarioFlags, SCENARIO_FLAG_SECOND_PLAYTHROUGH) == 0 ? 10 : 30;
+        g_playerEntityPointer.health = (short)(g_playerEntityPointer.health - damage);
+        g_playerEntityPointer.isBeingAttackedFlag = (unsigned char)(facing + 1);
+        g_playerEntityPointer.action_behavior = (unsigned char)(facing + 0x66);
+        // A contact may already have armed a reaction on the preceding frame.
+        // Start this hit cleanly instead of resuming an unfinished grab pose.
+        g_playerEntityPointer.animationId = g_playerEntityPointer.health < 0 ? 1 : 2;
+        g_playerEntityPointer.animFrameId = 0;
+        g_playerEntityPointer.action_state = 0;
+        ENTITY->status_flags &= (unsigned char)~2;
+        ENTITY->hit_state = 0;
+        ENTITY->ignore_player_flag = 0;
+        C_BEH_WORD = 7; // return to the swoop/chase, with a fresh action state
+        Snd_em(6);
+        return;
+    }
     unsigned char state = ENTITY->action_state;
     if (state == 0) {
         ENTITY->animation_frame_id = 10;

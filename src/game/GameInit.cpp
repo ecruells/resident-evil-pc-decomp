@@ -4,6 +4,7 @@
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "FileLoader.h"
+#include "mods/ZombieMode.h"
 #include "../system/AssetPath.h"
 #include <cstdlib>
 
@@ -193,7 +194,8 @@ void load_global_assets(void)
     LoadTexturePage(g_DataBuffer, 2, 0, 0xB, 0, 0, 0, 0);
 
     // Load Main menu textures (8bits)
-    LoadFile(GAME_DATA_ROOT "data\\status.tim", g_DataBuffer, 0x20);
+    size_t statusBytes = LoadFile(GAME_DATA_ROOT "data\\status.tim", g_DataBuffer, 0x20);
+    zombie_mode_pickaxe_icon_init(g_DataBuffer, (unsigned int)statusBytes);
     g_TextureBankID = 0x41C;
     LoadTexturePage(g_DataBuffer, 0x1C, 4, 0, 0, 0, 0, 1);
 
@@ -202,6 +204,7 @@ void load_global_assets(void)
     // Loan Main menu characters faces texture (8bits)
     LoadFile(GAME_DATA_ROOT "data\\statface.tim", g_DataBuffer, 0x20);
     LoadTexturePage(g_DataBuffer, g_TextureBankID & 0xFF, 0, 9, 0, 0, 0, 0);
+    zombie_mode_load_portraits();
 
     // Load Inventory slot background texture (8bits)
     LoadFile(GAME_DATA_ROOT "data\\blue.tim", g_DataBuffer, 0x20);
