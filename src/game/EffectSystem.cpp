@@ -2785,9 +2785,9 @@ static void effect_submit_sprite(Effect* eff, short screenX, short screenY,
 // projected, and the velocity header advanced. The sprite animation is stepped
 // and the sprite submitted.
 //
-// Effects whose header lacks bit 1 keep whatever position the stack had in the
-// original; the port zeroes that scratch so the zone test deterministically
-// rejects them instead of randomly drawing at a stale spot.
+// Frames whose header lacks bit 1 keep whatever world AND screen position the
+// stack had in the original; the port stands in the slot's last stored world
+// position for both (see local_10 and the re-projection before the submit).
 // ============================================================================
 void EffectActor_UpdateAndRender(void)
 {
@@ -2884,6 +2884,28 @@ void EffectActor_UpdateAndRender(void)
     if ((eff->animHeader[11] & 0x80) != 0) return;
 
     if (is_entity_in_switch_zone(&local_10, g_CurrentRdtDataTypePtr) == 0) return;
+
+    // The screen position is stale stack in the original too (0x0047c2f0:
+    // [esp+0x14] is only written by the transform branch), and its residue is
+    // the projection of the same last position local_10 is seeded with. Left at
+    // {0,0} it is the SCREEN CENTRE (callers pass centred coordinates), so every
+    // frame whose phase had the transform bit clear drew the sprite there - in
+    // ROOM1000 camera 0 the sword key's sparkle blinked as a white dot on the
+    // hall door until the key was picked up. Re-project the same position the
+    // zone test just accepted, through the same camera setup as the transform
+    // branch; projDepth/depthScaled keep the values that branch stored.
+    if ((eff->animHeader[10] & 2) == 0) {
+        SVECTOR lastPos;
+        lastPos.x = (short)local_10.x;
+        lastPos.y = (short)local_10.y;
+        lastPos.z = (short)local_10.z;
+        lastPos.pad = 0;
+        GetMatrixTranslation(&g_RoomCameraData);
+        SetGlobalScaledRotationMatrix(&g_RoomCameraData);
+        ProjectEffectSprite(&lastPos, (int*)&local_1c);
+        local_1c.x -= 0xa0;
+        local_1c.y -= 0x78;
+    }
 
     effect_submit_sprite(eff, local_1c.x, local_1c.y,
                          (int)(unsigned short)eff->depthScaled + 1,
