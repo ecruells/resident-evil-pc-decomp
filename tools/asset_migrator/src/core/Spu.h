@@ -94,9 +94,9 @@ struct RenderedTrack {
 };
 
 // Render track `track` of a SEPxx.HSB (VAB + appended SEP) one pass long.
-// A looping track is rendered intro + the loop's SECOND pass, so the loop
-// region already carries the tails of its own previous pass and repeats
-// seamlessly.
+// A looping track is rendered intro + first pass + second pass, with the loop
+// region on the SECOND pass: it carries the tails of its own previous pass and
+// repeats seamlessly, while the first time through plays clean.
 bool renderSepTrack(const uint8_t* hsb, size_t size, int track,
                     RenderedTrack* out, std::string* error);
 

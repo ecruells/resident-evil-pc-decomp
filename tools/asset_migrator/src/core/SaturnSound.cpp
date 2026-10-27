@@ -1368,11 +1368,13 @@ bool renderSaturnSong(const SoundDriver& driver, const std::vector<uint8_t>& cdp
     out->droppedNotes = drv.dropped;
     out->mix.clear();
     if (headFrames.size() >= 3) {
-        const long l1 = headFrames[0], l2 = headFrames[1], l3 = headFrames[2];
-        out->mix.assign(pcm.begin(), pcm.begin() + l1 * 2);
-        out->mix.insert(out->mix.end(), pcm.begin() + l2 * 2, pcm.begin() + l3 * 2);
-        out->loopStart = l1;
-        out->loopEnd = l1 + (l3 - l2);
+        // intro + pass 1 + pass 2, looping over pass 2 (see renderSepTrack in
+        // Spu.cpp): pass 1 is kept whole so the first time through has no
+        // tails from the loop's end over its start.
+        const long l2 = headFrames[1], l3 = headFrames[2];
+        out->mix.assign(pcm.begin(), pcm.begin() + l3 * 2);
+        out->loopStart = l2;
+        out->loopEnd = l3;
     } else {
         out->mix = std::move(pcm);
         out->loopStart = out->loopEnd = -1;

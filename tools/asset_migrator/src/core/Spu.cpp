@@ -861,13 +861,15 @@ bool renderSepTrack(const uint8_t* hsb, size_t size, int track,
     out->notes = syn.notes();
     out->mix.clear();
     if (jump2 >= 0 && jump1 >= 0 && loopStartAt >= 0) {
-        // intro + the loop's second pass (its start carries the first pass's
-        // tails, which is exactly what it will be preceded by on every repeat).
-        out->mix.assign(pcm.begin(), pcm.begin() + loopStartAt * 2);
-        out->mix.insert(out->mix.end(), pcm.begin() + jump1 * 2,
-                           pcm.begin() + jump2 * 2);
-        out->loopStart = loopStartAt;
-        out->loopEnd = loopStartAt + (jump2 - jump1);
+        // intro + first pass + second pass, looping over the second pass. Its
+        // start carries the previous pass's tails, which is what it follows on
+        // every repeat; the first pass is kept whole because, the first time
+        // through, the loop start follows the intro and those tails never
+        // sounded (splicing the second pass straight after the intro played
+        // the end of the loop over its start).
+        out->mix.assign(pcm.begin(), pcm.begin() + jump2 * 2);
+        out->loopStart = jump1;
+        out->loopEnd = jump2;
     } else {
         out->mix = std::move(pcm);
         out->loopStart = out->loopEnd = -1;

@@ -59,8 +59,9 @@ struct RenderOptions {
 // Interleaved stereo at 44.1 kHz, at the SCSP's output scale (MAME's >> 2
 // 16-bit path) but NOT clamped, so the caller can level it. loopStart/loopEnd
 // are frames ([start, end)) when the song loops, else -1. A looping song is
-// rendered intro + its loop's SECOND pass, so the loop region already carries
-// the tails of the previous pass and repeats seamlessly.
+// rendered intro + pass 1 + pass 2 with the loop region on pass 2, so the loop
+// carries the tails of the previous pass and repeats seamlessly, while the
+// first time through plays clean.
 struct RenderedSong {
     std::vector<int32_t> mix;
     int rate = 44100;
