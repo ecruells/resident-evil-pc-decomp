@@ -207,6 +207,8 @@ unsigned char load_effect_sprite_data(unsigned char* effectAnimIndex, unsigned c
 // the full layout comment lives next to load_shoot_direction_data.
 extern const unsigned char kWeaponSheetPage[8];
 extern const unsigned short kWeaponSheetPageV[8];
+extern const int kWeaponSheetShiftedSrv;          // also read by EffectSystem.cpp
+extern const unsigned char kEffectTexVHackShift;
 
 // ============================================================================
 // FUN_0047bc80 (0x0047bc80) - Set up effect sprite texture pages
@@ -733,9 +735,20 @@ static void load_effect_sprites(void)
 const unsigned char kWeaponSheetPage[8] = { 0, 0, 0, 0, 1, 1, 1, 1 };
 const unsigned short kWeaponSheetPageV[8] = { 0, 64, 176, 240, 3, 27, 99, 123 };
 
+// Port-only: SRVs 168..175 hold each weapon sheet baked kEffectTexVHackShift
+// rows further down its page - the art the original's room 70C special case
+// (EffectActor_UpdateAndRender 0x0047c2f0) samples. Only baked in that room.
+const int kWeaponSheetShiftedSrv = 168;
+const unsigned char kEffectTexVHackShift = 0x7b;
+
 // Bake weapon sheet `slot` (its SRV lives at 3+slot) from the Effspr page file
 // `fileName` (an esp*.tim name, no extension). Returns 1 on success.
-static int BakeWeaponSheetFromPage(int slot, const char* pageName)
+//
+// `vShift` / `srvSlot` bake the same sheet-sized band from `vShift` rows further
+// down the page into another SRV (see kWeaponSheetShiftedSrv); 0 / -1 is the
+// normal bake.
+static int BakeWeaponSheetFromPage(int slot, const char* pageName,
+                                   unsigned short vShift = 0, int srvSlotArg = -1)
 {
     if (slot < 0 || slot >= 8) return 0;
     unsigned char type = g_abEffSpriteIndexTable[slot];
@@ -791,6 +804,12 @@ static int BakeWeaponSheetFromPage(int slot, const char* pageName)
     }
     if (nextV < height + pageV) height = (unsigned short)(nextV - pageV);
 
+    // The shifted bake reads the same-sized band `vShift` rows lower, so the
+    // sheet's local UVs address it unchanged.
+    pageV = (unsigned short)(pageV + vShift);
+    if (pageV >= 256) return 0;
+    if (pageV + height > 256) height = (unsigned short)(256 - pageV);
+
     static DWORD rgba[256 * 256];
     const unsigned char* pix = p;
     for (unsigned short y = 0; y < height; y++) {
@@ -807,7 +826,7 @@ static int BakeWeaponSheetFromPage(int slot, const char* pageName)
         }
     }
 
-    int srvSlot = 3 + slot;
+    int srvSlot = (srvSlotArg >= 0) ? srvSlotArg : 3 + slot;
     if (g_TexturePageSRV[srvSlot] != MARNI_NULL_HANDLE) {
         if (Marni_DX() != NULL) Marni_DX()->DestroyTexture(g_TexturePageSRV[srvSlot]);
         g_TexturePageSRV[srvSlot] = MARNI_NULL_HANDLE;
@@ -832,12 +851,34 @@ static int BakeWeaponSheetFromPage(int slot, const char* pageName)
 // mansion palette everywhere.
 void RebakeWeaponSheetsForRoom(void)
 {
-    unsigned char nameIdx = g_RoomEffectSpriteTable
-        [(get_stage_id() * 0x20 + (unsigned int)g_roomId) * 4 + 1];
+    const unsigned int row = (get_stage_id() * 0x20 + (unsigned int)g_roomId) * 4;
+
+    // The shifted copies belong to one room only; drop the last room's.
+    for (int slot = 0; slot < 8; slot++) {
+        int srv = kWeaponSheetShiftedSrv + slot;
+        if (g_TexturePageSRV[srv] != MARNI_NULL_HANDLE) {
+            if (Marni_DX() != NULL) Marni_DX()->DestroyTexture(g_TexturePageSRV[srv]);
+            g_TexturePageSRV[srv] = MARNI_NULL_HANDLE;
+        }
+    }
+
+    unsigned char nameIdx = g_RoomEffectSpriteTable[row + 1];
     if (nameIdx == 0xFF) return;
     const char* pageName = (const char*)(g_EffectSpriteNames + nameIdx);
     for (int slot = 4; slot < 8; slot++) {
         BakeWeaponSheetFromPage(slot, pageName);
+    }
+
+    // Port-only: room 70C's Yawn dust (see effect_submit_sprite). The original
+    // samples the band 0x7B rows below a tint 1/2 sprite on the same page, so
+    // bake that band for every weapon sheet, from the page file it lives on.
+    if (g_stageId == STAGE_MANSION_RETURN_2F && g_roomId == ROOM_LESSON_ROOM) {
+        for (int slot = 0; slot < 8; slot++) {
+            unsigned char fileIdx = g_RoomEffectSpriteTable[row + kWeaponSheetPage[slot]];
+            if (fileIdx == 0xFF) continue;
+            BakeWeaponSheetFromPage(slot, (const char*)(g_EffectSpriteNames + fileIdx),
+                                    kEffectTexVHackShift, kWeaponSheetShiftedSrv + slot);
+        }
     }
 }
 
