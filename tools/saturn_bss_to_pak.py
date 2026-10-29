@@ -24,6 +24,17 @@ Usage:
     python tools/saturn_bss_to_pak.py FILE.BSS OUTDIR --stage 5 --room 13
     python tools/saturn_bss_to_pak.py --tyrant-room     # -> assets/SATURN/Stage5
     python tools/saturn_bss_to_pak.py --verify          # which frames differ?
+    python tools/saturn_bss_to_pak.py --bordered OUTDIR # the bordered cameras, from the disc
+
+Bordered cameras.  The cave rooms, the two lab elevators and the mansion
+elevator are shown on the bordered screen (MSF2_SCREEN_BORDER, set by the room
+script).  The game then reads the background as a PACKED 316x236 bitmap - 316
+pixels a row, rows back to back - out of the 320x240 buffer, and the PC's paks
+for those cameras are stored that way.  The Saturn frame is a plain 320x240
+picture whose top-left 316x236 is the PC's picture, so those frames are packed
+before they are written (``BORDERED``, the same table as the migrator's
+``kBorderedBgs`` in ``core/SaturnOverlay.cpp``).  Written unpacked they show as
+diagonal streaks, four pixels of shear a row.
 
 ``--verify`` decodes every Saturn frame and the PC pak for the same room and
 camera (through the game's own LZW) and reports the ones whose luma differs by
@@ -58,10 +69,36 @@ OVERLAY_ROOMS = [
 ]
 
 
+# (stage digit, room id) -> camera bit mask.  Every PC picture that is packed
+# (29 of the USA tree's 679, by row continuity: smooth at stride 316, not 320).
+# Stage 7 room 0x00, the mansion elevator, reads stage 2's RC2000.
+BORDERED = {
+    (2, 0x00): 0x01,
+    (3, 0x06): 0x0F, (3, 0x07): 0x7F, (3, 0x0B): 0xFF, (3, 0x0F): 0xFF,
+    (5, 0x0D): 0x01, (5, 0x15): 0x01,
+}
+BORDER_W, BORDER_H = 316, 236
+
+
 def frame_rgb(rgb, pix):
     """(256 palette triples, linear 8 bpp indices) -> 320x240x3 uint8 RGB."""
     pal = np.frombuffer(b"".join(rgb), dtype=np.uint8).reshape(256, 3)
     return pal[np.frombuffer(pix, dtype=np.uint8)]
+
+
+def pack_bordered(img):
+    """The top-left 316x236 of a 320x240x3 frame, rows back to back."""
+    img = np.asarray(img, dtype=np.uint8).reshape(HEIGHT, WIDTH, 3)
+    flat = np.zeros(WIDTH * HEIGHT * 3, dtype=np.uint8)
+    flat[:BORDER_W * BORDER_H * 3] = img[:BORDER_H, :BORDER_W].reshape(-1)
+    return flat.reshape(WIDTH * HEIGHT, 3)
+
+
+def background_rgb(stage, room, k, rgb, pix):
+    img = frame_rgb(rgb, pix)
+    if (BORDERED.get((stage, room), 0) >> k) & 1:
+        return pack_bordered(img)
+    return img
 
 
 def convert_room(bss_path, out_dir, stage_digit, room_id, dry=False):
@@ -73,7 +110,7 @@ def convert_room(bss_path, out_dir, stage_digit, room_id, dry=False):
     out = []
     for k, rgb, pix in frames:
         name = pak_name(str(stage_digit), room_id, k)
-        pak = lzw_pack(make_tim(frame_rgb(rgb, pix)))
+        pak = lzw_pack(make_tim(background_rgb(stage_digit, room_id, k, rgb, pix)))
         if not dry:
             with open(os.path.join(out_dir, name), "wb") as fh:
                 fh.write(pak)
@@ -161,12 +198,33 @@ def cmd_tyrant_room(dry=False):
           "keep the PC art.")
 
 
+def cmd_bordered(out_root):
+    """Write the bordered cameras' paks, reading the .BSS from the disc image
+    (the extracted SATURN_ISO_CONTENT copy is incomplete)."""
+    import saturn_iso
+    iso = saturn_iso.Iso()
+    for (stage, room), mask in sorted(BORDERED.items()):
+        data = iso.get("/STAGE%d/ROOM%d%02X.BSS" % (stage, stage, room))
+        out_dir = os.path.join(out_root, "Stage%d" % stage)
+        os.makedirs(out_dir, exist_ok=True)
+        for k, rgb, pix in bss_backgrounds(data):
+            if not (mask >> k) & 1:
+                continue
+            name = pak_name(str(stage), room, k)
+            with open(os.path.join(out_dir, name), "wb") as fh:
+                fh.write(lzw_pack(make_tim(background_rgb(stage, room, k, rgb, pix))))
+            print("  %s (packed 316x236)" % os.path.join(out_dir, name))
+
+
 def main(argv):
     if not argv or argv[0] in ("-h", "--help"):
         print(__doc__)
         return 2
     if argv[0] == "--verify":
         return cmd_verify()
+    if argv[0] == "--bordered" and len(argv) > 1:
+        cmd_bordered(argv[1])
+        return 0
     if argv[0] == "--tyrant-room":
         cmd_tyrant_room("--dry" in argv)
         return 0

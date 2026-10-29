@@ -1869,8 +1869,13 @@ unsigned int   g_pakDecompMaxCode = 0x1ff;
 // which put every dictionary access at the wrong address. See Globals.h.
 PakDictEntry   g_pakDict[PAK_DICT_ENTRIES] = {};
 
-// 0x00d227d0 - String output buffer for building decoded strings
-char           g_pakStringBuf[512] = {};
+// 0x00d227d0 - String output buffer for building decoded strings. The original
+// writes it without a bound (pak_decomp_decode_string, 0x00425bc0) and nothing
+// else lives before the decoder state at 0x00d2b0a0, so it is 0x88D0 bytes:
+// enough for the longest string the dictionary can chain. A 512-byte buffer
+// overflowed on backgrounds with large exactly-flat areas (the Saturn's
+// elevator and cave rooms), whose LZW strings run past 512 bytes.
+char           g_pakStringBuf[PAK_STRING_BUF_SIZE] = {};
 
 // ============================================================================
 // Room data globals (populated by room_set from RDT file data)

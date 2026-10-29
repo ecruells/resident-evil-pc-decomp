@@ -112,6 +112,39 @@ unnoticed; it only shows up on a stream whose encoder actually uses the case.
 Round-tripping `bss_to_pak.py`'s output through `pak_view` is what exposed it.
 Fixed 2026-09-14.
 
+### The string buffer is 0x88D0 bytes, not 512
+
+`g_pakStringBuf` (`0x00d227d0`) holds one decoded string, reversed. The
+original writes it with no bound (`0x00425bc0`), and it runs up to the decoder
+state at `0x00d2b0a0`: 0x88D0 bytes. The port had declared 512, which a
+converted background with large areas of one exact colour could overrun.
+Fixed 2026-10-29 (`PAK_STRING_BUF_SIZE`). It was suspected for the Saturn's
+streaked elevator and cave backgrounds, but the port's decoder decodes those
+paks byte-identically to `pak_view.py` either way; the streaks were the
+bordered-camera packing below.
+
+### Bordered cameras: a packed 316x236 picture
+
+Some cameras are shown on the bordered screen (`MSF2_SCREEN_BORDER`, set by the
+room script): the cave rooms (stage 3 rooms 0x06, 0x07, 0x0B, 0x0F), the two lab
+elevators (stage 5 rooms 0x0D, 0x15) and the mansion elevator (stage 7 room
+0x00, which reads stage 2's `RC2000`). The game then reads the background as a
+316x236 bitmap with the rows back to back, straight out of the buffer the pak
+decodes into (`display_image(..., 316, 236)`), so the PC stores those pictures
+PACKED. Viewed as 320x240 they look sheared; read 316 to a row they are right.
+29 of the USA tree's pictures are packed (row continuity tells them apart
+cleanly: about 0.4-0.6 vs 1.3+ for the ratio of vertical roughness at stride
+316 to stride 320). `RC3062.PAK` even says 316x236 in its TIM header; the others
+keep the 320x240 header.
+
+A converter that writes these from a full 320x240 frame must pack them: take the
+frame's top-left 316x236 (that is where the PC's picture sits in the Saturn
+frame, offset 0,0) and store its rows back to back. Unpacked, the game shears
+the picture four pixels a row into diagonal streaks. The Saturn migrator does
+this (`kBorderedBgs`, `core/SaturnOverlay.cpp`), as does
+`tools/saturn_bss_to_pak.py` (`BORDERED`, `--bordered OUTDIR`). The DC's
+`StageA` paks come out packed already.
+
 ---
 
 ## Converting, and how it is checked

@@ -137,6 +137,62 @@ const RoomBg kRoomBgs[] = {
      "Laboratory B4, the Tyrant room - emptied vats, second capsule"},
 };
 
+// The camera pictures the game shows on the bordered screen (MSF2_SCREEN_BORDER,
+// set by the room's own script): the cave rooms, the two lab elevators and the
+// mansion elevator (stage 7 room 0x00, whose picture is stage 2's RC2000). For
+// these the game reads the background as a PACKED 316x236 bitmap - 316 pixels
+// per row, rows back to back - out of the 320x240 buffer (display_image(...,
+// 316, 236), src/game/Room.cpp), and the PC's paks are stored that way. The
+// Saturn's frame is a plain 320x240 picture whose top-left 316x236 is the PC's
+// picture (offset 0,0, checked on all five rooms below), so written as it is it
+// came out sheared four pixels a row: diagonal streaks.
+//
+// The list is every PC picture that is packed - all 29, found by row
+// continuity in the USA tree (a packed picture is smooth only at stride 316);
+// every other one of its 650 pictures is smooth only at stride 320. Packing is
+// per picture, not per room: RC2001..RC2004 are plain.
+struct BorderedBg {
+    char stageDigit;
+    int roomId;
+    unsigned cameraMask;   // bit n: camera n
+};
+
+const BorderedBg kBorderedBgs[] = {
+    {'2', 0x00, 0x01},   // mansion elevator (stage 7 room 0x00 reads RC2000)
+    {'3', 0x06, 0x0F},   // caves
+    {'3', 0x07, 0x7F},
+    {'3', 0x0B, 0xFF},
+    {'3', 0x0F, 0xFF},
+    {'5', 0x0D, 0x01},   // lab elevators
+    {'5', 0x15, 0x01},
+};
+
+constexpr int kBorderedW = 316;
+constexpr int kBorderedH = 236;
+
+bool isBorderedBg(char stageDigit, int roomId, int camera) {
+    for (const BorderedBg& b : kBorderedBgs)
+        if (b.stageDigit == stageDigit && b.roomId == roomId && camera >= 0 && camera < 32 &&
+            (b.cameraMask >> camera) & 1u)
+            return true;
+    return false;
+}
+
+// The frame's top-left 316x236 with its rows back to back, as the PC stores a
+// bordered picture; the 1,424 pixels left over at the end are black.
+std::vector<uint8_t> packBorderedFrame(const std::vector<uint8_t>& rgb) {
+    std::vector<uint8_t> out(rgb.size(), 0);
+    for (int y = 0; y < kBorderedH; ++y)
+        std::memcpy(&out[(size_t)y * kBorderedW * 3], &rgb[(size_t)y * kSaturnBgWidth * 3],
+                    (size_t)kBorderedW * 3);
+    return out;
+}
+
+// The pixels the PC background writer gets for camera `camera` of a room.
+std::vector<uint8_t> backgroundPixels(char stageDigit, int roomId, const SaturnBssFrame& f) {
+    return isBorderedBg(stageDigit, roomId, f.index) ? packBorderedFrame(f.rgb) : f.rgb;
+}
+
 // Campaign rooms whose *data* the Saturn also cut differently, and which are
 // therefore overlaid as a whole .RDT rather than patched in code. Both ship two
 // files per room (the two character variants, chosen by the last digit of
@@ -576,7 +632,8 @@ bool migrateSaturnAssets(const SaturnMigrationOptions& opts,
                 const std::string name = pakName(bg.stageDigit, bg.roomId, f.index);
                 // Same PC writer the DC's arrange backgrounds go through: a
                 // 320x240 16 bpp TIM (vram 0,240) inside the game's LZW.
-                const std::vector<uint8_t> tim = makeBackgroundTim(f.rgb);
+                const std::vector<uint8_t> tim =
+                    makeBackgroundTim(backgroundPixels(bg.stageDigit, bg.roomId, f));
                 const std::vector<uint8_t> pak = lzwPack(tim);
                 const std::string rel =
                     std::string("Stage") + bg.stageDigit + "/" + name;
@@ -774,7 +831,8 @@ bool migrateSaturnAssets(const SaturnMigrationOptions& opts,
             }
             for (const SaturnBssFrame& f : frames) {
                 const std::string name = pakName(r.stageDigit, r.roomId, f.index);
-                const std::vector<uint8_t> pak = lzwPack(makeBackgroundTim(f.rgb));
+                const std::vector<uint8_t> pak =
+                    lzwPack(makeBackgroundTim(backgroundPixels(r.stageDigit, r.roomId, f)));
                 const std::string prel = stageRel + "/" + name;
                 if (!writeFile(joinPath(overlay, prel), pak)) {
                     if (error) *error = "cannot write " + joinPath(overlay, prel);

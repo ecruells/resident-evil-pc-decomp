@@ -1116,8 +1116,10 @@ static_assert(sizeof(PakDictEntry) == 12, "PakDictEntry size mismatch");
 #define PAK_DICT_ENTRIES 34981
 extern PakDictEntry  g_pakDict[PAK_DICT_ENTRIES];      // 0x00d2b0b0
 
-// LZW string output buffer (for building decoded strings)
-extern char          g_pakStringBuf[512];              // 0x00d227d0
+// LZW string output buffer (for building decoded strings): 0x00d227d0 up to
+// the decoder state at 0x00d2b0a0. Written without a bound by the original.
+#define PAK_STRING_BUF_SIZE 0x88D0
+extern char          g_pakStringBuf[PAK_STRING_BUF_SIZE];  // 0x00d227d0
 
 // --- Lab slides state (reset by lab_slides_reset) ---
 extern unsigned char g_labSlidesFuncIndex;             // 0x00d22790
