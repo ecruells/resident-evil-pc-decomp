@@ -55,7 +55,6 @@ extern void chimera_update(void);
 int          player_distance_z = 0;   // 0x00be0de4
 int          g_scaled_down_dist = 0;  // 0x00be0de8
 unsigned int g_entity_bkp = 0;        // 0x00be0df4
-void*        _ENTITY_SAVE = NULL;
 
 // ============================================================================
 // enemies_update_functions_tbl @ 0x004d3c90

@@ -653,7 +653,6 @@ extern void BillboardSetColor(void* quad, int unused1, int unused2, unsigned int
 
 // Shared scratch globals defined in EntityCommon.cpp
 extern unsigned int g_entity_bkp;
-extern void* _ENTITY_SAVE;
 extern int g_scaled_down_dist;
 extern int player_distance_z;
 
@@ -2868,12 +2867,14 @@ static void benddown_and_eat(void)
             Snd_em(3);
         }
         if (ENTITY->animation_frame_id == 0x0E) {
-            _ENTITY_SAVE = &g_playerEntityPointer;
+            Entity* zombie = ENTITY;
+            ENTITY = (Entity*)&g_playerEntityPointer;
             JointApplyColorTint(g_playerEntityPointer.jointsStructs, 0x30, 0x80820, &DAT_00606060);
             VECTOR pos = { 100, -700, 0, 0 };
             Effect_CreateBillboard(0, 0, 0, &g_playerEntityPointer.jointsStructs->world, &pos, 0);
             JointApplyColorTint(g_playerEntityPointer.jointsStructs + 2, 0x30, 0x80820, &DAT_00606060);
             Effect_CreateBillboard(0, 0, 0, &g_playerEntityPointer.jointsStructs[2].world, &pos, 0);
+            ENTITY = zombie;
         }
         // `sVar1 = *0xc4; *0xc4 = sVar1 - 1; if (sVar1 == 0)` - the test is
         // on the value BEFORE the decrement, so it fires one frame later
