@@ -654,6 +654,31 @@ static const char* HdModelKeyFor(const CMarniBits* bits, int* outMaterial,
     return NULL;
 }
 
+// Which texel of a CLUT texture is the transparent one: index 0, but only while
+// palette entry 0 is black (the STP bit is ignored).
+//
+// The original gives every texture surface a DirectDraw source colour key of
+// VALUE 0 (ddrawsurface_create_with_palette, 0x004331f8: SetColorKey(SRCBLT)).
+// On a palettized texture that value is index 0; on an RGB texture it is black,
+// and for the flag-8 textures Direct3DTIM_Create makes (models, room objects,
+// doors) d3d_reload_texture_entry (0x00449a40) first turns every black texel
+// into 0x080808, so nothing is keyed at all. The two paths agree on exactly
+// one case: index 0 holding black - which is how all the shipped art is drawn.
+//
+// Keying index 0 whatever its colour was wrong for models made for the retail
+// PC / Classic REbirth (GitHub issue: a custom CHAR10.EMD): their skins put a
+// real colour at index 0 - the dark blue of the trouser camo, 10158 texels -
+// and it rendered as holes. A black colour key on every index would be wrong
+// the other way: it cuts the dark areas out of 80 shipped room-object and
+// model textures (ROOM4080's object page is 97% black). Against the old rule
+// this one changes no visible texel of the USA tree: the index-0 texels it
+// turns opaque sit in unused filler blocks, apart from 196 white edge texels
+// of the ROOM4090 sink, whose index 0 is white.
+static inline bool ClutIndexZeroIsKey(const WORD* clut)
+{
+    return clut != NULL && (clut[0] & 0x7FFF) == 0;
+}
+
 static DWORD HdModelTexel(const BYTE* base, int pitch, int bpp, const WORD* clut,
                           int x, int y)
 {
@@ -665,7 +690,7 @@ static DWORD HdModelTexel(const BYTE* base, int pitch, int bpp, const WORD* clut
         idx = (x & 1) ? (two >> 4) : (two & 0xF);
     }
     WORD c = clut[idx];
-    DWORD a = (idx == 0) ? 0x00 : 0xFF;
+    DWORD a = (idx == 0 && ClutIndexZeroIsKey(clut)) ? 0x00 : 0xFF;
     DWORD r = (c & 0x1F) * 255 / 31;
     DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
     DWORD b = ((c >> 10) & 0x1F) * 255 / 31;
@@ -780,6 +805,9 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
     // then built from the finished RGBA by clearing the alpha of the texels
     // this marks, so the two can never disagree about a texel's colour.
     const bool clutKeyed = (clut != NULL) && (bpp == 4 || bpp == 8);
+    // Index 0 is the transparent texel only while it holds black (see
+    // ClutIndexZeroIsKey); -1 matches no index.
+    const int keyIndex = (clutKeyed && ClutIndexZeroIsKey(clut)) ? 0 : -1;
     int  stpTexels = 0, opaqueTexels = 0;
     BYTE stpIndex[256];
     memset(stpIndex, 0, sizeof(stpIndex));
@@ -792,17 +820,17 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
             if (bpp == 8) {
                 for (int x = 0; x < w; x++) {
                     int idx = row[x];
-                    if (stpIndex[idx])   stpTexels++;
-                    else if (idx != 0)   opaqueTexels++;
+                    if (stpIndex[idx])         stpTexels++;
+                    else if (idx != keyIndex)  opaqueTexels++;
                 }
             }
             else {
                 for (int x = 0; x < w; x += 2) {
                     int lo = row[x >> 1] & 0x0F;
                     int hi = (row[x >> 1] >> 4) & 0x0F;
-                    if (stpIndex[lo]) stpTexels++; else if (lo != 0) opaqueTexels++;
+                    if (stpIndex[lo]) stpTexels++; else if (lo != keyIndex) opaqueTexels++;
                     if (x + 1 < w) {
-                        if (stpIndex[hi]) stpTexels++; else if (hi != 0) opaqueTexels++;
+                        if (stpIndex[hi]) stpTexels++; else if (hi != keyIndex) opaqueTexels++;
                     }
                 }
             }
@@ -823,7 +851,7 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
                 BYTE twoPix = base[y * pitch + x / 2];
                 int nib = (x & 1) ? (twoPix >> 4) : (twoPix & 0xF);
                 WORD c = clut[nib];
-                DWORD a = (nib == 0) ? 0x00 : 0xFF;
+                DWORD a = (nib == keyIndex) ? 0x00 : 0xFF;
                 DWORD r = (c & 0x1F) * 255 / 31;
                 DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
                 DWORD b = ((c >> 10) & 0x1F) * 255 / 31;
@@ -832,7 +860,7 @@ static int VTable_CreateTextureHandle(void* self, void* texDesc,
             else if (bpp == 8 && clut) {
                 int idx = base[y * pitch + x];
                 WORD c = clut[idx];
-                DWORD a = (idx == 0) ? 0x00 : 0xFF;
+                DWORD a = (idx == keyIndex) ? 0x00 : 0xFF;
                 DWORD r = (c & 0x1F) * 255 / 31;
                 DWORD g = ((c >> 5) & 0x1F) * 255 / 31;
                 DWORD b = ((c >> 10) & 0x1F) * 255 / 31;
