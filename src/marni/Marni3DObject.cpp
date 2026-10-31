@@ -368,7 +368,8 @@ int CMarniPolyhedra::CopyFrom(CMarniPolyhedra* src)
             pdst[4]  = 0;           // m_flag10 (0x10) = 0
             pdst[9]  = psrc[9];     // m_vertexCount (0x24)
             pdst[12] = psrc[12];    // m_vertexCapacity (0x30)
-            pdst[16] = psrc[16];    // extended field at 0x40 (beyond base class)
+            // No +0x40 copy: the original never touches it (see the note in
+            // CMarniViewport2::CopyFrom).
             pdst[13] = psrc[13];    // m_listCapacity (0x34)
             pdst[11] = psrc[11];    // m_primitiveType (0x2C)
             pdst[7]  = psrc[7];     // m_unknown1C (0x1C)
@@ -384,7 +385,6 @@ int CMarniPolyhedra::CopyFrom(CMarniPolyhedra* src)
     }
 
     pdst[9]  = psrc[9];      // m_vertexCount
-    pdst[16] = psrc[16];     // extended field at 0x40
     pdst[7]  = 1;            // m_unknown1C = 1
     pdst[8]  = 0;            // m_unknown20 = 0
 
@@ -1094,6 +1094,14 @@ int CMarniViewport2::Unlock()
 int CMarniViewport2::CopyFrom(CMarniViewport2* src)
 {
     // 0x00426600 — use DWORD-indexed access to match Ghidra field layout exactly
+    //
+    // Fields stop at +0x34 (m_listCapacity). The original copies nothing at
+    // +0x38..+0x40, and must not: the trail pools (PathTrail.cpp) and the
+    // complex-object list (g_objectListPtrArray) pack these objects 0x38 bytes
+    // apart, so +0x40 is the NEXT entry's m_pIndexBuffer. Copying it made
+    // pool B[i+1] share pool A[i+1]'s index buffer, which was then freed twice
+    // when that trail slot was released - the heap crash after killing several
+    // zombies with magnum head shots.
     DWORD* pdst = (DWORD*)this;
     DWORD* psrc = (DWORD*)src;
 
@@ -1110,7 +1118,6 @@ int CMarniViewport2::CopyFrom(CMarniViewport2* src)
             pdst[4]  = 0;         // m_flag10 = 0
             pdst[9]  = psrc[9];   // m_vertexCount
             pdst[12] = psrc[12];  // m_vertexCapacity
-            pdst[16] = psrc[16];  // m_padding40 (extended field)
             pdst[13] = psrc[13];  // m_listCapacity
             pdst[11] = psrc[11];  // m_primitiveType
             pdst[7]  = psrc[7];   // m_unknown1C (render style)
@@ -1162,7 +1169,6 @@ int CMarniViewport2::CopyFrom(CMarniViewport2* src)
         pdst[9]  = psrc[9];   // m_vertexCount
         pdst[10] = psrc[10];  // m_listCount
         pdst[8]  = psrc[8];   // m_unknown20
-        pdst[16] = psrc[16];  // m_padding40
     }
     // Branch 2b: Convert strip -> flat (dest flat=0, src strip=1)
     else if (pdst[7] == 0 && psrc[7] == 1) {
