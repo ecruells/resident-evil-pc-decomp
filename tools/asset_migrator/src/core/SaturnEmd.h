@@ -43,6 +43,13 @@ struct SaturnEmdOptions {
     // W15.EMW whose packets read that half (core/SaturnOverlay.cpp).
     const std::vector<uint8_t>* donorEmd = nullptr;
     const std::vector<uint8_t>* donorMask = nullptr;
+    // The DC's custom Beretta (Players/W0F.EMW, W1F.EMW). With these two set
+    // (and weaponPage), the left-page texels `leftMask` flags (128 x 256,
+    // row-major, non-zero = wanted) take their colour from `leftColours` (same
+    // layout, RGB555, 0 = hole) instead of the PS1 page: the DC's own player
+    // page, which has the gun's art where the PS1 page has filler.
+    const std::vector<uint8_t>* leftMask = nullptr;
+    const std::vector<uint16_t>* leftColours = nullptr;
 };
 
 // True when `data` starts with the Saturn .EMD index tag (00 00 00 10).

@@ -211,6 +211,12 @@ rendered sound.
   slots 28 and 29 - never by name, which is what keeps them from shadowing the OG
   and DC outfits. The player models carry 23 meshes against the PS1 skeleton's 15
   joints; the converter takes the 15 the skeleton reaches.
+  Weapon models have no texture of their own and sample the holder's left page,
+  which is the PS1 original's. The DC's custom Beretta (`DC/Players/W0F.EMW`,
+  `W1F.EMW`) reaches texels only the DC's own `CHAR10`/`CHAR11` have its art
+  in, so when `<target>/DC` exists those texels are copied from there (without
+  it the gun shows the PS1 filler, yellow on Jill's). **Migrate the Director's
+  Cut before this disc.**
 - **Battle Game arenas** -> `SATURN/Stage8/`: the 15 `STAGE8/ROOM80x0.RDT`,
   LZ77-decoded (`core/SaturnLz77.cpp`) into ordinary PS1 RDTs, with the PS1
   colour-key -> PC index-0 transparency relabel. The arenas reuse campaign
