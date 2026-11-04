@@ -1,5 +1,19 @@
 # Changelog
 
+## [1.4.2](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.4.1...residentevil-v1.4.2) (2026-11-04)
+
+
+### Bug Fixes
+
+* crash when a death by a zombie ocurrs in a room with a mirror ([f8b97b9](https://github.com/ecruells/resident-evil-pc-decomp/commit/f8b97b98fdb70c7ca0314461a1fd0fbd5154626f))
+* game crash when head shooting many enemies in a row ([aaeb2a0](https://github.com/ecruells/resident-evil-pc-decomp/commit/aaeb2a0c63cb6d3b5af5c205e8c124cec63dcad4))
+* migrated ps1 and saturn bgms starts with the loops end ([5f28186](https://github.com/ecruells/resident-evil-pc-decomp/commit/5f28186bea5c2d3af4a9305f4fe8aba59a96c30e))
+* **saturn:** glitched rooms backgrounds in some rooms ([67e88e9](https://github.com/ecruells/resident-evil-pc-decomp/commit/67e88e9120d06f0784a8aff4fb82aaee60177204))
+* some custom emd models have transparent colors instead of solid ([fd8a2e0](https://github.com/ecruells/resident-evil-pc-decomp/commit/fd8a2e031a08ee435c545fa675caa951c22b9ae8))
+* **textures:** missing hd textures and hd tex load errors in dc and saturn modes ([dbb61d1](https://github.com/ecruells/resident-evil-pc-decomp/commit/dbb61d18fcbe63deee7b9326ae62fd8a424bed1b))
+* white dot appearing in dining room main door ([907c23c](https://github.com/ecruells/resident-evil-pc-decomp/commit/907c23c8b5ec243ab812e34ddf1363da9d709a27))
+* yawn2 floor smash effects looks like an explosion ([d430af9](https://github.com/ecruells/resident-evil-pc-decomp/commit/d430af9cf0e413474918753dbb3ceb863ca1ccbc))
+
 ## [1.4.1](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.4.0...residentevil-v1.4.1) (2026-10-23)
 
 
