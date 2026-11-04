@@ -614,6 +614,11 @@ bool convertSaturnEmd(const std::vector<uint8_t>& saturn,
             }
         }
     }
+    // The left-page patch (SaturnEmdOptions::leftMask), inside the page the
+    // weapon models read.
+    const bool leftPatch = havePsTim && opts.weaponPage && opts.leftMask && opts.leftColours &&
+                           opts.leftMask->size() == (size_t)128 * kPage &&
+                           opts.leftColours->size() == (size_t)128 * kPage;
     const bool psPage = rowOf[0] >= 0 || rowOf[1] >= 0 || donorRight;
 
     std::map<int, Place> place;
@@ -674,6 +679,8 @@ bool convertSaturnEmd(const std::vector<uint8_t>& saturn,
                 const uint8_t di = donorPs1[donorTim.pix + (size_t)yy * donorTim.w + (xx - 128)];
                 return di == 0 ? 0 : donorTim.rows[0][di];
             }
+            if (xx < 128 && leftPatch && (*opts.leftMask)[(size_t)yy * 128 + xx])
+                return (*opts.leftColours)[(size_t)yy * 128 + xx];
             const uint8_t i = m.ps1[psTim.pix + (size_t)yy * psTim.w + xx];
             // Index 0 is the PC's transparent key, colour 0 the PS1's.
             return i == 0 ? 0 : psTim.rows[rowOf[xx / 128]][i];

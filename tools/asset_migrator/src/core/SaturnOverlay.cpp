@@ -238,12 +238,14 @@ std::string findNoCase(const std::string& root, const std::string& folder,
     return std::string();
 }
 
+bool checkPcEmd(const std::vector<uint8_t>& d, std::string* why);
+
 // A weapon .EMW ends in two dwords, the second the offset of its TMD: one
 // object of 0x34000609 packets. Flags the texels the packets cover (128 x 256,
-// each packet's UV bounding box) and moves every packet 128 texels right, onto
-// the page half the donor texels are written to. False if it is not that shape.
-bool patchWeaponToRightHalf(std::vector<uint8_t>* emw, std::vector<uint8_t>* mask) {
-    std::vector<uint8_t>& d = *emw;
+// each packet's UV bounding box) and returns where the packets are and how many;
+// `row` is the CLUT row the first packet reads. False if it is not that shape.
+bool weaponFootprint(const std::vector<uint8_t>& d, std::vector<uint8_t>* mask,
+                     size_t* primsOut, size_t* countOut, int* row) {
     if (d.size() < 64) return false;
     const size_t tmd = readU32(d.data(), d.size(), d.size() - 4) & ~3u;
     if (tmd + 12 + 28 > d.size() || readU32(d.data(), d.size(), tmd + 8) != 1) return false;
@@ -265,9 +267,69 @@ bool patchWeaponToRightHalf(std::vector<uint8_t>* emw, std::vector<uint8_t>* mas
         for (int y = v0; y <= v1; ++y)
             for (int x = u0; x <= u1; ++x) (*mask)[(size_t)y * 128 + x] = 1;
     }
+    *primsOut = prims;
+    *countOut = count;
+    *row = ((readU16(d.data(), d.size(), prims + 6) >> 6) & 0x1FF) - 0x1E0;
+    return true;
+}
+
+// The footprint as above, then every packet moved 128 texels right, onto the
+// page half the donor texels are written to.
+bool patchWeaponToRightHalf(std::vector<uint8_t>* emw, std::vector<uint8_t>* mask) {
+    std::vector<uint8_t>& d = *emw;
+    size_t prims = 0, count = 0;
+    int row = 0;
+    if (!weaponFootprint(d, mask, &prims, &count, &row)) return false;
     for (size_t i = 0; i < count; ++i)
         for (int c = 0; c < 3; ++c) d[prims + 28 * i + 4 + 4 * c] += 128;
     return true;
+}
+
+// The DC's custom Beretta (Players/W0F.EMW Chris, W1F.EMW Jill, DC overlay
+// only). Like every weapon model it samples its holder's left page, but it
+// reaches texels the plain Beretta does not (Jill's: u 0..7, v 66..87), and
+// only the DC's own CHAR10/CHAR11 have the gun's art there. A Saturn outfit's
+// page is the PS1 original's (yellow filler there on Jill's), so worn in the
+// DC the gun came out yellow. Gives the colours the DC holder shows under the
+// gun's footprint (128 x 256 RGB555, 0 = hole) and the mask; false when the
+// DC overlay is not in the target folder.
+bool dcCustomBerettaTexels(const std::string& targetRoot, const char* emwName,
+                           const char* emdName, std::vector<uint8_t>* mask,
+                           std::vector<uint16_t>* colours) {
+    const std::string dc = joinPath(targetRoot, "DC");
+    const std::string emwPath = findNoCase(dc, "Players", emwName);
+    const std::string emdPath = findNoCase(dc, "Enemy", emdName);
+    std::vector<uint8_t> emw, emd;
+    std::string why;
+    if (emwPath.empty() || emdPath.empty() || !readFile(emwPath, &emw) ||
+        !readFile(emdPath, &emd) || !checkPcEmd(emd, &why))
+        return false;
+    size_t prims = 0, count = 0;
+    int row = 0;
+    if (!weaponFootprint(emw, mask, &prims, &count, &row)) return false;
+    const uint8_t* e = emd.data();
+    const size_t n = emd.size();
+    const size_t tim = readU32(e, n, n - 4);
+    const size_t clen = readU32(e, n, tim + 8);
+    const int cw = readU16(e, n, tim + 16), ch = readU16(e, n, tim + 18);
+    const size_t img = tim + 8 + clen;
+    if (cw != 256 || row < 0 || row >= ch || img + 12 > n) return false;
+    const int w = readU16(e, n, img + 8) * 2, h = readU16(e, n, img + 10);
+    if (w < 128 || h < 256 || img + 12 + (size_t)w * h > n) return false;
+    colours->assign((size_t)128 * 256, 0);
+    for (int y = 0; y < 256; ++y)
+        for (int x = 0; x < 128; ++x) {
+            const uint8_t i = e[img + 12 + (size_t)y * w + x];
+            if (i)
+                (*colours)[(size_t)y * 128 + x] =
+                    readU16(e, n, tim + 20 + 512 * (size_t)row + 2 * (size_t)i);
+        }
+    return true;
+}
+
+// The disc's names of the models Chris is loaded from (see isJillPlayerModel).
+bool isChrisPlayerModel(const std::string& discName) {
+    return discName == "CHAR10.EMD" || discName == "EM1030.EMD" || discName == "EM1032.EMD";
 }
 
 bool readDiscFile(const DiscImage& img, const std::string& folder,
@@ -472,6 +534,30 @@ bool migrateSaturnAssets(const SaturnMigrationOptions& opts,
                           ": Jill's flamethrower keeps the base tree's look");
         }
     }
+    // The DC's custom Beretta: its texels from the DC overlay's own player
+    // models, written into the Saturn players' left page (dcCustomBerettaTexels).
+    std::vector<uint8_t> berettaMask[2];
+    std::vector<uint16_t> berettaColours[2];
+    {
+        const char* const emw[2] = {"W0F.EMW", "W1F.EMW"};
+        const char* const emd[2] = {"CHAR10.EMD", "CHAR11.EMD"};
+        for (int c = 0; c < 2; ++c)
+            if (!dcCustomBerettaTexels(opts.targetRoot, emw[c], emd[c], &berettaMask[c],
+                                       &berettaColours[c])) {
+                berettaMask[c].clear();
+                berettaColours[c].clear();
+            }
+        if (berettaMask[0].empty() || berettaMask[1].empty())
+            progress.info("no Director's Cut overlay in " + joinPath(opts.targetRoot, "DC") +
+                          ": the DC's custom Beretta keeps the PS1 page's look on the "
+                          "Saturn outfits (migrate the Director's Cut first, then this disc)");
+    }
+    auto setBeretta = [&](const std::string& disc, SaturnEmdOptions* eo) {
+        const int c = isChrisPlayerModel(disc) ? 0 : isJillPlayerModel(disc) ? 1 : -1;
+        if (c < 0 || berettaMask[c].empty()) return;
+        eo->leftMask = &berettaMask[c];
+        eo->leftColours = &berettaColours[c];
+    };
     {
         progress.info("models: Saturn-only creatures and alternate outfits -> PC .EMD");
         for (const Model& m : kModels) {
@@ -489,6 +575,7 @@ bool migrateSaturnAssets(const SaturnMigrationOptions& opts,
                 eo.donorEmd = &chrisEmd;
                 eo.donorMask = &flameMask;
             }
+            if (m.weapon) setBeretta(m.disc, &eo);
             if (!convertSaturnEmd(src, &pc, &info, &err, eo)) {
                 if (error) *error = std::string(m.disc) + ": " + err;
                 return false;
@@ -535,6 +622,7 @@ bool migrateSaturnAssets(const SaturnMigrationOptions& opts,
                 eo.donorEmd = &chrisEmd;
                 eo.donorMask = &flameMask;
             }
+            if (eo.weaponPage) setBeretta(name, &eo);
             if (!convertSaturnEmd(src, &pc, &info, &err, eo)) {
                 if (error) *error = name + ": " + err;
                 return false;
