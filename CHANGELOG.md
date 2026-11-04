@@ -1,5 +1,14 @@
 # Changelog
 
+## [1.4.3](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.4.2...residentevil-v1.4.3) (2026-11-04)
+
+
+### Bug Fixes
+
+* **saturn:** imported saturn outfit renders the custom beretta yellow in dc arrange mode ([9e2be4a](https://github.com/ecruells/resident-evil-pc-decomp/commit/9e2be4a65556133bc7638f6ac80686936d75d395))
+* **saturn:** imported saturn outfit renders the custom beretta yellow… ([076ab99](https://github.com/ecruells/resident-evil-pc-decomp/commit/076ab9911d767172d4676ddb5f8b6e409c2e9b86))
+* **texture:** non dc outfits render bad texture on custom beretta ([1fdf8b4](https://github.com/ecruells/resident-evil-pc-decomp/commit/1fdf8b4ccfeb139928421b3d1ffcd3de01a3cc77))
+
 ## [1.4.2](https://github.com/ecruells/resident-evil-pc-decomp/compare/residentevil-v1.4.1...residentevil-v1.4.2) (2026-11-04)
 
 
