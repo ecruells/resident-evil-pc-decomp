@@ -66,6 +66,19 @@ int room_hd_bg_height(void);
 void room_hd_note_room(const char* rdtPath);
 const char* room_hd_rdt_mask_key(int camera, char* out, size_t outSize);
 
+// Saturn mode and DC arrange rooms only: the PC Objspr page whose top-left
+// part the camera's mask (`tim`, the TIM inside the room file) is - the Saturn
+// room file is the PS1 one, and its mask TIM is the used rows/columns of the
+// PC page for the same room and camera (an arena's, its campaign room's; an
+// arrange room that kept the base room's picture, the base room's). Checked
+// against the page itself, colour for colour. Returns the page's key
+// ("USA/objspr/osp01063") with its size in *pageW / *pageH, or NULL when the
+// mask is not that page.
+// Its HD picture stands in when the mode's tree has none of its own.
+const char* room_hd_pc_mask_page(int camera, const void* tim, int* pageW, int* pageH);
+// The image size of the TIM at `tim` in texels (0 x 0 when it is not one).
+void room_hd_tim_size(const void* tim, int* width, int* height);
+
 // The texture of a model kept inside the room file (a room object, an item
 // lying in the room): the same TIM is copied into many rooms, so it is named
 // by its contents, in one folder of the tree the room was read from -

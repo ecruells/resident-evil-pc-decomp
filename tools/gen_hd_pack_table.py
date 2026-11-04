@@ -62,6 +62,10 @@ VERIFIED = {
     ('51E26C5F', 'Objspr/OSP00095'), ('67F32AFF', 'Objspr/OSP00250'),
     ('69B3DD51', 'Objspr/OSP02061'), ('CBE5E9A7', 'Objspr/OSP03127'),
     ('43CB5D47', 'Objspr/OSP04161'), ('3824801F', 'Objspr/OSP04165'),
+    # Pages with the white filler block (game_pictures), repainted past the
+    # mask limit: 5.3-6.9.
+    ('07FE3925', 'Objspr/OSP00031'), ('332E8821', 'Objspr/OSP00093'),
+    ('D7B7AB5B', 'Objspr/OSP00094'), ('CDED1F98', 'Objspr/OSP01282'),
     ('BD5ACB5B', 'Item_m1/DOOR02'), ('E296E4A9', 'Item_m1/DOOR04'),
     ('A73566CF', 'Item_m1/DOOR14'),
     # The slides' body text was re-typeset in the pack.
@@ -69,7 +73,47 @@ VERIFIED = {
     ('93FE1F7F', 'Data/slide/03'),
     # The pack page's frame scraps (top right) differ; the book is the same.
     ('48D95E9E', 'Item_m2/FILEI17'),
+    # The arrange 2F terrace (room 212) camera 0's mask: the pack re-lit the
+    # pillars, 4.17 against the 4.0 limit. One picture, six room files.
+    ('2DCFFEEC', 'Stage2/ROOM2120_MASK0+Stage2/ROOM2121_MASK0+Stage9/ROOM9120_MASK0+'
+                 'Stage9/ROOM9121_MASK0+StageE/ROOME120_MASK0+StageE/ROOME121_MASK0'),
 }
+
+# Pairs the user identified in game (2026-11-01), each checked side by side
+# with the game's dump. They are written whether or not the matcher finds
+# them: the room 304 corridor (RC3044) is lit differently in the pack; the
+# others are file textures the matcher leaves out (the save screen's
+# typewriter, the all-maps selector, the ending report and three of the
+# Japanese reader's backdrops).
+USER_BG_PAIRS = [
+    ('73FF3601', 'Stage3/RC3044'),
+]
+USER_FILE_PAIRS = [
+    ('D1D144A8', 'Data/TYPE00'),
+    ('C9831239', 'Data/EN07'),
+    ('4D64B07B', 'Item_m2/MAP0E'),
+    ('2D82D6C8', 'Item_m2/FILEI07'),     # fax and orders
+    ('2CFF1A06', 'Item_m2/FILEI11'),     # security system
+    ('0F20AFFA', 'Item_m2/FILEI16'),     # plant 42 report
+]
+# Neptune: a one-row 128-wide skin, the left half of the pack page (EM100B and
+# EM110B carry the same TIM).
+USER_MODEL_PAIRS = [
+    ('CAD6E2E5', 0, 'Enemy/EM100B'),
+    ('CAD6E2E5', 0, 'Enemy/EM110B'),
+]
+# Textures the game names only by a room TIM's CRC or by the hash of the
+# upload (HdPackKind::Named, installed as they are: each 128x256 picture is
+# stretched over the square pack page). The courtyard map (room 300's item)
+# has its palette darkened before the upload (CmdFunctions.cpp), so the game
+# looks it up by the upload's hash. The guardhouse map (room 406) and the
+# shelf (room 1F0's object 1) are named by their TIM; the hash dumps of them
+# (ef3eccc3a0cb92b8, d2dc6e521a59ab2d) are an older build's.
+USER_NAMED_PAIRS = [
+    ('558DBD58', '82152f2276f2176d'),             # courtyard map, darkened
+    ('ABEA20A8', 'RoomModels/667bc53f'),          # guardhouse map
+    ('B5CE7F7A', 'RoomModels/99817e6a'),          # shelf
+]
 
 
 def area(img, w, h):
@@ -134,6 +178,15 @@ def game_pictures(root, kind):
             words = clut[:256][idx]
             w *= 2                            # 8 bpp: two texels per halfword
             alpha = np.where(words == 0, 0.0, 255.0).astype(np.float32)
+            # Seven pages (OSP00031, 00093, 00094, 01184, 04101, 04105 ...)
+            # fill the part of the page no sprite uses with index 255 =
+            # 0x7FFF, opaque white; the pack leaves it transparent. Compared
+            # as it is, that white block outweighs the picture and the page
+            # matched nothing. A 16x16 block of nothing but that filler is
+            # left out (a lone white texel in the picture is kept).
+            filler = (idx == 255) & (words == 0x7FFF)
+            blocks = filler.reshape(h // 16, 16, w // 16, 16).all((1, 3))
+            alpha[np.repeat(np.repeat(blocks, 16, 0), 16, 1)] = 0.0
         rgba = np.stack([(words & 31) * 8.0, ((words >> 5) & 31) * 8.0,
                          ((words >> 10) & 31) * 8.0, alpha], -1).astype(np.float32)
         rel = os.path.relpath(path, root).replace('\\', '/')
@@ -192,7 +245,25 @@ def match(kind, game_root, packs, report):
             for i in range(len(pnames)):
                 err[i, cols] = np.abs(gfeats[cols] - pfeats_p[i][None]).mean((1, 2, 3))
     pairs = mutual_pairs(kind, gnames, pnames, err, limit, report)
+    if kind == 'mask':
+        # A second round over what is left: a pack page whose closest game
+        # page already has a far closer pack page (D7B7AB5B is 4.98 from
+        # OSP04054, which took 819B6A20 at 0.48) is still the closest to its
+        # own page (OSP00094, 6.87) once the paired ones are out.
+        pairs += leftover_pairs(kind, gnames, pnames, err, limit, pairs, report)
     return pairs + same_picture_pairs(kind, gnames, gfeats, gpages, pairs, report)
+
+
+def leftover_pairs(kind, gnames, pnames, err, limit, pairs, report):
+    gpaired = set(g for _, g, _ in pairs)
+    ppaired = set(p for p, _, _ in pairs)
+    gi = [j for j, n in enumerate(gnames) if n not in gpaired]
+    pi = [i for i, n in enumerate(pnames) if n not in ppaired]
+    if not gi or not pi:
+        return []
+    lim = [limit[j] for j in gi] if isinstance(limit, list) else limit
+    return mutual_pairs(kind + ' (leftovers)', [gnames[j] for j in gi], [pnames[i] for i in pi],
+                        err[np.ix_(pi, gi)], lim, report)
 
 
 # Two room files can show the same picture: the main hall's 2F cameras
@@ -512,9 +583,81 @@ def slide_cells(root):
     return []
 
 
+# The USA file reader's pages (src/game/MainMenu.cpp, pickup_unpack_list): each
+# Item_m2/FILEM_*.PIX is an LZW pak container (a dword offset per page, the
+# last one the file's end) of 256x256 4 bpp TIMs, one per page, and the game
+# names page n HD/<TREE>/Item_m2/FILEM_X0/<nn>. Classic REbirth's English
+# pages are these pages pixel for pixel, so most pair by name.
+def filem_pages(root):
+    """-> [(asset, words)] for every page of every FILEM_*.PIX."""
+    out = []
+    for folder in os.listdir(root):
+        if folder.lower() != 'item_m2' or not os.path.isdir(os.path.join(root, folder)):
+            continue
+        for f in sorted(os.listdir(os.path.join(root, folder))):
+            low = f.lower()
+            if not (low.startswith('filem_') and low.endswith('.pix')):
+                continue
+            d = open(os.path.join(root, folder, f), 'rb').read()
+            if len(d) < 64:
+                continue
+            offs = struct.unpack_from('<16I', d, 0)
+            for n in range(16):
+                if offs[n] == 0 or offs[n] >= len(d):
+                    break
+                words = tim_words(bytes(pak_view.PakDecoder(d[offs[n]:]).run()), 0)
+                if words is not None:
+                    out.append(('%s/%s/%02d' % (folder, os.path.splitext(f)[0], n), words))
+    return out
+
+
+# A USA page that shows a picture (the pass number, Barry's photo, the three
+# pass codes) has no page in any pack: Classic REbirth runs the Japanese game,
+# whose reader draws the picture as a 256x120 backdrop (Item_m2/FILEI*). The
+# USA page holds the backdrop's pixels at BACKDROP_AT, scale 1, so the
+# importer builds the HD page from the backdrop's pack picture
+# (HdPackKind::Backdrop, composeBackdropPage in HdPack.cpp).
+BACKDROP_AT = (24, 24)
+BACKDROP_MAX_ERR = 12.0       # the five pages sit at 2.0-8.8
+BACKDROP_MIN_TEXELS = 2000
+
+
+def backdrop_rows(game_root, jpn_root, data):
+    """-> [(pack name, page asset)] for the FILEM pages no pack has, from the
+    backdrop rows in `data` whose picture the page shows."""
+    if not jpn_root:
+        return []
+    paired = set(a.lower() for _, a, _, _ in data)
+    pack_of = dict((a.lower(), n) for n, a, _, _ in data)
+    backdrops = [(a, words_rgba(w)) for a, w in file_textures(jpn_root)
+                 if os.path.basename(a).lower().startswith('filei') and a.lower() in pack_of]
+    out = []
+    bx, by = BACKDROP_AT
+    for asset, words in filem_pages(game_root):
+        if asset.lower() in paired:
+            continue
+        page = words_rgba(words)
+        best = None
+        for b, img in backdrops:
+            bh, bw = img.shape[:2]
+            h, w = min(bh, page.shape[0] - by), min(bw, page.shape[1] - bx)
+            p = page[by:by + h, bx:bx + w]
+            q = img[:h, :w]
+            m = (p[..., 3] > 0) & (q[..., 3] > 0) & (p[..., :3].sum(-1) > 40)
+            if m.sum() < BACKDROP_MIN_TEXELS:
+                continue
+            e = float(np.abs(p[..., :3] - q[..., :3])[m].mean())
+            if best is None or e < best[0]:
+                best = (e, b)
+        if best is not None and best[0] <= BACKDROP_MAX_ERR:
+            out.append((pack_of[best[1].lower()], asset))
+            print('backdrop: %s <- %s (%.2f)' % (asset, best[1], best[0]))
+    return out
+
+
 def file_textures(root):
     """-> [(asset, words HxW uint16 array)] for the files the game names."""
-    out = slide_cells(root)
+    out = slide_cells(root) + filem_pages(root)
     for folder in sorted(os.listdir(root)):
         exts = FILE_FOLDERS.get(folder.lower())
         if exts is None or not os.path.isdir(os.path.join(root, folder)):
@@ -685,6 +828,27 @@ def match_data(game_root, packs, report, jpn_root=None):
                     keep[i][0], asset, e,
                     'kept' if ok else ('not mutual' if not mutual else 'too different'),
                     second, c, c2))
+    # The pairs identified in game, in the layout the pack picture shows them.
+    by_asset = dict((a.lower(), w) for a, w in textures)
+    have = set(r[1].lower() for r in rows)
+    for name, asset in USER_FILE_PAIRS:
+        words = by_asset.get(asset.lower())
+        if words is None or asset.lower() in have or name not in files:
+            continue
+        pic = pack_page(files[name])
+        if pic is None:
+            continue
+        w, h = words.shape[1], words.shape[0]
+        size = region_size((0, 0, w, h))
+        g = area(premultiply(words_rgba(words)), size[0], size[1])
+        views = page_views(pic[0], pic[1], w, h)
+        if not views:
+            continue
+        view = min(views, key=lambda v: view_error(v[0], g))
+        rows.append((name, asset, view_error(view[0], g), view[1]))
+        have.add(asset.lower())
+        if report:
+            report.write('data,%s,%s,%.2f,identified in game\n' % (name, asset, rows[-1][2]))
     if report:
         for name, asset, e, stretched in rows[:exact]:
             report.write('data,%s,%s,0.00,name%s\n' % (name, asset,
@@ -1027,12 +1191,35 @@ def main():
     models = match_models(args.game, args.packs, report)
     data = match_data(args.game, args.packs, report, args.jpn)
     dc_bgd, dc_mask = match_dc(args.dc, args.packs, report) if args.dc else ([], [])
+    # The pairs identified in game (USER_*_PAIRS), unless the matcher already
+    # has a picture for that asset.
+    named_in_packs = set()
+    for pack in args.packs:
+        for kind in DATA_KINDS:
+            folder = os.path.join(pack, kind)
+            if os.path.isdir(folder):
+                named_in_packs.update(os.path.splitext(f)[0].upper() for f in os.listdir(folder))
+    have_bg = set(a.lower() for _, a, _ in bgd)
+    for name, asset in USER_BG_PAIRS:
+        if name in named_in_packs and asset.lower() not in have_bg:
+            bgd.append((name, asset, -1.0))
+    have_model = set((a.lower(), r) for _, r, a in models)
+    for name, row, asset in USER_MODEL_PAIRS:
+        if name in named_in_packs and (asset.lower(), row) not in have_model:
+            models.append((name, row, asset))
+    named = [(n, a) for n, a in USER_NAMED_PAIRS if n in named_in_packs]
+    backdrops = backdrop_rows(args.game, args.jpn, data)
     with open(args.out, 'w', newline='\n') as out:
         out.write('// Generated by tools/gen_hd_pack_table.py - do not edit by hand.\n')
         out.write('// { pack file name (no extension), kind, game asset (no extension) }\n')
-        out.write('// %d backgrounds, %d masks, %d model palette rows, %d Data/ textures; '
-                  'DC: %d backgrounds, %d masks.\n'
-                  % (len(bgd), len(mask), len(models), len(data), len(dc_bgd), len(dc_mask)))
+        out.write('// %d backgrounds, %d masks, %d model palette rows, %d Data/ textures, '
+                  '%d named, %d file pages from a backdrop; DC: %d backgrounds, %d masks.\n'
+                  % (len(bgd), len(mask), len(models), len(data), len(named), len(backdrops),
+                     len(dc_bgd), len(dc_mask)))
+        for name, asset in named:
+            out.write('{"%s", HdPackKind::Named, "%s"},\n' % (name, asset))
+        for name, asset in backdrops:
+            out.write('{"%s", HdPackKind::Backdrop, "%s"},\n' % (name, asset))
         for name, asset, _, stretched in data:
             kind = 'FileWhole' if stretched else 'File'
             if asset.count('/') == 2:

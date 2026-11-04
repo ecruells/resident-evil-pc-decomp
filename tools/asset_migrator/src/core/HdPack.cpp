@@ -41,19 +41,33 @@ namespace {
 // as it is - the game maps an HD picture over the texture's logical size,
 // whatever its shape. Cell: a part of a file the game uploads on its own and
 // names "<file>/<NN>" - the slide projector's six 192x128 slides, cut out of
-// Data/SLIDE.TIM ("Data/SLIDE/03"), each the top-left corner of a pack page.
+// Data/SLIDE.TIM ("Data/SLIDE/03"), each the top-left corner of a pack page,
+// and the USA file reader's 256x256 pages, one per page of an
+// Item_m2/FILEM_*.PIX container ("Item_m2/FILEM_N0/04").
 // A File row whose file the tree does not have is skipped: the table covers
 // both trees (the Japanese reader's Item_m2/FILEI backdrops are JPN only).
+// Named: a texture the game names by something other than a file - a room
+// TIM's CRC ("RoomModels/667bc53f") or, for one whose palette the game edits
+// before the upload, the upload's own hash ("82152f2276f2176d") - paired in
+// game by the user; the pack picture goes in as it is, under HD/<TREE>/ or,
+// for a hash, HD/.
+// Backdrop: a USA file reader page with a picture ("Item_m2/FILEM_P0/01"),
+// which no pack has; the row names the pack picture of the Japanese reader's
+// backdrop of the same picture, and the importer builds the HD page from the
+// page and that backdrop (composeBackdropPage).
 // DcBackground / DcMask: the pack's bio1dc set
 // (its Director's Cut camera angles), paired with the DC overlay's own files
 // and installed under HD/DC/ - a background as Stage8/RC8000, a mask kept in
 // the room file as Stage8/ROOM8000_MASK3 (src/game/RoomBackgroundWebp.h).
 enum class HdPackKind { Background, Mask, ModelPalette0, ModelPalette1, File, FileWhole,
-                        DcBackground, DcMask, ModelWhole, Cell };
+                        DcBackground, DcMask, ModelWhole, Cell, Named,
+                        Backdrop };
 
 // The slide projector's cells (src/game/SpriteRenderer.cpp, TexturePage_LoadImage).
 const int kSlideCellWidth = 192;
 const int kSlideCellHeight = 128;
+// A page of the USA file reader (src/game/MainMenu.cpp, pickup_unpack_list).
+const int kFilePageSize = 256;
 
 struct HdPackEntry {
     const char* packName;   // file name in the pack, without extension
@@ -63,6 +77,22 @@ struct HdPackEntry {
 
 const HdPackEntry kTable[] = {
 #include "core/HdPackTable.inc"
+};
+
+// Director's Cut models that wear a base model's skin under another name. The
+// game looks a skin up by the model's file (HD/DC/Enemy/EM1116.webp), and no
+// pack names one after these, so the base skin is written there too, as a
+// file of its own. The zombie Forest (DC entity id 0x16: EM1016 in Chris's
+// game, EM1116 in Jill's, one TIM) is the Forest corpse EM1026: the same
+// 256x256 skin and UV layout, with about 11% of the texels retouched (wound
+// edges, a badge).
+struct DcModelSkinCopy {
+    const char* base;   // the pack table's asset ("Enemy/EM1026")
+    const char* dc;     // the DC file, under HD/DC/Enemy/
+};
+const DcModelSkinCopy kDcModelSkinCopies[] = {
+    {"Enemy/EM1026", "EM1016"},
+    {"Enemy/EM1026", "EM1116"},
 };
 
 // The entry of `dir` named `name`, compared case-insensitively ("" when none).
@@ -120,21 +150,10 @@ bool backgroundRgba(const std::string& dir, const std::string& pakName,
     return true;
 }
 
-// A room mask page as LoadEffectTextureSheet (src/game/TextureLoader.cpp)
-// builds it from Objspr/osp*.pak: the first CLUT row, v * 255 / 31, and alpha 0
-// for a texel whose colour is 0x0000 exactly.
-bool maskRgba(const std::string& path, std::vector<uint8_t>* rgba, int* width,
-              int* height, std::string* why) {
-    std::vector<uint8_t> pak, tim;
-    if (!readFile(path, &pak)) {
-        *why = "cannot read the .pak";
-        return false;
-    }
-    std::string err;
-    if (!lzwUnpack(pak.data(), pak.size(), &tim, &err)) {
-        *why = "LZW: " + err;
-        return false;
-    }
+// A 4/8 bpp TIM with a CLUT in its first CLUT row, v * 255 / 31, alpha 0 for
+// a texel whose colour is 0x0000 exactly.
+bool timRgba(const std::vector<uint8_t>& tim, std::vector<uint8_t>* rgba, int* width,
+             int* height, std::string* why) {
     const size_t n = tim.size();
     const uint32_t flags = readU32(tim.data(), n, 4);
     if (n < 32 || readU32(tim.data(), n, 0) != 0x10 || !(flags & 8) || (flags & 3) > 1) {
@@ -179,6 +198,23 @@ bool maskRgba(const std::string& path, std::vector<uint8_t>* rgba, int* width,
     *width = w;
     *height = h;
     return true;
+}
+
+// A room mask page as LoadEffectTextureSheet (src/game/TextureLoader.cpp)
+// builds it from Objspr/osp*.pak (timRgba's colours and key).
+bool maskRgba(const std::string& path, std::vector<uint8_t>* rgba, int* width,
+              int* height, std::string* why) {
+    std::vector<uint8_t> pak, tim;
+    if (!readFile(path, &pak)) {
+        *why = "cannot read the .pak";
+        return false;
+    }
+    std::string err;
+    if (!lzwUnpack(pak.data(), pak.size(), &tim, &err)) {
+        *why = "LZW: " + err;
+        return false;
+    }
+    return timRgba(tim, rgba, width, height, why);
 }
 
 
@@ -477,6 +513,19 @@ bool composeSkin(const std::string& ffmpeg, const std::string& pal0, const std::
     return ok;
 }
 
+// Whether `d` is a file reader page container (Item_m2/FILEM_*.PIX: sixteen
+// dword offsets to LZW-packed 256x256 TIMs, the last one the file's end) with
+// a page `page` ("04").
+bool isFilePageContainer(const std::vector<uint8_t>& d, const std::string& page) {
+    const size_t n = d.size();
+    if (n < 64 || readU32(d.data(), n, 0) != 64 || page.empty()) return false;
+    char* end = nullptr;
+    const long p = std::strtol(page.c_str(), &end, 10);
+    if (*end != '\0' || p < 0 || p >= 16) return false;
+    const uint32_t off = readU32(d.data(), n, (size_t)p * 4);
+    return off >= 64 && off < n;
+}
+
 // The size of the image in a TIM at `off` (4, 8 or 16 bpp).
 bool timShape(const std::vector<uint8_t>& d, size_t off, int* w, int* h) {
     const size_t n = d.size();
@@ -524,6 +573,256 @@ bool wholePicture(const std::string& pic, std::vector<uint8_t>* out, std::string
         return false;
     }
     out->swap(file);
+    return true;
+}
+
+// A USA file reader page that shows a picture (the pass number, Barry's
+// photo, the three pass codes) has no page in any pack: Classic REbirth runs
+// the Japanese game, which draws the same picture as a 256x120 backdrop
+// (Item_m2/FILEI*) and the text on a page of its own. The USA page holds that
+// backdrop's pixels at (24, 24), scale 1 (all five, within 2-9 levels a
+// channel), so the HD page is built from it: the page scaled up to the pack's
+// scale, with the pack's backdrop over the texels that show the picture. Only
+// those texels: the backdrop's own frame scraps (top right) are not on the
+// USA page. Whatever of the picture lies outside the backdrop (the bottom of
+// Barry's photo) stays the scaled-up page.
+const int kBackdropX = 24;
+const int kBackdropY = 24;
+const int kBackdropWidth = 256;
+const int kBackdropHeight = 120;
+
+bool filePageRgba(const std::vector<uint8_t>& pix, int page, std::vector<uint8_t>* rgba,
+                  int* w, int* h, std::string* why) {
+    const size_t n = pix.size();
+    const uint32_t off = page >= 0 && page < 16 ? readU32(pix.data(), n, (size_t)page * 4) : 0;
+    if (n < 64 || off < 64 || off >= n) {
+        *why = "no such page";
+        return false;
+    }
+    std::vector<uint8_t> tim;
+    std::string err;
+    if (!lzwUnpack(pix.data() + off, n - off, &tim, &err)) {
+        *why = "LZW: " + err;
+        return false;
+    }
+    return timRgba(tim, rgba, w, h, why);
+}
+
+// Lossless WebP of a W x H RGBA8 image through ffmpeg, as the rest of the import.
+bool encodeRgbaWebp(const std::string& ffmpeg, const std::vector<uint8_t>& rgba, int W, int H,
+                    const std::string& tmp, std::vector<uint8_t>* out, std::string* why) {
+    const std::string raw = tmp + ".rgba";
+    if (!writeFile(raw, rgba)) {
+        *why = "cannot write " + raw;
+        return false;
+    }
+    const std::vector<std::string> args = {
+        "-hide_banner", "-loglevel", "error", "-y", "-f", "rawvideo", "-pix_fmt", "rgba",
+        "-s", std::to_string(W) + "x" + std::to_string(H), "-i", raw, "-c:v", "libwebp",
+        "-lossless", "1", "-compression_level", "4", tmp};
+    int code = -1;
+    std::string so, se, err;
+    const bool ran = ChildProcess::run(ffmpeg, args, false, &code, &so, &se, &err);
+    std::error_code ec;
+    std::filesystem::remove(raw, ec);
+    if (!ran || code != 0 || !readFile(tmp, out)) {
+        *why = "ffmpeg could not build it (it needs libwebp)" + (se.empty() ? "" : ": " + se);
+        return false;
+    }
+    std::filesystem::remove(tmp, ec);
+    return true;
+}
+
+bool composeBackdropPage(const std::string& ffmpeg, const std::vector<uint8_t>& pageRgba,
+                         int pw, int ph, const std::string& pic, const std::string& tmp,
+                         std::vector<uint8_t>* out, std::string* why) {
+    std::vector<uint8_t> file, hd;
+    int hw = 0, hh = 0;
+    if (!readFile(pic, &file) || !decodeWebp(file, &hd, &hw, &hh)) {
+        *why = pic + " does not decode";
+        return false;
+    }
+    if (hw != hh || hw < 256 || pw != 256 || ph != 256) {
+        *why = "the pack picture is not a square page";
+        return false;
+    }
+    const double s = hw / 256.0;           // pack pixels per texel
+    const int W = hw, H = (int)std::lround(ph * s);
+
+    // Which texels show the picture: opaque, not black, inside the backdrop;
+    // grown by two texels so the pack's edge pixels come along.
+    std::vector<float> mask((size_t)pw * ph, 0.0f);
+    for (int y = kBackdropY; y < std::min(ph, kBackdropY + kBackdropHeight); ++y)
+        for (int x = kBackdropX; x < std::min(pw, kBackdropX + kBackdropWidth); ++x) {
+            const uint8_t* p = &pageRgba[((size_t)y * pw + x) * 4];
+            if (p[3] && std::max(p[0], std::max(p[1], p[2])) > 24) mask[(size_t)y * pw + x] = 1.0f;
+        }
+    for (int pass = 0; pass < 2; ++pass) {
+        std::vector<float> grown = mask;
+        for (int y = kBackdropY; y < std::min(ph, kBackdropY + kBackdropHeight); ++y)
+            for (int x = kBackdropX; x < std::min(pw, kBackdropX + kBackdropWidth); ++x)
+                for (int dy = -1; dy <= 1; ++dy)
+                    for (int dx = -1; dx <= 1; ++dx) {
+                        const int sx = x + dx, sy = y + dy;
+                        if (sx >= 0 && sy >= 0 && sx < pw && sy < ph && mask[(size_t)sy * pw + sx] > 0)
+                            grown[(size_t)y * pw + x] = 1.0f;
+                    }
+        mask.swap(grown);
+    }
+
+    // The pack repainted the picture (Barry's photo is warmer and brighter):
+    // the part of it the backdrop does not reach is brought to the pack's
+    // colours, a gain and offset per channel fitted on the texels both show
+    // (each texel against the mean of its pack block). And the backdrop fades
+    // out over its last rows instead of ending on a hard line.
+    const int S = std::max(1, (int)std::lround(s));
+    double gain[3] = {1, 1, 1}, bias[3] = {0, 0, 0};
+    {
+        double n = 0, sx[3] = {0}, sy[3] = {0}, sxx[3] = {0}, sxy[3] = {0};
+        for (int y = kBackdropY; y < std::min(ph, kBackdropY + kBackdropHeight); ++y)
+            for (int x = kBackdropX; x < std::min(pw, kBackdropX + kBackdropWidth); ++x) {
+                const uint8_t* p = &pageRgba[((size_t)y * pw + x) * 4];
+                if (!p[3] || std::max(p[0], std::max(p[1], p[2])) <= 24) continue;
+                double q[3] = {0, 0, 0};
+                const int qx = (x - kBackdropX) * S, qy = (y - kBackdropY) * S;
+                if (qx + S > hw || qy + S > hh) continue;
+                for (int by = 0; by < S; ++by)
+                    for (int bx = 0; bx < S; ++bx)
+                        for (int k = 0; k < 3; ++k)
+                            q[k] += hd[((size_t)(qy + by) * hw + qx + bx) * 4 + k];
+                ++n;
+                for (int k = 0; k < 3; ++k) {
+                    q[k] /= S * S;
+                    sx[k] += p[k]; sy[k] += q[k]; sxx[k] += p[k] * p[k]; sxy[k] += p[k] * q[k];
+                }
+            }
+        for (int k = 0; k < 3 && n > 100; ++k) {
+            const double var = sxx[k] - sx[k] * sx[k] / n;
+            if (var > 1e-6) {
+                gain[k] = (sxy[k] - sx[k] * sy[k] / n) / var;
+                bias[k] = (sy[k] - gain[k] * sx[k]) / n;
+            }
+        }
+    }
+    // Texels of the picture the backdrop does not cover get the fitted colours.
+    std::vector<uint8_t> page = pageRgba;
+    const int fade = 6;   // texels over which the backdrop fades out at its bottom
+    for (int y = 0; y < ph; ++y)
+        for (int x = 0; x < pw; ++x) {
+            uint8_t* p = &page[((size_t)y * pw + x) * 4];
+            const bool inside = x >= kBackdropX && x < kBackdropX + kBackdropWidth &&
+                                y >= kBackdropY && y < kBackdropY + kBackdropHeight;
+            if (inside || !p[3] || std::max(p[0], std::max(p[1], p[2])) <= 24) continue;
+            // Only below the backdrop and next to the picture it covers.
+            if (y < kBackdropY + kBackdropHeight || x < kBackdropX) continue;
+            bool near = false;
+            for (int yy = y - 1; yy >= kBackdropY + kBackdropHeight - 1 && !near; --yy) {
+                const uint8_t* a = &pageRgba[((size_t)yy * pw + x) * 4];
+                if (!a[3] || std::max(a[0], std::max(a[1], a[2])) <= 24) break;
+                near = yy == kBackdropY + kBackdropHeight - 1;
+            }
+            if (!near) continue;
+            for (int k = 0; k < 3; ++k)
+                p[k] = (uint8_t)std::max(0.0, std::min(255.0, gain[k] * p[k] + bias[k] + 0.5));
+        }
+    for (int y = kBackdropY + kBackdropHeight - fade; y < kBackdropY + kBackdropHeight; ++y) {
+        if (y < 0 || y >= ph) continue;
+        // Only where the picture goes on below the backdrop.
+        const float w = (float)(kBackdropY + kBackdropHeight - y) / (fade + 1);
+        for (int x = kBackdropX; x < std::min(pw, kBackdropX + kBackdropWidth); ++x) {
+            const int below = kBackdropY + kBackdropHeight;
+            if (below >= ph) continue;
+            const uint8_t* a = &page[((size_t)below * pw + x) * 4];
+            if (a[3] && std::max(a[0], std::max(a[1], a[2])) > 24)
+                mask[(size_t)y * pw + x] *= w;
+        }
+    }
+
+    // Bilinear sample of the page (each channel, and the mask) at texel (u, v).
+    auto sample = [&](double u, double v, float* c, float* m) {
+        u = std::max(0.0, std::min(pw - 1.0, u));
+        v = std::max(0.0, std::min(ph - 1.0, v));
+        const int x0 = (int)u, y0 = (int)v;
+        const int x1 = std::min(pw - 1, x0 + 1), y1 = std::min(ph - 1, y0 + 1);
+        const double fx = u - x0, fy = v - y0;
+        const double wt[4] = {(1 - fx) * (1 - fy), fx * (1 - fy), (1 - fx) * fy, fx * fy};
+        const int xs[4] = {x0, x1, x0, x1}, ys[4] = {y0, y0, y1, y1};
+        for (int k = 0; k < 4; ++k) c[k] = 0.0f;
+        *m = 0.0f;
+        for (int i = 0; i < 4; ++i) {
+            const size_t t = (size_t)ys[i] * pw + xs[i];
+            for (int k = 0; k < 4; ++k) c[k] += (float)(wt[i] * page[t * 4 + k]);
+            *m += (float)(wt[i] * mask[t]);
+        }
+    };
+
+    std::vector<uint8_t> rgba((size_t)W * H * 4);
+    const int ox = (int)std::lround(kBackdropX * s), oy = (int)std::lround(kBackdropY * s);
+    const int bh = (int)std::lround(kBackdropHeight * s);
+    for (int y = 0; y < H; ++y)
+        for (int x = 0; x < W; ++x) {
+            float c[4], m;
+            sample((x + 0.5) / s - 0.5, (y + 0.5) / s - 0.5, c, &m);
+            const int px = x - ox, py = y - oy;
+            if (m > 0.0f && px >= 0 && py >= 0 && px < hw && py < bh) {
+                const uint8_t* q = &hd[((size_t)py * hw + px) * 4];
+                const float mq = m * q[3] / 255.0f;   // nothing from a pack texel it keys out
+                for (int k = 0; k < 3; ++k) c[k] = c[k] * (1 - mq) + q[k] * mq;
+            }
+            // The page's own transparency, scaled up: the pack's picture
+            // keeps stray key colours (magenta, blue) in the pass codes'
+            // punched holes, which the page has transparent (0x0000). Colour
+            // under transparency goes to black - the reader's background -
+            // so filtering cannot bleed it in.
+            for (int k = 0; k < 3; ++k) c[k] *= c[3] / 255.0f;
+            for (int k = 0; k < 4; ++k)
+                rgba[((size_t)y * W + x) * 4 + k] =
+                    (uint8_t)std::max(0.0f, std::min(255.0f, c[k] + 0.5f));
+        }
+
+    return encodeRgbaWebp(ffmpeg, rgba, W, H, tmp, out, why);
+}
+
+// The pack picture for a texture the game keys (texels of colour 0x0000
+// transparent), given the cut-out it lacks. Classic REbirth's pictures are
+// opaque - its renderer keys their black itself - while this game takes a
+// texture's holes from the picture's alpha, so an opaque picture fills them:
+// the file book page's black margin (Item_m2/FILE000/001) covered the book
+// change arrows drawn under it. The game's transparency, scaled up
+// (bilinear), goes on a picture with none of its own; colour under it goes to
+// black so filtering cannot bleed it in. `file` is left as it is when the
+// picture has alpha already or the texture keys nothing.
+bool keyLikeTexture(const std::string& ffmpeg, const std::vector<uint8_t>& tex, int tw, int th,
+                    const std::string& tmp, std::vector<uint8_t>* file, std::string* why) {
+    if (tw <= 0 || th <= 0 || tex.size() < (size_t)tw * th * 4) return true;
+    bool keyed = false;
+    for (size_t i = 0; i < (size_t)tw * th && !keyed; ++i) keyed = tex[i * 4 + 3] == 0;
+    if (!keyed) return true;
+    std::vector<uint8_t> rgba;
+    int W = 0, H = 0;
+    if (!decodeWebp(*file, &rgba, &W, &H) || W <= 0 || H <= 0) return true;
+    for (size_t i = 0; i < (size_t)W * H; ++i)
+        if (rgba[i * 4 + 3] != 0xFF) return true;   // the picture brings its own
+    const double sx = (double)tw / W, sy = (double)th / H;
+    for (int y = 0; y < H; ++y) {
+        const double v = std::max(0.0, std::min(th - 1.0, (y + 0.5) * sy - 0.5));
+        const int y0 = (int)v, y1 = std::min(th - 1, y0 + 1);
+        const double fy = v - y0;
+        for (int x = 0; x < W; ++x) {
+            const double u = std::max(0.0, std::min(tw - 1.0, (x + 0.5) * sx - 0.5));
+            const int x0 = (int)u, x1 = std::min(tw - 1, x0 + 1);
+            const double fx = u - x0;
+            auto a = [&](int xx, int yy) { return (double)tex[((size_t)yy * tw + xx) * 4 + 3]; };
+            const double al = a(x0, y0) * (1 - fx) * (1 - fy) + a(x1, y0) * fx * (1 - fy) +
+                              a(x0, y1) * (1 - fx) * fy + a(x1, y1) * fx * fy;
+            uint8_t* p = &rgba[((size_t)y * W + x) * 4];
+            for (int k = 0; k < 3; ++k) p[k] = (uint8_t)std::lround(p[k] * al / 255.0);
+            p[3] = (uint8_t)std::lround(al);
+        }
+    }
+    std::vector<uint8_t> keyedFile;
+    if (!encodeRgbaWebp(ffmpeg, rgba, W, H, tmp, &keyedFile, why)) return false;
+    file->swap(keyedFile);
     return true;
 }
 
@@ -979,6 +1278,18 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
             return false;
         }
         namedWritten.insert(pathKey(out));
+        // The same skin under the Director's Cut's names for the model, each
+        // its own file (HD/DC/...), so the two can be retouched apart.
+        for (const auto& copy : kDcModelSkinCopies) {
+            if (toLower(asset) != toLower(copy.base)) continue;
+            const std::string dcDir = joinPath(joinPath(hd, "DC"), "Enemy");
+            const std::string dcOut = joinPath(dcDir, std::string(copy.dc) + ".webp");
+            if (!makeDirs(dcDir) || !writeFile(dcOut, b->second)) {
+                if (error) *error = "cannot write " + dcOut;
+                return false;
+            }
+            namedWritten.insert(pathKey(dcOut));
+        }
         usedPack.insert(src.pal[0]);
         if (two) usedPack.insert(src.pal[1]);
         ++modelsDone;
@@ -1041,6 +1352,8 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
         const std::string dir = folder.empty() ? std::string() : joinPath(treeDir, folder);
         std::string outStem, outFolder = folder, why;
         int w = 0, h = 0;
+        size_t timOff = (size_t)-1;
+        std::vector<uint8_t> texRgba;
         if (!dir.empty() && e.kind == HdPackKind::DcBackground) {
             const std::string file = findBackgroundFile(dir, stem + ".pak");
             if (!file.empty()) {
@@ -1078,6 +1391,11 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
                         w = kSlideCellWidth;
                         h = kSlideCellHeight;
                         outFolder = joinPath(folder, f.substr(0, f.size() - 4));
+                    } else if (ext == ".pix" && isFilePageContainer(d, cellName)) {
+                        // A page of the file reader (pickup_unpack_list): a
+                        // 256x256 TIM, the whole pack page.
+                        w = h = kFilePageSize;
+                        outFolder = joinPath(folder, f.substr(0, f.size() - 4));
                     } else {
                         w = 0;
                     }
@@ -1089,10 +1407,20 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
                     h = kBackgroundHeight;
                 } else if (ext == ".tim" || ext == ".ivm") {
                     timShape(d, 0, &w, &h);
+                    timOff = 0;
                 } else if (ext == ".dor" && d.size() >= 12) {
-                    timShape(d, readU32(d.data(), d.size(), 8), &w, &h);
+                    timOff = readU32(d.data(), d.size(), 8);
+                    timShape(d, timOff, &w, &h);
                 }
                 if (w > 0) outStem = f.substr(0, f.size() - 4);
+                // The game's own texels, for the cut-out (keyLikeTexture).
+                if (w > 0 && e.kind == HdPackKind::File && timOff < d.size()) {
+                    const std::vector<uint8_t> tim(d.begin() + (std::ptrdiff_t)timOff, d.end());
+                    int kw = 0, kh = 0;
+                    std::string ignored;
+                    if (!timRgba(tim, &texRgba, &kw, &kh, &ignored) || kw != w || kh != h)
+                        texRgba.clear();
+                }
                 break;
             }
         }
@@ -1107,6 +1435,11 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
         std::vector<uint8_t> file;
         if (whole ? !wholePicture(pic, &file, &why)
                   : !texturePicture(opts.ffmpegPath, pic, w, h, tmpNamed, &file, &why)) {
+            progress.info("  " + std::string(e.packName) + " (" + asset + "): " + why);
+            ++namedFailed;
+            continue;
+        }
+        if (!texRgba.empty() && !keyLikeTexture(opts.ffmpegPath, texRgba, w, h, tmpNamed, &file, &why)) {
             progress.info("  " + std::string(e.packName) + " (" + asset + "): " + why);
             ++namedFailed;
             continue;
@@ -1132,6 +1465,90 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
     if (namedFailed)
         progress.info("  " + std::to_string(namedFailed) + " skipped (listed above)");
 
+    // ---- 1c'. textures named by a room TIM's CRC or by their hash ----
+    // Paired in game (HdPackKind::Named); each pack picture goes in as it is.
+    // A hash name is kept away from the dump pass below (usedNames); a tree
+    // name from the room-model pass (namedWritten).
+    size_t namedDone = 0;
+    for (int i = 0; i < total && !dcPackGame; ++i) {
+        const HdPackEntry& e = kTable[i];
+        if (e.kind != HdPackKind::Named) continue;
+        std::string pic;
+        for (const auto& k : kinds) {
+            const auto it = pack[k].find(e.packName);
+            if (it != pack[k].end()) { pic = it->second; break; }
+        }
+        if (pic.empty()) continue;
+        std::vector<uint8_t> file;
+        std::string why;
+        if (!wholePicture(pic, &file, &why)) {
+            progress.info("  " + std::string(e.packName) + " (" + e.asset + "): " + why);
+            continue;
+        }
+        const std::string asset = e.asset;
+        if (asset.find('/') == std::string::npos) {
+            if (!install(hd, std::string(), toLower(asset), file, kinds, error)) return false;
+            usedNames.insert(toLower(asset));
+        } else {
+            const std::string out = joinPath(joinPath(hd, treeName), asset + ".webp");
+            const std::string dir = out.substr(0, out.find_last_of("/\\"));
+            if (!makeDirs(dir) || !writeFile(out, file)) {
+                if (error) *error = "cannot write " + out;
+                return false;
+            }
+            namedWritten.insert(pathKey(out));
+        }
+        usedPack.insert(pic);
+        ++namedDone;
+    }
+    if (namedDone)
+        progress.info("  textures paired in game: " + std::to_string(namedDone));
+
+    // ---- 1c''. the USA file reader's picture pages, built from a backdrop ----
+    size_t backdropDone = 0;
+    const std::string tmpPage = joinPath(hd, "re1am_page_tmp.webp");
+    for (int i = 0; i < total && !dcPackGame; ++i) {
+        const HdPackEntry& e = kTable[i];
+        if (e.kind != HdPackKind::Backdrop) continue;
+        std::string pic;
+        for (const auto& k : kinds) {
+            const auto it = pack[k].find(e.packName);
+            if (it != pack[k].end()) { pic = it->second; break; }
+        }
+        if (pic.empty()) continue;
+        // "<folder>/<container>/<page>"
+        const std::string asset = e.asset;
+        const size_t a = asset.find('/'), b = asset.rfind('/');
+        if (a == std::string::npos || a == b) continue;
+        const std::string folder = childCI(tree, asset.substr(0, a), true);
+        const std::string stem = asset.substr(a + 1, b - a - 1);
+        const std::string page = asset.substr(b + 1);
+        const std::string pix = folder.empty() ? std::string()
+                                : childCI(joinPath(tree, folder), stem + ".pix", false);
+        std::vector<uint8_t> d, pageRgba, file;
+        int pw = 0, ph = 0;
+        std::string why;
+        if (pix.empty() || !readFile(joinPath(joinPath(tree, folder), pix), &d) ||
+            !isFilePageContainer(d, page))
+            continue;   // a tree without the USA reader (JPN) is not a failure
+        if (!filePageRgba(d, std::atoi(page.c_str()), &pageRgba, &pw, &ph, &why) ||
+            !composeBackdropPage(opts.ffmpegPath, pageRgba, pw, ph, pic, tmpPage, &file, &why)) {
+            progress.info("  " + std::string(e.packName) + " (" + asset + "): " + why);
+            continue;
+        }
+        const std::string outDir = joinPath(joinPath(joinPath(hd, treeName), folder),
+                                            pix.substr(0, pix.size() - 4));
+        const std::string out = joinPath(outDir, page + ".webp");
+        if (!makeDirs(outDir) || !writeFile(out, file)) {
+            if (error) *error = "cannot write " + out;
+            return false;
+        }
+        namedWritten.insert(pathKey(out));
+        ++backdropDone;
+    }
+    if (backdropDone)
+        progress.info("  file pages built from a backdrop: " + std::to_string(backdropDone));
+
     // ---- 1d. the inventory icons, by Classic REbirth's name ----
     // The original game uploads each item's icon on its own: the 40x30 icon
     // from item_all.pix (1200 bytes per item, 8 bpp) in STATUS.TIM's third
@@ -1140,10 +1557,15 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
     // icon in its top-left 160x120. The port names each icon after the file
     // and the item (src/game/TextureLoader.cpp, HD item icons), so the corner
     // goes in as HD/<TREE>/Data/ITEM_ALL/<NN>.webp.
+    // A combine reloads the new item's icon from item_mix.pix instead
+    // (menu_item_combine_refresh), named HD/<TREE>/Data/ITEM_MIX/<NN>.webp.
+    // Each of its rows is a byte-for-byte copy of an item_all.pix row, so the
+    // pack has the same picture under the same name.
     size_t iconsDone = 0;
-    if (!dcPackGame) {
+    for (const char* sheet : {"item_all.pix", "item_mix.pix"}) {
+        if (dcPackGame) break;
         const std::string data = childCI(tree, "data", true);
-        const std::string pixName = data.empty() ? "" : childCI(joinPath(tree, data), "item_all.pix", false);
+        const std::string pixName = data.empty() ? "" : childCI(joinPath(tree, data), sheet, false);
         const std::string timName = data.empty() ? "" : childCI(joinPath(tree, data), "status.tim", false);
         std::vector<uint8_t> pix, tim;
         if (!pixName.empty() && !timName.empty() &&
@@ -1196,10 +1618,10 @@ bool importHdPack(const HdPackOptions& opts, const Progress& progress,
             std::error_code ec;
             std::filesystem::remove(tmpIcon, ec);
         }
-        if (iconsDone)
-            progress.info("  inventory icons: " + std::to_string(iconsDone) + " -> " +
-                          joinPath(joinPath(hd, treeName), "Data/ITEM_ALL"));
     }
+    if (iconsDone)
+        progress.info("  inventory icons: " + std::to_string(iconsDone) + " -> " +
+                      joinPath(joinPath(hd, treeName), "Data/ITEM_ALL, Data/ITEM_MIX"));
 
     // ---- 2. everything else: against the game's own dump (original game) ----
     const std::string dumpDir = joinPath(hd, "dump");

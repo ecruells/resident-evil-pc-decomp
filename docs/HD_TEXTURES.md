@@ -111,6 +111,19 @@ own, as a 64x64 texture with the icon in the top-left corner in STATUS.TIM's
 third palette row: the importer computes that texture's Classic REbirth name
 for every item (71 of the 72 USA icons are in the Seamless HD Project; not the
 oil can, 46) and cuts the icon's corner (160x120 of the 4x picture) out.
+A combine reloads the new item's icon from `item_mix.pix` instead
+(`menu_item_combine_refresh`), named `HD/<TREE>/Data/ITEM_MIX/<NN>.webp`; each
+of its rows is a byte-for-byte copy of an `item_all.pix` row, so the importer
+finds it in the pack the same way.
+A mode's sheet (`DC/data/item_all`) never borrows the base icon of the same
+**number**: the DC's rows 45/46 are the moon crest halves where the PC has the
+lock pick and the oil can. `HdItemIconKey` (`src/game/TextureLoader.cpp`)
+names a mode row after the base row that shows the same picture (same row
+first, then any row of either base sheet; colours through STATUS.TIM row 2
+within 2 steps a channel), and leaves it on its own name with the fallback
+refused when there is none. Every named icon is also dumped on its own with
+`DumpTextures`, e.g. `HD/dump/DC/data/item_all/45.png`; its HD picture goes
+in `HD/DC/data/item_all/45.webp`.
 
 **Projector slides.** `load_slides_images` loads `Data/SLIDE.TIM` (640x256,
 8 bpp, six palette rows) and the port uploads it as six 192x128 cells, cell
@@ -120,6 +133,35 @@ the file and the slide, `HD/<TREE>/Data/SLIDE/<NN>.webp` (`00` the Umbrella
 title .. `05` the staff photo). The packs hand each slide over as the top-left
 192x128 of a 256x256 page; the importer's `Cell` rows cut that corner out.
 
+**File reader pages.** The USA file reader reads each document from an
+`Item_m2/FILEM_*.PIX` container: sixteen dword offsets, then one LZW-packed
+256x256 4 bpp TIM per page (the last offset is the file's end).
+`pickup_unpack_list` (`src/game/MainMenu.cpp`) unpacks one page into the TIM
+buffer and uploads it, so the upload is not the file `LoadFile` read; it is
+named after the container and the page, `HD/<TREE>/Item_m2/FILEM_N0/<NN>.webp`
+(`04` the fifth page). Classic REbirth's English pages are these pages pixel
+for pixel: 78 of the 84 have a file under Classic REbirth's own name in the
+MulderLoad pack (the RE-ENHANCE text pages), which the importer installs as
+`Cell` rows. A 79th, `FILEM_W0/03` (Barry's letter to his daughters), pairs
+by picture (2.15, correlation 0.94): the pack's page corrects the original's
+typos ("Poly", "will watching"), so its name differs. No pack has the five
+pages with a picture (`FILEM_P0/01` the pass number, `W0/01` Barry's photo,
+`X0/01`, `Y0/01`, `Z0/01` the pass codes): Classic REbirth runs the Japanese
+game, which draws the picture as a separate 256x120 backdrop (`FILEI12`, `15`,
+`10`, `13`, `14`). The USA page holds that backdrop's pixels at (24, 24),
+scale 1 (2-9 levels a channel apart), so the importer builds the HD page
+(row kind `Backdrop`, `composeBackdropPage`): the page scaled up to the
+pack's scale, with the pack's backdrop over the texels that show the picture
+(not over the rest: the backdrop's frame scraps are not on the USA page).
+The transparency is the page's own, scaled up, and colour under it is black:
+the pack keeps stray key colours (magenta, blue) in the pass codes' punched
+holes, which the page has transparent, and copying the pack's pixels there
+drew them.
+Barry's photo goes on 32 texels below the backdrop; that part stays the
+scaled-up page, brought to the pack's colours (a gain and offset per channel
+fitted where both show the photo) with the backdrop fading out over its last
+six rows.
+
 **Players/.** The `.EMW` weapons and the cutscene `WS*.TMD` carry no texture:
 they are drawn from the character's texture page (bank 0x16), so the
 character's named skin covers them.
@@ -128,6 +170,28 @@ character's named skin covers them.
 mode) read a camera's mask from the `.RDT` itself, so it is named after the
 room file the game loaded and the camera, in hex: `ROOM8000_MASK3`
 (`room_hd_note_room` in `RoomInit.cpp`, used by `load_room_masks`).
+
+In Saturn mode, a mask with no picture under that name takes the PC page's.
+The Saturn room file is the PS1 one, and its mask TIM is the PC `Objspr` page
+of the same room and camera cut down to the rows and columns it uses: all
+1,274 Saturn masks (every `ROOM*.RDT`, the Battle Game arenas against their
+campaign room, the Laboratory Tyrant room included) are the PC page's top-left
+part within 2 steps a channel - the palettes are ordered differently, the
+colours are the same. `room_hd_saturn_mask_page` (`RoomBackgroundWebp.cpp`)
+checks that per camera against the page itself, and the upload is then named
+as that part of the page (`HdRegionScope` on `HD/USA/Objspr/OSP01065.webp`),
+the way the weapon-effect bands are cut out of an Effspr page. A mask that is
+not the page (another disc) keeps its own name.
+
+One room is left out, backgrounds and masks alike: the Laboratory Tyrant room
+(`Stage5/RC5130`-`RC5137`, also Battle Game arena 15), which the Saturn re-drew
+(the vats emptied, the second Tyrant's capsule added; the asset migrator's
+`kRoomBgs`). Its masks match the PC pages, but the PC's HD art shows the PC's
+room, so its background keys refuse the base fallback
+(`HdTextures_SetBaseFallback`, `room_hd_note_bg`) and its masks take no PC
+page: with no picture under `HD/SATURN/` the room keeps the Saturn's own art.
+Every other Saturn background (with "all rooms" migrated, a palette-shifted
+copy of the PC picture) borrows the USA picture of the same name.
 
 **Models inside a room file.** A room object (the clocks, statues and crests
 `omodel_set` places) and an item model (the keys, jewels and ink ribbons
@@ -268,6 +332,11 @@ looked up or dumped on its own. A Debug build decodes several times slower than 
   (the PlayStation's colour key) and draws everything else opaque. Keep the
   dump's alpha channel when you upscale, or the texture loses its holes. Use
   lossless WebP, or a lossy one with a clean alpha edge, for anything keyed.
+  Classic REbirth's pack pictures are opaque (its renderer keys black
+  itself), so the importer gives a table row's picture that has no alpha the
+  game TIM's own transparency, scaled up (`keyLikeTexture` in
+  `core/HdPack.cpp`). Without it the file book page's black margin
+  (`Item_m2/FILE000/001`) covered the book-change arrows drawn under it.
 - **A page is hashed as uploaded.** Several model textures are assembled into
   one 256x256 page before the upload, so the hash names the finished page, not
   one source file. A room with a different set of enemies builds a different
@@ -311,6 +380,14 @@ overlay (`DC`, `SATURN`, `SATURN_JPN`) when it carries the file, otherwise
 replace reads `USA/ENEMY/...`, so one picture serves every mode that uses the
 same file, and a mode's own model can never be drawn with another tree's art.
 Folder and file name case does not matter.
+
+A model the overlay does carry, but with no picture in its own HD tree,
+borrows the base tree's skin of the same name only when the two TIMs show the
+same picture (`EmdTimsLookAlike`, `src/game/EntityModelLoader.cpp`): colours
+through each file's palette, at most 10% of texels more than 2 steps apart.
+The DC's CHAR10/CHAR11/EM1030/EM1031 are the PC skins with the gaps between
+UV islands repainted (about 2% differ) and borrow; its outfits EM1032/EM1033
+(57-70%) do not.
 
 With `[Textures] DumpTextures=1` each model is also written once to
 `HD/dump/<TREE>/<path>.png`, e.g. `HD/dump/USA/enemy/em1033.png`. That PNG is the
@@ -392,12 +469,15 @@ replaces it like any other file, and the emptied folder is removed.
 generated by `tools/gen_hd_pack_table.py`: every pack background and mask is
 compared, as a picture, with every one of the game's, and a pair is kept when
 each is the other's closest match and they differ by less than a threshold.
-That gives 605 of 676 backgrounds and 422 of 431 masks. Two room files can
+That gives 605 of 676 backgrounds and 429 of 431 pack masks; a second round
+over the masks left unpaired adds 2 more (`D7B7AB5B` is closest to
+`OSP04054`, which already took a pack page at 0.48, and next closest to its
+own `OSP00094`). Two room files can
 show the same picture (the main hall's 2F cameras `Stage2/RC2030-RC2034` are
 `Stage1/RC1220-RC1224` again, at 0.5-1.3: compression noise and one small
 object), and the pack has it once; a game picture that is the same as a paired
 one (under 1.5, at the same size; masks under 0.5) takes that pack picture too
-- 17 more backgrounds and 3 masks, 622 and 425 in all. Two things about
+- 17 more backgrounds and 2 masks, 622 and 433 in all. Three things about
 the pictures matter:
 
 - A pack mask is always a whole 256x256 page (Classic REbirth hashes the VRAM
@@ -405,6 +485,13 @@ the pictures matter:
   top-left quarter: the generator compares them with that quarter of each pack
   picture, and the importer cuts that quarter out losslessly (ffmpeg). Compared
   whole, only 8 of them matched, and those 8 went to the wrong rooms.
+- Seven `Objspr` pages (`OSP00031`, `00093`, `00094`, `01184`, `01234`,
+  `04101`, `04105` ...) fill the part no sprite uses with index 255 =
+  `0x7FFF`, opaque white; the pack leaves it transparent. The generator leaves
+  out every 16x16 block of nothing but that filler, or the white block
+  outweighs the picture and the page matches nothing (room 109's masks had no
+  HD page for that reason). `OSP02062`, `OSP03065` and `OSP03071` have no
+  pack page.
 - The bordered-screen rooms (`MSF2_SCREEN_BORDER`: the caves, `RC2000`,
   `RC50D0`, `RC5150`) hold a 316x236 picture. `RC3062` says so in its header;
   the others carry it under a 320x240 header and the game reads it 316 wide,
@@ -502,6 +589,19 @@ EM1029's right half (two pack pictures tie).
   structure with it (correlation 0.3) - otherwise the 32x32 `ARROR`, nearly
   all transparent, was every black page corner's best match. That also paired
   `DOOR08` and the three `ELE01` lifts (checked by eye). In all: 163 rows.
+- Pairs identified in game (`USER_*_PAIRS` in the generator), written
+  whether or not the matcher finds them: the room 304 corridor
+  (`Stage3/RC3044`, re-lit in the Seamless HD Project), the save screen's
+  typewriter (`Data/TYPE00`), the all-maps selector (`Item_m2/MAP0E`), the
+  ending report (`Data/EN07`, MulderLoad's English page), the Japanese
+  reader's fax, security system and plant 42 report backdrops
+  (`FILEI07/11/16`), Neptune's skin (`EM100B` / `EM110B`, one row: the pack
+  page's left half), and three room-model textures in row kind `Named`,
+  installed as they are under the name the game looks them up by: the
+  guardhouse map and room 1F0's shelf by their TIM
+  (`HD/<TREE>/RoomModels/667bc53f`, `99817e6a`), and the courtyard map by the
+  upload's hash (`HD/82152f2276f2176d`): the game darkens that map's palette
+  before the upload, so it has no file name.
 - Director's Cut: the Seamless HD Project's `bio1dc/hires` (the TeamX DC
   camera angles) is paired with the DC overlay tree, which the generator takes
   as `--dc <DC folder>`: 91 of 91 backgrounds, and 67 of 74 masks against the

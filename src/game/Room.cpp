@@ -753,9 +753,26 @@ void load_room_masks(int param_1) // 0x00475a90
             // Port-only: named after the room file and camera
             // (HD/DC/Stage8/ROOM8000_MASK3.webp, RoomBackgroundWebp.h).
             char hdKey[160];
-            HdSourceScope hdSource(room_hd_rdt_mask_key(param_1, hdKey, sizeof(hdKey)), 0, 0);
-            TexturePage_SetupFull(timMask, g_TextureBankID, g_TextureCurrentPage,
-                                  ROOM_MASK_TEXTURE_SLOT);
+            room_hd_rdt_mask_key(param_1, hdKey, sizeof(hdKey));
+            // Saturn mode and the DC's arrange rooms: with no picture of its
+            // own, a mask that is the PC Objspr page's top-left part takes
+            // that part of the page's HD picture (room_hd_pc_mask_page).
+            int pageW = 0, pageH = 0;
+            const char* pcPage = NULL;
+            if ((g_bSaturnMode || g_bDcMode) && !HdTextures_PrefetchNamed(hdKey)) {
+                pcPage = room_hd_pc_mask_page(param_1, timMask, &pageW, &pageH);
+            }
+            if (pcPage != NULL) {
+                int maskW = 0, maskH = 0;
+                room_hd_tim_size(timMask, &maskW, &maskH);
+                HdRegionScope hdSource(pcPage, 0, 0, maskW, maskH, pageW, pageH);
+                TexturePage_SetupFull(timMask, g_TextureBankID, g_TextureCurrentPage,
+                                      ROOM_MASK_TEXTURE_SLOT);
+            } else {
+                HdSourceScope hdSource(hdKey, 0, 0);
+                TexturePage_SetupFull(timMask, g_TextureBankID, g_TextureCurrentPage,
+                                      ROOM_MASK_TEXTURE_SLOT);
+            }
         } else {
             TexturePage_DeleteSet(ROOM_MASK_TEXTURE_SLOT);
         }

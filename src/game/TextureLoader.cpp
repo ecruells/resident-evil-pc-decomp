@@ -6,6 +6,9 @@
 #include "../DebugPrint.h"
 #include "../system/HdTextures.h"   // HdBufferScope (port-only)
 #include "HdText.h"                  // HdText_NoteFontPage (port-only)
+#include "../system/AssetPath.h"     // HdItemIconKey: the base tree's sheets (port-only)
+#include "../platform/platform.h"
+#include <map>
 #include <stdio.h>
 #include <cstdlib>
 #include <cstring>
@@ -1397,6 +1400,127 @@ void LoadImage_SetHdIconKey(const char* key)
     s_hdIconKey[sizeof(s_hdIconKey) - 1] = '\0';
 }
 
+// ----------------------------------------------------------------------------
+// HdItemIconKey (port-only). The HD name of row `row` of the item sheet
+// `buffer` holds (item_all.pix / item_mix.pix, 1200 bytes a row), or "".
+//
+// A mode's sheet ("DC/data/item_all") must not borrow the base release's HD
+// icon of the same NUMBER, which is what HdTextures' mode -> base fallback
+// would do: the Director's Cut sheet has rows of its own (45/46 are the moon
+// crest halves where the PC has the lock pick and the oil can, and its
+// item_mix rows 12-14 are the moon crest where the PC's 12 is a mixed herb).
+// A mode row is named after the base row that shows the same picture - the
+// same row first, then any row of either base sheet - and keeps its own name,
+// with the fallback refused, when there is none. "The same picture" is the
+// colours through STATUS.TIM's third row (the palette LoadImage draws icons
+// with) within 2 steps a channel: the DC re-saved most PC icons with a few
+// near-black edge texels as index 0.
+// ----------------------------------------------------------------------------
+static const int kItemIconBytes = 1200;
+
+static bool ItemIconsAlike(const unsigned char* a, const unsigned char* b, const WORD* clut)
+{
+    if (clut == NULL) return memcmp(a, b, kItemIconBytes) == 0;
+    for (int i = 0; i < kItemIconBytes; i++) {
+        if (a[i] == b[i]) continue;
+        const WORD ca = a[i] ? clut[a[i]] : 0, cb = b[i] ? clut[b[i]] : 0;
+        for (int sh = 0; sh < 15; sh += 5) {
+            const int d = (int)((ca >> sh) & 31) - (int)((cb >> sh) & 31);
+            if (d > 2 || d < -2) return false;
+        }
+    }
+    return true;
+}
+
+// The base tree's copy of `rel` ("data/item_all"), read once.
+static const std::vector<unsigned char>& BaseItemSheet(const std::string& rel)
+{
+    static std::map<std::string, std::vector<unsigned char> > s_sheets;
+    std::map<std::string, std::vector<unsigned char> >::iterator it = s_sheets.find(rel);
+    if (it != s_sheets.end()) return it->second;
+    std::vector<unsigned char>& sheet = s_sheets[rel];
+    std::string file = rel + ".pix";
+    if (!AssetBaseHasFile(-1, file.c_str())) return sheet;
+    for (size_t i = 0; i < file.size(); i++) if (file[i] == '/') file[i] = '\\';
+    char savedOverlay[16] = "";
+    strncpy(savedOverlay, GetAssetModeName(), sizeof(savedOverlay) - 1);
+    SetAssetMode("");
+    char path[300], resolved[300], norm[300];
+    snprintf(path, sizeof(path), "%s%s", GAME_DATA_ROOT, file.c_str());
+    const char* basePath = plat_normalize_path(ResolveAssetRoot(path, resolved, sizeof(resolved)),
+                                               norm, sizeof(norm));
+    SetAssetMode(savedOverlay);
+    size_t size = 0;
+    unsigned char* data = (unsigned char*)plat_file_read_all(basePath, &size);
+    if (data != NULL) {
+        sheet.assign(data, data + size);
+        free(data);
+    }
+    return sheet;
+}
+
+const char* HdItemIconKey(const void* buffer, int row, char* out, size_t outSize)
+{
+    if (out == NULL || outSize == 0) return "";
+    out[0] = '\0';
+    char sheetKey[180];
+    if (!HdTextures_Active() || row < 0 ||
+        HdTextures_KeyForBuffer(buffer, sheetKey, sizeof(sheetKey))[0] == '\0' ||
+        strchr(sheetKey, '@') != NULL) {
+        return out;
+    }
+    const char* slash = strchr(sheetKey, '/');
+    if (slash == NULL || strncmp(sheetKey, "USA/", 4) == 0 || strncmp(sheetKey, "JPN/", 4) == 0) {
+        snprintf(out, outSize, "%s/%02d", sheetKey, row);   // the base tree's own
+        return out;
+    }
+
+    // A mode's sheet: decided once per row (the file does not change under it).
+    char modeKey[200];
+    snprintf(modeKey, sizeof(modeKey), "%s/%02d", sheetKey, row);
+    static std::map<std::string, std::string> s_decided;
+    std::map<std::string, std::string>::iterator done = s_decided.find(modeKey);
+    if (done != s_decided.end()) {
+        snprintf(out, outSize, "%s", done->second.c_str());
+        return out;
+    }
+    const TextureCLUTCache* cc = &g_CLUTCache[15];
+    const WORD* clut = (cc->clutData != NULL && cc->bpp == 8 && cc->clutEntries >= 256 &&
+                        cc->numCLUTs > 2) ? cc->clutData + 2 * 256 : NULL;
+    const unsigned char* icon = (const unsigned char*)buffer + row * kItemIconBytes;
+    const char* base = GetAssetVersion() ? "JPN" : "USA";
+    const std::string rel(slash + 1);
+    std::string found;
+    const std::vector<unsigned char>& own = BaseItemSheet(rel);
+    if ((size_t)(row + 1) * kItemIconBytes <= own.size() &&
+        ItemIconsAlike(icon, &own[(size_t)row * kItemIconBytes], clut)) {
+        char k[200];
+        snprintf(k, sizeof(k), "%s/%s/%02d", base, rel.c_str(), row);
+        found = k;
+    }
+    static const char* const kSheets[] = {"data/item_all", "data/item_mix"};
+    for (int s = -1; s < 2 && found.empty(); s++) {
+        const std::string r = (s < 0) ? rel : std::string(kSheets[s]);
+        if (s >= 0 && _stricmp(r.c_str(), rel.c_str()) == 0) continue;
+        const std::vector<unsigned char>& sheet = BaseItemSheet(r);
+        for (size_t i = 0; (i + 1) * kItemIconBytes <= sheet.size(); i++) {
+            if (ItemIconsAlike(icon, &sheet[i * kItemIconBytes], clut)) {
+                char k[200];
+                snprintf(k, sizeof(k), "%s/%s/%02d", base, r.c_str(), (int)i);
+                found = k;
+                break;
+            }
+        }
+    }
+    if (found.empty()) {
+        found = modeKey;
+        HdTextures_SetBaseFallback(modeKey, false);
+    }
+    if (clut != NULL) s_decided[modeKey] = found;   // without the palette it was a guess
+    snprintf(out, outSize, "%s", found.c_str());
+    return out;
+}
+
 struct HdIconRegion {
     int x, y, w, h;
     std::string key;
@@ -1619,6 +1743,18 @@ void LoadImage(int srcData, int srcSlot, int dstSlot, short format,
                         page[py * VRAM_PAGE_W + px] = rgba;
                     }
                 }
+            }
+            // Port-only: a named icon is dumped on its own ([Textures]
+            // DumpTextures). The page it lands on is never a file of its own,
+            // so an icon without an HD picture would otherwise never show up
+            // in HD/dump/ to be drawn.
+            if (s_hdIconKey[0] != '\0' && HdTextures_NamedDumpWanted(s_hdIconKey) &&
+                dstX >= 0 && dstY >= 0 && dstX + pixW <= VRAM_PAGE_W && dstY + pixH <= VRAM_PAGE_H) {
+                std::vector<DWORD> iconRgba((size_t)pixW * pixH);
+                for (int row = 0; row < pixH; row++)
+                    memcpy(&iconRgba[(size_t)row * pixW], &page[(dstY + row) * VRAM_PAGE_W + dstX],
+                           (size_t)pixW * sizeof(DWORD));
+                HdTextures_DumpNamed(s_hdIconKey, pixW, pixH, iconRgba.data());
             }
         } else {
             WORD* pixels = (WORD*)srcData;

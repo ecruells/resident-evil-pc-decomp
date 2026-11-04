@@ -27,6 +27,7 @@
 #include "dc/Items.h"       // lockpick/ammo item ids the DC moved
 #include "../system/HdTextures.h"   // item-view texture names (port-only)
 extern void LoadImage_SetHdIconKey(const char* key);   // TextureLoader.cpp (port)
+extern const char* HdItemIconKey(const void* buffer, int row, char* out, size_t outSize);   // TextureLoader.cpp (port)
 #include <math.h>
 #include <cstdio>
 #include <cstring>
@@ -4083,8 +4084,22 @@ static void pickup_load_texture(const char* path, unsigned int texId, int mode)
 static void pickup_unpack_list(int index)
 {
     void* pageBuffer = (void*)((int)g_TimImageBuffer__bitmap + 0x10000);
+    // Port-only: the page is named after the container and the page,
+    // HD/<TREE>/Item_m2/FILEM_N0/04.webp (system/HdTextures.h), the way the
+    // slides are. The unpacked page is not the file LoadFile read, so it
+    // would otherwise only have its hash.
+    char hdKey[160] = "";
+    if (HdTextures_Active() &&
+        HdTextures_KeyForBuffer(g_bgPakLoadBuffer, hdKey, sizeof(hdKey))[0] != '\0' &&
+        strchr(hdKey, '@') == NULL) {
+        const size_t n = strlen(hdKey);
+        snprintf(hdKey + n, sizeof(hdKey) - n, "/%02d", index);
+    } else {
+        hdKey[0] = '\0';
+    }
     unpack_pakfile_(g_bgPakLoadBuffer + *(int*)(g_bgPakLoadBuffer + index * 4),
                     pageBuffer);
+    HdSourceScope hd(hdKey[0] != '\0' ? hdKey : NULL, 256, 256);
     LoadTexturePage(pageBuffer, 0x15, (short)g_pickupPageOffsets[6],
                     0xe, 0, 0, 0, 0);
 }
@@ -5361,13 +5376,9 @@ static void itembox_draw_slot_icon(int imgType, int slot)
 {
     // Port-only: name the icon like LoadItemImage does (HD/<TREE>/Data/ITEM_ALL/<NN>.webp)
     // so the box grid shows the HD picture too, not just the inventory.
-    char hdKey[180];
-    if (HdTextures_Active() &&
-        HdTextures_KeyForBuffer((const void*)g_TimImageBuffer__bitmap, hdKey, sizeof(hdKey))[0] != '\0' &&
-        strchr(hdKey, '@') == NULL) {
-        char key[200];
-        snprintf(key, sizeof(key), "%s/%02d", hdKey, imgType);
-        LoadImage_SetHdIconKey(key);
+    char hdKey[200];
+    if (HdItemIconKey((const void*)g_TimImageBuffer__bitmap, imgType, hdKey, sizeof(hdKey))[0] != '\0') {
+        LoadImage_SetHdIconKey(hdKey);
     }
     LoadImage((int)g_TimImageBuffer__bitmap + imgType * 0x4b0, 0xc, slot + 0xf, 1,
               (short)((slot & 1) * 0x14), (short)(((slot & 0xfe) << 4) + 0x50),
