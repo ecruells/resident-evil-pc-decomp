@@ -137,6 +137,19 @@ OG mode (`[Game] Ps1EndingCredits=1`):
 With a PS1 image the PC source can be left empty to update an existing tree.
 Use a raw `.bin`/`.cue` so the movies' CD-XA audio is intact.
 
+**Weapon gun textures** -> `<tree>/Players/W<nn>_<c>.TIM` (`core/WeaponTextures.cpp`,
+`re1am_selftest weapontex TREE` runs it alone). A weapon model has no texture
+and samples its holder's page, gun and hand together, so a gun drawn only on
+one model's page (the DC's custom Beretta, Jill's flamethrower) is wrong on
+every other one. Each file is the default model's left page plus a mask of the
+gun's texels - the ones every outfit of that character in the tree leaves
+alone. When the worn model's page does not already show that gun, the game
+draws the gun's triangles from the file and the hand's from the worn page
+(`src/game/WeaponTexture.h`); otherwise nothing changes. Written by this tab for the base tree, and
+again by the Director's Cut tab (its own `W0F_0`/`W1F_1`, and the base trees
+once they hold the DC outfits) and the Saturn tab (the base trees, with the
+Saturn outfits).
+
 ### Director's Cut
 
 Builds the `DC/` overlay from a Director's Cut disc image. **An image is
@@ -216,7 +229,10 @@ rendered sound.
   `W1F.EMW`) reaches texels only the DC's own `CHAR10`/`CHAR11` have its art
   in, so when `<target>/DC` exists those texels are copied from there (without
   it the gun shows the PS1 filler, yellow on Jill's). **Migrate the Director's
-  Cut before this disc.**
+  Cut before this disc.** With the weapon gun textures (PC tab) the game draws
+  the custom Beretta and Jill's flamethrower from those instead, on any outfit;
+  once the base tree has `W15_1.TIM` this tab no longer writes the patched
+  `SATURN/Players/W15.EMW` (and removes an old one), which would hide it.
 - **Battle Game arenas** -> `SATURN/Stage8/`: the 15 `STAGE8/ROOM80x0.RDT`,
   LZ77-decoded (`core/SaturnLz77.cpp`) into ordinary PS1 RDTs, with the PS1
   colour-key -> PC index-0 transparency relabel. The arenas reuse campaign
@@ -465,7 +481,7 @@ renamed to the name this game gives that texture (`src/system/HdTextureHash.h`):
    `HD/<USA|JPN>/<folder>/<FILE>.webp` (a 256x256 page picture holding a
    smaller texture is cropped to it, losslessly). Seamless HD Project: 131.
    `Players/` has nothing of its own: the weapons are drawn with the
-   character's skin.
+   character's skin (the gun textures, PC tab, have no HD picture).
 4. **Director's Cut** (*Pack is for: Director's Cut*, the Seamless HD
    Project's `bio1dc\hires`): paired with the DC overlay's own files and
    installed under `HD/DC/`: backgrounds as `Stage<n>/RC....webp`, the arrange

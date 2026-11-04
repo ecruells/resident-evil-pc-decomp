@@ -69,8 +69,11 @@
 #include "core/TitleFont.h"
 #include "core/Tim.h"
 #include "core/Util.h"
+#include "core/WeaponTextures.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <system_error>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -643,6 +646,20 @@ bool migrateSaturnAssets(const SaturnMigrationOptions& opts,
                      info.timHeight, pc.size());
             progress.info(line);
         }
+        // With the base tree's gun texture (W15_1.TIM, core/WeaponTextures.h) the
+        // game draws the flamethrower from it on any model; an overlay W15.EMW
+        // would hide that file (the game only takes a texture from the weapon
+        // model's own tree), so the patched copy is only for older base trees.
+        const std::string baseTree =
+            joinPath(opts.targetRoot, region == SaturnRegion::Jpn ? "JPN" : "USA");
+        if (!flameEmw.empty() && !findNoCase(baseTree, "Players", "W15_1.TIM").empty()) {
+            flameEmw.clear();
+            const std::string stale = findNoCase(overlay, "Players", "W15.EMW");
+            std::error_code ec;
+            if (!stale.empty() && std::filesystem::remove(stale, ec))
+                progress.info("  removed " + stale + ": the base tree's W15_1.TIM draws Jill's "
+                              "flamethrower now");
+        }
         if (!flameEmw.empty()) {
             const std::string rel = "Players/W15.EMW";
             if (!makeDirs(joinPath(overlay, "Players")) ||
@@ -944,6 +961,11 @@ bool migrateSaturnAssets(const SaturnMigrationOptions& opts,
                      {{"EM1061.EMD", "EM1061.EMD", "Chris, Saturn outfit"},
                       {"EM1161.EMD", "EM1161.EMD", "Jill, Saturn outfit"}},
                      progress);
+    // The base trees' gun textures again, now that they hold the Saturn outfits.
+    progress.info("weapon textures: the base trees' Players/W??_?.TIM");
+    for (const char* r : {"USA", "JPN"})
+        if (isDirectory(joinPath(opts.targetRoot, r)))
+            writeWeaponTextures(joinPath(opts.targetRoot, r), progress);
     {
         progress.info("music: the Battle Game's own tracks -> rendered from the sequences");
         // The Battle Game's results screens (RANKING.PRG 0x0602B1E4): their

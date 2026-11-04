@@ -15,6 +15,7 @@
 #include "saturn/SaturnModels.h"
 #include "saturn/SaturnBattle.h"
 #include "Bonus.h"
+#include "WeaponTexture.h"
 
 // ============================================================================
 // Extern data declarations (not yet extracted to Globals.h)
@@ -962,6 +963,8 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
             weaponModel != 0 ? weaponModel
                              : g_weaponPathTable[g_playerEntity.id & 3][weapon_id]);
     SetSpriteBufferFlag();
+    char weaponPath[sizeof(FILE_PATH)];
+    strcpy(weaponPath, FILE_PATH);   // port: for WeaponTexture_Apply below
 
     unsigned int fileSize = LoadFile(FILE_PATH, (void*)anim_buffer, 32);
     g_playerEntity.jointMoveData0 = anim_buffer;
@@ -976,6 +979,7 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
     if (weapon_id == 0) {
         joint->anim_slot_ptr = g_playerEntity.weaponPartAnimSlot;
         joint->anim_object = (void*)g_playerEntity.weaponPartAnimObject;
+        WeaponTexture_Apply(NULL, 0, NULL);   // port: no weapon model, no gun texture
     } else {
         joint->anim_slot_ptr = (puVar1[1] & 0xFFFFFFFC) + (int)anim_buffer;
         unsigned char prevPage = g_TextureCurrentPage;
@@ -983,6 +987,10 @@ void LoadEquippedWeaponAnimation(unsigned char weapon_id, unsigned char param_2,
         g_TextureCurrentPage = 7;
         g_TextureBankID = 0x16;
         ProcessTmdTextures(2, (unsigned int*)joint->anim_slot_ptr, 0x16, 7);
+        // Port: the gun's packets onto the weapon's own texture, when the
+        // migrator wrote one (WeaponTexture.h). Without it nothing changes.
+        WeaponTexture_Apply(weaponPath, g_playerEntity.id & 3,
+                            (unsigned int*)joint->anim_slot_ptr);
         g_TextureBankID = prevBank;
         g_TextureCurrentPage = prevPage;
         joint->anim_slot_ptr += 0xc;

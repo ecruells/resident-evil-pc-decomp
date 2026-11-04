@@ -53,6 +53,7 @@
 #include "core/TitleFont.h"
 #include "core/Util.h"
 #include "core/Video.h"
+#include "core/WeaponTextures.h"
 
 #include <algorithm>
 #include <chrono>
@@ -1121,6 +1122,15 @@ int main(int argc, char** argv) {
     if (cmd == "satcdp" && argc >= 3)
         return cmdSatCdp(argv[2], argc >= 4 ? argv[3] : "");
     if (cmd == "audioatomic") return cmdAudioAtomic();
+    if (cmd == "weapontex" && argc >= 3) {
+        // re1am_selftest weapontex TREE - the weapons' gun textures, written into
+        // TREE/Players as the PC / DC / Saturn tabs do (core/WeaponTextures.h).
+        Progress p;
+        p.log = [](const std::string& s) { std::printf("%s\n", s.c_str()); };
+        const int n = writeWeaponTextures(argv[2], p);
+        std::printf("%d texture(s)\n", n);
+        return n > 0 ? 0 : 1;
+    }
     if (cmd == "selftest") return cmdSelfTest();
     if (cmd == "titlefont" && argc >= 3) {
         // re1am_selftest titlefont OUT.BIN - what the PC tab writes as

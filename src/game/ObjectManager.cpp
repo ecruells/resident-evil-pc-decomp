@@ -3,6 +3,7 @@
 #include "../marni/MarniSystem.h"
 #include "../marni/PSXTexture.h"
 #include "SpriteRenderer.h"
+#include "WeaponTexture.h"   // port: the gun slot of bank 22
 #include "TmdRenderer.h"     // TMD_CLEANUP_SLOT_COUNT - see the slot-map note there
 
 // ============================================================================
@@ -158,7 +159,8 @@ void ObjectCleanupCallback(void)
     // TMD object buffer — using g_tmdObjectBuffer here corrupted TMD slots.
     for (int i = 0; i < 32; i++) {
         if (i == 22) {
-            g_objectCountArray[22] = 1;
+            // Port: 2 while the weapon has its own gun texture (WeaponTexture.h).
+            g_objectCountArray[22] = WeaponTexture_PlayerBankSlots();
         } else {
             int count = g_objectCountArray[i];
             char* basePtr = (char*)&g_psxTextureArray[0] + i * 0x1b60;

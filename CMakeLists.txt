@@ -99,6 +99,7 @@ set(RE1_SOURCES
     src/game/TmdAnimation.cpp
     src/game/TmdRenderer.cpp
     src/game/WeaponDamage.cpp
+    src/game/WeaponTexture.cpp
     
     src/game/dc/WeaponDamageTables.cpp
     src/game/dc/ItemTables.cpp

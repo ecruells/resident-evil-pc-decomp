@@ -424,8 +424,20 @@ Not covered: a model drawn gold in the Saturn Battle Game's arena 15 (its
 palette is rewritten before the upload, so the named skin is skipped and the
 hash route applies); weapon models, which do not load through
 `LoadEntityEMD` (room objects and item models are named after the room file,
-above). The knock-out twin path has not been seen in
+above) - they are drawn with the player's skin, except in the case below. The knock-out twin path has not been seen in
 game for a named skin.
+
+### Weapon gun textures
+
+A weapon model (`Players/W??.EMW`) has no texture: it samples the left page of
+the model holding it, gun and hand alike, so it is drawn with the player's skin
+- HD included. When the migrator has written `Players/W<nn>_<c>.TIM` for it
+(`tools/asset_migrator/src/core/WeaponTextures.h`) and the worn model's page
+does NOT already show that gun (the DC's custom Beretta on any non-DC model,
+Jill's flamethrower), `src/game/WeaponTexture.cpp` moves the whole weapon onto a
+second texture slot built at load time: the worn page on the left, the gun's
+page on the right. That slot has no HD picture (its left half is whatever is
+worn), so in those cases the weapon is drawn SD.
 
 ## Importing a Classic REbirth HD pack
 

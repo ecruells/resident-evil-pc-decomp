@@ -6,6 +6,7 @@
 #include "FileLoader.h"
 #include "../DebugPrint.h"
 #include "../system/HdTextures.h"
+#include "WeaponTexture.h"
 #include <cstdio>
 #include <cstring>
 
@@ -990,6 +991,7 @@ void TmdProcessingCallback(void)
 
     void* psvTex;
     if (g_TextureBankID == 0x16) {
+        WeaponTexture_PlayerTextureReloaded();   // port: the gun slot was built for the old texture
         g_objectCountArray[22] = 1;
         psvTex = &g_psxTextureArray[0x16 * 0x1b60];
     } else {

@@ -9,6 +9,7 @@
 #include "core/TitleFont.h"
 #include "core/Util.h"
 #include "core/Video.h"
+#include "core/WeaponTextures.h"
 
 #include <filesystem>
 #include <system_error>
@@ -305,6 +306,10 @@ bool migratePcAssets(const PcMigrationOptions& opts, const Progress& progress,
     // Carried by the tool, not read from any disc; written on every run so a
     // tree migrated before the font moved here gets it too.
     if (!writeTitleFont(destRoot, progress, error)) return false;
+    // The weapons' gun textures (core/WeaponTextures.h), from the tree's own
+    // player models; redone by the DC and Saturn tabs when they add outfits.
+    progress.info("weapon textures: the guns' own art -> Players/W??_?.TIM");
+    writeWeaponTextures(destRoot, progress);
     // The HD fonts belong to the HD folder; only refreshed here when there is
     // one already, since creating HD/ switches HD textures on.
     if (isDirectory(joinPath(opts.targetRoot, "HD")) &&
@@ -397,6 +402,14 @@ bool migrateDcAssets(const DcMigrationOptions& opts, const Progress& progress,
                       {"EM1033.EMD", "EM1053.EMD", "Jill, Director's Cut outfit"},
                       {"EM1035.EMD", "EM1055.EMD", "Rebecca, Director's Cut outfit"}},
                      progress);
+    // The custom Beretta's texture from the DC's own player models, and the
+    // base trees' textures again now that they hold the DC outfits too (an
+    // outfit's repainted hand must not end up in a gun mask).
+    progress.info("weapon textures: the guns' own art -> Players/W??_?.TIM");
+    writeWeaponTextures(overlay, progress);
+    for (const char* region : {"USA", "JPN"})
+        if (isDirectory(joinPath(opts.targetRoot, region)))
+            writeWeaponTextures(joinPath(opts.targetRoot, region), progress);
 
     int planes = 0;
     if (opts.fmvSubtitles) {

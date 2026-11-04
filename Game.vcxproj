@@ -144,6 +144,7 @@
     <ClCompile Include="src\game\ObjectManager.cpp" />
     <ClCompile Include="src\game\TmdAnimation.cpp" />
     <ClCompile Include="src\game\TmdRenderer.cpp" />
+    <ClCompile Include="src\game\WeaponTexture.cpp" />
     <ClCompile Include="src\game\EntityModelLoader.cpp" />
     <ClCompile Include="src\game\CollisionDebug.cpp" />
     <ClCompile Include="src\game\RoomCollision.cpp" />
@@ -232,6 +233,7 @@
     <ClInclude Include="src\game\Ps1FmvSubtitles.h" />
     <ClInclude Include="src\game\Ps1FmvSubtitleData.h" />
     <ClInclude Include="src\game\TmdRenderer.h" />
+    <ClInclude Include="src\game\WeaponTexture.h" />
     <ClInclude Include="src\game\entities\EntityCommon.h" />
     <ClInclude Include="src\game\entities\Zombie.h" />
     <ClInclude Include="src\system\PngImage.h" />
