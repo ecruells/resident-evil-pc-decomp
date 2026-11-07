@@ -24,12 +24,13 @@
 //   Task_exit (FUN_00420210) at 0x00420210
 //   Task_chain at 0x00420230
 //
-// Two switch implementations, selected by compiler:
+// Switch implementations, selected by target/compiler:
 //   - MSVC x86: the original's naked-asm ESP switching (below).
-//   - Everything else (Linux, and later ARM): ucontext makecontext/swapcontext,
+//   - PS2: cooperative EE threads, synchronized at each yield.
+//   - Other POSIX platforms: ucontext makecontext/swapcontext,
 //     which expresses the same "run until yield, resume where you left off"
 //     contract without hand-written assembly. See docs/LINUX_PORT.md Phase 1.
-// Both share the public API and the scheduling loop.
+// All share the public API and the scheduling loop.
 //
 // IMPORTANT (MSVC path): /RTCs (Runtime Stack Check) MUST be disabled in this
 // file. The manual ESP switching (g_SchedulerESP save/restore via naked asm and
@@ -186,7 +187,24 @@ static void TaskSwitch_Resume(void)
     ReturnToScheduler_Resume();
 }
 
-#else  // !(MSVC x86)
+#elif defined(RE1_PS2)
+
+// Port-added switch mechanism: EE kernel threads retain the complete R5900
+// register context. Only one gameplay thread is runnable at a time. The
+// scheduler wakes a task and waits; the task yields by doing the reverse.
+// Scheduling policy below stays identical to 0x004200E0.
+#include "../platform/ps2/task_context.h"
+static Re1TaskContext s_TaskContext[TASK_MAX];
+static void TaskSwitch_Start(void)
+{
+    re1_task_start(s_TaskContext[g_CurrentTaskID],
+        reinterpret_cast<void (*)(void)>(g_TasksEIP[g_CurrentTaskID]),
+        TaskStackBase(g_CurrentTaskID), TASK_STACK_SIZE);
+}
+static void TaskSwitch_Resume(void) { re1_task_resume(s_TaskContext[g_CurrentTaskID]); }
+static void TaskYield(void) { re1_task_yield(s_TaskContext[g_CurrentTaskID]); }
+
+#else  // !(MSVC x86), !RE1_PS2
 
 // ============================================================================
 // Portable switch primitives (ucontext).

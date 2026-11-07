@@ -79,6 +79,16 @@ To build from a developer command prompt instead:
 msbuild Game.sln /p:Configuration=Release /p:Platform=Win32 /t:Build
 ```
 
+### PlayStation 2 (experimental)
+
+[Download the PS2 test build (ELF and complete package)](downloads/README.md).
+
+A native PS2 target reuses the Linux SDL2 input/audio and shared game code.
+It adds an EE task scheduler, a 320x240 CPU renderer with SDL2 presentation,
+and streaming MPEG1/MP2 movies. The ELF builds, but boot and gameplay have
+**not yet been validated** on PCSX2 or hardware. See [PS2 setup, asset layout,
+build and validation instructions](docs/PS2_PORT.md).
+
 ### Linux
 
 A native 32-bit binary (`-m32`) built with CMake. The game logic and the Marni

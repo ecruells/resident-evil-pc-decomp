@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdlib>
+// Parse standard algorithms before the game's rand macro. GCC 15's
+// random_shuffle compatibility template calls std::rand even in C++17.
+#include <algorithm>
 
 #include "DebugPrint.h"   // dbg_printf / dbg_safe_str
 

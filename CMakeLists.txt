@@ -140,6 +140,15 @@ set(RE1_SOURCES
 )
 
 # ---------------------------------------------------------------------------
+# PS2 reuses the Linux SDL2 input/audio and all shared translation units.
+# Configure with -DCMAKE_TOOLCHAIN_FILE=cmake/ps2-toolchain.cmake.
+# ---------------------------------------------------------------------------
+if(RE1_PS2)
+    include(cmake/PS2.cmake)
+    return()
+endif()
+
+# ---------------------------------------------------------------------------
 # Linux platform layer + renderer backend.
 # ---------------------------------------------------------------------------
 list(APPEND RE1_SOURCES

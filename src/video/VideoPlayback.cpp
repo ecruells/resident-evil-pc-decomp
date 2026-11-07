@@ -264,9 +264,14 @@ static BOOL PreferModernSibling(const char* aviPath, char* out, size_t size)
 
     char candidate[MAX_PATH];
     const size_t prefix = (size_t)(dot - aviPath);
-    if (prefix + 5 > MAX_PATH) return FALSE;
+#ifdef RE1_PS2
+    const char* extension = ".ps2.mpg"; // port-added MPEG1/MP2 streaming sidecar
+#else
+    const char* extension = ".mp4";
+#endif
+    if (prefix + strlen(extension) + 1 > MAX_PATH) return FALSE;
     memcpy(candidate, aviPath, prefix);
-    strcpy_s(candidate + prefix, sizeof(candidate) - prefix, ".mp4");
+    strcpy_s(candidate + prefix, sizeof(candidate) - prefix, extension);
 
     char resolved[MAX_PATH];
     const char* candidatePath = ResolveVideoPath(candidate, resolved, sizeof(resolved));

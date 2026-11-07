@@ -105,6 +105,12 @@ static long s_streamEnd   = 0;   // one past the last frame of the segment
 static long s_streamPos   = 0;   // absolute frame index played so far
 static int  s_streamOn    = 0;
 
+#ifdef RE1_PS2
+// Port-added FMV ring: bounded PCM instead of holding a whole movie in RAM.
+static short s_movieRing[32768 * 2];
+static unsigned s_movieRead=0, s_movieWrite=0, s_moviePlayed=0;
+#endif
+
 void MixCallback(void* /*userdata*/, Uint8* stream, int len)
 {
     memset(stream, 0, (size_t)len);
@@ -115,6 +121,13 @@ void MixCallback(void* /*userdata*/, Uint8* stream, int len)
 
     Sint32* out = s_acc;
     memset(out, 0, (size_t)frames * 2 * sizeof(Sint32));
+
+#ifdef RE1_PS2
+    for (int f=0; f<frames && s_movieRead!=s_movieWrite; ++f) {
+        unsigned i=(s_movieRead++ % 32768)*2;
+        out[f*2]+=s_movieRing[i]; out[f*2+1]+=s_movieRing[i+1]; ++s_moviePlayed;
+    }
+#endif
 
     // Movie audio, if any, mixes like a bank but reads its cursor as the clock.
     if (s_streamOn && s_streamPcm != NULL) {
@@ -406,6 +419,9 @@ void InitializeSoundSystem(void)
     }
 
     s_outRate = AudioFile_TreeHasCDAudio() ? 44100 : 22050;
+#ifdef RE1_PS2
+    s_outRate = 44100; // MPEG sidecars and the audsrv device share this rate.
+#endif
 
     SDL_AudioSpec want = {};
     want.freq     = OUT_RATE;
@@ -489,3 +505,37 @@ long plat_audio_stream_pos(void)
     if (!s_streamOn) return -1;
     return s_streamPos;
 }
+
+#ifdef RE1_PS2
+bool re1_movie_audio_ready() { return s_dev != 0; }
+void re1_movie_audio_reset() {
+    if(s_dev)SDL_LockAudioDevice(s_dev);
+    s_movieRead=s_movieWrite=s_moviePlayed=0;
+    if(s_dev)SDL_UnlockAudioDevice(s_dev);
+}
+unsigned re1_movie_audio_played() {
+    if(s_dev)SDL_LockAudioDevice(s_dev);
+    unsigned n=s_moviePlayed;
+    if(s_dev)SDL_UnlockAudioDevice(s_dev);
+    return n;
+}
+unsigned re1_movie_audio_queued() {
+    if(s_dev)SDL_LockAudioDevice(s_dev);
+    unsigned n=s_movieWrite-s_movieRead;
+    if(s_dev)SDL_UnlockAudioDevice(s_dev);
+    return n;
+}
+bool re1_movie_audio_push(const float* samples,unsigned frames) {
+    if(!s_dev)return false;
+    SDL_LockAudioDevice(s_dev);
+    if(frames > 32768-(s_movieWrite-s_movieRead)) { SDL_UnlockAudioDevice(s_dev); return false; }
+    for(unsigned f=0;f<frames;++f) {
+        unsigned i=(s_movieWrite++ % 32768)*2;
+        for(unsigned ch=0;ch<2;++ch) {
+            float s=samples[f*2+ch]*32767.f;
+            s_movieRing[i+ch]=(short)(s < -32768 ? -32768 : s > 32767 ? 32767 : s);
+        }
+    }
+    SDL_UnlockAudioDevice(s_dev); return true;
+}
+#endif

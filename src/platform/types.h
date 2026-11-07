@@ -95,6 +95,9 @@ typedef void*       LPVOID;
 #define APIENTRY
 #define __stdcall
 #define __cdecl
+#ifdef __fastcall
+#undef __fastcall // newlib declares the x86 spelling even on the EE
+#endif
 #define __fastcall
 #define __thiscall
 
